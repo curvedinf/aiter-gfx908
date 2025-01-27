@@ -69,6 +69,7 @@ private:
     hipModule_t module;
     hipFunction_t kernel_func;
     uint32_t sub_GU = 512;
+    bool is_int4 = false;
 
 public:
     FMoeKernel(const char *name, const char *hsaco, uint32_t sub_GU = 512)
@@ -79,6 +80,11 @@ public:
         std::cout << " Success" << std::endl;
         this->sub_GU = sub_GU;
     };
+
+    void set_int4(bool is_int4_) 
+    {
+        is_int4 = is_int4_;
+    }
 
     template <typename T, typename T_O, bool switchGxy = false>
     void launch_kernel(torch::Tensor &out,                    // [token_cnt, dim]
@@ -100,15 +106,29 @@ public:
         int dim = input.size(1);
         int sub_X_cnt = sorted_expert_ids.size(0);
         int eprt = w1.size(0);
+<<<<<<< HEAD
         int inter_dim = w2.size(2);
+=======
+>>>>>>> ab4cb59 (integrate int4 moe kernel and unit test all ok)
         uint32_t sub_GU = this->sub_GU;
         uint32_t I_elemSize = sizeof(T);
         uint32_t O_elemSize = sizeof(T_O);
 
         int stride_X = input.stride(0) * input.element_size();
+        int hidden_dim = is_int4 ? w2.size(2) * 8 : w2.size(2);
         int stride_GU = dim * I_elemSize;
+<<<<<<< HEAD
         int stride_D = inter_dim * I_elemSize;
         int stride_expert_GU = stride_GU * inter_dim;
+=======
+        int stride_D = hidden_dim * I_elemSize;
+        if (is_int4)
+        {
+            stride_GU /= 2;
+            stride_D /= 2;
+        }
+        int stride_expert_GU = stride_GU * hidden_dim;
+>>>>>>> ab4cb59 (integrate int4 moe kernel and unit test all ok)
         int stride_expert_D = stride_D * dim;
         int stride_expert_GUDQN = inter_dim * sizeof(float);
         int stride_expert_DDQN = dim * sizeof(float);
@@ -159,6 +179,14 @@ public:
         args.eSMQs = stride_expert_SMTDQN;
         args.topk = topk;
 
+        void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                          &arg_size, HIP_LAUNCH_PARAM_END};
+
+        int bdx = 256;
+        int gdx = ((hidden_dim + sub_GU - 1) / sub_GU);
+        int gdy = sub_X_cnt;
+        int gdz = 1;
+        
         // std::cout << "args.dim: " << args.dim << std::endl;
         // std::cout << "args.inter_dim: " << args.inter_dim << std::endl;
         // std::cout << "args.token_cnt: " << args.token_cnt << std::endl;
@@ -173,7 +201,10 @@ public:
         // std::cout << "args.stride_expert_DDQN: " << args.eDQs << std::endl;
         // std::cout << "args.stride_expert_SMTDQN: " << args.eSMQs << std::endl;
         // std::cout << "args.topk: " << args.topk << std::endl;
+        // std::cout << "gdx: " << gdx << std::endl;
+        // std::cout << "gdy: " << gdy << std::endl;
 
+<<<<<<< HEAD
         void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                           &arg_size, HIP_LAUNCH_PARAM_END};
 
@@ -182,6 +213,8 @@ public:
         int gdy = sub_X_cnt;
         int gdz = 1;
         const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
+=======
+>>>>>>> ab4cb59 (integrate int4 moe kernel and unit test all ok)
         const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
         if constexpr (switchGxy)
         {
@@ -373,8 +406,14 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
     int inter_dim = down.size(2);
     int sub_X_cnt = sorted_expert_ids.size(0);
     int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt); // todo,add tune interface here
-
-    if (input.dtype() == at::ScalarType::Char || input.dtype() == at::ScalarType::Byte)
+    if (gate.dtype() == at::ScalarType::UInt32)
+    {
+        selectedTile = 512;
+        static FMoeKernel impl_int4_512("fmoe_int4fp8_g1u1_subGU_512", "fmoe_int4fp8_g1u1_subGU_512.co", 512);
+        impl_ptr = &impl_int4_512;
+        impl_ptr->set_int4(true);
+    }
+    else (input.dtype() == at::ScalarType::Char || input.dtype() == at::ScalarType::Byte)
     {
         if (selectedTile == 512)
         {

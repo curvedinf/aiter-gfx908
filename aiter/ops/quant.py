@@ -19,7 +19,7 @@ def moe_smoothquant_fwd(
 
 
 # following are pure torch implement
-def pertoken_quant(x, y_scale_dtype=torch.float, x_scale=None, quant_dtype=torch.int8):
+def pertoken_quant(x, y_scale_dtype=torch.float, x_scale=None, quant_dtype=torch.int8, dtypeMax=None):
     if x_scale is None:
         hidden_states = x
     else:
@@ -31,11 +31,11 @@ def pertoken_quant(x, y_scale_dtype=torch.float, x_scale=None, quant_dtype=torch
         dim=-1,
         keepdim=True
     )
-
-    try:
-        dtypeMax = torch.finfo(quant_dtype).max
-    except:
-        dtypeMax = torch.iinfo(quant_dtype).max
+    if not dtypeMax:
+        try:
+            dtypeMax = torch.finfo(quant_dtype).max
+        except:
+            dtypeMax = torch.iinfo(quant_dtype).max
 
     per_token_scale = per_token_amax.to(dtype=torch.float32) / dtypeMax
     per_token_scale[per_token_scale == 0] = 1

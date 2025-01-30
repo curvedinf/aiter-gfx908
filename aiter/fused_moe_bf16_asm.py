@@ -55,7 +55,7 @@ def asm_moe(hidden_states,
     M, topk = topk_ids.shape
     dtype = hidden_states.dtype
     device = topk_ids.device
-    lastdim_mul = 8 if w1.dtype == torch.uint32 else 1
+    lastdim_mul = 8 if w1.dtype in {torch.int32, torch.uint32} else 1
     model_dim = model_dim * lastdim_mul
     sorted_ids, sorted_weights, sorted_expert_ids, num_tokens_post_padded, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
                                                                                                     model_dim, dtype)
@@ -88,7 +88,7 @@ def asm_moe(hidden_states,
     else:
         # a8w8 fmoe, opt: smooth quant
         if fc1_smooth_scale is not None:
-            a8_type = w1.dtype if w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
+            a8_type = w1.dtype if w1.dtype != torch.int32 and w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
             a8 = torch.empty((topk * M, model_dim),
                              dtype=a8_type, device=device)
             a8_scale = torch.empty(

@@ -106,29 +106,20 @@ public:
         int dim = input.size(1);
         int sub_X_cnt = sorted_expert_ids.size(0);
         int eprt = w1.size(0);
-<<<<<<< HEAD
-        int inter_dim = w2.size(2);
-=======
->>>>>>> ab4cb59 (integrate int4 moe kernel and unit test all ok)
+        int inter_dim = is_int4 ? w2.size(2) * 8 : w2.size(2);
         uint32_t sub_GU = this->sub_GU;
         uint32_t I_elemSize = sizeof(T);
         uint32_t O_elemSize = sizeof(T_O);
 
         int stride_X = input.stride(0) * input.element_size();
-        int hidden_dim = is_int4 ? w2.size(2) * 8 : w2.size(2);
         int stride_GU = dim * I_elemSize;
-<<<<<<< HEAD
         int stride_D = inter_dim * I_elemSize;
-        int stride_expert_GU = stride_GU * inter_dim;
-=======
-        int stride_D = hidden_dim * I_elemSize;
         if (is_int4)
         {
             stride_GU /= 2;
             stride_D /= 2;
         }
-        int stride_expert_GU = stride_GU * hidden_dim;
->>>>>>> ab4cb59 (integrate int4 moe kernel and unit test all ok)
+        int stride_expert_GU = stride_GU * inter_dim;
         int stride_expert_D = stride_D * dim;
         int stride_expert_GUDQN = inter_dim * sizeof(float);
         int stride_expert_DDQN = dim * sizeof(float);
@@ -183,7 +174,7 @@ public:
                           &arg_size, HIP_LAUNCH_PARAM_END};
 
         int bdx = 256;
-        int gdx = ((hidden_dim + sub_GU - 1) / sub_GU);
+        int gdx = ((inter_dim + sub_GU - 1) / sub_GU);
         int gdy = sub_X_cnt;
         int gdz = 1;
         
@@ -204,7 +195,6 @@ public:
         // std::cout << "gdx: " << gdx << std::endl;
         // std::cout << "gdy: " << gdy << std::endl;
 
-<<<<<<< HEAD
         void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                           &arg_size, HIP_LAUNCH_PARAM_END};
 
@@ -213,8 +203,6 @@ public:
         int gdy = sub_X_cnt;
         int gdz = 1;
         const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
-=======
->>>>>>> ab4cb59 (integrate int4 moe kernel and unit test all ok)
         const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
         if constexpr (switchGxy)
         {
@@ -406,7 +394,7 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
     int inter_dim = down.size(2);
     int sub_X_cnt = sorted_expert_ids.size(0);
     int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt); // todo,add tune interface here
-    if (gate.dtype() == at::ScalarType::UInt32)
+    if (gate.dtype() == at::ScalarType::UInt32 || gate.dtype() == at::ScalarType::Int)
     {
         selectedTile = 512;
         static FMoeKernel impl_int4_512("fmoe_int4fp8_g1u1_subGU_512", "fmoe_int4fp8_g1u1_subGU_512.co", 512);

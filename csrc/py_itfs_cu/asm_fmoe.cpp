@@ -359,7 +359,7 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
     int hidden_dim = down.size(2);
     int sub_X_cnt = sorted_expert_ids.size(0);
     int selectedTile = get_heuristic_tile(hidden_dim, sub_X_cnt); // todo,add tune interface here
-    if (gate.dtype() == at::ScalarType::UInt32)
+    if (gate.dtype() == at::ScalarType::UInt32 || gate.dtype() == at::ScalarType::Int)
     {
         selectedTile = 512;
         static FMoeKernel impl_int4_512("fmoe_int4fp8_g1u1_subGU_512", "fmoe_int4fp8_g1u1_subGU_512.co", 512);

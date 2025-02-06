@@ -118,6 +118,7 @@ def fmoe_fp8_g1u1_a16(
     fc2_smooth_scale: Tensor,
 ): ...
 
+
 @compile_ops("module_moe")
 def ck_moe(
     hidden_states: Tensor,
@@ -130,5 +131,17 @@ def ck_moe(
     fc1_smooth_scale: Optional[Tensor] = None,
     fc2_smooth_scale: Optional[Tensor] = None,
     block_m: Optional[int] = 32
-): 
-    ...
+): ...
+
+
+@compile_ops("module_moe")
+def ck_moe_stage1(
+    hidden_states: Tensor,
+    w1: Tensor,
+    w2: Tensor,
+    sorted_token_ids: Tensor,
+    sorted_expert_ids: Tensor,
+    out: Tensor,
+    w1_scale: Optional[Tensor] = None,
+    a1_scale: Optional[Tensor] = None,
+): ...

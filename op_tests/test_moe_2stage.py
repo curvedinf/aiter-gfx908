@@ -54,7 +54,8 @@ def torch_moe_stage1(hidden_states,
             sub_tokens = hidden_states[mask]
             act_input = sub_tokens @ (w1[E_id].transpose(0, 1))
             out[loc:loc+act_input.shape[0]] = act_input
-            loc += int((act_input.shape[0]+block_size-1)//block_size)
+            loc += int((act_input.shape[0] +
+                       block_size-1)//block_size)*block_size
     return out
 
 
@@ -172,12 +173,6 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                        #    w1_scale,
                                        None,
                                        BLOCK_SIZE_M)
-    print(out_ref[:20])
-    print(f'{out_ref.shape=}')
-    print(f'{hex(w1.data_ptr())=}')
-    print(f'{hex(w2.data_ptr())=}')
-    print(f'{hex(sorted_ids.data_ptr())=}')
-    print(f'{hex(sorted_expert_ids.data_ptr())=}')
     out, us = ck_moe_stage1(input,
                             shuffle_weight(w1, layout=(32, 32)),
                             w2,
@@ -185,7 +180,6 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                             sorted_expert_ids,
                             w1_scale, a1_scale,
                             dtype, BLOCK_SIZE_M)
-    print(out[:20])
     checkAllclose(out_ref, out,
                   msg=f'golden vs aiter_asm:{us_ref:.2f} us......(quant:{quant_dtype})')
 

@@ -181,7 +181,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                             w1_scale, a1_scale,
                             dtype, BLOCK_SIZE_M)
     checkAllclose(out_ref, out,
-                  msg=f'golden vs aiter_asm:{us_ref:.2f} us......(quant:{quant_dtype})')
+                  msg=f'golden: {us_ref:.2f} us vs aiter:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
 
 
 for dtype in [torch.float16]:

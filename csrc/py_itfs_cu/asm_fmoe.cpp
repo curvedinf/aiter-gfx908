@@ -362,7 +362,7 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
     if (gate.dtype() == at::ScalarType::UInt32 || gate.dtype() == at::ScalarType::Int)
     {
         selectedTile = 512;
-        static FMoeKernel impl_int4_512("fmoe_int4fp8_g1u1_subGU_512", "fmoe_int4fp8_g1u1_subGU_512.co", 512);
+        static FMoeKernel impl_int4_512("fmoe_int4fp8_g1u1_subGU_512_gelu", "fmoe_int4fp8_g1u1_subGU_512_gelu.co", 512);
         impl_ptr = &impl_int4_512;
         impl_ptr->set_int4(true);
     }

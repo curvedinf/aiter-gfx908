@@ -195,13 +195,6 @@ public:
         // std::cout << "gdx: " << gdx << std::endl;
         // std::cout << "gdy: " << gdy << std::endl;
 
-        void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE,
-                          &arg_size, HIP_LAUNCH_PARAM_END};
-
-        int bdx = 256;
-        int gdx = ((inter_dim + sub_GU - 1) / sub_GU);
-        int gdy = sub_X_cnt;
-        int gdz = 1;
         const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
         const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
         if constexpr (switchGxy)
@@ -401,7 +394,7 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
         impl_ptr = &impl_int4_512;
         impl_ptr->set_int4(true);
     }
-    else (input.dtype() == at::ScalarType::Char || input.dtype() == at::ScalarType::Byte)
+    else if (input.dtype() == at::ScalarType::Char || input.dtype() == at::ScalarType::Byte)
     {
         if (selectedTile == 512)
         {

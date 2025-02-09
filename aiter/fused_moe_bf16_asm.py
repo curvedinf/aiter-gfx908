@@ -87,8 +87,8 @@ def asm_moe(hidden_states,
 
     else:
         # a8w8 fmoe, opt: smooth quant
+        a8_type = w1.dtype if w1.dtype != torch.int32 and w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
         if fc1_smooth_scale is not None:
-            a8_type = w1.dtype if w1.dtype != torch.int32 and w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
             a8 = torch.empty((topk * M, model_dim),
                              dtype=a8_type, device=device)
             a8_scale = torch.empty(
@@ -97,9 +97,9 @@ def asm_moe(hidden_states,
             aiter.moe_smoothquant_fwd(
                 a8, hidden_states, fc1_smooth_scale, topk_ids, a8_scale)
         else:
-            if w1.dtype == torch.float8_e4m3fnuz:
+            if w1.dtype == torch.float8_e4m3fnuz or w1.dtype == torch.int32 and w1.dtype == torch.uint32:
                 a8 = torch.empty(
-                    (M, model_dim), dtype=w1.dtype, device=device)
+                    (M, model_dim), dtype=a8_type, device=device)
                 a8_scale = torch.empty(M, dtype=torch.float, device=device)
                 if per_tensor_quant_scale is None:
                     aiter.dynamic_per_token_scaled_fp8_quant(

@@ -58,6 +58,44 @@ def torch_moe_stage1(hidden_states,
                        block_size-1)//block_size)*block_size
     return out
 
+@perftest(num_iters=3)
+def torch_moe_stage2(hidden_states,
+                     w1,  # E, inter_dim*2, model_dim
+                     w2,  # E, model_dim, inter_dim
+                     topk_weight, topk_ids,
+                     # following for quant
+                     fc2_scale=None,  # [expert, model_dim, 1]
+                     block_size=32
+                     ):
+    B, D = topk_ids.shape[0], w1.shape[-1]
+    topk = topk_weight.shape[1]
+    dtype = hidden_states.dtype
+    num_experts, model_dim, inter_dim = w2.shape
+
+    # gose to quant D_w8a8/w8a8
+    if fc2_scale is not None:
+        expert = w1.shape[0]
+        w2 = (w2.view(-1, inter_dim).to(fc2_scale) *
+              fc2_scale.view(-1, 1)).to(dtype).view(expert, -1, inter_dim)
+
+    out = torch.zeros(
+        (B, topk, D),
+        dtype=dtype,
+        device=hidden_states.device,
+    )
+    loc = 0
+    for E_id in range(w2.shape[0]):
+        mask = topk_ids == E_id
+        if mask.sum():
+            len = mask.sum()
+            sub_tokens = hidden_states[loc:loc+len]
+            act_input = sub_tokens @ (w2[E_id].transpose(0, 1))
+            out[mask] = act_input
+            loc += int((len +
+                       block_size-1)//block_size)*block_size
+    return (
+        out * topk_weight.view(B, -1, 1).to(out.dtype)
+    ).sum(dim=1)
 
 def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
               # following for quant

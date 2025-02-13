@@ -38,7 +38,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             "                int max_context_len,"
             "                Tensor? alibi_slopes,"
             "                str kv_cache_dtype,"
-            "                float k_scale, float v_scale) -> ()");
+            "                str kv_cache_layout,"
+            "                float logits_soft_cap,"
+            "                Tensor k_scale, Tensor v_scale) -> ()");
 
       m.def("swap_blocks", &swap_blocks,
             "swap_blocks(Tensor src, Tensor! dst, Tensor block_mapping) -> ()");

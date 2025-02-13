@@ -128,6 +128,7 @@ def checkAllclose(a, b, rtol=1e-2, atol=1e-2, msg=''):
         logger.info(
             f'-->max delta:{delta.max()}, delta details: {percent:.1%} ({(a[mask]).numel()} of {a.numel()}) elements')
 
+    return isClose.all()
 
 def tensor_dump(x: torch.tensor, name: str, dir='./'):
     x_cpu = x.cpu().view(torch.uint8)

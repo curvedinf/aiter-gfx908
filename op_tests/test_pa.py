@@ -1,14 +1,14 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
-
 import random
 from typing import List, Optional, Tuple, Union
 import itertools
 import torch
 import aiter
+import pytest
 from aiter import paged_attn as ops
 from aiter.test_common import checkAllclose, perftest, tensor_dump, tensor_load
 from aiter import pertoken_quant
+from enum import Enum
+from einops import rearrange
 
 uniform_range = (-1, 1)
 STR_DTYPE_TO_TORCH_DTYPE = {
@@ -19,15 +19,6 @@ STR_DTYPE_TO_TORCH_DTYPE = {
     "fp8_e4m3": torch.uint8,
     "fp8_e5m2": torch.uint8,
 }
-ck_naive_quant_algo = [
-    'NO',
-    'KV_8BIT_PERHEAD',
-    # // FP8/INT8 quant for KVCache, per-token quant
-    # // [num_tokens, nhead, hdim] -> [nhead, num_tokens]
-    'KV_8BIT_PERTOKEN',
-    # // same as 8bit per token quant but 4 bit
-    'KV_4BIT_PERTOKEN',
-]
 
 
 def get_kv_cache_torch_dtype(
@@ -139,10 +130,13 @@ def ref_masked_attention(
     value: torch.Tensor,
     scale: float,
     attn_mask: Optional[torch.Tensor] = None,
+    logits_soft_cap: float = 0.0
 ) -> torch.Tensor:
     attn_weights = scale * torch.einsum("qhd,khd->hqk", query, key).float()
     if attn_mask is not None:
         attn_weights = attn_weights + attn_mask.float()
+    if 0 < logits_soft_cap:
+        attn_weights = logits_soft_cap * torch.tanh(attn_weights / logits_soft_cap)
     attn_weights = torch.softmax(attn_weights, dim=-1).to(value.dtype)
     out = torch.einsum("hqk,khd->qhd", attn_weights, value)
     return out
@@ -199,19 +193,20 @@ def pertoken_quant_kvcache_symm(
 # @perftest()
 
 
-def run_native(query,
-               key_cache,
-               value_cache,
-               block_tables,
-               seq_lens,
-               max_seq_len,
-               kv_cache_dtype,
-               num_kv_heads,
-               scale,
-               alibi_slopes,
-               k_scale,
-               v_scale,
-               num_queries_per_kv):
+def run_torch(query,
+              key_cache,
+              value_cache,
+              block_tables,
+              seq_lens,
+              max_seq_len,
+              kv_cache_dtype,
+              num_kv_heads,
+              scale,
+              alibi_slopes,
+              logits_soft_cap,
+              k_scale,
+              v_scale,
+              num_queries_per_kv):
     output = torch.zeros_like(query)
     num_query_heads = query.shape[1]
     num_kv_heads = value_cache.shape[1]
@@ -253,11 +248,71 @@ def run_native(query,
             alibi_bias = alibi_slopes.view(-1, 1, 1) * alibi_bias.view(
                 1, 1, -1)
 
-        out = ref_masked_attention(q, keys, values, scale, alibi_bias)
+        out = ref_masked_attention(q, keys, values, scale, alibi_bias, logits_soft_cap)
         out = out.view(num_query_heads, head_size)
         output[i].copy_(out, non_blocking=True)
     return output, 1
 
+
+def run_torch_new(query,
+              key_cache,
+              value_cache,
+              block_tables,
+              seq_lens,
+              max_seq_len,
+              kv_cache_dtype,
+              num_kv_heads,
+              scale,
+              alibi_slopes,
+              logits_soft_cap,
+              k_scale,
+              v_scale,
+              num_queries_per_kv):
+    output = torch.zeros_like(query)
+    num_query_heads = query.shape[1]
+    num_kv_heads = key_cache.shape[1]
+    block_size = key_cache.shape[2]
+    head_size = key_cache.shape[3]
+    num_seqs = query.shape[0]
+
+    block_tables_lst = block_tables.cpu().tolist()
+    seq_lens_lst = seq_lens.cpu().tolist()
+    for i in range(num_seqs):
+        q = query[i].unsqueeze(0)
+        block_table = block_tables_lst[i]
+        seq_len = int(seq_lens_lst[i])
+
+        keys_lst: List[torch.Tensor] = []
+        values_lst: List[torch.Tensor] = []
+        for j in range(seq_len):
+            block_number = int(block_table[j // block_size])
+            block_offset = j % block_size
+
+            k = key_cache[block_number, :, block_offset, :]
+            k = k.reshape(num_kv_heads, head_size)
+            keys_lst.append(k)
+
+            v = value_cache[block_number, :, block_offset, :]
+            values_lst.append(v)
+        keys = torch.stack(keys_lst, dim=0)
+        values = torch.stack(values_lst, dim=0)
+        if num_queries_per_kv > 1:
+            # Handle MQA and GQA
+            keys = torch.repeat_interleave(keys, num_queries_per_kv, dim=1)
+            values = torch.repeat_interleave(values, num_queries_per_kv, dim=1)
+
+        alibi_bias = None
+        if alibi_slopes is not None:
+            # Create the ALiBi bias used in the paged attention kernel.
+            position_ids = torch.arange(seq_len).int()
+            alibi_bias = (position_ids - seq_len + 1).float()
+            alibi_bias = alibi_slopes.view(-1, 1, 1) * alibi_bias.view(
+                1, 1, -1)
+
+        out = ref_masked_attention(q, keys, values, scale, alibi_bias, logits_soft_cap)
+        out = out.view(num_query_heads, head_size)
+        output[i].copy_(out, non_blocking=True)
+    return output, 1
 
 @perftest()
 def run_aiter(query,
@@ -267,26 +322,69 @@ def run_aiter(query,
              seq_lens,
              max_seq_len,
              kv_cache_dtype,
+             kv_cache_layout,
              num_kv_heads,
              scale,
              alibi_slopes,
+             logits_soft_cap,
              k_scale,
              v_scale,):
-    return ops.PagedAttention.forward_decode(
+    # copied from ops.PagedAttention.forward_decode()
+    _PARTITION_SIZE_ROCM = 256
+    fp8_out_scale = None
+
+    num_seqs, num_heads, head_size = query.shape
+    block_size = key_cache.shape[2 if kv_cache_layout == 'HND' else 1]
+    gqa_ratio = num_heads // num_kv_heads
+
+    output = torch.empty_like(query)
+    max_num_partitions = (
+        (max_seq_len + _PARTITION_SIZE_ROCM - 1) //
+        _PARTITION_SIZE_ROCM)
+    assert _PARTITION_SIZE_ROCM % block_size == 0
+    tmp_output = torch.empty(
+        size=(num_seqs, num_heads, max_num_partitions, head_size),
+        dtype=output.dtype,
+        device=output.device,
+    )
+    exp_sums = torch.empty(
+        size=(num_seqs, num_heads, max_num_partitions),
+        dtype=torch.float32,
+        device=output.device,
+    )
+    max_logits = torch.empty_like(exp_sums)
+    cpa_fp8_out = False
+    if fp8_out_scale is not None:
+        output = torch.empty_like(output,
+                                dtype=torch.float8_e4m3fnuz)
+        cpa_fp8_out = True
+    aiter.paged_attention_rocm(
+        output,
+        exp_sums,
+        max_logits,
+        tmp_output,
         query,
         key_cache,
         value_cache,
-        block_tables,
-        seq_lens,
-        max_seq_len,
-        kv_cache_dtype,
         num_kv_heads,
         scale,
+        block_tables,
+        seq_lens,
+        block_size,
+        max_seq_len,
         alibi_slopes,
+        kv_cache_dtype,
+        kv_cache_layout,
+        logits_soft_cap,
         k_scale,
         v_scale,
+        fp8_out_scale if cpa_fp8_out else None,
+        _PARTITION_SIZE_ROCM,
     )
-
+    if cpa_fp8_out:
+        return output.view(num_seqs, num_heads * head_size)
+    else:
+        return output
 
 @perftest()
 def run_aiter_naive(query,
@@ -392,15 +490,6 @@ def load_input():
             tensor_load('/mnt/raid0/ljin1/pa_data/bf16in/OUT_BF16.bin'),
             )
 
-
-DUMP = 1
-VERIFY = 2
-# debug_mode = DUMP
-# debug_mode = VERIFY
-debug_mode = 0
-torch.set_printoptions(sci_mode=False)
-
-
 def asm_V_shuffle(VC):
     # [num_blocks, num_kv_heads, head_size, block_size]
     x = 16//VC.element_size()
@@ -410,7 +499,33 @@ def asm_V_shuffle(VC):
     VC = VC.permute(0, 1, 3, 2, 4).contiguous()
     return VC
 
+class InputSource(Enum):
+    PreGen = 1
+    Random = 2
 
+class PAVariant(Enum):
+    Shomy = 1
+    Asm   = 2
+    Naive = 3
+
+INPUT_SOURCE = InputSource.Random
+DUMP_INPUTS = False # whether to dump inputs
+DUMP_OUTPUT = False # whether to dump output
+
+@pytest.mark.parametrize('ctx_lens', [1, 26, 128, 4097])
+@pytest.mark.parametrize('num_seqs', [128])
+@pytest.mark.parametrize('num_heads', [(8, 1), (4, 2)])
+@pytest.mark.parametrize('head_size', [64, 128])
+@pytest.mark.parametrize('use_alibi', [False, True])
+@pytest.mark.parametrize('block_size', [1, 16, 32])
+@pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize('kv_cache_dtype', ['auto'])
+@pytest.mark.parametrize('kv_cache_layout', ['NHD', 'HND'])
+@pytest.mark.parametrize('logits_soft_cap', [0., 30.])
+@pytest.mark.parametrize('pa_variant', [PAVariant.Shomy])
+@pytest.mark.parametrize('quant_cache_dtype', [None, torch.float8_e4m3fnuz, torch.int8])
+@pytest.mark.parametrize('seed', [0])
+@pytest.mark.parametrize('device', ['cuda:0'])
 def test_paged_attention(
     ctx_lens: int,
     num_seqs: int,
@@ -420,12 +535,31 @@ def test_paged_attention(
     block_size: int,
     dtype: torch.dtype,
     kv_cache_dtype: str,
+    kv_cache_layout: str,
+    logits_soft_cap: float,
+    pa_variant: PAVariant,
+    quant_cache_dtype: torch.dtype,
     seed: int,
     device: str
 ) -> None:
+    if pa_variant == PAVariant.Shomy:
+        if quant_cache_dtype is not None:
+            pytest.skip()
+    elif pa_variant == PAVariant.Asm:
+        if use_alibi or head_size != 128 or block_size != 16 or \
+            dtype is not torch.bfloat16 or \
+            quant_cache_dtype not in [None, torch.int8]:
+            pytest.skip()
+    elif pa_variant == PAVariant.Naive:
+        if use_alibi:
+            pytest.skip()
+
+    torch.manual_seed(seed)
+    random.seed(seed)
     torch.set_default_device(device)
+
     # Using default kv_scale
-    k_scale = v_scale = 1.0
+    k_scale = v_scale = torch.tensor([1.0], dtype=torch.float32)
     scale = float(1.0 / (head_size**0.5))
     num_query_heads, num_kv_heads = num_heads
     alibi_slopes = None
@@ -436,9 +570,10 @@ def test_paged_attention(
     max_seq_len = ctx_lens
     max_num_blocks_per_seq = (max_seq_len + block_size - 1) // block_size
     num_blocks = max_num_blocks_per_seq*num_seqs
-    print(f'{debug_mode=}')
+    print(f'{INPUT_SOURCE=}')
 
-    if debug_mode == VERIFY:
+    # prepare inputs & golden output
+    if INPUT_SOURCE == InputSource.PreGen:
         (query,
          key_cache,
          value_cache,
@@ -449,95 +584,168 @@ def test_paged_attention(
         query = torch.empty(num_seqs, num_query_heads, head_size, dtype=dtype)
         query.uniform_(*uniform_range)
 
-        # seq_lens = [random.randint(1, MAX_SEQ_LEN) for _ in range(num_seqs)]
-        seq_lens = [ctx_lens for _ in range(num_seqs)]
-        seq_lens = torch.tensor(seq_lens, dtype=torch.int)
-
-        # Create the block tables.
-        block_tables_lst: List[List[int]] = []
-        for _ in range(num_seqs):
-            block_table = [
-                random.randint(0, num_blocks - 1)
-                for _ in range(max_num_blocks_per_seq)
-            ]
-            block_tables_lst.append(block_table)
-
-        block_tables = torch.tensor(block_tables_lst, dtype=torch.int)
-
         # Create the KV caches.
         key_caches, value_caches = kv_cache_factory(num_blocks, block_size, 1,
                                                     num_kv_heads, head_size,
                                                     kv_cache_dtype, dtype, seed,
                                                     device)
+
         key_cache, value_cache = key_caches[0], value_caches[0]
 
-    out_aiter, time_aiter = run_aiter(
-        query,
-        key_cache,
-        value_cache,
-        block_tables,
-        seq_lens,
-        max_seq_len,
-        kv_cache_dtype,
-        num_kv_heads,
-        scale,
-        alibi_slopes,
-        k_scale,
-        v_scale,
-    )
-    if debug_mode != VERIFY:
-        out_golden = out_aiter
-    checkAllclose(out_golden, out_aiter,
-                  msg=f'golden vs aiter_shomy:{time_aiter}')
-    # tensor_dump(out_aiter, 'out_aiter')
+        # Create the block tables.
+        block_tables = rearrange(
+            torch.randperm(num_blocks, dtype=torch.int32, device=device),
+            "(b nblocks) -> b nblocks",
+            b=num_seqs,
+        )
 
-    out_aiter_asm, time_aiter_asm = run_aiter_asm(
-        query,
-        key_cache,
-        asm_V_shuffle(value_cache),
-        block_tables,
-        seq_lens,
-        max_seq_len,
-        kv_cache_dtype,
-        num_kv_heads,
-        scale,
-        alibi_slopes,
-        max_num_blocks_per_seq
-    )
+        # seq_lens = [random.randint(1, MAX_SEQ_LEN) for _ in range(num_seqs)]
+        seq_lens = torch.full(size=(num_seqs,), fill_value=ctx_lens, dtype=torch.int)
+        seq_lens_new = torch.tensor([0] + [ctx_lens] * num_seqs).cumsum(dim=0, dtype=torch.int)
 
-    checkAllclose(out_golden, out_aiter_asm,
-                  msg=f'golden vs aiter_asm:{time_aiter_asm}')
-    # tensor_dump(out_aiter, 'out_aiter')
+        # generate golden output
+        if pa_variant == PAVariant.Shomy:
+            key_cache_new = rearrange(key_cache, 'b h d1 s d2 -> b h s (d1 d2)')
+            value_cache_new = rearrange(value_cache, 'b h d s -> b h s d')
+            out_golden, _ = run_torch_new(
+                query,
+                key_cache_new,
+                value_cache_new,
+                block_tables,
+                seq_lens,
+                max_seq_len,
+                kv_cache_dtype,
+                num_kv_heads,
+                scale,
+                alibi_slopes,
+                logits_soft_cap,
+                k_scale,
+                v_scale,
+                num_queries_per_kv,
+            )
+        else:
+            key_cache_new = rearrange(key_cache, 'b h d1 s d2 -> b h s (d1 d2)')
+            value_cache_new = rearrange(value_cache, 'b h d s -> b h s d')
 
-    for quant_algo_, cache_type_ in [(0, key_cache.dtype), (2, torch.float8_e4m3fnuz), (2, torch.int8)]:
-        if quant_algo_ == 0:
+            if kv_cache_layout == 'NHD':
+                key_cache_new = rearrange(key_cache_new, 'b h s d -> b s h d')
+                value_cache_new = rearrange(value_cache_new, 'b h s d -> b s h d')
+
+            out_golden, _ = run_aiter(
+                query,
+                key_cache_new.contiguous(),
+                value_cache_new.contiguous(),
+                block_tables,
+                seq_lens_new,
+                max_seq_len,
+                kv_cache_dtype,
+                kv_cache_layout,
+                num_kv_heads,
+                scale,
+                alibi_slopes,
+                0.0,
+                k_scale,
+                v_scale,
+            )
+
+    if quant_cache_dtype is None:
+        if pa_variant == PAVariant.Shomy:
+            if kv_cache_layout == 'NHD':
+                key_cache_new = rearrange(key_cache_new, 'b h s d -> b s h d')
+                value_cache_new = rearrange(value_cache_new, 'b h s d -> b s h d')
+
+            out_aiter, time_aiter = run_aiter(
+                query,
+                key_cache_new.contiguous(),
+                value_cache_new.contiguous(),
+                block_tables,
+                seq_lens_new,
+                max_seq_len,
+                kv_cache_dtype,
+                kv_cache_layout,
+                num_kv_heads,
+                scale,
+                alibi_slopes,
+                logits_soft_cap,
+                k_scale,
+                v_scale,
+            )
+            assert checkAllclose(out_golden, out_aiter,
+                                msg=f'golden vs aiter:{time_aiter}')
+            if DUMP_OUTPUT:
+                tensor_dump(out_aiter, 'out_aiter')
+        elif pa_variant == PAVariant.Asm:
+            out_aiter_asm, time_aiter_asm = run_aiter_asm(
+                query,
+                key_cache,
+                asm_V_shuffle(value_cache),
+                block_tables,
+                seq_lens,
+                max_seq_len,
+                kv_cache_dtype,
+                num_kv_heads,
+                scale,
+                alibi_slopes,
+                max_num_blocks_per_seq
+            )
+            assert checkAllclose(out_golden, out_aiter_asm,
+                                msg=f'golden vs aiter_asm:{time_aiter_asm}')
+            if DUMP_OUTPUT:
+                tensor_dump(out_aiter, 'out_aiter_asm')
+        else:
             k_quant_, k_scale_, v_quant_, v_scale_ = key_cache, torch.empty(
                 (0)), value_cache, torch.empty((0))
-        else:
-            k_quant_, k_scale_, v_quant_, v_scale_ = pertoken_quant_kvcache_symm(
-                key_cache, value_cache, quant_dtype=cache_type_)
-        out_aiter_naive, time_aiter_naive = run_aiter_naive(
-            query,
-            k_quant_,
-            v_quant_,
-            block_tables,
-            seq_lens,
-            k_scale_,
-            v_scale_,
-            max_seq_len,
-            kv_cache_dtype,
-            num_kv_heads,
-            scale,
-            alibi_slopes,
-            k_scale,
-            v_scale,
-            block_size,
-            quant_algo_
-        )
-        checkAllclose(out_aiter_asm, out_aiter_naive,
-                      msg=f'golden vs ck_naive(quant:{ck_naive_quant_algo[quant_algo_]}, kvcache:{cache_type_}):{time_aiter_naive}')
 
-        if cache_type_ == torch.int8:
+            out_aiter_naive, time_aiter_naive = run_aiter_naive(
+                query,
+                k_quant_,
+                v_quant_,
+                block_tables,
+                seq_lens,
+                k_scale_,
+                v_scale_,
+                max_seq_len,
+                kv_cache_dtype,
+                num_kv_heads,
+                scale,
+                alibi_slopes,
+                k_scale,
+                v_scale,
+                block_size,
+            )
+            assert checkAllclose(out_golden, out_aiter_naive,
+                                msg=f'golden vs ck_naive:{time_aiter_naive}')
+
+            if DUMP_OUTPUT:
+                tensor_dump(out_aiter, 'out_aiter_asm')
+    else:
+        quant_algo = 2
+
+        k_quant_, k_scale_, v_quant_, v_scale_ = pertoken_quant_kvcache_symm(
+            key_cache, value_cache, quant_dtype=quant_cache_dtype)
+
+        if pa_variant == PAVariant.Naive:
+            out_aiter_naive, time_aiter_naive = run_aiter_naive(
+                query,
+                k_quant_,
+                v_quant_,
+                block_tables,
+                seq_lens,
+                k_scale_,
+                v_scale_,
+                max_seq_len,
+                kv_cache_dtype,
+                num_kv_heads,
+                scale,
+                alibi_slopes,
+                k_scale,
+                v_scale,
+                block_size,
+                quant_algo
+            )
+            assert checkAllclose(out_golden, out_aiter_naive,
+                                msg=f'golden vs ck_naive(quant:{quant_algo}, kvcache:{quant_cache_dtype}):{time_aiter_naive}')
+        elif pa_variant == PAVariant.Asm:
             out_aiter_asm, time_aiter_asm = run_aiter_asm(
                 query,
                 k_quant_,
@@ -553,9 +761,10 @@ def test_paged_attention(
                 k_scale_,
                 v_scale_,
             )
-            checkAllclose(out_golden, out_aiter_asm,
-                          msg=f'golden vs aiter_asm(quant:{ck_naive_quant_algo[quant_algo_]}, kvcache:{cache_type_}):{time_aiter_asm}')
-    if debug_mode == DUMP:
+            assert checkAllclose(out_golden, out_aiter_asm,
+                                msg=f'golden vs aiter_asm(quant:{quant_algo}, kvcache:{quant_cache_dtype}):{time_aiter_asm}')
+
+    if DUMP_INPUTS:
         dump_input(query,
                    key_cache,
                    value_cache,
@@ -569,32 +778,27 @@ def test_paged_attention(
                    k_scale,
                    v_scale,)
 
-    # out_native, time_native = run_native(
-    #     query,
-    #     key_cache,
-    #     value_cache,
-    #     block_tables,
-    #     seq_lens,
-    #     max_seq_len,
-    #     kv_cache_dtype,
-    #     num_kv_heads,
-    #     scale,
-    #     alibi_slopes,
-    #     k_scale,
-    #     v_scale,
-    #     num_queries_per_kv,
-    # )
-    # checkAllclose(out_golden, out_native, msg='golden vs torch_native')
-    # tensor_dump(out_native, 'out_native')
-
     # atol, rtol = 1e-2, 1e-2
     # msg = f"[perf] dim: {str((num_seqs, num_heads, head_size)):<20}, dtype: {dtype}, {time_native=:<8.2f} us, {time_aiter=:<8.2f} us, uplift: {time_native/time_aiter-1:<5.1%}"
-    # checkAllclose(out_native, out_aiter, atol=atol, rtol=rtol, msg=msg)
+    # assert checkAllclose(out_native, out_aiter, atol=atol, rtol=rtol, msg=msg)
     # print(
     #     f"[test] dim: {str((ctx_lens, num_seqs, num_heads, head_size)):<20}, dtype: {dtype}, finished)\n")
-    print(f'finish~ {ctx_lens=}, {num_seqs=}, {num_heads=}, {head_size=}, {use_alibi=}, {block_size=}, {dtype=}, {kv_cache_dtype=}\n')
 
+if __name__ == '__main__':
+    torch.set_printoptions(sci_mode=False)
 
-for ctx_len in [1, 26, 128, 4097]:
-    test_paged_attention(ctx_len, 128, (8, 1), 128, False, 16,
-                         torch.bfloat16, "auto", 0, "cuda:0")
+    for ctx_len, pa_variant, quant_cache_dtype in itertools.product(
+        [1, 26, 128, 4097],
+        [PAVariant.Shomy, PAVariant.Asm],
+        [None, torch.float8_e4m3fnuz, torch.int8]):
+
+        if pa_variant == PAVariant.Shomy:
+            if quant_cache_dtype is not None:
+                continue
+        elif pa_variant == PAVariant.Asm:
+            if quant_cache_dtype not in [None, torch.int8]:
+                continue
+
+        test_paged_attention(ctx_len, 128, (8, 1), 128, False, 16,
+                             torch.bfloat16, "auto", 'HND', 0.0, 
+                             pa_variant, quant_cache_dtype, 0, "cuda:0")

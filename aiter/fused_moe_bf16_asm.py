@@ -12,8 +12,7 @@ from aiter import logger
 BLOCK_SIZE_M = 32
 
 
-def moe_sorting_ck(topk_ids, topk_weights, num_experts, model_dim, moebuf_dtype):
-    block_size = BLOCK_SIZE_M
+def moe_sorting_ck(topk_ids, topk_weights, num_experts, model_dim, moebuf_dtype, block_size=BLOCK_SIZE_M):
     device = topk_ids.device
     M, topk = topk_ids.shape
     topk = topk_ids.shape[1]

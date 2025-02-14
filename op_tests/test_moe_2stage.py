@@ -189,6 +189,7 @@ def ck_moe_stage1(hidden_states,
                   w2,  # [E, model_dim, inter_dim]
                   sorted_token_ids,  # [max_num_tokens_padded]
                   sorted_expert_ids,  # [max_num_m_blocks]
+                  num_valid_ids,  # [1]
                   w1_scale, a1_scale, dtype,
                   block_size=32
                   ):
@@ -202,7 +203,7 @@ def ck_moe_stage1(hidden_states,
         device=hidden_states.device,
     )
     aiter.ck_moe_stage1(hidden_states, w1, w2, sorted_token_ids,
-                        sorted_expert_ids, out, w1_scale, a1_scale)
+                        sorted_expert_ids, num_valid_ids, out, w1_scale, a1_scale)
     return out
 
 
@@ -243,8 +244,11 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                         #    w1_scale,
                                         None,
                                         BLOCK_SIZE_M)
-    gate, up = out1_ref.split([inter_dim, inter_dim], dim=-1)
-    input2 = F.silu(gate) * up
+    if use_g1u1:
+        gate, up = out1_ref.split([inter_dim, inter_dim], dim=-1)
+        input2 = F.silu(gate) * up
+    else:
+        input2 = F.gelu(out1_ref)
     out2_ref, us_ref = torch_moe_stage2(input2,
                                         w1,  # E, inter_dim*2, model_dim
                                         w2,  # E, model_dim, inter_dim
@@ -266,15 +270,9 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                              w2,
                              sorted_ids,
                              sorted_expert_ids,
+                             num_valid_ids,
                              w1_scale, a1_scale,
                              dtype, BLOCK_SIZE_M)
-    # print(f'{[sorted_ids&0xffffff][:35]=}')
-    # print(f'{sorted_expert_ids=}')
-    # for i in range(32,42):
-    for i in range(out1.shape[0]):
-        print(i, 'tokenID:', sorted_ids[i] & 0xffffff)
-        print(f'{num_valid_ids=}')
-        checkAllclose(out1[i], out1_ref[i], msg=f"{i}: ")
     checkAllclose(out1_ref, out1,
                   msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
 

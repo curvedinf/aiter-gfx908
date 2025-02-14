@@ -192,9 +192,10 @@ struct TypeCast
 
 void ck_moe_stage1_impl(int N, int K,
                         int tokens,
-                        int SORTED_SIZE,
+                        int sorted_size,
                         void *sorted_token_ids_ptr,
                         void *sorted_expert_ids_ptr,
+                        void *num_valid_ids_ptr,
                         void *hidden_states_ptr,
                         void *w1_ptr,
                         void *a1_scale_ptr,
@@ -268,13 +269,14 @@ void ck_moe_stage1_impl(int N, int K,
     auto argument =
         device_op.MakeArgument(sorted_token_ids_ptr,
                                sorted_expert_ids_ptr,
+                               num_valid_ids_ptr,
                                hidden_states_ptr,
                                w1_ptr,
                                std::array<const void *, NumDTensor>{a1_scale_ptr,
                                                                     w1_scale_ptr},
                                out_ptr,
                                tokens,
-                               SORTED_SIZE,
+                               sorted_size,
                                N,
                                K,
                                StrideA,
@@ -301,21 +303,23 @@ void ck_moe_stage1(torch::Tensor &hidden_states,          // [m, k], input token
                    torch::Tensor &w2,                     // [expert, dim, inter_dim], pre-shuffle([e, nr, kr, w])
                    torch::Tensor &sorted_token_ids,       // [max_num_tokens_padded]
                    torch::Tensor &sorted_expert_ids,      // [max_num_m_blocks]
+                   torch::Tensor &num_valid_ids,          // [1]
                    torch::Tensor &out,                    // [max_num_tokens_padded, inter_dim]
                    std::optional<torch::Tensor> w1_scale, // [e, 1, n], gate(up) scale
                    std::optional<torch::Tensor> a1_scale  // [m, 1], token scale
 )
 {
     int tokens = hidden_states.size(0);
-    int SORTED_SIZE = out.size(0);
+    int sorted_size = out.size(0);
     int N = w1.size(1);
     int K = w1.size(2);
 
     ck_moe_stage1_impl(N, K,
                        tokens,
-                       SORTED_SIZE,
+                       sorted_size,
                        sorted_token_ids.data_ptr(),
                        sorted_expert_ids.data_ptr(),
+                       num_valid_ids.data_ptr(),
                        hidden_states.data_ptr(),
                        w1.data_ptr(),
                        a1_scale.has_value() ? a1_scale.value().data_ptr() : nullptr,

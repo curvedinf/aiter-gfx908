@@ -20,6 +20,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,          // [m, k], input token
                    torch::Tensor &w2,                     // [e, n, k], pre-shuffle([e, nr, kr, w])
                    torch::Tensor &sorted_token_ids,       // [max_num_tokens_padded]
                    torch::Tensor &sorted_expert_ids,      // [max_num_m_blocks]
+                   torch::Tensor &num_valid_ids,          // [1]
                    torch::Tensor &out,                    // [max_num_tokens_padded, inter_dim]
                    std::optional<torch::Tensor> w1_scale, // [e, 1, n], gate(up) scale
                    std::optional<torch::Tensor> a1_scale  // [m, 1], token scale

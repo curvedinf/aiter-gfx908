@@ -141,6 +141,7 @@ def ck_moe_stage1(
     w2: Tensor,
     sorted_token_ids: Tensor,
     sorted_expert_ids: Tensor,
+    num_valid_ids: Tensor,
     out: Tensor,
     w1_scale: Optional[Tensor] = None,
     a1_scale: Optional[Tensor] = None,

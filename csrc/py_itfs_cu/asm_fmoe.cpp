@@ -270,7 +270,7 @@ void fmoe(torch::Tensor &out,               // [token_cnt, dim]
                                                 sorted_token_ids,
                                                 sorted_weight_buf,
                                                 sorted_expert_ids,
-                                                num_tokens_post_padded,
+                                                num_valid_ids,
                                                 topk);
 }
 
@@ -554,7 +554,7 @@ void fmoe_fp8_g1u1_a16(torch::Tensor &out,               // [token_cnt, dim]
                                                      sorted_token_ids,
                                                      sorted_weight_buf,
                                                      sorted_expert_ids,
-                                                     num_tokens_post_padded,
+                                                     num_valid_ids,
                                                      topk,
                                                      // quant args
                                                      fc1_smooth_scale,

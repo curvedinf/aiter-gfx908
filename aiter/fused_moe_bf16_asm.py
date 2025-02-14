@@ -54,17 +54,17 @@ def asm_moe(hidden_states,
     M, topk = topk_ids.shape
     dtype = hidden_states.dtype
     device = topk_ids.device
-    sorted_ids, sorted_weights, sorted_expert_ids, num_tokens_post_padded, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
-                                                                                                    model_dim, dtype)
+    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
+                                                                                           model_dim, dtype)
     if fc1_scale is None:
         # pure bf16
         aiter.fmoe(moe_buf, hidden_states, w1, w2, sorted_ids,
-                   sorted_weights, sorted_expert_ids, num_tokens_post_padded, topk)
+                   sorted_weights, sorted_expert_ids, num_valid_ids, topk)
     elif a16:
         # a16w8 smooth quant fmoe
         if w1.dtype == torch.float8_e4m3fnuz and inter_dim*2 == w1.shape[1]:
             aiter.fmoe_fp8_g1u1_a16(moe_buf, hidden_states, w1, w2, sorted_ids,
-                                    sorted_weights, sorted_expert_ids, num_tokens_post_padded,
+                                    sorted_weights, sorted_expert_ids, num_valid_ids,
                                     topk,
                                     fc1_scale,
                                     fc2_scale,
@@ -72,7 +72,7 @@ def asm_moe(hidden_states,
                                     fc2_smooth_scale)
         elif w1.dtype == torch.int8 and inter_dim == w1.shape[1]:
             aiter.fmoe_int8_g1u0_a16(moe_buf, hidden_states, w1, w2, sorted_ids,
-                                     sorted_weights, sorted_expert_ids, num_tokens_post_padded,
+                                     sorted_weights, sorted_expert_ids, num_valid_ids,
                                      topk,
                                      fc1_scale,
                                      fc2_scale,
@@ -127,7 +127,7 @@ def asm_moe(hidden_states,
             raise ValueError(f"Invalid MoE weight: {w1.shape=} {w2.shape=}")
 
         fmoe_func(moe_buf, a8, w1, w2, sorted_ids,
-                  sorted_weights, sorted_expert_ids, num_tokens_post_padded,
+                  sorted_weights, sorted_expert_ids, num_valid_ids,
                   topk,
                   a8_scale,
                   fc1_scale,

@@ -66,18 +66,18 @@ def test_moe_sort(dtype, token, model_dim, inter_dim, E, topk):
     (sorted_ids_a,
      sorted_expert_ids_a,
      token_nums,
-     num_tokens_post_padded_a), avg_a = moe_sorting_vllm(
+     num_valid_ids_a), avg_a = moe_sorting_vllm(
         topk_ids, BLOCK_SIZE_M, E)
     sorted_ids_a = sorted_ids_a//topk
 
     (sorted_ids_b,
      sorted_weights_b,
      sorted_expert_ids_b,
-     num_tokens_post_padded_b,
+     num_valid_ids_b,
      moe_buf), avg_b = moe_sorting_ck_test(topk_ids, topk_weights, E,
                                            model_dim, dtype)
-    # print(f'{num_tokens_post_padded_a=}')
-    # print(f'{num_tokens_post_padded_b=}')
+    # print(f'{num_valid_ids_a=}')
+    # print(f'{num_valid_ids_b=}')
     # print(f'{sorted_ids_a.shape=}')
     # print(f'{sorted_ids_b.shape=}')
     # pad_a = (sorted_ids_a.shape[0]+BLOCK_SIZE_M -
@@ -92,14 +92,14 @@ def test_moe_sort(dtype, token, model_dim, inter_dim, E, topk):
 
     print(
         f"[perf] {token=}, {model_dim=}, {inter_dim=}, {E=}, {topk=}, dtype: {dtype}, torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b-1:<5.1%}")
-    if num_tokens_post_padded_a[0] != num_tokens_post_padded_b[0]:
+    if num_valid_ids_a[0] != num_valid_ids_b[0]:
         print("[F!!!]")
         return
-    checkAllclose(num_tokens_post_padded_a, num_tokens_post_padded_b, atol=0)
-    checkAllclose(sorted_ids_a[:num_tokens_post_padded_a[0]],
-                  sorted_ids_b[:num_tokens_post_padded_b[0]])
-    checkAllclose(sorted_expert_ids_a[:num_tokens_post_padded_a[0]//BLOCK_SIZE_M],
-                  sorted_expert_ids_b[:num_tokens_post_padded_b[0]//BLOCK_SIZE_M])
+    checkAllclose(num_valid_ids_a, num_valid_ids_b, atol=0)
+    checkAllclose(sorted_ids_a[:num_valid_ids_a[0]],
+                  sorted_ids_b[:num_valid_ids_b[0]])
+    checkAllclose(sorted_expert_ids_a[:num_valid_ids_a[0]//BLOCK_SIZE_M],
+                  sorted_expert_ids_b[:num_valid_ids_b[0]//BLOCK_SIZE_M])
     print(f"[passed~]")
 
 

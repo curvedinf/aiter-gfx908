@@ -66,7 +66,7 @@ def torch_moe_stage2(hidden_states,
                      w2,  # E, model_dim, inter_dim
                      topk_weights, topk_ids,
                      sorted_weights, sorted_ids,
-                     sorted_expert_ids, num_tokens_post_padded,
+                     sorted_expert_ids, num_valid_ids,
                      dtype,
                      fc2_scale=None,  # [expert, inter_dim, 1]
                      block_size=32
@@ -88,7 +88,7 @@ def torch_moe_stage2(hidden_states,
         device=hidden_states.device,
     )
 
-    num_tokens_post_padded = int(num_tokens_post_padded[0])
+    num_valid_ids = int(num_valid_ids[0])
 
     sorted_expert_full_ids = torch.tensor(
         [x for x in sorted_expert_ids for _ in range(block_size)])
@@ -108,7 +108,7 @@ def torch_moe_stage2(hidden_states,
 
     invalid_num = topk << 24 | block_size
     mask = sorted_ids == invalid_num
-    mask[num_tokens_post_padded:] = True
+    mask[num_valid_ids:] = True
 
     out = out[~mask]
     sorted_id2 = sorted_ids[~mask]
@@ -222,8 +222,8 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     E, model_dim, inter_dim = w2.shape
     M, topk = topk_ids.shape
     BLOCK_SIZE_M = 128
-    sorted_ids, sorted_weights, sorted_expert_ids, num_tokens_post_padded, moe_buf = moe_sorting_ck(topk_ids, topk_weights, E,
-                                                                                                    model_dim, dtype, BLOCK_SIZE_M)
+    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weights, E,
+                                                                                           model_dim, dtype, BLOCK_SIZE_M)
 
     quant_dtype = torch.float8_e4m3fnuz
     w1_scale = torch.empty((E), dtype=torch.float, device="cuda")
@@ -250,7 +250,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                         w2,  # E, model_dim, inter_dim
                                         topk_weights, topk_ids,
                                         sorted_weights, sorted_ids,
-                                        sorted_expert_ids, num_tokens_post_padded,
+                                        sorted_expert_ids, num_valid_ids,
                                         dtype=dtype,
                                         # [expert, inter_dim, 1]
                                         fc2_scale=None,
@@ -268,7 +268,12 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                              sorted_expert_ids,
                              w1_scale, a1_scale,
                              dtype, BLOCK_SIZE_M)
+    # print(f'{[sorted_ids&0xffffff][:35]=}')
+    # print(f'{sorted_expert_ids=}')
+    # for i in range(32,42):
     for i in range(out1.shape[0]):
+        print(i, 'tokenID:', sorted_ids[i] & 0xffffff)
+        print(f'{num_valid_ids=}')
         checkAllclose(out1[i], out1_ref[i], msg=f"{i}: ")
     checkAllclose(out1_ref, out1,
                   msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')

@@ -188,13 +188,14 @@ struct MulABScaleExpertWeight
 
 template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, int MPerBlock = 32>
 void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
-                        void *&hidden_states,           // [m, k], input token
-                        void *&w1,                      // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
-                        void *&w2,                      // [expert, dim, inter_dim], pre-shuffle([e, nr, kr, w])
-                        void *&sorted_token_ids,        // [max_num_tokens_padded]
-                        void *&sorted_expert_ids,       // [max_num_m_blocks]
-                        void *&num_valid_ids,           //[1]
-                        void *&out,                     // [max_num_tokens_padded, inter_dim]
+                        int topk,
+                        void *&hidden_states,                          // [m, k], input token
+                        void *&w1,                                     // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
+                        void *&w2,                                     // [expert, dim, inter_dim], pre-shuffle([e, nr, kr, w])
+                        void *&sorted_token_ids,                       // [max_num_tokens_padded]
+                        void *&sorted_expert_ids,                      // [max_num_m_blocks]
+                        void *&num_valid_ids,                          //[1]
+                        void *&out,                                    // [max_num_tokens_padded, inter_dim]
                         std::optional<void *> w1_scale = std::nullopt, // [e, 1, n], gate(up) scale
                         std::optional<void *> a1_scale = std::nullopt  // [m, 1], token scale
 );

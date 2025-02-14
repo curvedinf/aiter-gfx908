@@ -5,6 +5,7 @@
 
 template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, int MPerBlock>
 void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
+                        int topk,
                         void *&hidden_states,           // [m, k], input token
                         void *&w1,                      // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
                         void *&w2,                      // [expert, dim, inter_dim], pre-shuffle([e, nr, kr, w])
@@ -109,6 +110,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                                                                     w1_scale.has_value() ? w1_scale.value() : nullptr},
                                out,
                                tokens,
+                               topk,
                                sorted_size,
                                N,
                                K,
@@ -135,6 +137,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     template void ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerfBlock>( \
         const hipStream_t &stream,                                                                              \
         int tokens, int sorted_size, int N, int K,                                                              \
+        int topk,                                                                                               \
         void *&hidden_states,                                                                                   \
         void *&w1,                                                                                              \
         void *&w2,                                                                                              \

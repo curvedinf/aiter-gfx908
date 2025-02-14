@@ -144,10 +144,12 @@ def ck_moe_stage1(
     sorted_expert_ids: Tensor,
     num_valid_ids: Tensor,
     out: Tensor,
+    topk: int,
     w1_scale: Optional[Tensor] = None,
     a1_scale: Optional[Tensor] = None,
     block_m: Optional[int] = 32
 ): ...
+
 
 @compile_ops("module_moe")
 def ck_moe_stage2(

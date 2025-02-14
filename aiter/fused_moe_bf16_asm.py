@@ -12,8 +12,7 @@ from aiter import logger
 BLOCK_SIZE_M = 32
 
 
-def moe_sorting_ck(topk_ids, topk_weights, num_experts, model_dim, moebuf_dtype, block_size=BLOCK_SIZE_M, expert_mask = None):
-    # block_size = BLOCK_SIZE_M
+def moe_sorting_ck(topk_ids, topk_weights, num_experts, model_dim, moebuf_dtype, block_size=BLOCK_SIZE_M, expert_mask=None):
     device = topk_ids.device
     M, topk = topk_ids.shape
     topk = topk_ids.shape[1]
@@ -28,15 +27,15 @@ def moe_sorting_ck(topk_ids, topk_weights, num_experts, model_dim, moebuf_dtype,
     sorted_expert_ids = torch.empty((max_num_m_blocks, ),
                                     dtype=torch.int32,
                                     device=device)
-    num_tokens_post_pad = torch.empty((1),
-                                      dtype=torch.int32,
-                                      device=device)
+    num_valid_ids = torch.empty((1),
+                                dtype=torch.int32,
+                                device=device)
     moe_buf = torch.empty((M, model_dim),
                           dtype=moebuf_dtype,
                           device=device)
     aiter.moe_sorting_fwd(topk_ids, topk_weights, sorted_ids, sorted_weights,  sorted_expert_ids,
-                          num_tokens_post_pad, moe_buf, num_experts, BLOCK_SIZE_M, expert_mask)
-    return sorted_ids, sorted_weights, sorted_expert_ids, num_tokens_post_pad, moe_buf
+                          num_valid_ids, moe_buf, num_experts, block_size, expert_mask)
+    return sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf
 
 
 def asm_moe(hidden_states,
@@ -50,7 +49,7 @@ def asm_moe(hidden_states,
             fc2_smooth_scale=None,  # [expert(local_expert:EP), 1, inter_dim]
             a16=False,
             per_tensor_quant_scale=None,
-            expert_mask = None
+            expert_mask=None
             ):
     E, model_dim, inter_dim = w2.shape
     if expert_mask is not None:
@@ -59,8 +58,8 @@ def asm_moe(hidden_states,
     dtype = hidden_states.dtype
     device = topk_ids.device
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
-                                                                                                    model_dim, dtype, BLOCK_SIZE_M, expert_mask)
-    
+                                                                                           model_dim, dtype, BLOCK_SIZE_M, expert_mask)
+
     if fc1_scale is None:
         # pure bf16
         aiter.fmoe(moe_buf, hidden_states, w1, w2, sorted_ids,
@@ -98,9 +97,9 @@ def asm_moe(hidden_states,
             # moe_smoothquant_fwd need topk_ids which contains local_expert_id
             if expert_mask is not None:
                 local_expert_hash = expert_mask.cumsum(0, dtype=torch.int32)
-                local_expert_hash[local_expert_hash > 0] -= 1 
+                local_expert_hash[local_expert_hash > 0] -= 1
                 topk_ids = local_expert_hash[topk_ids]
-            
+
             aiter.moe_smoothquant_fwd(
                 a8, hidden_states, fc1_smooth_scale, topk_ids, a8_scale)
         else:

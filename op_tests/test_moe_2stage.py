@@ -34,8 +34,6 @@ def torch_moe_stage1(hidden_states,
         B, -1, D).repeat(1, topk, 1)
 
     max_num_tokens_padded = topk_ids.numel() + num_experts * block_size - topk
-    # max_num_tokens_padded = int(
-    #     (max_num_tokens_padded+block_size-1)//block_size)*block_size
 
     # gose to quant D_w8a8/w8a8
     if fc1_scale is not None:
@@ -43,8 +41,13 @@ def torch_moe_stage1(hidden_states,
         w1 = (w1.view(-1, D).to(fc1_scale) *
               fc1_scale.view(-1, 1)).to(dtype).view(expert, -1, D)
 
+    # out = torch.zeros(
+    #     (max_num_tokens_padded, N),
+    #     dtype=dtype,
+    #     device=hidden_states.device,
+    # )
     out = torch.zeros(
-        (max_num_tokens_padded, N),
+        (B, topk, N),
         dtype=dtype,
         device=hidden_states.device,
     )
@@ -54,9 +57,11 @@ def torch_moe_stage1(hidden_states,
         if mask.sum():
             sub_tokens = hidden_states[mask]
             act_input = sub_tokens @ (w1[E_id].transpose(0, 1))
-            out[loc:loc+act_input.shape[0]] = act_input
-            loc += int((act_input.shape[0] +
-                       block_size-1)//block_size)*block_size
+            # out[loc:loc+act_input.shape[0]] = act_input
+            # loc += int((act_input.shape[0] +
+            #            block_size-1)//block_size)*block_size
+            out[mask] = act_input
+
     return out
 
 
@@ -73,7 +78,7 @@ def torch_moe_stage2(hidden_states,
                      ):
     ctype = torch.float  # compute type
     token_num, topk = topk_ids.shape
-    M, _ = hidden_states.shape
+    # M, _ = hidden_states.shape
     num_experts, model_dim, inter_dim = w2.shape
     max_num_m_blocks = sorted_expert_ids.shape[0]
 
@@ -82,43 +87,55 @@ def torch_moe_stage2(hidden_states,
         w2 = (w2.view(-1, inter_dim).to(ctype) *
               fc2_scale.view(-1, 1)).to(ctype).view(num_experts, -1, inter_dim)
 
-    out = torch.zeros(
-        (M, model_dim),
+    final_out = torch.zeros(
+        (token_num, topk, model_dim),
         dtype=dtype,
         device=hidden_states.device,
     )
+    for E_id in range(w1.shape[0]):
+        mask = topk_ids == E_id
+        if mask.sum():
+            sub_tokens = hidden_states[mask]
+            act_input = sub_tokens @ (w2[E_id].transpose(0, 1))
+            final_out[mask] = act_input
 
-    num_valid_ids = int(num_valid_ids[0])
+    # out = torch.zeros(
+    #     (M, model_dim),
+    #     dtype=dtype,
+    #     device=hidden_states.device,
+    # )
 
-    sorted_expert_full_ids = torch.tensor(
-        [x for x in sorted_expert_ids for _ in range(block_size)])
-    sorted_expert_full_ids = sorted_expert_full_ids[:M]
-    for E_id in range(num_experts):
-        row_mask = sorted_expert_full_ids == E_id
-        if row_mask.sum():
-            sub_tokens = hidden_states[row_mask]
-            act_ouput = sub_tokens @ (w2[E_id].transpose(0, 1))
-            out[row_mask] = act_ouput
+    # num_valid_ids = int(num_valid_ids[0])
 
-    final_out = torch.empty(
-        (token_num*topk, model_dim),
-        dtype=dtype,
-        device=hidden_states.device,
-    )
+    # sorted_expert_full_ids = torch.tensor(
+    #     [x for x in sorted_expert_ids for _ in range(block_size)])
+    # sorted_expert_full_ids = sorted_expert_full_ids[:M]
+    # for E_id in range(num_experts):
+    #     row_mask = sorted_expert_full_ids == E_id
+    #     if row_mask.sum():
+    #         sub_tokens = hidden_states[row_mask]
+    #         act_ouput = sub_tokens @ (w2[E_id].transpose(0, 1))
+    #         out[row_mask] = act_ouput
 
-    invalid_num = topk << 24 | block_size
-    mask = sorted_ids == invalid_num
-    mask[num_valid_ids:] = True
+    # final_out = torch.empty(
+    #     (token_num*topk, model_dim),
+    #     dtype=dtype,
+    #     device=hidden_states.device,
+    # )
 
-    out = out[~mask]
-    sorted_id2 = sorted_ids[~mask]
+    # invalid_num = topk << 24 | block_size
+    # mask = sorted_ids == invalid_num
+    # mask[num_valid_ids:] = True
 
-    topkID = sorted_id2 >> 24
-    tkID = sorted_id2 & 0xffffff
+    # out = out[~mask]
+    # sorted_id2 = sorted_ids[~mask]
 
-    mask = tkID*topk+topkID
-    final_out[mask] = out
-    final_out = final_out.view(token_num, topk, model_dim)
+    # topkID = sorted_id2 >> 24
+    # tkID = sorted_id2 & 0xffffff
+
+    # mask = tkID*topk+topkID
+    # final_out[mask] = out
+    # final_out = final_out.view(token_num, topk, model_dim)
     return (final_out * topk_weights.view(token_num, -1, 1)).sum(1).to(hidden_states.dtype)
 
 
@@ -191,19 +208,22 @@ def ck_moe_stage1(hidden_states,
                   sorted_expert_ids,  # [max_num_m_blocks]
                   num_valid_ids,  # [1]
                   w1_scale, a1_scale, dtype,
+                  topk,
                   block_size=32
                   ):
+    token_num = hidden_states.shape[0]
+    D = w1.shape[1]
     num_experts, model_dim, inter_dim = w2.shape
     max_num_tokens_padded = sorted_token_ids.shape[0]
     # max_num_tokens_padded = sorted_expert_ids.shape[0]*block_size
 
     out = torch.zeros(
-        (max_num_tokens_padded, w1.shape[1]),
+        (token_num, topk, D),
         dtype=dtype,
         device=hidden_states.device,
     )
     aiter.ck_moe_stage1(hidden_states, w1, w2, sorted_token_ids,
-                        sorted_expert_ids, num_valid_ids, out, w1_scale, a1_scale)
+                        sorted_expert_ids, num_valid_ids, out, topk, w1_scale, a1_scale)
     return out
 
 
@@ -272,7 +292,12 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                              sorted_expert_ids,
                              num_valid_ids,
                              w1_scale, a1_scale,
-                             dtype, BLOCK_SIZE_M)
+                             dtype, topk, BLOCK_SIZE_M)
+    for E_id in range(E):
+        mask = topk_ids == E_id
+        print(out1_ref[mask])
+        print(out1[mask])
+        checkAllclose(out1_ref[mask], out1[mask], msg=f'expert{E_id}')
     checkAllclose(out1_ref, out1,
                   msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
 

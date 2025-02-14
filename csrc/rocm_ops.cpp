@@ -29,8 +29,14 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             "Aligning the number of tokens to be processed by each expert such "
             "that it is divisible by the block size.");
       m.def("silu_and_mul", &silu_and_mul, "Activation function used in SwiGLU.");
-      m.def("rms_norm", &rms_norm, "Apply Root Mean Square (RMS) Normalization to the input tensor.");
-      m.def("fused_add_rms_norm", &fused_add_rms_norm, "In-place fused Add and RMS Normalization");
+      m.def("rms_norm_cu", &rms_norm, "Apply Root Mean Square (RMS) Normalization to the input tensor.");
+      m.def("fused_add_rms_norm_cu", &fused_add_rms_norm, "In-place fused Add and RMS Normalization");
+      m.def("rmsnorm2d_fwd", &rmsnorm2d);
+      m.def("rmsnorm2d_fwd_with_add", &rmsnorm2d_with_add);
+      m.def("rmsnorm2d_fwd_with_smoothquant", &rmsnorm2d_with_smoothquant);
+      m.def("rmsnorm2d_fwd_with_add_smoothquant", &rmsnorm2d_with_add_smoothquant);
+      m.def("rmsnorm2d_fwd_with_dynamicquant", &rmsnorm2d_with_dynamicquant);
+      m.def("rmsnorm2d_fwd_with_add_dynamicquant", &rmsnorm2d_with_add_dynamicquant);
       m.def("wvSpltK", &wvSpltK, "wvSpltK(Tensor in_a, Tensor in_b, Tensor! out_c, int N_in,"
                                  "        int CuCount) -> ()");
       m.def("LLMM1", &LLMM1, "LLMM1(Tensor in_a, Tensor in_b, Tensor! out_c, int rows_per_block) -> "
@@ -138,7 +144,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             py::arg("epsilon"), py::arg("x_bias") = std::nullopt);
       m.def("smoothquant_fwd", &smoothquant_fwd);
       m.def("moe_smoothquant_fwd", &moe_smoothquant_fwd);
-      m.def("moe_sorting_fwd", &moe_sorting_fwd);
+      m.def("moe_sorting_fwd", &moe_sorting_fwd,
+          py::arg("topk_ids"), py::arg("topk_weights"), 
+          py::arg("sorted_token_ids"), py::arg("sorted_weights"), 
+          py::arg("sorted_expert_ids"), py::arg("total_tokens_post_pad"), 
+          py::arg("moe_buf"), py::arg("num_experts"), 
+          py::arg("unit_size"), py::arg("local_expert_mask")= std::nullopt);
       m.def("pa_fwd_naive", &pa_fwd_naive, "pa_fwd_naive",
             py::arg("Q"),
             py::arg("K"),
@@ -173,6 +184,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
       m.def("mul", &aiter_mul, "apply for mul with transpose and broadcast.");
       m.def("sub", &aiter_sub, "apply for sub with transpose and broadcast.");
       m.def("div", &aiter_div, "apply for div with transpose and broadcast.");
+      m.def("sigmoid", &aiter_sigmoid, "apply for sigmoid.");
+      m.def("tanh", &aiter_tanh, "apply for tanh.");
       m.def("pa_fwd_asm", &pa_fwd, "pa_fwd",
             py::arg("Q"),
             py::arg("K"),
@@ -217,5 +230,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             py::arg("topk_weights"), py::arg("topk_ids"),
             py::arg("w1_scale") = std::nullopt, py::arg("w2_scale") = std::nullopt,
             py::arg("a1_scale") = std::nullopt, py::arg("a2_scale") = std::nullopt,
-            py::arg("block_m") = 32);
+            py::arg("block_m") = 32, py::arg("expert_mask") = std::nullopt);
 }

@@ -4,6 +4,7 @@
 #include <hip/hip_fp16.h>
 #include <torch/all.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include "aiter_hip_common.h"
 
 struct __attribute__((packed)) KernelArgs
@@ -180,6 +181,7 @@ public:
         int gdx = ((inter_dim + sub_GU - 1) / sub_GU);
         int gdy = sub_X_cnt;
         int gdz = 1;
+        const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
         const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
         if constexpr (switchGxy)
         {
@@ -247,17 +249,29 @@ void fmoe(torch::Tensor &out,               // [token_cnt, dim]
           uint32_t topk                     //
 )
 {
-    // bf16 g1u0
-    static FMoeKernel impl("fmoe_kernel_func", "fmoe.co");
-    impl.launch_kernel<uint16_t, uint16_t>(out,
-                                           input,
-                                           gate,
-                                           down,
-                                           sorted_token_ids,
-                                           sorted_weight_buf,
-                                           sorted_expert_ids,
-                                           num_valid_ids,
-                                           topk);
+    // g1u0
+    FMoeKernel *impl_ptr = nullptr;
+    if (input.dtype() == at::ScalarType::Half)
+    {
+        static FMoeKernel impl_f16("fmoe_kernel_func", "fmoe_f16.co");
+        impl_ptr = &impl_f16;
+    }
+    else if (input.dtype() == at::ScalarType::BFloat16)
+    {
+        static FMoeKernel impl_b16("fmoe_kernel_func", "fmoe_b16.co");
+        impl_ptr = &impl_b16;
+    }
+    TORCH_CHECK(impl_ptr != nullptr,
+                __func__, ": unsupport current input type");
+    impl_ptr->launch_kernel<uint16_t, uint16_t>(out,
+                                                input,
+                                                gate,
+                                                down,
+                                                sorted_token_ids,
+                                                sorted_weight_buf,
+                                                sorted_expert_ids,
+                                                num_tokens_post_padded,
+                                                topk);
 }
 
 void fmoe_int8_g1u0(torch::Tensor &out,               // [token_cnt, dim]
@@ -278,7 +292,7 @@ void fmoe_int8_g1u0(torch::Tensor &out,               // [token_cnt, dim]
     FMoeKernel *impl_ptr = nullptr;
     int inter_dim = down.size(2);
 
-    if (input.dtype() == at::ScalarType::Char)
+    if (input.dtype() == at::ScalarType::Char || input.dtype() == at::ScalarType::Byte)
     {
 
         if ((inter_dim % 512) == 0)
@@ -360,7 +374,7 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
     int sub_X_cnt = sorted_expert_ids.size(0);
     int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt); // todo,add tune interface here
 
-    if (input.dtype() == at::ScalarType::Char)
+    if (input.dtype() == at::ScalarType::Char || input.dtype() == at::ScalarType::Byte)
     {
         if (selectedTile == 512)
         {
@@ -515,19 +529,36 @@ void fmoe_fp8_g1u1_a16(torch::Tensor &out,               // [token_cnt, dim]
                        torch::Tensor &fc2_smooth_scale   // [expert, 1, inter_dim]
 )
 {
-    static FMoeKernel impl("fmoe_fp8_g1u1_smf_subGU_512", "fmoe_fp8_g1u1_smf_subGU_512.co");
-    impl.launch_kernel<uint8_t, uint16_t, true>(out,
-                                                input,
-                                                gate,
-                                                down,
-                                                sorted_token_ids,
-                                                sorted_weight_buf,
-                                                sorted_expert_ids,
-                                                num_valid_ids,
-                                                topk,
-                                                // quant args
-                                                fc1_smooth_scale,
-                                                fc1_scale,
-                                                fc2_scale,
-                                                fc2_smooth_scale);
+    FMoeKernel *impl_ptr = nullptr;
+    int inter_dim = down.size(2);
+    int sub_X_cnt = sorted_expert_ids.size(0);
+    int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt); // todo,add tune interface here
+
+    if (selectedTile == 512)
+    {
+        static FMoeKernel impl_512("fmoe_fp8_g1u1_smf_subGU_512", "fmoe_fp8_g1u1_smf_subGU_512.co", 512);
+        impl_ptr = &impl_512;
+    }
+    else if (selectedTile == 320)
+    {
+        static FMoeKernel impl_320("fmoe_fp8_g1u1_smf_subGU_320", "fmoe_fp8_g1u1_smf_subGU_320.co", 320);
+        impl_ptr = &impl_320;
+    }
+    else
+        TORCH_CHECK(false, __func__, " Unsupported inter_dim " + std::to_string(inter_dim) + ", which should be divisible by 128, 192, 256, 320, 384, 448 or 512");
+
+    impl_ptr->launch_kernel<uint8_t, uint16_t, true>(out,
+                                                     input,
+                                                     gate,
+                                                     down,
+                                                     sorted_token_ids,
+                                                     sorted_weight_buf,
+                                                     sorted_expert_ids,
+                                                     num_tokens_post_padded,
+                                                     topk,
+                                                     // quant args
+                                                     fc1_smooth_scale,
+                                                     fc1_scale,
+                                                     fc2_scale,
+                                                     fc2_smooth_scale);
 }

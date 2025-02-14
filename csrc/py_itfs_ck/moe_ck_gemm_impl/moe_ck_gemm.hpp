@@ -202,14 +202,15 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
 
 template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, int MPerBlock = 32>
 void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
-                        void *&inter_states,            // [max_num_tokens_padded, k], input token
-                        void *&w1,                      // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
-                        void *&w2,                      // [expert, dim, inter_dim], pre-shuffle([e, nr, kr, w])
-                        void *&sorted_token_ids,        // [max_num_tokens_padded]
-                        void *&sorted_expert_ids,       // [max_num_m_blocks]
-                        void *&sorted_weights,          // [max_num_tokens_padded]
-                        void *&num_valid_ids,           //[1]
-                        void *&out,                     // [m, out_dim]
+                        int topk,
+                        void *&inter_states,                           // [max_num_tokens_padded, k], input token
+                        void *&w1,                                     // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
+                        void *&w2,                                     // [expert, dim, inter_dim], pre-shuffle([e, nr, kr, w])
+                        void *&sorted_token_ids,                       // [max_num_tokens_padded]
+                        void *&sorted_expert_ids,                      // [max_num_m_blocks]
+                        void *&sorted_weights,                         // [max_num_tokens_padded]
+                        void *&num_valid_ids,                          //[1]
+                        void *&out,                                    // [m, out_dim]
                         std::optional<void *> w2_scale = std::nullopt, // [e, 1, n], gate(up) scale
                         std::optional<void *> a2_scale = std::nullopt  // [max_num_tokens_padded, 1], token scale
 );

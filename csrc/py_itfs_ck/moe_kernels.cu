@@ -126,13 +126,13 @@ torch::Tensor ck_moe(torch::Tensor &hidden_states,          // [m, k], input tok
     else if (MPerBlock == 128)                                                                                                                                                                                                                                                                                          \
         ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 128>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_tokens_post_pad_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);
 
-void ck_moe_stage1(torch::Tensor &hidden_states,                         // [m, k], input token
-                   torch::Tensor &w1,                                    // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
-                   torch::Tensor &w2,                                    // [expert, dim, inter_dim], pre-shuffle([e, nr, kr, w])
-                   torch::Tensor &sorted_token_ids,                      // [max_num_tokens_padded]
-                   torch::Tensor &sorted_expert_ids,                     // [max_num_m_blocks]
-                   torch::Tensor &num_valid_ids,                         // [1]
-                   torch::Tensor &out,                                   // [m * topk, inter_dim]
+void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
+                   torch::Tensor &w1,                // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
+                   torch::Tensor &w2,                // [expert, dim, inter_dim], pre-shuffle([e, nr, kr, w])
+                   torch::Tensor &sorted_token_ids,  // [max_num_tokens_padded]
+                   torch::Tensor &sorted_expert_ids, // [max_num_m_blocks]
+                   torch::Tensor &num_valid_ids,     // [1]
+                   torch::Tensor &out,               // [m * topk, inter_dim]
                    int topk,
                    std::optional<torch::Tensor> w1_scale = std::nullopt, // [e, 1, n], gate(up) scale
                    std::optional<torch::Tensor> a1_scale = std::nullopt, // [m, 1], token scale
@@ -228,22 +228,23 @@ void ck_moe_stage1(torch::Tensor &hidden_states,                         // [m, 
     // }
 }
 
-#define CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock)                                                                                                                                                                                                                             \
-    // if (MPerBlock == 32)                                                                                                                                                                                                                                                                                                             \
-    //     ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 32>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_tokens_post_pad_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr); \
-    // else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                                        \
-    //     ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 64>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_tokens_post_pad_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr); \
-    // else if (MPerBlock == 128)                                                                                                                                                                                                                                                                                                       \
-    //     ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 128>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_tokens_post_pad_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr);
+#define CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock)                                                                                                                                                                                                                                   \
+    if (MPerBlock == 32)                                                                                                                                                                                                                                                                                                                   \
+        ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 32>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_tokens_post_pad_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr); \
+    else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                                              \
+        ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 64>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_tokens_post_pad_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr); \
+    else if (MPerBlock == 128)                                                                                                                                                                                                                                                                                                             \
+        ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 128>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_tokens_post_pad_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr);
 
-void ck_moe_stage2(torch::Tensor &inter_states,                          // [m, k], input token
-                   torch::Tensor &w1,                                    // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
-                   torch::Tensor &w2,                                    // [expert, dim, inter_dim], pre-shuffle([e, nr, kr, w])
-                   torch::Tensor &sorted_token_ids,                      // [max_num_tokens_padded]
-                   torch::Tensor &sorted_expert_ids,                     // [max_num_m_blocks]
-                   torch::Tensor &sorted_weights,                        // [max_num_tokens_padded]
-                   torch::Tensor &num_valid_ids,                         // [1]
-                   torch::Tensor &out,                                   // [max_num_tokens_padded, inter_dim]
+void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
+                   torch::Tensor &w1,                // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
+                   torch::Tensor &w2,                // [expert, dim, inter_dim], pre-shuffle([e, nr, kr, w])
+                   torch::Tensor &sorted_token_ids,  // [max_num_tokens_padded]
+                   torch::Tensor &sorted_expert_ids, // [max_num_m_blocks]
+                   torch::Tensor &sorted_weights,    // [max_num_tokens_padded]
+                   torch::Tensor &num_valid_ids,     // [1]
+                   torch::Tensor &out,               // [max_num_tokens_padded, inter_dim]
+                   int topk,
                    std::optional<torch::Tensor> w2_scale = std::nullopt, // [e, 1, n], gate(up) scale
                    std::optional<torch::Tensor> a2_scale = std::nullopt, // [m, 1], token scale
                    std::optional<int> block_m = 32)

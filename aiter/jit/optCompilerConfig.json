@@ -152,7 +152,8 @@
         "srcs": [
             "f'{AITER_CSRC_DIR}/pybind/moe_ck_pybind.cu'",
             "f'{CK_DIR}/example/ck_tile/15_fused_moe/instances'",
-            "f'{AITER_CSRC_DIR}/py_itfs_ck/moe_kernels.cu'"
+            "f'{AITER_CSRC_DIR}/py_itfs_ck/moe_kernels.cu'",
+            "f'{AITER_CSRC_DIR}/py_itfs_ck/moe_ck_gemm_impl'"
         ],
         "md_name": "'module_moe'",
         "flags_extra_cc": [],

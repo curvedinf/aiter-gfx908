@@ -58,7 +58,7 @@ def asm_moe(hidden_states,
     M, topk = topk_ids.shape
     dtype = hidden_states.dtype
     device = topk_ids.device
-    sorted_ids, sorted_weights, sorted_expert_ids, num_tokens_post_padded, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
+    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
                                                                                                     model_dim, dtype, BLOCK_SIZE_M, expert_mask)
     
     if fc1_scale is None:

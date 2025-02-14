@@ -223,7 +223,7 @@ def ck_moe_stage1(hidden_states,
         device=hidden_states.device,
     )
     aiter.ck_moe_stage1(hidden_states, w1, w2, sorted_token_ids,
-                        sorted_expert_ids, num_valid_ids, out, topk, w1_scale, a1_scale)
+                        sorted_expert_ids, num_valid_ids, out, w1_scale, a1_scale, block_size)
     return out
 
 

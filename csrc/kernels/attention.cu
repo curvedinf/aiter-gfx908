@@ -412,10 +412,10 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                                          // head_size, block_size]
     const int num_kv_heads,
     const float scale,
-    const int* __restrict__ block_tables, // [num_seqs, max_num_blocks_per_seq]
-    const int* __restrict__ context_lens, // [num_seqs + 1]
-    const int max_num_blocks_per_seq,
-    const float* __restrict__ alibi_slopes, // [num_heads]
+    const int* __restrict__ kv_indptr,         // [num_seqs + 1]
+    const int* __restrict__ kv_page_indices,   // [max_num_blocks]
+    const int* __restrict__ kv_last_page_lens, // [num_seqs]
+    const float* __restrict__ alibi_slopes,    // [num_heads]
     const int q_stride,
     const int kv_block_stride,
     const int kv_head_stride,
@@ -446,7 +446,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
 
     const int max_num_partitions = gridDim.y;
 
-    const int context_len = context_lens[seq_idx + 1] - context_lens[seq_idx];
+    const int context_len =
+        (kv_indptr[seq_idx + 1] - kv_indptr[seq_idx] - 1) * BLOCK_SIZE + kv_last_page_lens[seq_idx];
 
     const int partition_start_token_idx = partition_idx * T_PAR_SIZE; // partition_size;
     // exit if partition is out of context for seq
@@ -499,7 +500,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     const int num_context_blocks = DIVIDE_ROUND_UP(context_len, BLOCK_SIZE);
     const int last_ctx_block     = num_context_blocks - 1;
 
-    const int* block_table_seq = block_tables + seq_idx * max_num_blocks_per_seq;
+    const int* block_table_seq = kv_page_indices + kv_indptr[seq_idx];
 
     int kphysical_block_number[TLOOP];
 
@@ -1588,21 +1589,24 @@ template <typename scalar_t,
           int PARTITION_SIZE,
           int NPAR_LOOPS>
 __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
-    OUTT* __restrict__ out,               // [num_seqs, num_heads, head_size]
-    const float* __restrict__ exp_sums,   // [num_seqs, num_heads,
-                                          // max_num_partitions]
-    const float* __restrict__ max_logits, // [num_seqs, num_heads,
-                                          // max_num_partitions]
-    const scalar_t* __restrict__ tmp_out, // [num_seqs, num_heads,
-                                          // max_num_partitions, head_size]
-    const int* __restrict__ context_lens, // [num_seqs + 1]
+    OUTT* __restrict__ out,                    // [num_seqs, num_heads, head_size]
+    const float* __restrict__ exp_sums,        // [num_seqs, num_heads,
+                                               // max_num_partitions]
+    const float* __restrict__ max_logits,      // [num_seqs, num_heads,
+                                               // max_num_partitions]
+    const scalar_t* __restrict__ tmp_out,      // [num_seqs, num_heads,
+                                               // max_num_partitions, head_size]
+    const int* __restrict__ kv_indptr,         // [num_seqs + 1]
+    const int* __restrict__ kv_last_page_lens, // [num_seqs]
+    const int block_size,
     const int max_num_partitions,
     const float* __restrict__ fp8_out_scale_ptr)
 {
-    const int num_heads      = gridDim.x;
-    const int head_idx       = blockIdx.x;
-    const int seq_idx        = blockIdx.y;
-    const int context_len    = context_lens[seq_idx + 1] - context_lens[seq_idx];
+    const int num_heads = gridDim.x;
+    const int head_idx  = blockIdx.x;
+    const int seq_idx   = blockIdx.y;
+    const int context_len =
+        (kv_indptr[seq_idx + 1] - kv_indptr[seq_idx] - 1) * block_size + kv_last_page_lens[seq_idx];
     const int num_partitions = DIVIDE_ROUND_UP(context_len, PARTITION_SIZE);
     constexpr int NUM_WARPS  = NUM_THREADS / WARP_SIZE;
     const int warpid         = threadIdx.x / WARP_SIZE;
@@ -1817,10 +1821,10 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                                          // head_size, block_size]
     const int num_kv_heads,
     const float scale,
-    const int* __restrict__ block_tables, // [num_seqs, max_num_blocks_per_seq]
-    const int* __restrict__ context_lens, // [num_seqs + 1]
-    const int max_num_blocks_per_seq,
-    const float* __restrict__ alibi_slopes, // [num_heads]
+    const int* __restrict__ kv_indptr,         // [num_seqs + 1]
+    const int* __restrict__ kv_page_indices,   // [max_num_blocks]
+    const int* __restrict__ kv_last_page_lens, // [num_seqs]
+    const float* __restrict__ alibi_slopes,    // [num_heads]
     const int q_stride,
     const int kv_block_stride,
     const int kv_head_stride,
@@ -1887,14 +1891,16 @@ template <typename scalar_t,
           int PARTITION_SIZE,
           int NPAR_LOOPS>
 __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
-    OUTT* __restrict__ out,               // [num_seqs, num_heads, head_size]
-    const float* __restrict__ exp_sums,   // [num_seqs, num_heads,
-                                          // max_num_partitions]
-    const float* __restrict__ max_logits, // [num_seqs, num_heads,
-                                          // max_num_partitions]
-    const scalar_t* __restrict__ tmp_out, // [num_seqs, num_heads,
-                                          // max_num_partitions, head_size]
-    const int* __restrict__ context_lens, // [num_seqs + 1]
+    OUTT* __restrict__ out,                    // [num_seqs, num_heads, head_size]
+    const float* __restrict__ exp_sums,        // [num_seqs, num_heads,
+                                               // max_num_partitions]
+    const float* __restrict__ max_logits,      // [num_seqs, num_heads,
+                                               // max_num_partitions]
+    const scalar_t* __restrict__ tmp_out,      // [num_seqs, num_heads,
+                                               // max_num_partitions, head_size]
+    const int* __restrict__ kv_indptr,         // [num_seqs + 1]
+    const int* __restrict__ kv_last_page_lens, // [num_seqs]
+    const int block_size,
     const int max_num_partitions,
     const float* __restrict__ fp8_out_scale_ptr)
 {
@@ -1919,9 +1925,9 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
                                      value_cache_ptr,                \
                                      num_kv_heads,                   \
                                      scale,                          \
-                                     block_tables_ptr,               \
-                                     context_lens_ptr,               \
-                                     max_num_blocks_per_seq,         \
+                                     kv_indptr_ptr,                  \
+                                     kv_page_indices_ptr,            \
+                                     kv_last_page_lens_ptr,          \
                                      alibi_slopes_ptr,               \
                                      q_stride,                       \
                                      kv_block_stride,                \
@@ -1975,7 +1981,9 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
                                                    exp_sums_ptr,                                   \
                                                    max_logits_ptr,                                 \
                                                    tmp_out_ptr,                                    \
-                                                   context_lens_ptr,                               \
+                                                   kv_indptr_ptr,                                  \
+                                                   kv_last_page_lens_ptr,                          \
+                                                   BLOCK_SIZE,                                     \
                                                    max_num_partitions,                             \
                                                    fp8_out_scale_ptr);
 
@@ -1997,8 +2005,9 @@ void paged_attention_custom_launcher(torch::Tensor& out,
                                      torch::Tensor& value_cache,
                                      const int num_kv_heads,
                                      float scale,
-                                     torch::Tensor& block_tables,
-                                     torch::Tensor& context_lens,
+                                     torch::Tensor& kv_indptr,
+                                     torch::Tensor& kv_page_indices,
+                                     torch::Tensor& kv_last_page_lens,
                                      int max_context_len,
                                      const std::optional<torch::Tensor>& alibi_slopes,
                                      const std::string& kv_cache_layout,
@@ -2007,27 +2016,27 @@ void paged_attention_custom_launcher(torch::Tensor& out,
                                      torch::Tensor& v_scale,
                                      const c10::optional<torch::Tensor>& fp8_out_scale)
 {
-    int num_seqs               = query.size(0);
-    int num_heads              = query.size(1);
-    int head_size              = query.size(2);
-    int max_num_blocks_per_seq = block_tables.size(1);
-    int q_stride               = query.stride(0);
-    int kv_block_stride        = key_cache.stride(0);
-    int kv_head_stride = kv_cache_layout == "HND" ? key_cache.stride(1) : key_cache.stride(2);
-    int kv_seq_stride  = kv_cache_layout == "HND" ? key_cache.stride(2) : key_cache.stride(1);
+    int num_seqs        = query.size(0);
+    int num_heads       = query.size(1);
+    int head_size       = query.size(2);
+    int q_stride        = query.stride(0);
+    int kv_block_stride = key_cache.stride(0);
+    int kv_head_stride  = kv_cache_layout == "HND" ? key_cache.stride(1) : key_cache.stride(2);
+    int kv_seq_stride   = kv_cache_layout == "HND" ? key_cache.stride(2) : key_cache.stride(1);
 
     // NOTE: alibi_slopes is optional.
     const float* alibi_slopes_ptr =
         alibi_slopes ? reinterpret_cast<const float*>(alibi_slopes.value().data_ptr()) : nullptr;
 
-    float* exp_sums_ptr   = reinterpret_cast<float*>(exp_sums.data_ptr());
-    float* max_logits_ptr = reinterpret_cast<float*>(max_logits.data_ptr());
-    T* tmp_out_ptr        = reinterpret_cast<T*>(tmp_out.data_ptr());
-    T* query_ptr          = reinterpret_cast<T*>(query.data_ptr());
-    KVT* key_cache_ptr    = reinterpret_cast<KVT*>(key_cache.data_ptr());
-    KVT* value_cache_ptr  = reinterpret_cast<KVT*>(value_cache.data_ptr());
-    int* block_tables_ptr = block_tables.data_ptr<int>();
-    int* context_lens_ptr = context_lens.data_ptr<int>();
+    float* exp_sums_ptr        = reinterpret_cast<float*>(exp_sums.data_ptr());
+    float* max_logits_ptr      = reinterpret_cast<float*>(max_logits.data_ptr());
+    T* tmp_out_ptr             = reinterpret_cast<T*>(tmp_out.data_ptr());
+    T* query_ptr               = reinterpret_cast<T*>(query.data_ptr());
+    KVT* key_cache_ptr         = reinterpret_cast<KVT*>(key_cache.data_ptr());
+    KVT* value_cache_ptr       = reinterpret_cast<KVT*>(value_cache.data_ptr());
+    int* kv_indptr_ptr         = kv_indptr.data_ptr<int>();
+    int* kv_page_indices_ptr   = kv_page_indices.data_ptr<int>();
+    int* kv_last_page_lens_ptr = kv_last_page_lens.data_ptr<int>();
 
     const float* k_scale_ptr = reinterpret_cast<const float*>(k_scale.data_ptr());
     const float* v_scale_ptr = reinterpret_cast<const float*>(v_scale.data_ptr());
@@ -2112,8 +2121,9 @@ void paged_attention_custom_launcher(torch::Tensor& out,
                                                              value_cache,                       \
                                                              num_kv_heads,                      \
                                                              scale,                             \
-                                                             block_tables,                      \
-                                                             context_lens,                      \
+                                                             kv_indptr,                         \
+                                                             kv_page_indices,                   \
+                                                             kv_last_page_lens,                 \
                                                              max_context_len,                   \
                                                              alibi_slopes,                      \
                                                              kv_cache_layout,                   \
@@ -2205,8 +2215,9 @@ void paged_attention(
                                 // [num_blocks, block_size, num_heads, head_size]
     int64_t num_kv_heads,
     double scale,
-    torch::Tensor& block_tables, // [num_seqs, max_num_blocks_per_seq]
-    torch::Tensor& context_lens, // [num_seqs + 1]
+    torch::Tensor& kv_indptr,         // [num_seqs + 1]
+    torch::Tensor& kv_page_indices,   // [max_num_blocks]
+    torch::Tensor& kv_last_page_lens, // [num_seqs]
     int64_t block_size,
     int64_t max_context_len,
     const std::optional<torch::Tensor>& alibi_slopes,

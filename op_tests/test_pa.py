@@ -318,8 +318,9 @@ def run_torch_new(query,
 def run_aiter(query,
              key_cache,
              value_cache,
-             block_tables,
-             seq_lens,
+             kv_indptr,
+             kv_page_indices,
+             kv_last_page_lens,
              max_seq_len,
              kv_cache_dtype,
              kv_cache_layout,
@@ -368,8 +369,9 @@ def run_aiter(query,
         value_cache,
         num_kv_heads,
         scale,
-        block_tables,
-        seq_lens,
+        kv_indptr,
+        kv_page_indices,
+        kv_last_page_lens,
         block_size,
         max_seq_len,
         alibi_slopes,
@@ -601,7 +603,29 @@ def test_paged_attention(
 
         # seq_lens = [random.randint(1, MAX_SEQ_LEN) for _ in range(num_seqs)]
         seq_lens = torch.full(size=(num_seqs,), fill_value=ctx_lens, dtype=torch.int)
-        seq_lens_new = torch.tensor([0] + [ctx_lens] * num_seqs).cumsum(dim=0, dtype=torch.int)
+
+        # prepare flashinfer format-compatible parameters
+        # TODO: pass list of context_length instead
+        def convert_to_kv_indptr_last_page_lens(fixed_context_length):
+            get_num_blocks = lambda context_length: (context_length + block_size - 1) // (block_size)
+            get_last_page_len = lambda context_length: context_length % block_size \
+                if context_length % block_size > 0 else block_size
+
+            context_lengths = [fixed_context_length] * num_seqs
+            num_blocks_list = [get_num_blocks(context_length) for context_length in context_lengths]
+            last_page_lens = [get_last_page_len(context_length) for context_length in context_lengths]
+    
+            return torch.tensor([0] + num_blocks_list).cumsum(dim=0, dtype=torch.int), \
+                torch.tensor(last_page_lens, dtype=torch.int)
+
+        def convert_to_page_indices(block_tables, kv_indptr):
+            elements_per_row = kv_indptr[1:] - kv_indptr[:-1]
+            col_indices = torch.arange(block_tables.size(1)).expand(block_tables.size(0), -1)
+
+            return block_tables[col_indices < elements_per_row.unsqueeze(1)]
+
+        kv_indptr, kv_last_page_lens = convert_to_kv_indptr_last_page_lens(ctx_lens)
+        kv_page_indices = convert_to_page_indices(block_tables, kv_indptr)
 
         # generate golden output
         if pa_variant == PAVariant.Shomy:
@@ -635,8 +659,9 @@ def test_paged_attention(
                 query,
                 key_cache_new.contiguous(),
                 value_cache_new.contiguous(),
-                block_tables,
-                seq_lens_new,
+                kv_indptr,
+                kv_page_indices,
+                kv_last_page_lens,
                 max_seq_len,
                 kv_cache_dtype,
                 kv_cache_layout,
@@ -658,8 +683,9 @@ def test_paged_attention(
                 query,
                 key_cache_new.contiguous(),
                 value_cache_new.contiguous(),
-                block_tables,
-                seq_lens_new,
+                kv_indptr,
+                kv_page_indices,
+                kv_last_page_lens,
                 max_seq_len,
                 kv_cache_dtype,
                 kv_cache_layout,

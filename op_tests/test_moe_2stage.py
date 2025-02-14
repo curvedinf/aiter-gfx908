@@ -293,13 +293,25 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                              num_valid_ids,
                              w1_scale, a1_scale,
                              dtype, topk, BLOCK_SIZE_M)
-    for E_id in range(E):
-        mask = topk_ids == E_id
-        # print(out1_ref[mask])
-        # print(out1[mask])
-        checkAllclose(out1_ref[mask], out1[mask], msg=f'expert{E_id}')
     checkAllclose(out1_ref, out1,
+                  msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......')
+
+    out1_qt, us = ck_moe_stage1(a1_qt,
+                                shuffle_weight(w1_qt, layout=(32, 32)),
+                                w2,
+                                sorted_ids,
+                                sorted_expert_ids,
+                                num_valid_ids,
+                                w1_scale, a1_scale,
+                                dtype, topk, BLOCK_SIZE_M)
+    checkAllclose(out1_ref, out1_qt,
                   msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
+
+    # for E_id in range(E):
+    #     mask = topk_ids == E_id
+    #     # print(out1_ref[mask])
+    #     # print(out1[mask])
+    #     checkAllclose(out1_ref[mask], out1[mask], msg=f'expert{E_id}')
 
 
 for dtype in [torch.float16]:

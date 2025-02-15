@@ -258,20 +258,12 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
     int tokens = inter_states.size(0);
     int sorted_size = sorted_token_ids.size(0);
     int E = w1.size(0);
-    int N = w2.size(2);
-    int K = w1.size(2);
+    int N = w1.size(2);
+    int K = w2.size(2);
     // int max_num_tokens_padded = sorted_token_ids.size(0);
     // int agvtokens_per_expert = max_num_tokens_padded / E;
     int MPerBlock = block_m.value();
     // int M = agvtokens_per_expert < 32 ? 32 : (agvtokens_per_expert < 64 ? 64 : 128);
-    // std::cout<<"tokens: "<<tokens<<std::endl;
-    // std::cout<<"sorted_size: "<<sorted_size<<std::endl;
-    // std::cout<<"E: "<<E<<std::endl;
-    // std::cout<<"N: "<<N<<std::endl;
-    // std::cout<<"K: "<<K<<std::endl;
-    // std::cout<<"MPerBlock: "<<MPerBlock<<std::endl;
-
-
 
     void *inter_states_ptr = inter_states.data_ptr();
     void *w1_ptr = w1.data_ptr();

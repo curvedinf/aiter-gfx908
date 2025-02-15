@@ -120,11 +120,11 @@ torch::Tensor ck_moe(torch::Tensor &hidden_states,          // [m, k], input tok
 
 #define CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock)                                                                                                                                                                                                                \
     if (MPerBlock == 32)                                                                                                                                                                                                                                                                                                \
-        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 32>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_tokens_post_pad_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
+        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 32>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
     else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                           \
-        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 64>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_tokens_post_pad_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
+        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 64>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
     else if (MPerBlock == 128)                                                                                                                                                                                                                                                                                          \
-        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 128>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_tokens_post_pad_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);
+        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 128>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);
 
 void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
                    torch::Tensor &w1,                // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
@@ -161,7 +161,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     void *w2_ptr = w2.data_ptr();
     void *sorted_token_ids_ptr = sorted_token_ids.data_ptr();
     void *sorted_expert_ids_ptr = sorted_expert_ids.data_ptr();
-    void *num_tokens_post_pad_ptr = num_valid_ids.data_ptr();
+    void *num_valid_ids_ptr = num_valid_ids.data_ptr();
     void *out_ptr = out.data_ptr();
     void *w1_scale_ptr = w1_scale.has_value() ? w1_scale.value().data_ptr() : nullptr;
     void *a1_scale_ptr = a1_scale.has_value() ? a1_scale.value().data_ptr() : nullptr;
@@ -177,7 +177,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock);
     }
     // FP16
-    if (hidden_states.dtype() == at::ScalarType::Half)
+    else if (hidden_states.dtype() == at::ScalarType::Half)
     {
         using A0DataType = F16;
         using B0DataType = F16;
@@ -187,7 +187,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock);
     }
     // FP8
-    if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
+    else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
     {
         using A0DataType = F8;
         using B0DataType = F8;
@@ -230,11 +230,11 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
 
 #define CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock)                                                                                                                                                                                                                                   \
     if (MPerBlock == 32)                                                                                                                                                                                                                                                                                                                   \
-        ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 32>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_tokens_post_pad_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr); \
+        ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 32>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr); \
     else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                                              \
-        ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 64>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_tokens_post_pad_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr); \
+        ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 64>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr); \
     else if (MPerBlock == 128)                                                                                                                                                                                                                                                                                                             \
-        ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 128>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_tokens_post_pad_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr);
+        ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 128>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr);
 
 void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
                    torch::Tensor &w1,                // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
@@ -249,7 +249,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
                    std::optional<torch::Tensor> a2_scale = std::nullopt, // [m, 1], token scale
                    std::optional<int> block_m = 32)
 {
-    TORCH_CHECK(inter_states.dtype() == w1.dtype(),
+    TORCH_CHECK(inter_states.dtype() == w2.dtype(),
                 "Weights and activations should both be same dtype!");
 
     TORCH_CHECK(out.dtype() == at::ScalarType::BFloat16 || out.dtype() == at::ScalarType::Half,
@@ -264,6 +264,14 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
     // int agvtokens_per_expert = max_num_tokens_padded / E;
     int MPerBlock = block_m.value();
     // int M = agvtokens_per_expert < 32 ? 32 : (agvtokens_per_expert < 64 ? 64 : 128);
+    // std::cout<<"tokens: "<<tokens<<std::endl;
+    // std::cout<<"sorted_size: "<<sorted_size<<std::endl;
+    // std::cout<<"E: "<<E<<std::endl;
+    // std::cout<<"N: "<<N<<std::endl;
+    // std::cout<<"K: "<<K<<std::endl;
+    // std::cout<<"MPerBlock: "<<MPerBlock<<std::endl;
+
+
 
     void *inter_states_ptr = inter_states.data_ptr();
     void *w1_ptr = w1.data_ptr();
@@ -271,7 +279,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
     void *sorted_token_ids_ptr = sorted_token_ids.data_ptr();
     void *sorted_expert_ids_ptr = sorted_expert_ids.data_ptr();
     void *sorted_weights_ptr = sorted_weights.data_ptr();
-    void *num_tokens_post_pad_ptr = num_valid_ids.data_ptr();
+    void *num_valid_ids_ptr = num_valid_ids.data_ptr();
     void *out_ptr = out.data_ptr();
     void *w2_scale_ptr = w2_scale.has_value() ? w2_scale.value().data_ptr() : nullptr;
     void *a2_scale_ptr = a2_scale.has_value() ? a2_scale.value().data_ptr() : nullptr;
@@ -287,7 +295,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock);
     }
     // FP16
-    if (inter_states.dtype() == at::ScalarType::Half)
+    else if (inter_states.dtype() == at::ScalarType::Half)
     {
         using A0DataType = F16;
         using B0DataType = F16;
@@ -297,7 +305,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock);
     }
     // FP8
-    if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
+    else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
     {
         using A0DataType = F8;
         using B0DataType = F8;

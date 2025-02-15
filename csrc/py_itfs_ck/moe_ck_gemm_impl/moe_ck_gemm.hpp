@@ -142,6 +142,7 @@ struct TypeCastExpertWeight
 };
 
 // d0: ascale, d1: bscale, d2:expert weight
+//warning: hack hack hack here!!!! ignore d0 right now as kernel mul d0 * d2 outside. tofix:felix 
 struct MulABScaleExpertWeight
 {
     template <typename E, typename C, typename D0, typename D1, typename D2>
@@ -154,7 +155,7 @@ struct MulABScaleExpertWeight
                                                                                    const float &d1,
                                                                                    const float &d2) const
     {
-        e = ck::type_convert<F16>(c * d0 * d1 * d2);
+        e = ck::type_convert<F16>(c * d1 * d2);
     }
     template <>
     __host__ __device__ constexpr void operator()<B16, float, float, float, float>(B16 &e,
@@ -163,7 +164,7 @@ struct MulABScaleExpertWeight
                                                                                    const float &d1,
                                                                                    const float &d2) const
     {
-        e = ck::type_convert<B16>(c * d0 * d1 * d2);
+        e = ck::type_convert<B16>(c * d1 * d2);
     }
 
         template <>
@@ -173,7 +174,7 @@ struct MulABScaleExpertWeight
                                                                                        const float &d1,
                                                                                        const float &d2) const
         {
-            e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d0 * d1 * d2);
+            e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d1 * d2);
         }
         template <>
         __host__ __device__ constexpr void operator()<B16, int, float, float, float>(B16 &e,
@@ -182,7 +183,7 @@ struct MulABScaleExpertWeight
                                                                                        const float &d1,
                                                                                        const float &d2) const
         {
-            e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d0 * d1 * d2);
+            e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d1 * d2);
         }
 };
 

@@ -12,7 +12,7 @@ import aiter
 from aiter.test_common import checkAllclose, perftest
 from aiter import pertoken_quant
 from aiter.fused_moe_gelu import fused_topk
-from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck
+from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck , ck_moe_2stages
 from aiter.ops.shuffle import shuffle_weight
 
 
@@ -265,6 +265,19 @@ def ck_moe_stage2(hidden_states,
                         num_valid_ids, out, topk, w2_scale, a2_scale, block_size)
     return out
 
+@perftest()
+def ck_moe_fused_2stages(hidden_states,
+                        w1,  # [expert(local_expert:EP), inter_dim(*2), dim] N,K
+                        w2,  # [expert(local_expert:EP), dim, inter_dim]
+                        topk_weight, topk_ids,
+                        # following for int8 quant
+                        fc1_scale=None,  # [expert(local_expert:EP), inter_dim, 1]
+                        fc2_scale=None,  # [expert(local_expert:EP), model_dim, 1]
+                        block_size=32
+                        ):
+    return ck_moe_2stages(hidden_states, w1, w2, topk_weight, topk_ids, 
+                    fc1_scale, fc2_scale, block_size=block_size)
+
 
 def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=False, shared_E=0):
     input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
@@ -301,9 +314,10 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
         w2_qt[i] = wq
         w2_scale[i] = ws
 
-    # w1_qt, w1_scale = aiter.per_tensor_quant(w1,  quant_dtype=quant_dtype)
-    # w2_qt, w2_scale = aiter.per_tensor_quant(w2,  quant_dtype=quant_dtype)
     a1_qt, a1_scale = aiter.per_tensor_quant(input,  quant_dtype=quant_dtype)
+    # a1_qt = torch.zeros((M, model_dim), dtype=w1_qt.dtype, device="cuda")
+    # a1_scale = torch.empty((1,), dtype=torch.float, device="cuda")
+    # aiter.dynamic_scaled_fp8_quant(a1_qt, input, a1_scale)
 
     out1_ref, us_ref = torch_moe_stage1(a1_qt, w1_qt,
                                         w2_qt,
@@ -343,10 +357,10 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     #                          sorted_ids,
     #                          sorted_expert_ids,
     #                          num_valid_ids,
-    #                          w1_scale, a1_scale,
+    #                          None, None,
     #                          dtype, topk, BLOCK_SIZE_M)
     # checkAllclose(out1_ref, out1,
-    #               msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......')
+    #               msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
 
     out1_qt, us = ck_moe_stage1(a1_qt,
                                 shuffle_weight(w1_qt, layout=(32, 32)),
@@ -365,20 +379,23 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     else:
         input2 = F.gelu(out1_qt)
     a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
+    # a2_qt = torch.zeros(input2.shape, dtype=w2_qt.dtype, device="cuda")
+    # a2_scale = torch.empty((1,), dtype=torch.float, device="cuda")
+    # aiter.dynamic_scaled_fp8_quant(a2_qt, input2, a2_scale)
 
-    input2 = (a2_qt.to(a2_scale.dtype) * a2_scale).to(dtype)
-    w2 = (w2_qt.view(E,-1).to(w2_scale.dtype) * w2_scale.view(-1, 1)).to(dtype).view(w2.shape)
-    out2, us = ck_moe_stage2(input2,
-                                w1,
-                                shuffle_weight(w2, layout=(32, 32)),
-                                sorted_ids,
-                                sorted_expert_ids,
-                                sorted_weights,
-                                num_valid_ids,
-                                None, torch.tensor(1.0, dtype=torch.float, device="cuda"),
-                                dtype, topk, BLOCK_SIZE_M)
-    checkAllclose(out2_ref, out2,
-                  msg=f'ck_moe_stage2:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
+    # input2 = (a2_qt.to(a2_scale.dtype) * a2_scale).to(dtype)
+    # w2 = (w2_qt.view(E,-1).to(w2_scale.dtype) * w2_scale.view(-1, 1)).to(dtype).view(w2.shape)
+    # out2, us = ck_moe_stage2(input2,
+    #                             w1,
+    #                             shuffle_weight(w2, layout=(32, 32)),
+    #                             sorted_ids,
+    #                             sorted_expert_ids,
+    #                             sorted_weights,
+    #                             num_valid_ids,
+    #                             None, torch.tensor(1.0, dtype=torch.float, device="cuda"),
+    #                             dtype, topk, BLOCK_SIZE_M)
+    # checkAllclose(out2_ref, out2,
+    #               msg=f'ck_moe_stage2:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
     
 
     out2_qt, us = ck_moe_stage2(a2_qt,
@@ -399,14 +416,34 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     #     # print(out1_qt[mask].view(-1)[:5])
     #     checkAllclose(out1_ref[mask], out1_qt[mask], msg=f'expert{E_id}')
 
-    for i in range(token):
-        if i>10:
-            break
-        print(i)
-        print(out2_ref[i].view(-1))
-        print(out2_qt[i].view(-1))
-        print(out2[i].view(-1))
-        checkAllclose(out2_ref[i], out2_qt[i], msg=f'token{i}')
+    # for i in range(token):
+    #     if i>10:
+    #         break
+    #     print(i)
+    #     # print(out2_ref[i].view(-1))
+    #     # print(out2_qt[i].view(-1))
+    #     # print(out2[i].view(-1))
+    #     checkAllclose(out2_ref[i], out2_qt[i], msg=f'token{i}')
+
+    out_ck_qt, us = ck_moe_fused_2stages(input,
+                                      shuffle_weight(w1_qt, layout=(32, 32)),
+                                      shuffle_weight(w2_qt, layout=(32, 32)),
+                                      topk_weights, topk_ids,
+                                      w1_scale, w2_scale,
+                                      block_size=BLOCK_SIZE_M)
+    
+    checkAllclose(out2_qt, out_ck_qt,
+                  msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
+
+    # out_ck_nqt, us = ck_moe_fused_2stages(input,
+    #                                   shuffle_weight(w1, layout=(32, 32)),
+    #                                   shuffle_weight(w2, layout=(32, 32)),
+    #                                   topk_weights, topk_ids,
+    #                                   None, None,
+    #                                   block_size=BLOCK_SIZE_M)
+    
+    # checkAllclose(out2_qt, out_ck_nqt,
+    #               msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
 
     
 

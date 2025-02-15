@@ -145,6 +145,83 @@ def asm_moe(hidden_states,
                   fc2_smooth_scale)
     return moe_buf
 
+# Only support fp8 per tensor quant
+def ck_moe_2stages(hidden_states,
+                    w1,  # [expert(local_expert:EP), inter_dim(*2), dim] N,K
+                    w2,  # [expert(local_expert:EP), dim, inter_dim]
+                    topk_weight, topk_ids,
+                    # following for int8 quant
+                    fc1_scale=None,  # [expert(local_expert:EP), inter_dim, 1]
+                    fc2_scale=None,  # [expert(local_expert:EP), model_dim, 1]
+                    a1_scale=None,  # [1]
+                    a2_scale=None,  # [1]
+                    block_size=BLOCK_SIZE_M,
+                    expert_mask=None
+                    ):
+    E, model_dim, inter_dim = w2.shape
+    if expert_mask is not None:
+        E = expert_mask.numel()
+    M, topk = topk_ids.shape
+    dtype = hidden_states.dtype
+    device = topk_ids.device
+    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
+                                                                                           model_dim, dtype, block_size, expert_mask)
+    if w1.dtype == torch.float8_e4m3fnuz:
+        if a1_scale is None:
+            a1_qt, a1_scale = aiter.per_tensor_quant(hidden_states, quant_dtype=w1.dtype)
+            # a1_qt = torch.zeros((M, model_dim), dtype=w1.dtype, device=device)
+            # a1_scale = torch.empty((1,), dtype=torch.float, device=device)
+            # aiter.dynamic_scaled_fp8_quant(a1_qt, hidden_states, a1_scale)
+        else:
+            a1_qt = torch.empty((M, model_dim), dtype=w1.dtype, device=device)
+            aiter.static_scaled_fp8_quant(a1_qt, hidden_states, a1_scale)
+        hidden_states = a1_qt
+    else:
+        a1_scale = None
+
+    inter_states = torch.zeros(
+        (M, topk, w1.shape[1]),
+        dtype=dtype,
+        device=device,
+    )
+
+    aiter.ck_moe_stage1(hidden_states, w1, w2, sorted_ids,
+                        sorted_expert_ids, num_valid_ids, inter_states, topk, fc1_scale, a1_scale, block_size)
+    
+    # g1u0
+    if w2.shape[2] == w1.shape[1]:
+        inter_states = F.gelu(inter_states)
+    # g1u1
+    else:
+        gate, up = inter_states.split([inter_dim, inter_dim], dim=-1)
+        inter_states = F.silu(gate) * up
+        # inter_states_tmp = torch.empty((M, topk,inter_dim), dtype=dtype, device=device)
+        # aiter.silu_and_mul(inter_states_tmp, inter_states.view(-1, 2 * inter_dim))
+        # inter_states = inter_states_tmp
+
+    if w2.dtype == torch.float8_e4m3fnuz:
+        if a2_scale is None:
+            a2_qt, a2_scale = aiter.per_tensor_quant(inter_states, quant_dtype=w2.dtype)
+            # a2_qt = torch.zeros(inter_states.shape, dtype=w2.dtype, device=device)
+            # a2_scale = torch.empty((1,), dtype=torch.float, device=device)
+            # aiter.dynamic_scaled_fp8_quant(a2_qt, inter_states, a2_scale)
+        else:
+            a2_qt = torch.empty((M, model_dim), dtype=w2.dtype, device=device)
+            aiter.static_scaled_fp8_quant(a2_qt, inter_states, a2_scale)
+        inter_states = a2_qt
+    else:
+        if not hasattr(ck_moe_2stages, "one_float_tensor"):
+            ck_moe_2stages.one_float_tensor = torch.tensor(1.0, dtype=torch.float, device=device)
+        a2_scale = ck_moe_2stages.one_float_tensor
+        
+
+    aiter.ck_moe_stage2(inter_states, w1, w2, sorted_ids, 
+                        sorted_expert_ids, sorted_weights,
+                        num_valid_ids, moe_buf, topk, fc2_scale, a2_scale, block_size)
+    
+    return moe_buf
+
+
 
 def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
               # following for int8 quant

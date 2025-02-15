@@ -81,10 +81,10 @@ torch::Tensor ck_moe(torch::Tensor &hidden_states,          // [m, k], input tok
         prec_sq,
         prec_kw,
         block_size,
-        // activation,
+        activation,
         gate_only,
         fused_quant,
-        // expert_mask.has_value(),
+        expert_mask.has_value(),
     };
 
     fused_moe_args args{hidden_states.data_ptr(),
@@ -94,7 +94,7 @@ torch::Tensor ck_moe(torch::Tensor &hidden_states,          // [m, k], input tok
                         w1_scale.has_value() ? w1_scale.value().data_ptr() : nullptr,
                         w2_scale.has_value() ? w2_scale.value().data_ptr() : nullptr,
                         a2_scale.has_value() ? a2_scale.value().data_ptr() : nullptr,
-                        // expert_mask.has_value() ? expert_mask.value().data_ptr() : nullptr,
+                        expert_mask.has_value() ? expert_mask.value().data_ptr() : nullptr,
                         out.data_ptr(),
 
                         topk_ids.data_ptr(),

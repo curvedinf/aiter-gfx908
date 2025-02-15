@@ -400,6 +400,9 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     #     checkAllclose(out1_ref[mask], out1_qt[mask], msg=f'expert{E_id}')
 
     for i in range(token):
+        if i>10:
+            break
+        print(i)
         print(out2_ref[i].view(-1))
         print(out2_qt[i].view(-1))
         print(out2[i].view(-1))

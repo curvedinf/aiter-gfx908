@@ -31,6 +31,7 @@ bd_dir = f"{this_dir}/build"
 # copy ck to build, thus hippify under bd_dir
 shutil.copytree(CK_DIR, f'{bd_dir}/ck', dirs_exist_ok=True)
 CK_DIR = f'{bd_dir}/ck'
+shutil.rmtree(f'{CK_DIR}/library')
 
 
 def validate_and_update_archs():
@@ -179,7 +180,7 @@ def build_module(md_name, srcs, flags_extra_cc, flags_extra_hip, blob_gen_cmd, e
     except Exception as e:
         logger.error('failed build jit [{}]\n-->[History]: {}'.format(
             md_name,
-            ''.join(traceback.format_exception(*sys.exc_info()))
+            '-->'.join(traceback.format_exception(*sys.exc_info()))
         ))
         sys.exit()
     logger.info(

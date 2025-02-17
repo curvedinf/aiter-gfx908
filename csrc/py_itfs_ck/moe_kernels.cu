@@ -117,7 +117,7 @@ torch::Tensor ck_moe(torch::Tensor &hidden_states,          // [m, k], input tok
     fused_moe(traits, args, {stream});
     return out;
 }
-#define CK_MOE_STAGE1_GEMM_IMPL_F8(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock)                                                                                                                                                                                                                \
+#define CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock)                                                                                                                                                                                                                \
     if (MPerBlock == 32)                                                                                                                                                                                                                                                                                                \
         ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 32, 256/sizeof(A0DataType), 1, 1>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
     else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                           \

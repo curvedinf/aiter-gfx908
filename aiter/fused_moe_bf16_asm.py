@@ -27,7 +27,7 @@ def moe_sorting_ck(topk_ids, topk_weights, num_experts, model_dim, moebuf_dtype,
     sorted_expert_ids = torch.empty((max_num_m_blocks, ),
                                     dtype=torch.int32,
                                     device=device)
-    num_valid_ids = torch.empty((1),
+    num_valid_ids = torch.empty((1 + max_num_m_blocks),
                                 dtype=torch.int32,
                                 device=device)
     moe_buf = torch.empty((M, model_dim),
@@ -205,7 +205,6 @@ def ck_moe_2stages(a1,
         tmp = torch.empty((M, topk, inter_dim), dtype=dtype, device=device)
         aiter.silu_and_mul(tmp, a2)
         a2 = tmp
-
     if w2.dtype == torch.float8_e4m3fnuz:
         a2, a2_scale = aiter.per_tensor_quant_fp8_hip(a2, a2_scale)
         # a2, a2_scale = aiter.per_tensor_quant(a2, quant_dtype=w2.dtype)

@@ -135,7 +135,7 @@ def ck_moe(
 ): ...
 
 
-@compile_ops("module_moe")
+@compile_ops("module_moe_ck2stages")
 def ck_moe_stage1(
     hidden_states: Tensor,
     w1: Tensor,
@@ -151,7 +151,7 @@ def ck_moe_stage1(
 ): ...
 
 
-@compile_ops("module_moe")
+@compile_ops("module_moe_ck2stages")
 def ck_moe_stage2(
     inter_states: Tensor,
     w1: Tensor,

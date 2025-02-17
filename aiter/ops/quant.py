@@ -63,7 +63,7 @@ def per_tensor_quant(x, scale=None, scale_dtype=torch.float, quant_dtype=torch.i
 
 
 def per_tensor_quant_fp8_hip(x, scale=None):
-    y = torch.zeros(x.shape, dtype=torch.float8_e4m3fnuz, device=x.device)
+    y = torch.empty(x.shape, dtype=torch.float8_e4m3fnuz, device=x.device)
     if scale is None:
         scale = torch.zeros(1, dtype=torch.float, device=x.device)
         dynamic_scaled_fp8_quant(y, x, scale)
@@ -83,7 +83,7 @@ def dynamic_scaled_fp8_quant(
     out: Tensor, input: Tensor, scale: Tensor
 ):
     '''
-    must init out as zeroes
+    must init scale as zero
     '''
     ...
 

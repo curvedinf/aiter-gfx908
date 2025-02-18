@@ -1997,9 +1997,7 @@ template <typename T,
           bool ALIBI_ENABLED,
           bool LOGITS_SOFT_CAP_ENABLED>
 void paged_attention_custom_launcher(torch::Tensor& out,
-                                     torch::Tensor& exp_sums,
-                                     torch::Tensor& max_logits,
-                                     torch::Tensor& tmp_out,
+                                     torch::Tensor& workspace_buffer,
                                      torch::Tensor& query,
                                      torch::Tensor& key_cache,
                                      torch::Tensor& value_cache,
@@ -2028,9 +2026,6 @@ void paged_attention_custom_launcher(torch::Tensor& out,
     const float* alibi_slopes_ptr =
         alibi_slopes ? reinterpret_cast<const float*>(alibi_slopes.value().data_ptr()) : nullptr;
 
-    float* exp_sums_ptr        = reinterpret_cast<float*>(exp_sums.data_ptr());
-    float* max_logits_ptr      = reinterpret_cast<float*>(max_logits.data_ptr());
-    T* tmp_out_ptr             = reinterpret_cast<T*>(tmp_out.data_ptr());
     T* query_ptr               = reinterpret_cast<T*>(query.data_ptr());
     KVT* key_cache_ptr         = reinterpret_cast<KVT*>(key_cache.data_ptr());
     KVT* value_cache_ptr       = reinterpret_cast<KVT*>(value_cache.data_ptr());
@@ -2054,6 +2049,12 @@ void paged_attention_custom_launcher(torch::Tensor& out,
     const int gqa_ratio          = num_heads / num_kv_heads;
     assert(num_heads % num_kv_heads == 0);
     assert(head_size == HEAD_SIZE);
+
+    // split workspace into 3 intermediate tensors
+    float* exp_sums_ptr   = reinterpret_cast<float*>(workspace_buffer.data_ptr());
+    float* max_logits_ptr = exp_sums_ptr + (num_seqs * num_heads * max_num_partitions);
+    T* tmp_out_ptr =
+        reinterpret_cast<T*>(max_logits_ptr + (num_seqs * num_heads * max_num_partitions));
 
     constexpr int NTHR = 256;
     dim3 grid(num_seqs, max_num_partitions, num_kv_heads);
@@ -2113,9 +2114,7 @@ void paged_attention_custom_launcher(torch::Tensor& out,
                                     PSIZE,                                                      \
                                     ALIBI_ENABLED,                                              \
                                     LOGITS_SOFT_CAP_ENABLED>(out,                               \
-                                                             exp_sums,                          \
-                                                             max_logits,                        \
-                                                             tmp_out,                           \
+                                                             workspace_buffer,                  \
                                                              query,                             \
                                                              key_cache,                         \
                                                              value_cache,                       \
@@ -2204,10 +2203,8 @@ void paged_attention_custom_launcher(torch::Tensor& out,
     default: TORCH_CHECK(false, "Unsupported head size: ", head_size); break; \
     }
 void paged_attention(
-    torch::Tensor& out,         // [num_seqs, num_heads, head_size]
-    torch::Tensor& exp_sums,    // [num_seqs, num_heads, max_num_partitions]
-    torch::Tensor& max_logits,  // [num_seqs, num_heads, max_num_partitions]
-    torch::Tensor& tmp_out,     // [num_seqs, num_heads, max_num_partitions, head_size]
+    torch::Tensor& out, // [num_seqs, num_heads, head_size]
+    torch::Tensor& workspace_buffer,
     torch::Tensor& query,       // [num_seqs, num_heads, head_size]
     torch::Tensor& key_cache,   // [num_blocks, num_heads, block_size, head_size] or
                                 // [num_blocks, block_size, num_heads, head_size]

@@ -29,8 +29,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
       m.def("silu_and_mul", &silu_and_mul, "Activation function used in SwiGLU.");
       m.def("moe_sum", &moe_sum, "moe_sum(Tensor! input, Tensor output) -> ()");
       m.def("paged_attention_rocm", &paged_attention,
-            "paged_attention_rocm(Tensor! out, Tensor exp_sums,"
-            "                Tensor max_logits, Tensor tmp_out,"
+            "paged_attention_rocm(Tensor! out, Tensor workspace_buffer,"
             "                Tensor query, Tensor key_cache,"
             "                Tensor value_cache, int num_kv_heads,"
             "                float scale, Tensor kv_indptr,"

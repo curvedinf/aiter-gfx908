@@ -343,17 +343,16 @@ def run_aiter(query,
         (max_seq_len + _PARTITION_SIZE_ROCM - 1) //
         _PARTITION_SIZE_ROCM)
     assert _PARTITION_SIZE_ROCM % block_size == 0
-    tmp_output = torch.empty(
-        size=(num_seqs, num_heads, max_num_partitions, head_size),
-        dtype=output.dtype,
-        device=output.device,
-    )
-    exp_sums = torch.empty(
-        size=(num_seqs, num_heads, max_num_partitions),
-        dtype=torch.float32,
-        device=output.device,
-    )
-    max_logits = torch.empty_like(exp_sums)
+
+    # will use single workspace buffer to accommodate following 3 intermediate tensors:
+    #   1. tmp_output (shape=(num_seqs, num_heads, max_num_partitions, head_size), dtype=output.dtype)
+    #   2. exp_sums (shape=(num_seqs, num_heads, max_num_partitions), dtype=float32)
+    #   3. max_logits (shape=(num_seqs, num_heads, max_num_partitions), dtype=float32) 
+    nbyes_per_qo_elem = torch.finfo(output.dtype).bits // 8
+    workspace_buffer = torch.empty((num_seqs * num_heads * max_num_partitions * head_size) * nbyes_per_qo_elem
+                                    + 2 * (num_seqs * num_heads * max_num_partitions) * 4,
+            dtype=torch.uint8, device=output.device)
+
     cpa_fp8_out = False
     if fp8_out_scale is not None:
         output = torch.empty_like(output,
@@ -361,9 +360,7 @@ def run_aiter(query,
         cpa_fp8_out = True
     aiter.paged_attention_rocm(
         output,
-        exp_sums,
-        max_logits,
-        tmp_output,
+        workspace_buffer,
         query,
         key_cache,
         value_cache,

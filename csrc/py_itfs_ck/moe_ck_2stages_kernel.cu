@@ -43,7 +43,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     // int max_num_tokens_padded = sorted_token_ids.size(0);
     // int agvtokens_per_expert = max_num_tokens_padded / E;
     int MPerBlock = block_m.value();
-    
+
     // int M = agvtokens_per_expert < 32 ? 32 : (agvtokens_per_expert < 64 ? 64 : 128);
 
     void *hidden_states_ptr = hidden_states.data_ptr();
@@ -55,7 +55,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     void *out_ptr = out.data_ptr();
     void *w1_scale_ptr = w1_scale.has_value() ? w1_scale.value().data_ptr() : nullptr;
     void *a1_scale_ptr = a1_scale.has_value() ? a1_scale.value().data_ptr() : nullptr;
-
+    std::cout << "w1.dtype() " << w1.dtype() << std::endl;
     // BF16
     if (hidden_states.dtype() == at::ScalarType::BFloat16)
     {
@@ -79,7 +79,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, MPerBlock);
     }
     // FP8 Wint4
-    else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::Int)
+    else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::UInt32)
     {
         using A0DataType = F8;
         using B0DataType = I4;
@@ -99,6 +99,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
             CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, MPerBlock);
         }
     }
+    // FP8
     else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
     {
         using A0DataType = F8;
@@ -211,7 +212,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         const bool Nswizzle = true;
         CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, MPerBlock);
     }
-    // FP8
+    // FP8 wint4
     else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::Int)
     {
         using A0DataType = F8;
@@ -232,6 +233,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
             CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, MPerBlock);
         }
     }
+    // FP8
     else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
     {
         using A0DataType = F8;

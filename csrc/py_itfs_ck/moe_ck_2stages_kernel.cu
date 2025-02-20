@@ -95,6 +95,11 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
             CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, MPerBlock);
         }
     }
+    else 
+    {
+
+        std::cout<<"debug################"<<std::endl;
+    }
     // // I8
     // else if (hidden_states.dtype() == at::ScalarType::Char)
     // {

@@ -177,7 +177,6 @@ def ck_moe_2stages(a1,
     device = topk_ids.device
     if block_size is None:
         block_size = get_block_size(M, topk, E)
-    block_size = 192
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, global_E,
                                                                                            model_dim, dtype, block_size, expert_mask)
 

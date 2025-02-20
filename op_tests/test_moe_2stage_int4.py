@@ -305,13 +305,9 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     checkAllclose(out_ref, out2_ref, msg="[torch] 1_stage vs 2_stage")
 
-
-    print("########debug type:",type(a1_qt),type(w1_qt))
-
-
     out1_qt, us = ck_moe_stage1(a1_qt,
-                                shuffle_weight(w1_qt, layout=(32, 32)),
-                                w2,
+                                shuffle_weight(w1b, layout=(32, 32)),
+                                w2b,
                                 sorted_ids,
                                 sorted_expert_ids,
                                 num_valid_ids,

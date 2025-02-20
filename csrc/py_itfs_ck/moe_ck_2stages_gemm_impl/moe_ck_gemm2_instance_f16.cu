@@ -7,7 +7,7 @@ using B0DataType = F16;
 using AccDataType = F32;
 using EDataType = F16;
 using CDEElementOp = TypeCastExpertWeight;
-
+const bool Nswizzle =  true;
 CK_MOE_STAGE2_GEMM_DEFINE(32)
 CK_MOE_STAGE2_GEMM_DEFINE(64)
 CK_MOE_STAGE2_GEMM_DEFINE(128)

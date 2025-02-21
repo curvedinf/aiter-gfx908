@@ -212,7 +212,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, MPerBlock);
     }
     // FP8 wint4
-    else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::Int)
+    else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::UInt32)
     {
         using A0DataType = F8;
         using B0DataType = I4;

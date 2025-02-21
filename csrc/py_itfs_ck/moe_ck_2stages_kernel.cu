@@ -91,7 +91,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         {
             if (N % 8 == 0 && N > 8192)
             {
-                CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, MPerBlock, true);
+                CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, MPerBlock, false);
             }
             else
             {
@@ -102,7 +102,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         {
             if (N % 8 == 0 && N > 8192)
             {
-                CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, MPerBlock, true);
+                CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, MPerBlock, false);
             }
             else
             {

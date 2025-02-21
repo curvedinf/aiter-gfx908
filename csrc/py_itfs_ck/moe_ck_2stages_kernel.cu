@@ -55,7 +55,6 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     void *out_ptr = out.data_ptr();
     void *w1_scale_ptr = w1_scale.has_value() ? w1_scale.value().data_ptr() : nullptr;
     void *a1_scale_ptr = a1_scale.has_value() ? a1_scale.value().data_ptr() : nullptr;
-    std::cout << "w1.dtype() " << w1.dtype() << std::endl;
     // BF16
     if (hidden_states.dtype() == at::ScalarType::BFloat16)
     {

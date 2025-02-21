@@ -7,7 +7,7 @@ using B0DataType = I4;
 using AccDataType = F32;
 using EDataType = F16;
 using CDEElementOp = MulABScaleExpertWeight;
-const bool Nswizzle =  false;
+const bool Nswizzle = false;
 CK_MOE_STAGE2_GEMM_DEFINE(32)
 CK_MOE_STAGE2_GEMM_DEFINE(64)
 CK_MOE_STAGE2_GEMM_DEFINE(128)

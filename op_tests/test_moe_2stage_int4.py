@@ -16,6 +16,8 @@ from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck, ck_moe_
 from aiter.ops.shuffle import shuffle_weight
 from op_tests.int4_utils import *
 
+
+
 @perftest(num_iters=3)
 def torch_moe_stage1(hidden_states,
                      w1,  # E, inter_dim*2, model_dim
@@ -164,7 +166,7 @@ def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
     ).sum(dim=1)
 
 
-@perftest()
+@perftest(num_iters=3)
 def ck_moe_stage1(hidden_states,
                   w1,  # [E, inter_dim*2, model_dim]
                   w2,  # [E, model_dim, inter_dim]
@@ -191,7 +193,7 @@ def ck_moe_stage1(hidden_states,
     return out
 
 
-@perftest()
+@perftest(num_iters=3)
 def ck_moe_stage2(hidden_states,
                   w1,  # [E, inter_dim*2, model_dim]
                   w2,  # [E, model_dim, inter_dim]
@@ -267,11 +269,10 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     w2_qt = w2_qt.view(w2.shape)
     sp1 = (E+shared_E, inter_dim)
     sp2 = (E+shared_E, model_dim)
-    # b implement
-    w1b = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w1_qt)))
-    w2b = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w2_qt)))
+    # W int4 implement
+    w1b = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w1_qt, layout=(32, 32))))
+    w2b = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w2_qt, layout=(32, 32))))
     a1_qt, a1_scale = aiter.per_tensor_quant(input,  quant_dtype=quant_dtype)
-    # a1_qt, a1_scale = aiter.per_tensor_quant_fp8_hip(input)
 
     out1_ref, us_ref = torch_moe_stage1(a1_qt, w1_qt,
                                         w2_qt,
@@ -306,7 +307,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     checkAllclose(out_ref, out2_ref, msg="[torch] 1_stage vs 2_stage")
 
     out1_qt, us = ck_moe_stage1(a1_qt,
-                                shuffle_weight(w1b, layout=(32, 32)),
+                                w1b,
                                 w2b,
                                 sorted_ids,
                                 sorted_expert_ids,
@@ -315,18 +316,17 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                 dtype, topk, BLOCK_SIZE_M)
     checkAllclose(out1_ref, out1_qt,
                   msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
-#
-    #if use_g1u1:
-    #    gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
-    #    input2 = F.silu(gate) * up
-    #else:
-    #    input2 = F.gelu(out1_qt)
-    ## a2_qt, a2_scale = aiter.per_tensor_quant_fp8_hip(input2)
+    if use_g1u1:
+        gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
+        input2 = F.silu(gate) * up
+    else:
+        input2 = F.gelu(out1_qt)
+    #a2_qt, a2_scale = aiter.per_tensor_quant_fp8_hip(input2)
     #a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
-#
+
     #out2_qt, us = ck_moe_stage2(a2_qt,
-    #                            w1_qt,
-    #                            shuffle_weight(w2_qt, layout=(32, 32)),
+    #                            w1b,
+    #                            w2b,
     #                            sorted_ids,
     #                            sorted_expert_ids,
     #                            sorted_weights,
@@ -335,31 +335,28 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     #                            dtype, topk, BLOCK_SIZE_M)
     #checkAllclose(out2_ref, out2_qt,
     #              msg=f'ck_moe_stage2:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
-
-    #out_ck_qt, us = ck_moe_fused_2stages(input,
-    #                                     shuffle_weight(
-    #                                         w1_qt, layout=(32, 32)),
-    #                                     shuffle_weight(
-    #                                         w2_qt, layout=(32, 32)),
-    #                                     topk_weights, topk_ids,
-    #                                     w1_scale, w2_scale,
-    #                                     #  block_size=BLOCK_SIZE_M
-    #                                     )
-#
-    #checkAllclose(out2_ref, out_ck_qt,
-    #              msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
-
-    #out_ck_nqt, us = ck_moe_fused_2stages(input,
-    #                                      shuffle_weight(w1, layout=(32, 32)),
-    #                                      shuffle_weight(w2, layout=(32, 32)),
-    #                                      topk_weights, topk_ids,
-    #                                      None, None,
-    #                                      #   block_size=BLOCK_SIZE_M
-    #                                      )
-#
-    #checkAllclose(out_ref, out_ck_nqt,
-    #              msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
-#
+#    out_ck_qt, us = ck_moe_fused_2stages(input,
+#                                         shuffle_weight(
+#                                             w1_qt, layout=(32, 32)),
+#                                         shuffle_weight(
+#                                             w2_qt, layout=(32, 32)),
+#                                         topk_weights, topk_ids,
+#                                         w1_scale, w2_scale,
+#                                         #  block_size=BLOCK_SIZE_M
+#                                         )
+#    
+#    checkAllclose(out2_ref, out_ck_qt,
+#                  msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
+#    out_ck_nqt, us = ck_moe_fused_2stages(input,
+#                                          shuffle_weight(w1, layout=(32, 32)),
+#                                          shuffle_weight(w2, layout=(32, 32)),
+#                                          topk_weights, topk_ids,
+#                                          None, None,
+#                                          #   block_size=BLOCK_SIZE_M
+#                                          )
+#    
+#    checkAllclose(out_ref, out_ck_nqt,
+#              msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
 
 for dtype in [torch.float16]:
     for m in [32]:

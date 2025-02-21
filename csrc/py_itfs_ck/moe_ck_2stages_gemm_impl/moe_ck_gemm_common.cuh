@@ -47,7 +47,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t KPerBlock = 256 / sizeof(A0DataType);
     static constexpr ck::index_t MXDLPerWave = MPerBlock / 32; // todo fix this constraint
     static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);
-    static constexpr ck::index_t BK1 = 16 / sizeof(B0DataType);
+    static constexpr ck::index_t BK1 = ck::is_same_v<B0DataType, I4> ? 32 : 16 / sizeof(B0DataType); 
     static constexpr ck::index_t EVec = 16 / sizeof(EDataType);
     static constexpr ck::index_t D0Vec = 1;
     static constexpr ck::index_t D1Vec = 1;
@@ -100,6 +100,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     auto device_op = DeviceOpInstance{};
 
     auto invoker = device_op.MakeInvoker();
+
     auto argument =
         device_op.MakeArgument(sorted_token_ids,
                                sorted_expert_ids,
@@ -197,7 +198,7 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t CShuffleNLane = NPerBlock / 2;
     static constexpr ck::index_t CShuffleMLane = BLOCKSIZE / CShuffleNLane;
     static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);
-    static constexpr ck::index_t BK1 = 16 / sizeof(B0DataType);
+    static constexpr ck::index_t BK1 = ck::is_same_v<B0DataType, I4> ? 32 : 16 / sizeof(B0DataType); 
     static constexpr ck::index_t EVec = 2;
     static constexpr ck::index_t D0Vec = 1;
     static constexpr ck::index_t D1Vec = 1;

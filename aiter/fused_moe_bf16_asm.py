@@ -56,7 +56,7 @@ def asm_moe(hidden_states,
     dtype = hidden_states.dtype
     device = topk_ids.device
     lastdim_mul = 8 if w1.dtype in {torch.int32, torch.uint32} else 1
-    model_dim = model_dim * lastdim_mul
+    # model_dim = model_dim * lastdim_mul
     sorted_ids, sorted_weights, sorted_expert_ids, num_tokens_post_padded, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
                                                                                                     model_dim, dtype)
     if fc1_scale is None:

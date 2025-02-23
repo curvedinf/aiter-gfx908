@@ -162,7 +162,6 @@ def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
     hidden_states = hidden_states.to(computeType)
     w1 = w1.to(computeType)
     w2 = w2.to(computeType)
-
     B, D = hidden_states.shape
     topk = topk_weight.shape[1]
     if expert_mask is not None:
@@ -191,9 +190,9 @@ def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
         expert = w1.shape[0]
         w2D = w2.shape[-1]
         w1 = (w1.view(-1, D).to(fc1_scale) *
-              fc1_scale.view(-1, 1)).to(dtype).view(expert, -1, D)
+              fc1_scale.view(-1, 1)).to(computeType).view(expert, -1, D)
         w2 = (w2.view(-1, w2D).to(fc2_scale) *
-              fc2_scale.view(-1, 1)).to(dtype).view(expert, -1, w2D)
+              fc2_scale.view(-1, 1)).to(computeType).view(expert, -1, w2D)
         
     if fc1_smooth_scale is not None:
         expert = fc1_smooth_scale.shape[0]
@@ -206,6 +205,7 @@ def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
             sub_tokens = hidden_states[mask]
             if fc1_smooth_scale is not None:
                 sub_tokens = sub_tokens * (fc1_smooth_scale[E_id])
+
             act_input = sub_tokens @ (w1[E_id].transpose(0, 1))
             if moeType == "g1u1":
                 gate, up = act_input.split([inter_dim, inter_dim], dim=-1)

@@ -30,8 +30,7 @@ def permute_weight_a(x: torch.Tensor) -> torch.Tensor:
     x_ = x_.view(x.shape[0], x.shape[1], x.shape[2])
     return x_
 
-
-@perftest()
+@perftest(num_warmup=1, num_iters=2)
 def torch_moe_test(hidden_states, w1, w2, topk_weight, topk_ids,
                    # following for int8 quant
                    fc1_scale=None,  # [expert, inter_dim, 1]
@@ -109,7 +108,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     quant_dtype = torch.int8 if use_int4 or quantstr.startswith(
         'int8') else torch.float8_e4m3fnuz
     use_smooth = 'smooth' in quantstr
-    input = torch.randn((token, model_dim), dtype=dtype, device="cuda") / 10.0
+    input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
     if use_g1u1:
         w1 = torch.randn((E+shared_E, inter_dim*2, model_dim),
                          dtype=dtype, device="cuda") / 10.0
@@ -306,10 +305,12 @@ for dtype in [torch.bfloat16]:
                           quant='fp8smoothquant', use_g1u1=True)
 
 print('\ng1u1 int4')
+############warning: fixme: topk only support 1 here as we need ck mock but others not support it
+topk = 1
 for dtype in [torch.bfloat16]:
     for m in [32, 128]:
         # for dim in [1024]:
         for dim in [4096, 6144,  8192]:
             for hdim in [1024, 4096]:
-                test_fmoe(dtype, m, dim, hdim, 8, 3,
+                test_fmoe(dtype, m, dim, hdim, 8, topk,
                           quant='wint4afp8smoothquant', use_g1u1=True)

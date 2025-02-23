@@ -31,7 +31,7 @@ def permute_weight_a(x: torch.Tensor) -> torch.Tensor:
     return x_
 
 
-@perftest(num_warmup=1, num_iters=2)
+@perftest()
 def torch_moe_test(hidden_states, w1, w2, topk_weight, topk_ids,
                    # following for int8 quant
                    fc1_scale=None,  # [expert, inter_dim, 1]
@@ -46,7 +46,7 @@ def torch_moe_test(hidden_states, w1, w2, topk_weight, topk_ids,
                      topk_ids, fc1_scale, fc2_scale, fc1_smooth_scale, fc2_smooth_scale)
 
 
-@perftest(num_warmup=0, num_iters=2)
+@perftest()
 def asm_moe_test(hidden_states, w1, w2, topk_weight, topk_ids,
                  # following for int8 quant
                  fc1_scale=None,  # [expert, inter_dim, 1]
@@ -112,7 +112,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     input = torch.randn((token, model_dim), dtype=dtype, device="cuda") / 10.0
     if use_g1u1:
         w1 = torch.randn((E+shared_E, inter_dim*2, model_dim),
-                         dtype=dtype, device="cuda")
+                         dtype=dtype, device="cuda") / 10.0
     else:
         w1 = torch.randn((E+shared_E, inter_dim, model_dim),
                          dtype=dtype, device="cuda")
@@ -188,7 +188,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
             fc2_smooth_scale = None
         else:
             if use_int4:
-                #hack here, int4 kernel need this buffer but not used, so ones here.
+                #fixme @felix: hack here, int4 kernel need this buffer but not used, so ones.
                 # [expert, 1, model_dim]
                 fc1_smooth_scale = torch.ones(sp2, dtype=torch.float, device="cuda")
                 # [expert, 1, inter_dim]
@@ -245,6 +245,24 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
         msg = f"[perf] {use_g1u1=} {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {shared_E=}, {topk=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:.2f} us ...... uplift: {avg_c/avg_b-1:.1%}"
         checkAllclose(ref2, out_b, rtol=0.01, atol=100, msg=msg)
         # checkAllclose(ref2, avg_ck, rtol=0.01, atol=100)
+
+print('test test_fmoe 16 bit')
+print('\ng1u0 no quant')
+for dtype in [torch.float16, torch.bfloat16]:
+    for m in [128, 256]:
+        for dim in [4096, 8192]:
+            for hdim in [1024]:
+                # test_fmoe(dtype, m, dim, hdim, 32, 5)
+                test_fmoe(dtype, m, dim, hdim, 32, 5, quant='No')
+
+print('\ng1u1 no quant')
+for dtype in [torch.float16, torch.bfloat16]:
+    for m in [128, 256]:
+        for dim in [4096, 8192]:
+            for hdim in [1024]:
+                # test_fmoe(dtype, m, dim, hdim, 32, 5)
+                test_fmoe(dtype, m, dim, hdim, 32, 5,
+                          quant='No', use_g1u1=True)
 
 print('\ng1u1 int8quant')
 for dtype in [torch.bfloat16]:

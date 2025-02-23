@@ -189,10 +189,8 @@ def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
         # gose to quant D_w8a8/w8a8
         expert = w1.shape[0]
         w2D = w2.shape[-1]
-        w1 = (w1.view(-1, D).to(fc1_scale) *
-              fc1_scale.view(-1, 1)).to(computeType).view(expert, -1, D)
-        w2 = (w2.view(-1, w2D).to(fc2_scale) *
-              fc2_scale.view(-1, 1)).to(computeType).view(expert, -1, w2D)
+        w1 = (w1.view(-1, D)*fc1_scale.view(-1, 1)).view(expert, -1, D)
+        w2 = (w2.view(-1, w2D)*fc2_scale.view(-1, 1)).view(expert, -1, w2D)
         
     if fc1_smooth_scale is not None:
         expert = fc1_smooth_scale.shape[0]

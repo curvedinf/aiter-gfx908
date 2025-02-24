@@ -204,9 +204,14 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                      fc1_smooth_scale, fc2_smooth_scale)
 
         # b implement
+<<<<<<< HEAD
         element_byte_mul = 1 if not use_int4 else 2
         w1b = shuffle_weight(w1, element_size_mul=element_byte_mul)
         w2b = shuffle_weight(w2, element_size_mul=element_byte_mul)
+=======
+        w1b = shuffle_weight(w1)
+        w2b = shuffle_weight(w2)
+>>>>>>> origin/main
         if use_int4:
             w1b = rearrange_4bit_elements(convert_int8_to_uint32_int4(w1b))
             w2b = rearrange_4bit_elements(convert_int8_to_uint32_int4(w2b))

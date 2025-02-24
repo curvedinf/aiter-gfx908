@@ -27,7 +27,7 @@ def get_dtype_max(dtype):
     return dtypeMax
 
 
-def pertoken_quant(x, y_scale_dtype=torch.float, x_scale=None, quant_dtype=torch.int8):
+def pertoken_quant(x, y_scale_dtype=torch.float, x_scale=None, quant_dtype=torch.int8, dtypeMax=None):
     x = x.to(torch.float)
     if x_scale is None:
         hidden_states = x
@@ -40,8 +40,8 @@ def pertoken_quant(x, y_scale_dtype=torch.float, x_scale=None, quant_dtype=torch
         dim=-1,
         keepdim=True
     )
-
-    dtypeMax = get_dtype_max(quant_dtype)
+    if not dtypeMax:
+        dtypeMax = get_dtype_max(quant_dtype)
 
     per_token_scale = per_token_amax / dtypeMax
     per_token_scale[per_token_scale == 0] = 1
@@ -52,10 +52,11 @@ def pertoken_quant(x, y_scale_dtype=torch.float, x_scale=None, quant_dtype=torch
     return y, y_scale
 
 
-def per_tensor_quant(x, scale=None, scale_dtype=torch.float, quant_dtype=torch.int8):
+def per_tensor_quant(x, scale=None, scale_dtype=torch.float, quant_dtype=torch.int8, dtypeMax=None):
     x = x.to(torch.float)
     if scale is None:
-        dtypeMax = get_dtype_max(quant_dtype)
+        if not dtypeMax:
+            dtypeMax = get_dtype_max(quant_dtype)
         scale = torch.abs(x).max() / dtypeMax
     y = x/scale
 

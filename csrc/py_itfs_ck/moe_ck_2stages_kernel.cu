@@ -47,14 +47,18 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     // int M = agvtokens_per_expert < 32 ? 32 : (agvtokens_per_expert < 64 ? 64 : 128);
 
     void *hidden_states_ptr = hidden_states.data_ptr();
-    void *w1_ptr = w1.data_ptr();
+    void *w1_ptr = w1.transpose(1, 2).data_ptr();
     void *w2_ptr = w2.data_ptr();
     void *sorted_token_ids_ptr = sorted_token_ids.data_ptr();
     void *sorted_expert_ids_ptr = sorted_expert_ids.data_ptr();
     void *num_valid_ids_ptr = num_valid_ids.data_ptr();
     void *out_ptr = out.data_ptr();
-    void *w1_scale_ptr = w1_scale.has_value() ? w1_scale.value().data_ptr() : nullptr;
+    void *w1_scale_ptr = w1_scale.has_value() ? w1_scale.value().transpose(0, 1).data_ptr() : nullptr;
     void *a1_scale_ptr = a1_scale.has_value() ? a1_scale.value().data_ptr() : nullptr;
+    
+
+
+    
     // BF16
     if (hidden_states.dtype() == at::ScalarType::BFloat16)
     {

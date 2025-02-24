@@ -212,7 +212,7 @@ public:
         }
     };
 };
-int get_heuristic_tile(int inter_dim, int sub_X_cnt, const std::vector<int> &available_tails)
+int get_heuristic_tile(int inter_dim, int sub_X_cnt, const std::vector<int> &available_tiles)
 {
     // int tiles[7] = {512, 448, 384, 320, 256, 192, 128};
     hipDevice_t dev;
@@ -225,7 +225,7 @@ int get_heuristic_tile(int inter_dim, int sub_X_cnt, const std::vector<int> &ava
     uint32_t round = 0xffffffff;
     int selectedTile = 0;
 
-    for (auto tile : available_tails)
+    for (auto tile : available_tiles)
     {
         if ((inter_dim % tile) == 0)
         {

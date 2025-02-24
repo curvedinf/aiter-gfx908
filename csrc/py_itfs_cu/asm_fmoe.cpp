@@ -508,7 +508,7 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
     }
     else if (input.dtype() == at::ScalarType::Float8_e4m3fnuz)
     {
-        int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 448, 384, 320, 256, 192, 128}); // todo,add tune interface here
+        int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 448, 384, 320, 256, 192, 128}); 
         if (selectedTile == 512)
         {
             if (fc2_smooth_scale.has_value())
@@ -674,14 +674,14 @@ void fmoe_fp8_g1u1_a16(torch::Tensor &out,                    // [token_cnt, dim
     FMoeKernel *impl_ptr = nullptr;
     int inter_dim = down.size(2);
     int sub_X_cnt = sorted_expert_ids.size(0);
-    //int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt); // todo,add tune interface here
+    int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 320}); // todo,add tune interface here
 
-    if (inter_dim %512==0)
+    if (selectedTile == 512)
     {
         static FMoeKernel impl_512("fmoe_fp8_g1u1_smf_subGU_512", "fmoe_fp8_g1u1_smf_subGU_512.co", 512);
         impl_ptr = &impl_512;
     }
-    else if (inter_dim %320==0)
+    else if (selectedTile == 320)
     {
         static FMoeKernel impl_320("fmoe_fp8_g1u1_smf_subGU_320", "fmoe_fp8_g1u1_smf_subGU_320.co", 320);
         impl_ptr = &impl_320;

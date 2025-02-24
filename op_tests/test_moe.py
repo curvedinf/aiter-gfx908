@@ -204,12 +204,11 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                      fc1_smooth_scale, fc2_smooth_scale)
 
         # b implement
-        element_byte_mul = 1 if not use_int4 else 2
-        w1b = shuffle_weight(w1, element_size_mul=element_byte_mul)
-        w2b = shuffle_weight(w2, element_size_mul=element_byte_mul)
         if use_int4:
-            w1b = rearrange_4bit_elements(convert_int8_to_uint32_int4(w1b))
-            w2b = rearrange_4bit_elements(convert_int8_to_uint32_int4(w2b))
+            w1 = rearrange_4bit_elements(convert_int8_to_uint32_int4(w1))
+            w2 = rearrange_4bit_elements(convert_int8_to_uint32_int4(w2))
+        w1b = shuffle_weight(w1)
+        w2b = shuffle_weight(w2)
         out_b, avg_b = asm_moe_test(input, w1b, w2b, topk_weights, topk_ids,
                                     fc1_scale, fc2_scale,
                                     fc1_smooth_scale, fc2_smooth_scale)

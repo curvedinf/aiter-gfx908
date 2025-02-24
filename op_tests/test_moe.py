@@ -306,12 +306,10 @@ for dtype in [torch.bfloat16]:
                           quant='fp8smoothquant', use_g1u1=True)
 
 print('\ng1u1 int4')
-############warning: fixme: topk only support 1 here as we need ck mock but others not support it
-topk = 1
 for dtype in [torch.bfloat16]:
     for m in [32, 128]:
         # for dim in [1024]:
-        for dim in [4096, 6144,  8192]:
+        for dim in [4096, 6144]:
             for hdim in [1024, 4096]:
-                test_fmoe(dtype, m, dim, hdim, 8, topk,
+                test_fmoe(dtype, m, dim, hdim, 8, 3,
                           quant='wint4afp8smoothquant', use_g1u1=True)

@@ -388,24 +388,20 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
     if (gate.dtype() == at::ScalarType::UInt32 || gate.dtype() == at::ScalarType::Int)
     {
         int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 256, 128}); // todo,add tune interface here
-        if (selectedTile == 512) 
+        if (sub_X_cnt >= 32) 
         {
             static FMoeKernel impl_int4_512("fmoe_int4fp8_g1u1_subGU_512_gelu", "fmoe_int4fp8_g1u1_subGU_512_gelu.co", 512);
             impl_ptr = &impl_int4_512;
         }
-        else if (selectedTile == 256) 
+        else if (sub_X_cnt >= 16) 
         {
             static FMoeKernel impl_int4_256("fmoe_int4fp8_g1u1_subGU_256_gelu", "fmoe_int4fp8_g1u1_subGU_256_gelu.co", 256);
             impl_ptr = &impl_int4_256;
         }
-        else if (selectedTile == 128) 
+        else 
         {
             static FMoeKernel impl_int4_128("fmoe_int4fp8_g1u1_subGU_128_gelu", "fmoe_int4fp8_g1u1_subGU_128_gelu.co", 128);
             impl_ptr = &impl_int4_128;
-        }
-        else
-        {
-            TORCH_CHECK(false, __func__, " Unsupported inter_dim " + std::to_string(inter_dim) + ", which should be divisible by 128, 256, or 512");
         }
         impl_ptr->set_int4(true);
     }

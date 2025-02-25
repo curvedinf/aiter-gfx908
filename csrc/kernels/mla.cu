@@ -73,3 +73,4 @@ torch::Tensor mla(torch::Tensor &Q, //   [num_seqs, num_heads, head_size]
     ck_tile::stream_config naive_s{};
     naive_attention_fwd(naive_t, naive_a, naive_s);
 }
+

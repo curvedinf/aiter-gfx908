@@ -28,7 +28,24 @@ torch::Tensor mla(torch::Tensor &Q, //   [num_seqs, num_heads, head_size]
                            const int quant_algo
                            // above are input
 );
+
+at::Tensor BatchMLAPagedAttentionPlan(at::Tensor float_workspace_buffer,
+    at::Tensor int_workspace_buffer,
+    at::Tensor page_locked_int_workspace_buffer,
+    at::Tensor qo_indptr, at::Tensor kv_indptr, at::Tensor kv_len,
+    int64_t num_heads, int64_t head_dim_o, bool causal,
+    int64_t cuda_stream);
+
+void BatchMLAPagedAttentionRun(at::Tensor float_workspace_buffer, at::Tensor int_workspace_buffer,
+at::Tensor plan_info_vec, at::Tensor q_nope, at::Tensor q_pe,
+at::Tensor ckv_cache, at::Tensor kpe_cache, at::Tensor kv_indices,
+at::Tensor o, std::optional<at::Tensor> maybe_lse,
+int64_t mask_mode_code, int64_t num_heads, int64_t page_size,
+double sm_scale, int64_t cuda_stream);
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     m.def("mla", &mla, "mla");
+    m.def("plan", &BatchMLAPagedAttentionPlan);
+    m.def("run", &BatchMLAPagedAttentionRun);
 }

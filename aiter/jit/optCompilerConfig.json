@@ -312,6 +312,8 @@
     "module_mla": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/kernels/mla.cu'",
+            "f'{AITER_CSRC_DIR}/kernels/batch_mla_plan.cu'",
+            "f'{AITER_CSRC_DIR}/kernels/batch_mla_run.cu'",
             "f'{AITER_CSRC_DIR}/pybind/mla_pybind.cu'"
         ],
         "md_name": "'module_mla'",

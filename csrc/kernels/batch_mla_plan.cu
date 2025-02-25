@@ -13,14 +13,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <flashinfer/attention/scheduler.cuh>
-#include <optional>
+// #include <flashinfer/attention/scheduler.cuh>
+// #include <optional>
 
-#include "batch_mla_config.inc"
+// #include "batch_mla_config.inc"
+// #include "pytorch_conversion_utils.h"
+// #include "pytorch_extension_utils.h"
+
+//using namespace flashinfer;
+
+#include <torch/extension.h>
+#include "scheduler.cuh"
 #include "pytorch_conversion_utils.h"
-#include "pytorch_extension_utils.h"
-
-using namespace flashinfer;
 
 at::Tensor BatchMLAPagedAttentionPlan(at::Tensor float_workspace_buffer,
                                       at::Tensor int_workspace_buffer,

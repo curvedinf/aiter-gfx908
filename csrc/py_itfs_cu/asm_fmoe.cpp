@@ -121,8 +121,8 @@ public:
         }
         int stride_expert_GU = stride_GU * inter_dim;
         int stride_expert_D = stride_D * dim;
-        int stride_expert_GUDQN = w1_dqn.has_value() ? w1_dqn.value().size(1) * sizeof(float) : 0;
-        int stride_expert_DDQN = w2_dqn.has_value() ? w2_dqn.value().size(1) * sizeof(float) : 0;
+        int stride_expert_GUDQN = w1_dqn.has_value() ? w1_dqn.value().stride(0) * sizeof(float) : 0;
+        int stride_expert_DDQN = w2_dqn.has_value() ? w2_dqn.value().stride(0) * sizeof(float) : 0;
         int stride_expert_SMTDQN = inter_dim * sizeof(float);
         int stride_O = dim * O_elemSize;
         if (inter_dim * 2 == w1.size(1))
@@ -387,7 +387,8 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
     int sub_X_cnt = sorted_expert_ids.size(0);
     if (gate.dtype() == at::ScalarType::UInt32 || gate.dtype() == at::ScalarType::Int)
     {
-        int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 256, 128}); // todo,add tune interface here
+        // int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 256, 128}); 
+        // fixme: not using heuristic_tile but this hack, todo coderfeli
         if (sub_X_cnt >= 32) 
         {
             static FMoeKernel impl_int4_512("fmoe_int4fp8_g1u1_subGU_512_gelu", "fmoe_int4fp8_g1u1_subGU_512_gelu.co", 512);

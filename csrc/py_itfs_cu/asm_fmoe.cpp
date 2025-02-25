@@ -387,24 +387,23 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
     int sub_X_cnt = sorted_expert_ids.size(0);
     if (gate.dtype() == at::ScalarType::UInt32 || gate.dtype() == at::ScalarType::Int)
     {
-        impl_ptr->set_int4(true);
-        // int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 256, 128}); // todo,add tune interface here
-        if (sub_X_cnt < 16) 
+        int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 256, 128}); // todo,add tune interface here
+        if (sub_X_cnt >= 32) 
         {
-            static FMoeKernel impl_int4_128("fmoe_int4fp8_g1u1_subGU_128_gelu", "fmoe_int4fp8_g1u1_subGU_128_gelu.co", 128);
-            impl_ptr = &impl_int4_128;
+            static FMoeKernel impl_int4_512("fmoe_int4fp8_g1u1_subGU_512_gelu", "fmoe_int4fp8_g1u1_subGU_512_gelu.co", 512);
+            impl_ptr = &impl_int4_512;
         }
-        else if (sub_X_cnt < 32)
+        else if (sub_X_cnt >= 16) 
         {
-            
             static FMoeKernel impl_int4_256("fmoe_int4fp8_g1u1_subGU_256_gelu", "fmoe_int4fp8_g1u1_subGU_256_gelu.co", 256);
             impl_ptr = &impl_int4_256;
         }
         else 
         {
-            static FMoeKernel impl_int4_512("fmoe_int4fp8_g1u1_subGU_512_gelu", "fmoe_int4fp8_g1u1_subGU_512_gelu.co", 512);
-            impl_ptr = &impl_int4_512;
+            static FMoeKernel impl_int4_128("fmoe_int4fp8_g1u1_subGU_128_gelu", "fmoe_int4fp8_g1u1_subGU_128_gelu.co", 128);
+            impl_ptr = &impl_int4_128;
         }
+        impl_ptr->set_int4(true);
     }
     else if (input.dtype() == at::ScalarType::Char || input.dtype() == at::ScalarType::Byte)
     {

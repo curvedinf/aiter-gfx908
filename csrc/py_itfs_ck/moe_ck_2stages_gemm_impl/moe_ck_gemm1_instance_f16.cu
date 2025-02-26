@@ -8,6 +8,6 @@ using AccDataType = F32;
 using EDataType = F16;
 using CDEElementOp = TypeCast;
 
-CK_MOE_STAGE1_GEMM_DEFINE(32, 128,  2, 2, false)
-CK_MOE_STAGE1_GEMM_DEFINE(64, 128,  4, 2, false)
-CK_MOE_STAGE1_GEMM_DEFINE(128, 64, 4, 4, false)
+CK_MOE_STAGE1_GEMM_DEFINE(32, 128,  1, 1, false)
+CK_MOE_STAGE1_GEMM_DEFINE(64, 128,  2, 1, false)
+CK_MOE_STAGE1_GEMM_DEFINE(128, 64, 2, 2, false)

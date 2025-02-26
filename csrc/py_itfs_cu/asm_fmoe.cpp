@@ -389,12 +389,12 @@ void fmoe_g1u1(torch::Tensor &out,                                          // [
     {
         // int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 256, 128}); 
         // fixme: not using heuristic_tile but this hack, todo coderfeli
-        if (sub_X_cnt >= 32) 
+        if (sub_X_cnt >= 16) 
         {
             static FMoeKernel impl_int4_512("fmoe_int4fp8_g1u1_subGU_512_gelu", "fmoe_int4fp8_g1u1_subGU_512_gelu.co", 512);
             impl_ptr = &impl_int4_512;
         }
-        else if (sub_X_cnt >= 16) 
+        else if (sub_X_cnt >= 8) 
         {
             static FMoeKernel impl_int4_256("fmoe_int4fp8_g1u1_subGU_256_gelu", "fmoe_int4fp8_g1u1_subGU_256_gelu.co", 256);
             impl_ptr = &impl_int4_256;

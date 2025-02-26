@@ -1,6 +1,36 @@
 #include "exception.h"
+#include "allocator.h"
+#include "utils.cuh"
+#include "heap.h"
 
 using IdType = int32_t;
+
+enum class MaskMode {
+  kNone = 0U,    // No mask
+  kCausal = 1U,  // Causal mask
+  kCustom = 2U,  // Custom mask
+};
+
+inline int packed_causal_kv_end(int qo_len, int kv_len, int qo_tile_idx, int cluster_tile_q,
+  int num_qo_tiles, int group_size) {
+if (qo_tile_idx + 1 == num_qo_tiles) {
+return kv_len;
+}
+int kv_len_init = kv_len - qo_len;
+return kv_len_init + (qo_tile_idx + 1) * cluster_tile_q / group_size;
+}
+
+inline float cost_function(int qo_len, int kv_len) { return 2 * float(qo_len) + kv_len; }
+
+template <typename T>
+std::vector<T> flatten(const std::vector<std::vector<T>>& vec, int size_after_flatten) {
+  std::vector<T> result;
+  result.reserve(size_after_flatten);
+  for (const auto& inner_vec : vec) {
+    result.insert(result.end(), inner_vec.begin(), inner_vec.end());
+  }
+  return result;
+}
 
 struct MLAPlanInfo {
     int64_t num_blks_x;

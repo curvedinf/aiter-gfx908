@@ -21,10 +21,10 @@
 #include <sstream>
 
 #include "mla_params.cuh"
-#include "prefill.cuh"
-#include "variant_helper.cuh"
-
-namespace flashinfer {
+#include "permuted_smem.cuh"
+#include "math.cuh"
+// #include "prefill.cuh"
+// #include "variant_helper.cuh"
 
 namespace mla {
 
@@ -1034,7 +1034,5 @@ cudaError_t BatchMLAPagedAttention(Params params, uint32_t num_blks_x, uint32_t 
 }
 
 }  // namespace mla
-
-}  // namespace flashinfer
 
 #endif  // FLASHINFER_MLA_FA2_CUH_

@@ -26,6 +26,8 @@
 
 #include <torch/extension.h>
 #include "scheduler.cuh"
+#include "fastdiv.cuh"
+#include "mla.cuh"
 #include "pytorch_conversion_utils.h"
 
 void BatchMLAPagedAttentionRun(at::Tensor float_workspace_buffer, at::Tensor int_workspace_buffer,

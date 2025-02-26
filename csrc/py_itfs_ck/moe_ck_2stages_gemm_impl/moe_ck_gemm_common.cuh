@@ -45,13 +45,33 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t MNPerXDL = 32;
     static constexpr ck::index_t CShuffleMXDLPerWave = MPerBlock / 32;
     static constexpr ck::index_t KPerBlock = 256 / sizeof(A0DataType);
+    //static constexpr ck::index_t KPerBlock = 64;
     static constexpr ck::index_t MXDLPerWave = MPerBlock / 32; // todo fix this constraint
     static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);
     static constexpr ck::index_t BK1 = ck::is_same_v<B0DataType, I4> ? 32 : 16 / sizeof(B0DataType); 
     static constexpr ck::index_t EVec = 16 / sizeof(EDataType);
+    static constexpr ck::index_t K0_A = KPerBlock / AK1;
+    static constexpr ck::index_t K0_B = KPerBlock / BK1;
+    static constexpr ck::index_t K0_M_A = 256 / K0_A;
+    static constexpr ck::index_t K0_N_B = 256 / K0_B;
     static constexpr ck::index_t D0Vec = 1;
     static constexpr ck::index_t D1Vec = 1;
-
+    //std::cout<<"debug CK ########:"  <<std::endl;
+    //std::cout<<"debug CK MPerBlock:"<<MPerBlock  <<std::endl;
+    //std::cout<<"debug CK KPerBlock:"<<KPerBlock  <<std::endl;
+    //std::cout<<"debug CK AK1:"<<AK1  <<std::endl;
+    //std::cout<<"debug CK BK1:"<<BK1  <<std::endl;
+    //std::cout<<"debug CK K0_A:"<<K0_A  <<std::endl;
+    //std::cout<<"debug CK K0_B:"<<K0_B  <<std::endl;
+    //std::cout<<"debug CK K0_M_A:"<<K0_M_A  <<std::endl;
+    //std::cout<<"debug CK K0_N_B:"<<K0_N_B  <<std::endl;
+    //std::cout<<"debug CK MNPerXDL:"<<MNPerXDL  <<std::endl;
+    //std::cout<<"debug CK MXDLPerWave:"<<MXDLPerWave  <<std::endl;
+    //std::cout<<"debug CK CShuffleMXDLPerWave:"<<CShuffleMXDLPerWave  <<std::endl;
+    //std::cout<<"debug CK EVec:"<<EVec  <<std::endl;
+    //std::cout<<"debug CK D0Vec:"<<D0Vec  <<std::endl;
+    //std::cout<<"debug CK D1Vec:"<<D1Vec  <<std::endl;
+    //std::cout<<"debug CK Nswizzle:"<<Nswizzle  <<std::endl;
     // using DeviceOpInstance = ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3
     using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemm
         // clang-format off
@@ -76,8 +96,8 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                // a,b: loadtranfer cluster, cluster order, srcorder,VECDIM, srcpervec, dstpervec, lds_extra
             //    S<16, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0,
             //    S<16, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0,
-               S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, AK1, AK1, 0,
-               S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, AK1, AK1, 0,
+               S<K0_A, K0_M_A, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, AK1, AK1, 0,
+               S<K0_B, K0_N_B, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, BK1, BK1, 0,
                //    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
                //    MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
                 //  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|

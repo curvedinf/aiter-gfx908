@@ -306,7 +306,6 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     out_ref = torch_moe(input, w1, w2, topk_weights, topk_ids)
 
     #checkAllclose(out_ref, out2_ref, msg="[torch] 1_stage vs 2_stage")
-
     out1_qt, us = ck_moe_stage1(a1_qt,
                                 w1b,
                                 w2b,

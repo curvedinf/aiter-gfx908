@@ -92,7 +92,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         TORCH_CHECK(a1_scale.value().dtype() == at::ScalarType::Float,
                     "Scales must be Float dtype!");
         using AccDataType = F32;
-        using CDEElementOp = MulABScale;
+        using CDEElementOp = MulABScaleWint4;
         if (out.dtype() == at::ScalarType::Half)
         {
             CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, MPerBlock);

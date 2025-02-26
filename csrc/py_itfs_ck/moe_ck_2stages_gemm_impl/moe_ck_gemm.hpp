@@ -66,6 +66,49 @@ struct MulABScale
                                                                             const float &d0,
                                                                             const float &d1) const
     {
+        e = ck::type_convert<F16>(c * d1 * d0);
+    }
+
+    template <>
+    __host__ __device__ constexpr void operator()<B16, float, float, float>(B16 &e,
+                                                                            const float &c,
+                                                                            const float &d0,
+                                                                            const float &d1) const
+    {
+        e = ck::type_convert<B16>(c * d1 * d0);
+    }
+
+    template <>
+    __host__ __device__ constexpr void operator()<F16, int, float, float>(F16 &e,
+                                                                            const int &c,
+                                                                            const float &d0,
+                                                                            const float &d1) const
+    {
+        e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d1 * d0);
+    }
+
+    template <>
+    __host__ __device__ constexpr void operator()<B16, int, float, float>(B16 &e,
+                                                                            const int &c,
+                                                                            const float &d0,
+                                                                            const float &d1) const
+    {
+        e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d1 * d0);
+    }
+};
+
+struct MulABScaleWint4
+{
+    template <typename E, typename C, typename D0, typename D1>
+    __host__ __device__ constexpr void
+    operator()(E &e, const C &c, const D0 &d0, const D1 &d1) const;
+
+    template <>
+    __host__ __device__ constexpr void operator()<F16, float, float, float>(F16 &e,
+                                                                            const float &c,
+                                                                            const float &d0,
+                                                                            const float &d1) const
+    {
         e = ck::type_convert<F16>(c * d1 * d0 * 16.f);
     }
 

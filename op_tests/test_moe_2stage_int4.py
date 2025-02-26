@@ -241,10 +241,10 @@ def ck_moe_fused_2stages(hidden_states,
 
 
 def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=False, shared_E=0):
-    input = torch.ones((token, model_dim), dtype=dtype, device="cuda")
+    input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
     if use_g1u1:
-        w1 = torch.ones((E+shared_E, inter_dim*2, model_dim),
-                         dtype=dtype, device="cuda") 
+        w1 = torch.randn((E+shared_E, inter_dim*2, model_dim),
+                         dtype=dtype, device="cuda") / 10
     else:
         w1 = torch.randn((E+shared_E, inter_dim, model_dim),
                          dtype=dtype, device="cuda")
@@ -314,6 +314,10 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                 num_valid_ids,
                                 w1_scale, a1_scale,
                                 dtype, topk, BLOCK_SIZE_M)
+    
+    print("######Start to Test CK Stage 1##########")
+    print("Torch Stage 1 OUT:",out1_ref)
+    print("CK    Stage 1 OUT:",out1_qt)
     checkAllclose(out1_ref, out1_qt,
                   msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
     if use_g1u1:

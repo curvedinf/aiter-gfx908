@@ -107,7 +107,7 @@ def asm_moe(hidden_states,
             aiter.moe_smoothquant_fwd(
                 a8, hidden_states, fc1_smooth_scale, topk_ids, a8_scale)
         else:
-            if w1.dtype == torch.float8_e4m3fnuz or w1.dtype == torch.int32 and w1.dtype == torch.uint32:
+            if w1.dtype == torch.float8_e4m3fnuz or w1.dtype == torch.int32 or w1.dtype == torch.uint32:
                 a8 = torch.empty(
                     (M, model_dim), dtype=a8_type, device=device)
                 a8_scale = torch.empty(M, dtype=torch.float, device=device)

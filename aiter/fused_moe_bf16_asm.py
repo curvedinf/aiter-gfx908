@@ -151,7 +151,7 @@ def get_block_size(token, topk, expert):
     token_per_expert = token * topk / expert
     support_list = [32, 64, 128]
     for el in support_list:
-        if token_per_expert < el:
+        if token_per_expert <= el * 4:
             return el
     return support_list[-1]
 
@@ -181,6 +181,7 @@ def ck_moe_2stages(a1,
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, global_E,
                                                                                            model_dim, dtype, block_size, expert_mask)
 
+    # print("block_size:", block_size, sorted_expert_ids)
     if w1.dtype == torch.float8_e4m3fnuz:
         a1, a1_scale = aiter.per_tensor_quant_fp8_hip(a1, a1_scale)
         # a1, a1_scale = aiter.per_tensor_quant(a1, quant_dtype=w1.dtype)

@@ -55,10 +55,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     void *out_ptr = out.data_ptr();
     void *w1_scale_ptr = w1_scale.has_value() ? w1_scale.value().transpose(0, 1).data_ptr() : nullptr;
     void *a1_scale_ptr = a1_scale.has_value() ? a1_scale.value().data_ptr() : nullptr;
-    
 
-
-    
     // BF16
     if (hidden_states.dtype() == at::ScalarType::BFloat16)
     {
@@ -166,9 +163,9 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
                    std::optional<torch::Tensor> a2_scale = std::nullopt, // [m, 1], token scale
                    std::optional<int> block_m = 32)
 {
-    TORCH_CHECK(inter_states.dtype() == w2.dtype(),
-                "Weights and activations should both be same dtype!");
-
+    // TORCH_CHECK(inter_states.dtype() == w2.dtype(),
+    //             "Weights and activations should both be same dtype!");
+    //
     TORCH_CHECK(out.dtype() == at::ScalarType::BFloat16 || out.dtype() == at::ScalarType::Half,
                 "Out dtype only support BFloat16/Float16!")
 
@@ -229,12 +226,20 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         using CDEElementOp = MulABScaleExpertWeight;
         if (out.dtype() == at::ScalarType::Half)
         {
-            CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, MPerBlock);
+            // CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, MPerBlock);
+            if (MPerBlock == 64)
+            {
+                ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, 64>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr);
+            }
+            else if (MPerBlock == 128)
+            {
+                ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, 128>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr);
+            }
         }
-        else if (out.dtype() == at::ScalarType::BFloat16)
-        {
-            CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, MPerBlock);
-        }
+        // else if (out.dtype() == at::ScalarType::BFloat16)
+        //{
+        //     CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, MPerBlock);
+        // }
     }
     // FP8
     else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz)

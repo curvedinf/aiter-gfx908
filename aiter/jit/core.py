@@ -115,6 +115,11 @@ def get_hip_version():
 
 @functools.lru_cache(maxsize=1024)
 def get_module(md_name):
+    numa_balance_set = os.popen(
+        "cat /proc/sys/kernel/numa_balancing").read().strip()
+    if numa_balance_set == "1":
+        logger.warning("WARNING: NUMA balancing is enabled, which may cause errors. "
+                       "It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' ")
     return importlib.import_module(f'{__package__}.{md_name}')
 
 
@@ -286,14 +291,14 @@ def get_args_of_build(ops_name: str, exclue=[]):
                 return d_all_ops
             # no find opt_name in json.
             elif data.get(ops_name) == None:
-                print("Not found this operator in 'optCompilerConfig.json'. ")
+                logger.warning("Not found this operator in 'optCompilerConfig.json'. ")
                 return d_opt_build_args
             # parser single opt
             else:
                 compile_ops_ = data.get(ops_name)
                 return convert(compile_ops_)
         else:
-            print("ERROR: pls use dict_format to write 'optCompilerConfig.json'! ")
+            logger.warning("ERROR: pls use dict_format to write 'optCompilerConfig.json'! ")
 
 
 def compile_ops(ops_name: str, fc_name: Optional[str] = None):

@@ -171,7 +171,7 @@ def asm_moe(hidden_states,
                 f"Invalid MoE weight: {w1.shape=} {w2.shape=} {lastdim_mul}")
 
         if useInt4Weight:
-            sorted_ids = sorted_ids & 0xffffff
+            # sorted_ids = sorted_ids & 0xffffff
             fmoe_func(moe_buf, a8, w1, w2, sorted_ids,
                       sorted_weights, sorted_expert_ids, num_tokens_post_padded,
                       topk,

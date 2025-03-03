@@ -10,7 +10,7 @@
 float fmha_bwd_router(fmha_bwd_traits_all traits, fmha_bwd_args args, const ck_tile::stream_config& stream_config) {
     float r = -1;
 // fmha bwd v3 asm kernel currently only support mi300
-#ifdef(__HIPCC__) && (defined(__gfx942__))
+#if defined(__HIPCC__) && (defined(__gfx942__))
     r = fmha_bwd_v3(traits, args, stream_config);
 #endif
     if (r == -1) {
@@ -29,19 +29,15 @@ fmha_bwd_traits_all get_ck_fmha_bwd_traits(const mask_info &mask,
                                        bool is_v3_atomic_fp32,
                                        int how_v3_bf16_cvt)
 {
-    return fmha_bwd_traits_all{head_size,
-                           head_size,
+    return fmha_bwd_traits_all(mask,
                            dtype,
-                           false, // is_group_mode
-                           mask.type,
-                           enable_alibi ? bias_enum::alibi : bias_enum::no_bias,
-                           false,    // has_dbias
+                           head_size,
                            has_dropout,
-                           false, // s_randval
+                           enable_alibi,
                            deterministic,
                            use_ext_asm,
                            is_v3_atomic_fp32,
-                           how_v3_bf16_cvt};
+                           how_v3_bf16_cvt);
 }
 
 fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,

@@ -33,7 +33,7 @@ struct fmha_bwd_traits_all: public fmha_bwd_traits
     int how_v3_bf16_cvt;
 };
 
-#ifdef(__HIPCC__) && (defined(__gfx942__))
+#if defined(__HIPCC__) && (defined(__gfx942__))
 float fmha_bwd_v3(fmha_bwd_traits_all, fmha_bwd_args, const ck_tile::stream_config&);
 #endif
 

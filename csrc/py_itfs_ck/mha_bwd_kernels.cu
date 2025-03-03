@@ -5,11 +5,21 @@
 #include <ATen/cuda/CUDAContext.h>
 #include "py_itfs_common.h"
 #include "mha_common.h"
+#include "mha_bwd.h"
 
-#include "fmha_bwd.hpp"
-#include "mask.hpp"
+float fmha_bwd_router(fmha_bwd_traits_all traits, fmha_bwd_args args, const ck_tile::stream_config& stream_config) {
+    float r = -1;
+// fmha bwd v3 asm kernel currently only support mi300
+#ifdef(__HIPCC__) && (defined(__gfx942__))
+    r = fmha_bwd_v3(traits, args, stream_config);
+#endif
+    if (r == -1) {
+        r = fmha_bwd(traits, args, stream_config);
+    }
+    return r;
+}
 
-fmha_bwd_traits get_ck_fmha_bwd_traits(const mask_info &mask,
+fmha_bwd_traits_all get_ck_fmha_bwd_traits(const mask_info &mask,
                                        std::string dtype,
                                        int head_size,
                                        bool has_dropout,

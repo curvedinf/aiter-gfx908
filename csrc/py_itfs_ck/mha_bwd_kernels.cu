@@ -24,9 +24,12 @@ fmha_bwd_traits_all get_ck_fmha_bwd_traits(const mask_info &mask,
                                        int head_size,
                                        bool has_dropout,
                                        bool enable_alibi,
-                                       bool deterministic)
+                                       bool deterministic,
+                                       bool use_ext_asm,
+                                       bool is_v3_atomic_fp32,
+                                       int how_v3_bf16_cvt)
 {
-    return fmha_bwd_traits{head_size,
+    return fmha_bwd_traits_all{head_size,
                            head_size,
                            dtype,
                            false, // is_group_mode
@@ -35,7 +38,10 @@ fmha_bwd_traits_all get_ck_fmha_bwd_traits(const mask_info &mask,
                            false,    // has_dbias
                            has_dropout,
                            false, // s_randval
-                           deterministic};
+                           deterministic,
+                           use_ext_asm,
+                           is_v3_atomic_fp32,
+                           how_v3_bf16_cvt};
 }
 
 fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
@@ -364,7 +370,7 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d]
         ck_tile::stream_config stream_config{stream};
 
         auto traits =
-            get_ck_fmha_bwd_traits(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value(), deterministic);
+            get_ck_fmha_bwd_traits(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value(), deterministic, true, true, 1);
 
         auto args =
             get_ck_fmha_bwd_args(
@@ -391,7 +397,7 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d]
                 p_dropout,
                 drop_seed_offset);
 
-        float t = fmha_bwd(traits, args, stream_config);
+        float t = fmha_bwd_router(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     } else {
         // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.

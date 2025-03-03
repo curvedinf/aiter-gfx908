@@ -230,6 +230,53 @@ struct MulABScaleExpertWeight
         }
 };
 
+
+// d0: ascale, d1: bscale, d2:expert weight
+//warning: hack hack hack here!!!! ignore d0 right now as kernel mul d0 * d2 outside. tofix:felix 
+struct MulABScaleExpertWeightWin4
+{
+    template <typename E, typename C, typename D0, typename D1, typename D2>
+    __host__ __device__ constexpr void
+    operator()(E &e, const C &c, const D0 &d0, const D1 &d1, const D2 &d2) const;
+    template <>
+    __host__ __device__ constexpr void operator()<F16, float, float, float, float>(F16 &e,
+                                                                                   const float &c,
+                                                                                   const float &d0,
+                                                                                   const float &d1,
+                                                                                   const float &d2) const
+    {
+        e = ck::type_convert<F16>(c * d1 * d2 * 16.f);
+    }
+    template <>
+    __host__ __device__ constexpr void operator()<B16, float, float, float, float>(B16 &e,
+                                                                                   const float &c,
+                                                                                   const float &d0,
+                                                                                   const float &d1,
+                                                                                   const float &d2) const
+    {
+        e = ck::type_convert<B16>(c * d1 * d2 * 16.f);
+    }
+
+        template <>
+        __host__ __device__ constexpr void operator()<F16, int, float, float, float>(F16 &e,
+                                                                                       const int &c,
+                                                                                       const float &d0,
+                                                                                       const float &d1,
+                                                                                       const float &d2) const
+        {
+            e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d1 * d2 * 16.f);
+        }
+        template <>
+        __host__ __device__ constexpr void operator()<B16, int, float, float, float>(B16 &e,
+                                                                                       const int &c,
+                                                                                       const float &d0,
+                                                                                       const float &d1,
+                                                                                       const float &d2) const
+        {
+            e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d1 * d2 * 16.f);
+        }
+};
+
 template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, bool Nswizzle, int MPerBlock = 32>
 void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
                         int topk,

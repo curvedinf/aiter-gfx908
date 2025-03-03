@@ -2,7 +2,7 @@
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 #pragma once
 #include "moe_ck_gemm.hpp"
-
+#include <iostream>
 template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, bool Nswizzle, int MPerBlock>
 void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
                         int topk,
@@ -43,10 +43,18 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::Default;
     // static constexpr ck::index_t MPerBlock = 128;
     static constexpr ck::index_t MNPerXDL = 32;
-    static constexpr ck::index_t CShuffleMXDLPerWave = MPerBlock / 32;
-    static constexpr ck::index_t KPerBlock = 256 / sizeof(A0DataType);
+    static constexpr ck::index_t BLOCKSIZE = 256;
+    static constexpr ck::index_t NPerBlock = 128;
+    static constexpr ck::index_t WAVES = BLOCKSIZE / 64;
+    static constexpr ck::index_t MWaves = 1;
+    static constexpr ck::index_t NWaves = WAVES / MWaves;
+    static constexpr ck::index_t MXDLPerWave = MPerBlock / (MNPerXDL * MWaves);
+    static constexpr ck::index_t NXDLPerWave = NPerBlock / (MNPerXDL * NWaves);
+    static constexpr ck::index_t CShuffleMXDLPerWave = MPerBlock / 32 / MWaves;
+    // static constexpr ck::index_t CShuffleMXDLPerWave = MPerBlock / 32;
+    static constexpr ck::index_t KPerBlock = ck::is_same_v<B0DataType, I4> ? 128 : 256 / sizeof(A0DataType);
     // static constexpr ck::index_t KPerBlock = 64;
-    static constexpr ck::index_t MXDLPerWave = MPerBlock / 32; // todo fix this constraint
+    // static constexpr ck::index_t MXDLPerWave = MPerBlock / 32; // todo fix this constraint
     static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);
     static constexpr ck::index_t BK1 = ck::is_same_v<B0DataType, I4> ? 32 : 16 / sizeof(B0DataType);
     static constexpr ck::index_t EVec = 16 / sizeof(EDataType);
@@ -56,7 +64,9 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t K0_N_B = 256 / K0_B;
     static constexpr ck::index_t D0Vec = 1;
     static constexpr ck::index_t D1Vec = 1;
-    // std::cout<<"debug CK ########:"  <<std::endl;
+    // std::cout<<"Aiter debug CK GEMM1 ########:"  <<std::endl;
+    // std::cout<<"Aiter debug CK N:"  <<N<<std::endl;
+    // std::cout<<"Aiter debug CK K:"  <<K<<std::endl;
     // std::cout<<"debug CK MPerBlock:"<<MPerBlock  <<std::endl;
     // std::cout<<"debug CK KPerBlock:"<<KPerBlock  <<std::endl;
     // std::cout<<"debug CK AK1:"<<AK1  <<std::endl;
@@ -67,12 +77,13 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     // std::cout<<"debug CK K0_N_B:"<<K0_N_B  <<std::endl;
     // std::cout<<"debug CK MNPerXDL:"<<MNPerXDL  <<std::endl;
     // std::cout<<"debug CK MXDLPerWave:"<<MXDLPerWave  <<std::endl;
+    // std::cout<<"debug CK NXDLPerWave:"<<NXDLPerWave  <<std::endl;
     // std::cout<<"debug CK CShuffleMXDLPerWave:"<<CShuffleMXDLPerWave  <<std::endl;
     // std::cout<<"debug CK EVec:"<<EVec  <<std::endl;
     // std::cout<<"debug CK D0Vec:"<<D0Vec  <<std::endl;
     // std::cout<<"debug CK D1Vec:"<<D1Vec  <<std::endl;
     // std::cout<<"debug CK Nswizzle:"<<Nswizzle  <<std::endl;
-    //  using DeviceOpInstance = ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3
+    ////  using DeviceOpInstance = ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3
     using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemm
         // clang-format off
 ///######|  ALayout|  BLayout| DsLayout| ELayout|      AData|      BData|     DsData|     EData|     AccData|         CShuffle|           A|           B|          CDE|           GEMM| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MXdl| NXdl|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
@@ -231,29 +242,32 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t K0_M = 256 / K0_A;
     static constexpr ck::index_t K0_N = 256 / K0_B;
 
-    //std::cout << "debug CK ########:" << std::endl;
-    //std::cout << "debug CK BLOCKSIZE:" << BLOCKSIZE << std::endl;
-    //std::cout << "debug CK MPerBlock:" << MPerBlock << std::endl;
-    //std::cout << "debug CK NPerBlock:" << NPerBlock << std::endl;
-    //std::cout << "debug CK KPerBlock:" << KPerBlock << std::endl;
-    //std::cout << "debug CK AK1:" << AK1 << std::endl;
-    //std::cout << "debug CK BK1:" << BK1 << std::endl;
-    //std::cout << "debug CK MNPerXDL:" << MNPerXDL << std::endl;
-    //std::cout << "debug CK MXDLPerWave:" << MXDLPerWave << std::endl;
-    //std::cout << "debug CK NXDLPerWave:" << NXDLPerWave << std::endl;
-    //std::cout << "debug CK CShuffleMXDLPerWave:" << CShuffleMXDLPerWave << std::endl;
-    //std::cout << "debug CK CShuffleMLane:" << CShuffleMLane << std::endl;
-    //std::cout << "debug CK CShuffleNLane:" << CShuffleNLane << std::endl;
-    //std::cout << "debug CK EVec:" << EVec << std::endl;
-    //std::cout << "debug CK D0Vec:" << D0Vec << std::endl;
-    //std::cout << "debug CK D1Vec:" << D1Vec << std::endl;
-    //std::cout << "debug CK D2Vec:" << D1Vec << std::endl;
-    //std::cout << "debug CK Nswizzle:" << Nswizzle << std::endl;
-    //std::cout << "debug CK K0_A:" << K0_A << std::endl;
-    //std::cout << "debug CK K0_M:" << K0_M << std::endl;
-    //std::cout << "debug CK K0_B:" << K0_B << std::endl;
-    //std::cout << "debug CK K0_N:" << K0_N << std::endl;
-//
+    // std::cout << "debug CK ########:" << std::endl;
+    // std::cout << "debug CK BLOCKSIZE:" << BLOCKSIZE << std::endl;
+    // std::cout << "debug CK MPerBlock:" << MPerBlock << std::endl;
+    // std::cout << "debug CK NPerBlock:" << NPerBlock << std::endl;
+    // std::cout << "debug CK KPerBlock:" << KPerBlock << std::endl;
+    // std::cout << "debug CK AK1:" << AK1 << std::endl;
+    // std::cout << "debug CK BK1:" << BK1 << std::endl;
+    // std::cout << "debug CK MNPerXDL:" << MNPerXDL << std::endl;
+    // std::cout << "debug CK MXDLPerWave:" << MXDLPerWave << std::endl;
+    // std::cout << "debug CK NXDLPerWave:" << NXDLPerWave << std::endl;
+    // std::cout << "debug CK CShuffleMXDLPerWave:" << CShuffleMXDLPerWave << std::endl;
+    // std::cout << "debug CK CShuffleMLane:" << CShuffleMLane << std::endl;
+    // std::cout << "debug CK CShuffleNLane:" << CShuffleNLane << std::endl;
+    // std::cout << "debug CK EVec:" << EVec << std::endl;
+    // std::cout << "debug CK D0Vec:" << D0Vec << std::endl;
+    // std::cout << "debug CK D1Vec:" << D1Vec << std::endl;
+    // std::cout << "debug CK D2Vec:" << D1Vec << std::endl;
+    // std::cout << "debug CK Nswizzle:" << Nswizzle << std::endl;
+    // std::cout << "debug CK K0_A:" << K0_A << std::endl;
+    // std::cout << "debug CK K0_M:" << K0_M << std::endl;
+    // std::cout << "debug CK K0_B:" << K0_B << std::endl;
+    // std::cout << "debug CK K0_N:" << K0_N << std::endl;
+    // std::cout << "debug CK N:" << N << std::endl;
+    // std::cout << "debug CK K:" << K << std::endl;
+    // std::cout << "debug CK tokens:" << tokens << std::endl;
+    //
     using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemm
         // clang-format off
 ///#####|  ALayout|  BLayout| DsLayout| ELayout|      AData|      BData|     DsData|     EData|     AccData|         CShuffle|           A|           B|          CDE|           GEMM| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MXdl| NXdl|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|

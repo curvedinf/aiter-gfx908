@@ -4,9 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include "py_itfs_common.h"
-
 #include "moe_ck_gemm.hpp"
-
 #define CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, MPerBlock)                                                                                                                                                                                                          \
     if (MPerBlock == 32)                                                                                                                                                                                                                                                                                                    \
         ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, 32>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
@@ -172,7 +170,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
     int tokens = inter_states.size(0);
     int sorted_size = sorted_token_ids.size(0);
     int E = w1.size(0);
-    int N = w1.size(2);
+    int N = w2.size(1);
     int K = inter_states.size(-1);
     // int max_num_tokens_padded = sorted_token_ids.size(0);
     // int agvtokens_per_expert = max_num_tokens_padded / E;
@@ -223,7 +221,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         TORCH_CHECK(a2_scale.value().dtype() == at::ScalarType::Float,
                     "Scales must be Float dtype!");
         using AccDataType = F32;
-        using CDEElementOp = MulABScaleExpertWeight;
+        using CDEElementOp = MulABScaleExpertWeightWin4;
         if (out.dtype() == at::ScalarType::Half)
         {
             // CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, MPerBlock);

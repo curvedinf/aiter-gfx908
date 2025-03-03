@@ -40,7 +40,9 @@ __forceinline__ __device__ uint32_t half2_as_uint32(half2 x) { return *(uint32_t
  */
 __forceinline__ __device__ float ptx_exp2(float x) {
   float y;
+#if defined(ROCM_TODO)
   asm volatile("ex2.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
+#endif
   return y;
 }
 
@@ -50,7 +52,9 @@ __forceinline__ __device__ float ptx_exp2(float x) {
  */
 __forceinline__ __device__ float ptx_log2(float x) {
   float y;
+#if defined(ROCM_TODO)
   asm volatile("lg2.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
+#endif
   return y;
 }
 
@@ -61,7 +65,9 @@ __forceinline__ __device__ float ptx_log2(float x) {
 __forceinline__ __device__ half2 ptx_exp2(half2 x) {
   uint32_t y_u32;
   uint32_t x_u32 = half2_as_uint32(x);
+#if defined(ROCM_TODO)
   asm volatile("ex2.approx.f16x2 %0, %1;" : "=r"(y_u32) : "r"(x_u32));
+#endif
   return uint32_as_half2(y_u32);
 }
 
@@ -71,7 +77,9 @@ __forceinline__ __device__ half2 ptx_exp2(half2 x) {
  */
 __forceinline__ __device__ half ptx_exp2(half x) {
   ushort y_u16;
+#if defined(ROCM_TODO)
   asm volatile("ex2.approx.f16 %0, %1;" : "=h"(y_u16) : "h"(__half_as_ushort(x)));
+#endif
   return __ushort_as_half(y_u16);
 }
 
@@ -81,7 +89,9 @@ __forceinline__ __device__ half ptx_exp2(half x) {
  */
 __forceinline__ __device__ float ptx_rcp(float x) {
   float y;
+#if defined(ROCM_TODO)
   asm volatile("rcp.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
+#endif
   return y;
 }
 
@@ -93,9 +103,11 @@ __forceinline__ __device__ float ptx_rcp(float x) {
  */
 __forceinline__ __device__ float shfl_xor_sync(float x, int lane_mask) {
   float y;
+#if defined(ROCM_TODO)
   asm volatile("shfl.sync.bfly.b32 %0, %1, %2, 0x1f, 0xffffffff;"
                : "=f"(y)
                : "f"(x), "r"(lane_mask));
+#endif
   return y;
 }
 
@@ -106,7 +118,11 @@ __forceinline__ __device__ float shfl_xor_sync(float x, int lane_mask) {
  * \param lane_mask The mask to perform thread index xor with: y[i] <- x[i ^ lane_mask]
  */
 __forceinline__ __device__ half2 shfl_xor_sync(half2 x, int lane_mask) {
-  return __shfl_xor_sync(0xffffffff, x, lane_mask);
+  uint32_t y;
+#if defined(ROCM_TODO)
+  __shfl_xor_sync(0xffffffff, x, lane_mask);
+#endif
+  return y;
 }
 
 /*!
@@ -115,7 +131,9 @@ __forceinline__ __device__ half2 shfl_xor_sync(half2 x, int lane_mask) {
  */
 __forceinline__ __device__ float rsqrt(float x) {
   float y;
+#if defined(ROCM_TODO)
   asm volatile("rsqrt.approx.ftz.f32 %0, %1;" : "=f"(y) : "f"(x));
+#endif
   return y;
 }
 
@@ -125,7 +143,9 @@ __forceinline__ __device__ float rsqrt(float x) {
  */
 __forceinline__ __device__ float tanh(float x) {
   float y;
+#if defined(ROCM_TODO)
   asm volatile("tanh.approx.f32 %0, %1;" : "=f"(y) : "f"(x));
+#endif
   return y;
 }
 
@@ -136,7 +156,9 @@ __forceinline__ __device__ float tanh(float x) {
 __forceinline__ __device__ half2 tanh(half2 x) {
   uint32_t y_u32;
   uint32_t x_u32 = half2_as_uint32(x);
+#if defined(ROCM_TODO)
   asm volatile("tanh.approx.f16x2 %0, %1;" : "=r"(y_u32) : "r"(x_u32));
+#endif
   return uint32_as_half2(y_u32);
 }
 
@@ -146,7 +168,9 @@ __forceinline__ __device__ half2 tanh(half2 x) {
  */
 __forceinline__ __device__ half tanh(half x) {
   ushort y_u16;
+#if defined(ROCM_TODO)
   asm volatile("tanh.approx.f16 %0, %1;" : "=h"(y_u16) : "h"(__half_as_ushort(x)));
+#endif
   return __ushort_as_half(y_u16);
 }
 

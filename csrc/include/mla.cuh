@@ -24,7 +24,10 @@
 #include "permuted_smem.cuh"
 #include "math.cuh"
 // #include "prefill.cuh"
-// #include "variant_helper.cuh"
+#include "variant_helper.cuh"
+
+using cp_async::SharedMemFillMode;
+using mma::MMAMode;
 
 namespace mla {
 

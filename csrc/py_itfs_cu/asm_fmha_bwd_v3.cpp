@@ -694,8 +694,11 @@ float fmha_bwd(fmha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_config&
     float r = -1;
 
     if (t.use_ext_asm == true){
+        std::cout << "use ext asm" << std::endl;
         if ((t.is_group_mode == false) && (t.bias_type == bias_enum::no_bias) && (t.has_dbias == false) && (t.has_dropout == false) &&
                     (t.is_deterministic == false) && (a.hdim_q == a.hdim_v) && (a.nhead_q % a.nhead_k == 0)) {
+            std::cout << "second layer" << std::endl;
+            std::cout << a.nhead_stride_dq_acc << ">=" << a.stride_dq_acc << std::endl;
             if((a.hdim_q > 64) && (a.hdim_q <= 128) && (a.hdim_q % 8 == 0)){
                 if(t.data_type.compare("fp16") == 0){
                     if(t.mask_type == mask_enum::no_mask){

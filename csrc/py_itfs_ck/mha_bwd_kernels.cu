@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
-
+#include <iostream>
 #include <torch/all.h>
 #include <ATen/cuda/CUDAContext.h>
 #include "py_itfs_common.h"
@@ -10,9 +10,10 @@
 float fmha_bwd_router(fmha_bwd_traits_all traits, fmha_bwd_args args, const ck_tile::stream_config& stream_config) {
     float r = -1;
 // fmha bwd v3 asm kernel currently only support mi300
-#if defined(__HIPCC__) && (defined(__gfx942__))
+// #if defined(__HIPCC__) && (defined(__gfx942__))
+    // std::cout << "mi308, try v3" << std::endl;
     r = fmha_bwd_v3(traits, args, stream_config);
-#endif
+// #endif
     if (r == -1) {
         r = fmha_bwd(traits, args, stream_config);
     }
@@ -365,7 +366,7 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d]
         auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
         ck_tile::stream_config stream_config{stream};
 
-	stream_config.log_level_ = 1;
+	    stream_config.log_level_ = 1;
         auto traits =
             get_ck_fmha_bwd_traits(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value(), deterministic, true, true, 1);
 

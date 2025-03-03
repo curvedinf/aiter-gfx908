@@ -249,54 +249,54 @@ template<> struct FmhaBwdV3Name<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdFp16,  
 
 template <typename fmha_bwd_dq_dk_dv_v3_traits_> struct FmhaBwdV3Buf;
 // #######################################################|HDim|    DataType|kIsCausal|kIsAtomic32|BF16Cvt|kIsSEQPad|kIsHDPad|
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a16_rtne; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      1,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a16_rtna; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      2,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a16_rtz; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a32_rtne; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      1,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a32_rtna; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      2,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a32_rtz; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a16_rtne; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      1,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a16_rtna; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      2,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a16_rtz; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a32_rtne; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      1,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a32_rtna; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      2,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a32_rtz; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,    false,      false,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_fp16_a16; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,    false,       true,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_fp16_a32; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,     true,      false,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_fp16_causal_a16; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,     true,       true,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_fp16_causal_a32; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      0,    false,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a16_rtne_pddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      1,    false,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a16_rtna_pddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      2,    false,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a16_rtz_pddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      0,     true,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a32_rtne_psskddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      1,     true,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a32_rtna_psskddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      2,     true,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_a32_rtz_psskddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      0,    false,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a16_rtne_pddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      1,    false,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a16_rtna_pddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      2,    false,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a16_rtz_pddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      0,     true,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a32_rtne_psskddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      1,     true,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a32_rtna_psskddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      2,     true,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_bf16_causal_a32_rtz_psskddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,    false,      false,      0,    false,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_fp16_a16_pddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,    false,       true,      0,     true,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_fp16_a32_psskddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,     true,      false,      0,    false,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_fp16_causal_a16_pddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,     true,       true,      0,     true,    true>> { static constexpr unsigned char * bwd_v3_buf = bwd_fp16_causal_a32_psskddv; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,      false,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_a16_rtne; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,      false,      1,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_a16_rtna; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,      false,      2,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_a16_rtz; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,       true,      0,     true,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_a32_rtne_pssk; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,       true,      1,     true,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_a32_rtna_pssk; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,       true,      2,     true,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_a32_rtz_pssk; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,      false,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_causal_a16_rtne; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,      false,      1,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_causal_a16_rtna; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,      false,      2,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_causal_a16_rtz; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,       true,      0,     true,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_causal_a32_rtne_pssk; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,       true,      1,     true,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_causal_a32_rtna_pssk; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,       true,      2,     true,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_bf16_causal_a32_rtz_pssk; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdFp16,    false,      false,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_fp16_a16; };
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdFp16,    false,       true,      0,     true,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_fp16_a32_pssk; }; 
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdFp16,     true,      false,      0,    false,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_fp16_causal_a16; }; 
-template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdFp16,     true,       true,      0,     true,   false>> { static constexpr unsigned char * bwd_v3_buf = bwd_hd64_fp16_causal_a32_pssk; }; 
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a16_rtne.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      1,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a16_rtna.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      2,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a16_rtz.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a32_rtne.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      1,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a32_rtna.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      2,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a32_rtz.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a16_rtne.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      1,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a16_rtna.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      2,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a16_rtz.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a32_rtne.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      1,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a32_rtna.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      2,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a32_rtz.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,    false,      false,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_fp16_a16.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,    false,       true,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_fp16_a32.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,     true,      false,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_fp16_causal_a16.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,     true,       true,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_fp16_causal_a32.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      0,    false,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a16_rtne_pddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      1,    false,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a16_rtna_pddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,      false,      2,    false,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a16_rtz_pddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      0,     true,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a32_rtne_psskddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      1,     true,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a32_rtna_psskddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,    false,       true,      2,     true,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_a32_rtz_psskddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      0,    false,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a16_rtne_pddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      1,    false,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a16_rtna_pddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,      false,      2,    false,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a16_rtz_pddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      0,     true,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a32_rtne_psskddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      1,     true,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a32_rtna_psskddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,     true,       true,      2,     true,    true>> { static constexpr const char * bwd_v3_buf = "bwd_bf16_causal_a32_rtz_psskddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,    false,      false,      0,    false,    true>> { static constexpr const char * bwd_v3_buf = "bwd_fp16_a16_pddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,    false,       true,      0,     true,    true>> { static constexpr const char * bwd_v3_buf = "bwd_fp16_a32_psskddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,     true,      false,      0,    false,    true>> { static constexpr const char * bwd_v3_buf = "bwd_fp16_causal_a16_pddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,     true,       true,      0,     true,    true>> { static constexpr const char * bwd_v3_buf = "bwd_fp16_causal_a32_psskddv.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,      false,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_a16_rtne.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,      false,      1,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_a16_rtna.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,      false,      2,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_a16_rtz.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,       true,      0,     true,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_a32_rtne_pssk.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,       true,      1,     true,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_a32_rtna_pssk.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,    false,       true,      2,     true,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_a32_rtz_pssk.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,      false,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_causal_a16_rtne.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,      false,      1,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_causal_a16_rtna.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,      false,      2,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_causal_a16_rtz.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,       true,      0,     true,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_causal_a32_rtne_pssk.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,       true,      1,     true,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_causal_a32_rtna_pssk.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdBf16,     true,       true,      2,     true,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_bf16_causal_a32_rtz_pssk.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdFp16,    false,      false,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_fp16_a16.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdFp16,    false,       true,      0,     true,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_fp16_a32_pssk.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdFp16,     true,      false,      0,    false,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_fp16_causal_a16.co"; };
+template<> struct FmhaBwdV3Buf<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdFp16,     true,       true,      0,     true,   false>> { static constexpr const char * bwd_v3_buf = "bwd_hd64_fp16_causal_a32_pssk.co"; };
 
 template <typename fmha_bwd_dq_dk_dv_v3_traits_> struct FmhaBwdV3Ts;
 // ######################################################|HDim|    DataType|kIsCausal|kIsAtomic32|BF16Cvt|kIsSEQPad|kIsHDPad|
@@ -352,10 +352,10 @@ template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_< 64, FmhaBwdFp16,    
 class fmha_bwd_v3_kernel
 {
     public:
-    fmha_bwd_v3_kernel(const std::string& name, unsigned char buffer[])
+    fmha_bwd_v3_kernel(const char *name, const char *hsaco)
     {
-        HIP_CALL(hipModuleLoadData(&module, buffer));
-        HIP_CALL(hipModuleGetFunction(&kernel_func, module, name.c_str()));
+        HIP_CALL(hipModuleLoad(&module, (std::string(AITER_ASM_DIR) + hsaco).c_str()));
+        HIP_CALL(hipModuleGetFunction(&kernel_func, module, name));
     }
 
     void

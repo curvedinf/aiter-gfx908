@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
-#include <iostream>
+
 #include <torch/all.h>
 #include <ATen/cuda/CUDAContext.h>
 #include "py_itfs_common.h"
 #include "mha_common.h"
-#include "mha_bwd.h"
+
+#include "fmha_bwd.hpp"
+#include "mask.hpp"
 
 fmha_bwd_traits get_ck_fmha_bwd_traits(const mask_info &mask,
                                        std::string dtype,
@@ -15,16 +17,17 @@ fmha_bwd_traits get_ck_fmha_bwd_traits(const mask_info &mask,
                                        bool deterministic)
 {
     return fmha_bwd_traits{head_size,
-            head_size,
-            dtype,
-            false, // is_group_mode
-            mask.type,
-            enable_alibi ? bias_enum::alibi : bias_enum::no_bias,
-            false,    // has_dbias
-            has_dropout,
-            false, // s_randval
-            deterministic};
+                           head_size,
+                           dtype,
+                           false, // is_group_mode
+                           mask.type,
+                           enable_alibi ? bias_enum::alibi : bias_enum::no_bias,
+                           false,    // has_dbias
+                           has_dropout,
+                           false, // s_randval
+                           deterministic};
 }
+
 
 fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
                                    // sizes

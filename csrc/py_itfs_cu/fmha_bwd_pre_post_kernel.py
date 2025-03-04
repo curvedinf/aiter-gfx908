@@ -35,10 +35,11 @@ FMHA_BWD_KERNEL_HEADER = """// SPDX-License-Identifier: MIT
 FMHA_BWD_API_FILENAME="asm_fmha_bwd_v3_new.cpp"
 FMHA_BWD_API="""
 #include <iostream>
-#include "fmha_bwd.hpp"
 #include "aiter_hip_common.h"
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
+#include "py_itfs_common.h"
+#include "mha_common.h"
 
 #define HSA_KERNEL "kernel_func"
 

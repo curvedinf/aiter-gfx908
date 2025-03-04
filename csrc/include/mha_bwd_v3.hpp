@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 std::vector<at::Tensor>
-mha_bwd(const at::Tensor &dout, // [b, sq, hq, d]
+mha_bwd_v3(const at::Tensor &dout, // [b, sq, hq, d]
         const at::Tensor &q,    // [b, sq, hq, d]
         const at::Tensor &k,    // [b, sk, hk, d]
         const at::Tensor &v,    // [b, sk, hk, d]

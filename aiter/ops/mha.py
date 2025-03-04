@@ -452,6 +452,7 @@ def _flash_attn_backward(
             None
         )
     else:
+        print("fallback to v2")
         (
             dq,
             dk,

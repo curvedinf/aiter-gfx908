@@ -5,7 +5,7 @@
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
-    m.def("mha_bwd", &mha_bwd,
+    m.def("mha_bwd_v3", &mha_bwd_v3,
           py::arg("dout"),
           py::arg("q"), py::arg("k"), py::arg("v"),
           py::arg("out"),

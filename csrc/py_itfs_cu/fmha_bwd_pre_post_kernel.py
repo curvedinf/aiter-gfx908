@@ -753,7 +753,7 @@ float fmha_bwd_v3_genl_(const ck_tile::stream_config& s, fmha_bwd_args a)
 float fmha_bwd_v3(fmha_bwd_traits_all t, fmha_bwd_args a, const ck_tile::stream_config& s){
     float r = -1;
 
-    if (t.uses_ext_asm == true){
+    if (t.use_ext_asm == true){
         if ((t.is_group_mode == false) && (t.bias_type == bias_enum::no_bias) && (t.has_dbias == false) && (t.has_dropout == false) &&
                     (t.is_deterministic == false) && (a.hdim_q == a.hdim_v) && (a.nhead_q % a.nhead_k == 0)) {
             if((a.hdim_q > 64) && (a.hdim_q <= 128) && (a.hdim_q % 8 == 0)){
@@ -1513,6 +1513,27 @@ float fmha_bwd_v3(fmha_bwd_traits_all t, fmha_bwd_args a, const ck_tile::stream_
     return r;
 }
 
+fmha_bwd_traits_all get_ck_fmha_bwd_traits_all(const mask_info &mask,
+                                       std::string dtype,
+                                       int head_size,
+                                       bool has_dropout,
+                                       bool enable_alibi,
+                                       bool deterministic,
+                                       bool use_ext_asm,
+                                       bool is_v3_atomic_fp32,
+                                       int how_v3_bf16_cvt)
+{
+    return fmha_bwd_traits_all(mask,
+                    dtype,
+                    head_size,
+                    has_dropout,
+                    enable_alibi,
+                    deterministic,
+                    use_ext_asm,
+                    is_v3_atomic_fp32,
+                    how_v3_bf16_cvt);
+}
+
 fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
                                    // sizes
                                    const int b,
@@ -1840,7 +1861,7 @@ mha_bwd_v3(const at::Tensor &dout,         // [b, sq, hq, d]
 
 	    stream_config.log_level_ = 1;
         auto traits =
-            get_ck_fmha_bwd_traits_all(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value(), true, true, 1);
+            get_ck_fmha_bwd_traits_all(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value(), deterministic, true, true, 1);
 
         auto args =
             get_ck_fmha_bwd_args(

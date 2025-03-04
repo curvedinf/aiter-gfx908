@@ -1839,7 +1839,7 @@ mha_bwd_v3(const at::Tensor &dout,         // [b, sq, hq, d]
 
 	    stream_config.log_level_ = 1;
         auto traits =
-            get_ck_fmha_bwd_traits(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value());
+            get_ck_fmha_bwd_traits_all(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value(), true, true, 1);
 
         auto args =
             get_ck_fmha_bwd_args(
@@ -1866,7 +1866,7 @@ mha_bwd_v3(const at::Tensor &dout,         // [b, sq, hq, d]
                 p_dropout,
                 drop_seed_offset);
 
-        float t = fmha_bwd(traits, args, stream_config);
+        float t = fmha_bwd_v3(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     }} else {{
         // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.

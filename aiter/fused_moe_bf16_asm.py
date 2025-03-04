@@ -9,6 +9,7 @@ import os
 from typing import Any, Callable, Dict, Optional, Tuple
 import aiter
 from aiter import logger
+from op_tests.int4_utils import *
 BLOCK_SIZE_M = 32
 
 
@@ -215,6 +216,73 @@ def ck_moe_2stages(a1,
                 1.0, dtype=torch.float, device=device)
         a2_scale = ck_moe_2stages.one_float_tensor
 
+    aiter.ck_moe_stage2(a2, w1, w2, sorted_ids,
+                        sorted_expert_ids, sorted_weights,
+                        num_valid_ids, moe_buf, topk, fc2_scale, a2_scale, block_size)
+
+    return moe_buf
+
+
+def ck_moe_2stages_win4(a1,
+                   w1,  # [expert(local_expert:EP), inter_dim(*2), dim] N,K
+                   w2,  # [expert(local_expert:EP), dim, inter_dim]
+                   topk_weight, topk_ids,
+                   # following for int8 quant
+                   fc1_scale=None,  # [expert(local_expert:EP), inter_dim, 1]
+                   fc2_scale=None,  # [expert(local_expert:EP), model_dim, 1]
+                   a1_scale=None,  # [1]
+                   a2_scale=None,  # [1]
+                   block_size=None,
+                   expert_mask=None
+                   ):
+    E, model_dim, inter_dim = w2.shape
+    inter_dim = inter_dim * 8
+    global_E = E
+    if expert_mask is not None:
+        global_E = expert_mask.numel()
+    M, topk = topk_ids.shape
+    dtype = a1.dtype
+    device = topk_ids.device
+    if block_size is None:
+        block_size = get_block_size(M, topk, E)
+   
+    #print("###block_size:",block_size)
+    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, global_E,
+                                                                                           model_dim, dtype, block_size, expert_mask)
+    if w1.dtype == torch.uint32:#torch.uint32 torch.float8_e4m3fnuz
+        a1, a1_scale = aiter.per_tensor_quant_fp8_hip(a1, a1_scale)
+        # a1, a1_scale = aiter.per_tensor_quant(a1, quant_dtype=w1.dtype)
+    else:
+        a1_scale = None
+
+    a2 = torch.zeros(
+        (M, topk, w1.shape[1]),
+        dtype=dtype,
+        device=device,
+    )
+
+    aiter.ck_moe_stage1(a1, w1, w2,
+                        sorted_ids, sorted_expert_ids, num_valid_ids,
+                        a2, topk,
+                        fc1_scale, a1_scale, block_size)
+    #print("a2 shape:",a2.shape)
+    # g1u0
+    if w2.shape[2] == w1.shape[1]:
+        a2 = F.gelu(a2)
+    # g1u1
+    else:
+        tmp = torch.empty((M, topk, inter_dim), dtype=dtype, device=device)
+        aiter.silu_and_mul(tmp, a2)
+        a2 = tmp
+    if w2.dtype == torch.uint32:
+        a2, a2_scale = aiter.per_tensor_quant_fp8_hip(a2, a2_scale)
+        # a2, a2_scale = aiter.per_tensor_quant(a2, quant_dtype=w2.dtype)
+    else:
+        if not hasattr(ck_moe_2stages, "one_float_tensor"):
+            ck_moe_2stages.one_float_tensor = torch.tensor(
+                1.0, dtype=torch.float, device=device)
+        a2_scale = ck_moe_2stages.one_float_tensor
+    
     aiter.ck_moe_stage2(a2, w1, w2, sorted_ids,
                         sorted_expert_ids, sorted_weights,
                         num_valid_ids, moe_buf, topk, fc2_scale, a2_scale, block_size)

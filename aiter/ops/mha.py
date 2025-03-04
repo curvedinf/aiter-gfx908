@@ -71,6 +71,29 @@ def mha_bwd(
 ): ...
 
 
+@compile_ops("module_mha_bwd_v3", fc_name="mha_bwd_v3")
+def mha_bwd_v3(
+    dout: Tensor,
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    out: Tensor,
+    softmax_lse: Tensor,
+    dropout_p: float,
+    softmax_scale: float,
+    is_causal: bool,
+    window_size_left: int,
+    window_size_right: int,
+    deterministic: bool,
+    dq: Optional[Tensor] = None,
+    dk: Optional[Tensor] = None,
+    dv: Optional[Tensor] = None,
+    alibi_slopes: Optional[Tensor] = None,
+    rng_state: Optional[Tensor] = None,
+    gen: Optional[Generator] = None,
+): ...
+
+
 @compile_ops("module_mha_varlen_bwd", fc_name="mha_varlen_bwd")
 def mha_varlen_bwd(
     dout: Tensor,
@@ -243,34 +266,209 @@ def _flash_attn_backward(
     blob_gen_cmd = f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd ' \
         '--receipt 300 --filter {} --output_dir {{}}'.format(filter)
 
+    (batch, seqlen_q, nhead_q, hdim_q) = q.shape
+    (batch, seqlen_k, nhead_k, hdim_v) = v.shape
+
+    batch_stride_q = q.stride(0)
+    stride_q = q.stride(1)
+    nhead_stride_q = q.stride(2)
+
+    batch_stride_k = k.stride(0)
+    stride_k = k.stride(1)
+    nhead_stride_k = k.stride(2)
+    
+    batch_stride_v = v.stride(0)
+    stride_v = v.stride(1)
+    nhead_stride_v = v.stride(2)
+
+    batch_stride_o = out.stride(0)
+    stride_o = out.stride(1)
+    nhead_stride_o = out.stride(2)
+
+    batch_stride_do = dout.stride(0)
+    stride_do = dout.stride(1)
+    nhead_stride_do = dout.stride(2)
+
+    batch_stride_dk = dk.stride(0)
+    stride_dk = dk.stride(1)
+    nhead_stride_dk = dk.stride(2)
+
+    batch_stride_dv = dv.stride(0)
+    stride_dv = dv.stride(1)
+    nhead_stride_dv = dv.stride(2)
+
+    # mask
+    window_size_left = -1 if window_size_left >= seqlen_k
+    window_size_right = -1 if window_size_right >= seqlen_k
+    mask = (causal == True and window_size_left == -1) # causal mask
+    nmask = (causal == False and window_size_left == -1 and window_size_right == -1) # no mask
+    
+    def np():
+        # bwd_v3_bf16_a16_rtne
+        # bwd_v3_bf16_a16_rtna
+        # bwd_v3_bf16_a16_rtz
+        # bwd_v3_bf16_a32_rtne
+        # bwd_v3_bf16_a32_rtna
+        # bwd_v3_bf16_a32_rtz
+        # bwd_v3_bf16_causal_a16_rtne
+        # bwd_v3_bf16_causal_a16_rtna
+        # bwd_v3_bf16_causal_a16_rtz
+        # bwd_v3_bf16_causal_a32_rtne
+        # bwd_v3_bf16_causal_a32_rtna
+        # bwd_v3_bf16_causal_a32_rtz
+        # bwd_v3_hd64_bf16_a16_rtne
+        # bwd_v3_hd64_bf16_a16_rtna
+        # bwd_v3_hd64_bf16_a16_rtz
+        # bwd_v3_hd64_bf16_causal_a16_rtne
+        # bwd_v3_hd64_bf16_causal_a16_rtna
+        # bwd_v3_hd64_bf16_causal_a16_rtz
+        # bwd_v3_hd64_fp16_a16
+        # bwd_v3_fp16_a16
+        # bwd_v3_fp16_a32
+        # bwd_v3_hd64_fp16_causal_a16
+        # bwd_v3_fp16_causal_a16
+        # bwd_v3_fp16_causal_a32
+        ret &= hdim_q == 128 or hdim_q == 64
+        ret &= (seqlen_q == seqlen_k) 
+        ret &= seqlen_k % 64 == 0
+        ret &= stride_q == stride_do
+        ret &= nhead_stride_q == nhead_stride_do
+        ret &= batch_stride_q == batch_stride_do
+        ret &= stride_k == stride_v
+        ret &= nhead_stride_k == nhead_stride_v
+        ret &= batch_stride_k == batch_stride_v
+        ret &= nhead_stride_k == nhead_stride_dk
+        ret &= nhead_stride_v == nhead_stride_dv
+        ret &= (batch_stride_dk / batch_stride_k) == (nhead_q / nhead_k)
+        ret &= (batch_stride_dv / batch_stride_v) == (nhead_q / nhead_k)
+
+    def pssk():
+        # only for hd64 a32 causal/no causal, fp16/bf16-rtne/rtna/rtz cases
+        # nhead_stride_dq_acc >= stride_dq_acc must be guaranteed
+        # bwd_v3_hd64_bf16_a32_rtne_pssk
+        # bwd_v3_hd64_bf16_a32_rtna_pssk
+        # bwd_v3_hd64_bf16_a32_rtz_pssk
+        # bwd_v3_hd64_bf16_causal_a32_rtne_pssk
+        # bwd_v3_hd64_bf16_causal_a32_rtna_pssk
+        # bwd_v3_hd64_bf16_causal_a32_rtz_pssk
+        # bwd_v3_hd64_fp16_a32_pssk
+        # bwd_v3_hd64_fp16_causal_a32_pssk
+        ret = is_v3_atomic_fp32 == True
+        ret &= hdim_q == 64
+        ret &= nmask or (mask and seqlen_q == seqlen_k) # TODO: or (seqlen_q != seqlen_k and mask_type == top_left)
+
+    def pddv():
+        # only for a16 causal/no causal, fp16/bf16-rtne/rtna/rtz cases
+        # bwd_v3_bf16_a16_rtne_pddv
+        # bwd_v3_bf16_a16_rtna_pddv
+        # bwd_v3_bf16_a16_rtz_pddv
+        # bwd_v3_bf16_causal_a16_rtne_pddv
+        # bwd_v3_bf16_causal_a16_rtna_pddv
+        # bwd_v3_bf16_causal_a16_rtz_pddv
+        # bwd_v3_fp16_a16_pddv
+        # bwd_v3_fp16_causal_a16_pddv
+        ret = is_v3_atomic_fp32 == False
+        ret &= hdim_q > 64 and hdim_q < 128
+        ret &= (seqlen_q == seqlen_k) 
+        ret &= seqlen_k % 64 == 0
+        ret &= stride_q == stride_do
+        ret &= nhead_stride_q == nhead_stride_do
+        ret &= batch_stride_q == batch_stride_do
+        ret &= stride_k == stride_v
+        ret &= nhead_stride_k == nhead_stride_v
+        ret &= batch_stride_k == batch_stride_v
+        ret &= nhead_stride_k == nhead_stride_dk
+        ret &= nhead_stride_v == nhead_stride_dv
+        ret &= (batch_stride_dk / batch_stride_k) == (nhead_q / nhead_k)
+        ret &= (batch_stride_dv / batch_stride_v) == (nhead_q / nhead_k)
+
+    def psskddv():
+        # only for a32 causal/no causal, fp16/bf16-rtne/rtna/rtz cases
+        # bwd_v3_bf16_a32_rtne_psskddv
+        # bwd_v3_bf16_a32_rtna_psskddv
+        # bwd_v3_bf16_a32_rtz_psskddv
+        # bwd_v3_bf16_causal_a32_rtne_psskddv
+        # bwd_v3_bf16_causal_a32_rtna_psskddv
+        # bwd_v3_bf16_causal_a32_rtz_psskddv
+        # bwd_v3_fp16_a32_psskddv
+        # bwd_v3_fp16_causal_a32_psskddv
+        ret = is_v3_atomic_fp32 == True
+        ret &= hdim_q > 64 and hdim_q < 128
+        ret &= nmask or (mask and seqlen_q == seqlen_k) # TODO: or (seqlen_q != seqlen_k and mask_type == top_left)
+
+    def can_impl_fmha_v3_bwd():
+        # q: torch.Tensor,
+        # k: torch.Tensor,
+        # dropout_p: float,
+        # alibi_slopes: Optional[torch.Tensor],
+        # deterministic: bool):
+
+        # basic
+        ret = alibi_slopes is None
+        ret &= dropout_p == 0.0
+        ret &= deterministic == False
+        ret &= hdim_q == hdim_v
+        ret &= nhead_q % nhead_k == 0
+        ret &= hdim_q > =64 and hdim_q <= 128 and hdim_q % 8 == 0
+
+        ret &= np() or pssk() or pddv() or psskddv()
+        return ret
+
     # dq, dk, dv are allocated by us so they should already be contiguous
     dout, q, k, v, out = [maybe_contiguous(x) for x in (dout, q, k, v, out)]
-    (
-        dq,
-        dk,
-        dv,
-        softmax_d,
-    ) = mha_bwd(
-        dout,
-        q,
-        k,
-        v,
-        out,
-        softmax_lse,
-        dropout_p,
-        softmax_scale,
-        causal,
-        window_size_left,
-        window_size_right,
-        deterministic,
-        dq,
-        dk,
-        dv,
-        alibi_slopes,
-        rng_state,
-        None,
-        custom_build_args={'md_name': md_name, 'blob_gen_cmd': blob_gen_cmd}
-    )
+    if can_impl_fmha_v3_bwd():
+        (
+            dq,
+            dk,
+            dv,
+            softmax_d,
+        ) = mha_bwd_v3(
+            dout,
+            q,
+            k,
+            v,
+            out,
+            softmax_lse,
+            dropout_p,
+            softmax_scale,
+            causal,
+            window_size_left,
+            window_size_right,
+            deterministic,
+            dq,
+            dk,
+            dv,
+            alibi_slopes,
+            rng_state,
+            None
+        )
+    else:
+        (
+            dq,
+            dk,
+            dv,
+            softmax_d,
+        ) = mha_bwd(
+            dout,
+            q,
+            k,
+            v,
+            out,
+            softmax_lse,
+            dropout_p,
+            softmax_scale,
+            causal,
+            window_size_left,
+            window_size_right,
+            deterministic,
+            dq,
+            dk,
+            dv,
+            alibi_slopes,
+            rng_state,
+            None,
+            custom_build_args={'md_name': md_name, 'blob_gen_cmd': blob_gen_cmd}
+        )
     return softmax_d
 
 
@@ -336,6 +534,7 @@ class FlashAttnFunc(torch.autograd.Function):
     @staticmethod
     def backward(ctx, dout, *args):
         q, k, v, out, softmax_lse, rng_state = ctx.saved_tensors
+        # TODO: zeros_like()
         dq, dk, dv = torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
         head_size_og = dout.size(3)
         dout_padded = dout

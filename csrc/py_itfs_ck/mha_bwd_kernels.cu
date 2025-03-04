@@ -7,38 +7,23 @@
 #include "mha_common.h"
 #include "mha_bwd.h"
 
-float fmha_bwd_router(fmha_bwd_traits_all traits, fmha_bwd_args args, const ck_tile::stream_config& stream_config) {
-    float r = -1;
-// fmha bwd v3 asm kernel currently only support mi300
-// #if defined(__HIPCC__) && (defined(__gfx942__))
-    // std::cout << "mi308, try v3" << std::endl;
-    r = fmha_bwd_v3(traits, args, stream_config);
-// #endif
-    if (r == -1) {
-        r = fmha_bwd(traits, args, stream_config);
-    }
-    return r;
-}
-
-fmha_bwd_traits_all get_ck_fmha_bwd_traits(const mask_info &mask,
+fmha_bwd_traits get_ck_fmha_bwd_traits(const mask_info &mask,
                                        std::string dtype,
                                        int head_size,
                                        bool has_dropout,
                                        bool enable_alibi,
-                                       bool deterministic,
-                                       bool use_ext_asm,
-                                       bool is_v3_atomic_fp32,
-                                       int how_v3_bf16_cvt)
+                                       bool deterministic)
 {
-    return fmha_bwd_traits_all(mask,
-                           dtype,
-                           head_size,
-                           has_dropout,
-                           enable_alibi,
-                           deterministic,
-                           use_ext_asm,
-                           is_v3_atomic_fp32,
-                           how_v3_bf16_cvt);
+    return fmha_bwd_traits{head_size,
+            head_size,
+            dtype,
+            false, // is_group_mode
+            mask.type,
+            enable_alibi ? bias_enum::alibi : bias_enum::no_bias,
+            false,    // has_dbias
+            has_dropout,
+            false, // s_randval
+            deterministic};
 }
 
 fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
@@ -302,11 +287,11 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d]
         dq = torch::empty_like(q);
     }
     if (dk_.has_value()) {
-    dk = dk_.value();
-    TORCH_CHECK(dk.dtype() == q_dtype, "dk must have the same dtype as q");
-    CHECK_DEVICE(dk);
-    TORCH_CHECK(dk.stride(-1) == 1, "dk must have contiguous last dimension");
-    CHECK_SHAPE(dk, batch_size, seqlen_k, num_heads_k, head_size);
+        dk = dk_.value();
+        TORCH_CHECK(dk.dtype() == q_dtype, "dk must have the same dtype as q");
+        CHECK_DEVICE(dk);
+        TORCH_CHECK(dk.stride(-1) == 1, "dk must have contiguous last dimension");
+        CHECK_SHAPE(dk, batch_size, seqlen_k, num_heads_k, head_size);
     } else {
         dk = torch::empty_like(k);
     }
@@ -368,7 +353,7 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d]
 
 	    stream_config.log_level_ = 1;
         auto traits =
-            get_ck_fmha_bwd_traits(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value(), deterministic, true, true, 1);
+            get_ck_fmha_bwd_traits(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value());
 
         auto args =
             get_ck_fmha_bwd_args(
@@ -395,7 +380,7 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d]
                 p_dropout,
                 drop_seed_offset);
 
-        float t = fmha_bwd_router(traits, args, stream_config);
+        float t = fmha_bwd(traits, args, stream_config);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_bwd");
     } else {
         // If seqlen_q == 0, then we have an empty tensor. We need to set the output to 0.

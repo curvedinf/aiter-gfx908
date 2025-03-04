@@ -265,9 +265,9 @@ def _flash_attn_backward(
 
     blob_gen_cmd = f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd ' \
         '--receipt 300 --filter {} --output_dir {{}}'.format(filter)
-
-    (batch, seqlen_q, nhead_q, hdim_q) = q.shape
-    (batch, seqlen_k, nhead_k, hdim_v) = v.shape
+    is_v3_atomic_fp32 = True
+    (_, seqlen_q, nhead_q, hdim_q) = q.shape
+    (_, seqlen_k, nhead_k, hdim_v) = v.shape
 
     batch_stride_q = q.stride(0)
     stride_q = q.stride(1)
@@ -281,25 +281,25 @@ def _flash_attn_backward(
     stride_v = v.stride(1)
     nhead_stride_v = v.stride(2)
 
-    batch_stride_o = out.stride(0)
-    stride_o = out.stride(1)
-    nhead_stride_o = out.stride(2)
+    # batch_stride_o = out.stride(0)
+    # stride_o = out.stride(1)
+    # nhead_stride_o = out.stride(2)
 
     batch_stride_do = dout.stride(0)
     stride_do = dout.stride(1)
     nhead_stride_do = dout.stride(2)
 
     batch_stride_dk = dk.stride(0)
-    stride_dk = dk.stride(1)
+    # stride_dk = dk.stride(1)
     nhead_stride_dk = dk.stride(2)
 
     batch_stride_dv = dv.stride(0)
-    stride_dv = dv.stride(1)
+    # stride_dv = dv.stride(1)
     nhead_stride_dv = dv.stride(2)
 
     # mask
-    window_size_left = -1 if window_size_left >= seqlen_k
-    window_size_right = -1 if window_size_right >= seqlen_k
+    window_size_left = -1 if window_size_left >= seqlen_k else window_size_left
+    window_size_right = -1 if window_size_right >= seqlen_k else window_size_right
     mask = (causal == True and window_size_left == -1) # causal mask
     nmask = (causal == False and window_size_left == -1 and window_size_right == -1) # no mask
     
@@ -409,7 +409,7 @@ def _flash_attn_backward(
         ret &= deterministic == False
         ret &= hdim_q == hdim_v
         ret &= nhead_q % nhead_k == 0
-        ret &= hdim_q > =64 and hdim_q <= 128 and hdim_q % 8 == 0
+        ret &= hdim_q >= 64 and hdim_q <= 128 and hdim_q % 8 == 0
 
         ret &= np() or pssk() or pddv() or psskddv()
         return ret

@@ -406,7 +406,7 @@
         ],
         "isASM": "True",
         "verbose": "False",
-        "blob_gen_cmd": "f'{AITER_CSRC_DIR}/py_itfs_cu/fmha_bwd_pre_post_kernel.py --receipt 300 --filter \"*@*_ndeterministic@*_nbias*_dropout*_ndeterministic*\"--output_dir {{}}'"
+        "blob_gen_cmd": "f'{AITER_CSRC_DIR}/py_itfs_cu/fmha_bwd_pre_post_kernel.py --receipt 300 --filter \"*@*_ndeterministic@*_nbias*_dropout*_ndeterministic*\" --output_dir {{}}'"
     },
     "module_mha_varlen_bwd": {
         "srcs": [

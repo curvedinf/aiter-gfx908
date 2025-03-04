@@ -328,7 +328,7 @@ def _flash_attn_backward(
         # bwd_v3_hd64_fp16_causal_a16
         # bwd_v3_fp16_causal_a16
         # bwd_v3_fp16_causal_a32
-        ret &= hdim_q == 128 or hdim_q == 64
+        ret = hdim_q == 128 or hdim_q == 64
         ret &= (seqlen_q == seqlen_k) 
         ret &= seqlen_k % 64 == 0
         ret &= stride_q == stride_do
@@ -341,6 +341,8 @@ def _flash_attn_backward(
         ret &= nhead_stride_v == nhead_stride_dv
         ret &= (batch_stride_dk / batch_stride_k) == (nhead_q / nhead_k)
         ret &= (batch_stride_dv / batch_stride_v) == (nhead_q / nhead_k)
+
+        return ret
 
     def pssk():
         # only for hd64 a32 causal/no causal, fp16/bf16-rtne/rtna/rtz cases
@@ -356,6 +358,8 @@ def _flash_attn_backward(
         ret = is_v3_atomic_fp32 == True
         ret &= hdim_q == 64
         ret &= nmask or (mask and seqlen_q == seqlen_k) # TODO: or (seqlen_q != seqlen_k and mask_type == top_left)
+
+        return ret
 
     def pddv():
         # only for a16 causal/no causal, fp16/bf16-rtne/rtna/rtz cases
@@ -382,6 +386,8 @@ def _flash_attn_backward(
         ret &= (batch_stride_dk / batch_stride_k) == (nhead_q / nhead_k)
         ret &= (batch_stride_dv / batch_stride_v) == (nhead_q / nhead_k)
 
+        return ret
+    
     def psskddv():
         # only for a32 causal/no causal, fp16/bf16-rtne/rtna/rtz cases
         # bwd_v3_bf16_a32_rtne_psskddv
@@ -395,6 +401,8 @@ def _flash_attn_backward(
         ret = is_v3_atomic_fp32 == True
         ret &= hdim_q > 64 and hdim_q < 128
         ret &= nmask or (mask and seqlen_q == seqlen_k) # TODO: or (seqlen_q != seqlen_k and mask_type == top_left)
+
+        return ret
 
     def can_impl_fmha_v3_bwd():
         # q: torch.Tensor,

@@ -22,10 +22,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
           py::arg("alibi_slopes") = std::nullopt,
           py::arg("rng_state") = std::nullopt,
           py::arg("gen") = std::nullopt);
-}
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
-{
     m.def("mha_bwd_v3", &mha_bwd_v3,
           py::arg("dout"),
           py::arg("q"), py::arg("k"), py::arg("v"),

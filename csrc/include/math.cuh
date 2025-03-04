@@ -118,11 +118,7 @@ __forceinline__ __device__ float shfl_xor_sync(float x, int lane_mask) {
  * \param lane_mask The mask to perform thread index xor with: y[i] <- x[i ^ lane_mask]
  */
 __forceinline__ __device__ half2 shfl_xor_sync(half2 x, int lane_mask) {
-  uint32_t y;
-#if defined(ROCM_TODO)
-  __shfl_xor_sync(0xffffffff, x, lane_mask);
-#endif
-  return y;
+  return __shfl_xor(x, lane_mask);
 }
 
 /*!

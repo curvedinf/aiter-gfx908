@@ -574,7 +574,7 @@ class FlashAttnFunc(torch.autograd.Function):
             ctx.window_size[1],
             ctx.alibi_slopes,
             ctx.deterministic,
-            rng_state=rng_state,
+            rng_state,
             ctx.is_v3_atomic_fp32,
             ctx.how_v3_bf16_cvt
         )

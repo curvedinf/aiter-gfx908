@@ -35,6 +35,7 @@ def torch_moe_stage1(hidden_states,
     w1 = w1.to(ctype)
 
     B, D = hidden_states.shape
+    E=w1.shape[0]
     topk = topk_weight.shape[1]
     N = w1.shape[1]
     num_experts, model_dim, inter_dim = w2.shape
@@ -48,7 +49,7 @@ def torch_moe_stage1(hidden_states,
         w1 = (w1.view(-1, D) * fc1_scale.view(-1, 1)).view(num_experts, -1, D)
     if a1_scale is not None and w1_scale is not None:
         hidden_states = hidden_states * a1_scale
-        w1 = w1 * w1_scale.view(-1, 1, 1)
+        w1 = w1 * w1_scale.view(E, -1, 1)
 
     out = torch.zeros(
         (B, topk, N),
@@ -82,6 +83,7 @@ def torch_moe_stage2(hidden_states,
     hidden_states = hidden_states.to(ctype)
     w2 = w2.to(ctype)
 
+    E = w1.shape[0]
     token_num, topk = topk_ids.shape
     # M, _ = hidden_states.shape
     num_experts, model_dim, inter_dim = w2.shape
@@ -90,7 +92,7 @@ def torch_moe_stage2(hidden_states,
     # gose to quant D_w8a8/w8a8
     if a2_scale is not None and w2_scale is not None:
         hidden_states = hidden_states * a2_scale
-        w2 = w2 * w2_scale.view(-1, 1, 1)
+        w2 = w2 * w2_scale.view(E, -1, 1)
 
     out = torch.zeros(
         (token_num, topk, model_dim),
@@ -264,7 +266,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     quant_dtype = torch.float8_e4m3fnuz
     quant_dtype_w = torch.int8
-    w1_qt, w1_scale = aiter.pertoken_quant(w1.view(E, -1),
+    w1_qt, w1_scale = aiter.pertoken_quant(w1.view(E,-1),
                                            quant_dtype=quant_dtype_w, dtypeMax=7)
     w2_qt, w2_scale = aiter.pertoken_quant(w2.view(E, -1),
                                            quant_dtype=quant_dtype_w, dtypeMax=7)

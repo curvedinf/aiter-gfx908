@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
-from aiter.test_common import checkAllclose, perftest, tensor_dump
+from aiter.test_common import checkAllclose, perftest, tensor_dump, benchmark
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -34,6 +34,7 @@ def run_torch(x, weight, x_scale, w_scale, dtype=torch.bfloat16):
 def run_gemm_ck(x, weight, x_scale, w_scale, dtype=torch.bfloat16):
     return aiter.gemm_a8w8_blockscale_CK(x, weight, x_scale, w_scale, dtype)
 
+@benchmark()
 def test_gemm(dtype, m, n, k):
     dim = (m, n, k)
     block_shape_n, block_shape_k = block_shape

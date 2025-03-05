@@ -85,6 +85,8 @@ def fmha_v3_bwd(
     window_size_left: int,
     window_size_right: int,
     deterministic: bool,
+    is_v3_atomic_fp32: bool,
+    how_v3_bf16_cvt: int,
     dq: Optional[Tensor] = None,
     dk: Optional[Tensor] = None,
     dv: Optional[Tensor] = None,

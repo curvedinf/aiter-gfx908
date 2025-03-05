@@ -179,6 +179,7 @@ def ck_moe_stage2(
     sorted_weights: Tensor,
     num_valid_ids: Tensor,
     out: Tensor,
+    topk,
     w2_scale: Optional[Tensor] = None,
     a2_scale: Optional[Tensor] = None,
     block_m: Optional[int] = 32

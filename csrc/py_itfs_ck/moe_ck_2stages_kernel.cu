@@ -7,14 +7,13 @@
 
 #include "moe_ck_gemm.hpp"
 
-#define CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock, NSwizzle)                                                                                                                                                                                                                \
-    if (MPerBlock == 32)                                                                                                                                                                                                                                                                                                \
-        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 32, 256/sizeof(A0DataType), 1, 1, NSwizzle>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
-    else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                           \
-        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 64, 256/sizeof(A0DataType), 2, 1, NSwizzle>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
-    else if (MPerBlock == 128)                                                                                                                                                                                                                                                                                          \
-        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 128, 128/sizeof(A0DataType), 2, 2, NSwizzle>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);
-
+#define CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock, NSwizzle)                                                                                                                                                                                                                                          \
+    if (MPerBlock == 32)                                                                                                                                                                                                                                                                                                                                    \
+        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 32, 256 / sizeof(A0DataType), 1, 1, NSwizzle>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
+    else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                                                               \
+        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 64, 256 / sizeof(A0DataType), 2, 1, NSwizzle>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
+    else if (MPerBlock == 128)                                                                                                                                                                                                                                                                                                                              \
+        ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 128, 128 / sizeof(A0DataType), 2, 2, NSwizzle>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);
 
 void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
                    torch::Tensor &w1,                // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
@@ -89,22 +88,22 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         using CDEElementOp = MulABScale;
         if (out.dtype() == at::ScalarType::Half)
         {
-            if (N % 8 == 0 && N > 8192)
-            {
-                CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, MPerBlock, true);
-            }
-            else
+            // if (N % 8 == 0 && N > 8192)
+            // {
+            //     CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, MPerBlock, true);
+            // }
+            // else
             {
                 CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, MPerBlock, false);
             }
         }
         else if (out.dtype() == at::ScalarType::BFloat16)
         {
-            if (N % 8 == 0 && N > 8192)
-            {
-                CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, MPerBlock, true);
-            }
-            else
+            // if (N % 8 == 0 && N > 8192)
+            // {
+            //     CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, MPerBlock, true);
+            // }
+            // else
             {
                 CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, MPerBlock, false);
             }
@@ -132,12 +131,12 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     // }
 }
 
-#define CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock)                                                                                                                                                                                                                                   \
-    if (MPerBlock == 32)                                                                                                                                                                                                                                                                                                                   \
+#define CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerBlock)                                                                                                                                                                                                                             \
+    if (MPerBlock == 32)                                                                                                                                                                                                                                                                                                             \
         ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 32>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr); \
-    else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                                              \
+    else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                                        \
         ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 64>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr); \
-    else if (MPerBlock == 128)                                                                                                                                                                                                                                                                                                             \
+    else if (MPerBlock == 128)                                                                                                                                                                                                                                                                                                       \
         ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, 128>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr);
 
 void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token

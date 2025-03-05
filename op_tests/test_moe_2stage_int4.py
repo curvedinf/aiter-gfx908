@@ -244,15 +244,15 @@ def ck_moe_fused_2stages(hidden_states,
 
 
 def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=False, shared_E=0):
-    input = torch.randn((token, model_dim), dtype=dtype, device="cuda") / 1000 
+    input = torch.randn((token, model_dim), dtype=dtype, device="cuda") 
     if use_g1u1:
         w1 = torch.randn((E+shared_E, inter_dim*2, model_dim),
-                         dtype=dtype, device="cuda") / 10
+                         dtype=dtype, device="cuda")  / 10
     else:
         w1 = torch.randn((E+shared_E, inter_dim, model_dim),
-                         dtype=dtype, device="cuda") / 10
+                         dtype=dtype, device="cuda") 
     w2 = torch.randn((E+shared_E, model_dim, inter_dim),
-                     dtype=dtype, device="cuda") / 10
+                     dtype=dtype, device="cuda") 
     score = torch.randn((token, E), device="cuda", dtype=dtype)
     topk_weights, topk_ids = fused_topk(input, score, topk, True)
 
@@ -400,8 +400,9 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 #              msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
 
 for dtype in [torch.float16]:
-    #for m in [128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
-    for m in [2048]:
+    for m in [128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
+        print("m:",m)
+    #for m in [4096]:
         for dim in [6144]:
             for inter_dim in [4096]:
                 expert, topk = 8, 2

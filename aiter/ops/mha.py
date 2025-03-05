@@ -408,12 +408,6 @@ def _flash_attn_backward(
         return ret
 
     def can_impl_fmha_v3_bwd():
-        # q: torch.Tensor,
-        # k: torch.Tensor,
-        # dropout_p: float,
-        # alibi_slopes: Optional[torch.Tensor],
-        # deterministic: bool):
-
         # basic
         ret = alibi_slopes is None
         ret &= dropout_p == 0.0
@@ -421,9 +415,10 @@ def _flash_attn_backward(
         ret &= hdim_q == hdim_v
         ret &= nhead_q % nhead_k == 0
         ret &= hdim_q >= 64 and hdim_q <= 128 and hdim_q % 8 == 0
-        print("init ret: ", ret)
+        ret &= mask or nmask
+        # print("init ret: ", ret)
         ret &= np() or pssk() or pddv() or psskddv()
-        print("np: ", np(), ", pssk: ", pssk(), ", pddv: ", pddv(), ", psskddv: ", psskddv(), ", ret: ", ret)
+        # print("np: ", np(), ", pssk: ", pssk(), ", pddv: ", pddv(), ", psskddv: ", psskddv(), ", ret: ", ret)
         return ret
 
     # dq, dk, dv are allocated by us so they should already be contiguous

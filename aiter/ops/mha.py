@@ -71,8 +71,8 @@ def mha_bwd(
 ): ...
 
 
-@compile_ops("module_mha_bwd_v3", fc_name="mha_bwd_v3")
-def mha_bwd_v3(
+@compile_ops("module_fmha_v3_bwd", fc_name="fmha_v3_bwd")
+def fmha_v3_bwd(
     dout: Tensor,
     q: Tensor,
     k: Tensor,
@@ -265,7 +265,7 @@ def _flash_attn_backward(
 
     blob_gen_cmd = f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd ' \
         '--receipt 300 --filter {} --output_dir {{}}'.format(filter)
-    is_v3_atomic_fp32 = True
+
     (_, seqlen_q, nhead_q, hdim_q) = q.shape
     (_, seqlen_k, nhead_k, hdim_v) = v.shape
 
@@ -302,6 +302,10 @@ def _flash_attn_backward(
     window_size_right = -1 if window_size_right >= seqlen_k else window_size_right
     mask = (causal == True and window_size_left == -1) # causal mask
     nmask = (causal == False and window_size_left == -1 and window_size_right == -1) # no mask
+
+    # TODO: move this to somewhere else 
+    is_v3_atomic_fp32 = False
+    how_v3_bf16_cvt = 1
     
     def np():
         # bwd_v3_bf16_a16_rtne
@@ -328,19 +332,23 @@ def _flash_attn_backward(
         # bwd_v3_hd64_fp16_causal_a16
         # bwd_v3_fp16_causal_a16
         # bwd_v3_fp16_causal_a32
-        ret = hdim_q == 128 or hdim_q == 64
-        ret &= (seqlen_q == seqlen_k) 
-        ret &= seqlen_k % 64 == 0
-        ret &= stride_q == stride_do
-        ret &= nhead_stride_q == nhead_stride_do
-        ret &= batch_stride_q == batch_stride_do
-        ret &= stride_k == stride_v
-        ret &= nhead_stride_k == nhead_stride_v
-        ret &= batch_stride_k == batch_stride_v
-        ret &= nhead_stride_k == nhead_stride_dk
-        ret &= nhead_stride_v == nhead_stride_dv
-        ret &= (batch_stride_dk / batch_stride_k) == (nhead_q / nhead_k)
-        ret &= (batch_stride_dv / batch_stride_v) == (nhead_q / nhead_k)
+        hd128_case = hdim_q == 128
+        hd128_case &= seqlen_q == seqlen_k
+        hd128_case &= seqlen_k % 64 == 0
+        hd128_case &= stride_q == stride_do
+        hd128_case &= nhead_stride_q == nhead_stride_do
+        hd128_case &= batch_stride_q == batch_stride_do
+        hd128_case &= stride_k == stride_v
+        hd128_case &= nhead_stride_k == nhead_stride_v
+        hd128_case &= batch_stride_k == batch_stride_v
+        hd128_case &= nhead_stride_k == nhead_stride_dk
+        hd128_case &= nhead_stride_v == nhead_stride_dv
+        hd128_case &= (batch_stride_dk / batch_stride_k) == (nhead_q / nhead_k)
+        hd128_case &= (batch_stride_dv / batch_stride_v) == (nhead_q / nhead_k)
+
+        hd64_case = hdim_q == 64 and is_v3_atomic_fp32 == False
+
+        ret = hd128_case or hd64_case
 
         return ret
 
@@ -373,7 +381,7 @@ def _flash_attn_backward(
         # bwd_v3_fp16_causal_a16_pddv
         ret = is_v3_atomic_fp32 == False
         ret &= hdim_q > 64 and hdim_q < 128
-        ret &= (seqlen_q == seqlen_k) 
+        ret &= seqlen_q == seqlen_k 
         ret &= seqlen_k % 64 == 0
         ret &= stride_q == stride_do
         ret &= nhead_stride_q == nhead_stride_do
@@ -431,7 +439,7 @@ def _flash_attn_backward(
             dk,
             dv,
             softmax_d,
-        ) = mha_bwd_v3(
+        ) = fmha_v3_bwd(
             dout,
             q,
             k,
@@ -444,6 +452,8 @@ def _flash_attn_backward(
             window_size_left,
             window_size_right,
             deterministic,
+            is_v3_atomic_fp32,
+            how_v3_bf16_cvt,
             dq,
             dk,
             dv,

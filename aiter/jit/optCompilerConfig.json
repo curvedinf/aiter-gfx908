@@ -389,7 +389,7 @@
         "verbose": "False",
         "blob_gen_cmd": "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd --receipt 300 --output_dir {{}}'"
     },
-    "module_mha_bwd_v3": {
+    "module_fmha_v3_bwd": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_fmha_bwd_v3_new.cpp'",
             "f'{AITER_CSRC_DIR}/pybind/mha_bwd_asm_pybind.cu'"

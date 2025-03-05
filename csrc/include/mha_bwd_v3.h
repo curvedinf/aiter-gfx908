@@ -4,7 +4,7 @@
 #include <torch/extension.h>
 
 std::vector<at::Tensor>
-mha_bwd_v3(const at::Tensor &dout, // [b, sq, hq, d]
+fmha_v3_bwd(const at::Tensor &dout, // [b, sq, hq, d]
         const at::Tensor &q,    // [b, sq, hq, d]
         const at::Tensor &k,    // [b, sk, hk, d]
         const at::Tensor &v,    // [b, sk, hk, d]
@@ -16,6 +16,8 @@ mha_bwd_v3(const at::Tensor &dout, // [b, sq, hq, d]
         int window_size_left,
         int window_size_right,
         bool deterministic,
+        bool is_v3_atomic_fp32,
+        int how_v3_bf16_cvt,
         std::optional<at::Tensor> dq,                 // [b, sq, hq, d]
         std::optional<at::Tensor> dk,                 // [b, sk, hk, d]
         std::optional<at::Tensor> dv,                 // [b, sk, hk, d]

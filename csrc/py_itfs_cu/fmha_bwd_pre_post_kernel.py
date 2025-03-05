@@ -1702,7 +1702,7 @@ fmha_bwd_args get_ck_fmha_bwd_args(const mask_info &mask,
 }
 
 std::vector<at::Tensor>
-mha_bwd_v3(const at::Tensor &dout,         // [b, sq, hq, d]
+fmha_v3_bwd(const at::Tensor &dout,         // [b, sq, hq, d]
         const at::Tensor &q,            // [b, sq, hq, d]
         const at::Tensor &k,            // [b, sk, hk, d]
         const at::Tensor &v,            // [b, sk, hk, d]
@@ -1714,6 +1714,8 @@ mha_bwd_v3(const at::Tensor &dout,         // [b, sq, hq, d]
         int window_size_left,
         int window_size_right,
         bool deterministic,
+        bool is_v3_atomic_fp32,
+        int how_v3_bf16_cvt,
         std::optional<at::Tensor> dq_,
         std::optional<at::Tensor> dk_,
         std::optional<at::Tensor> dv_,
@@ -1861,7 +1863,7 @@ mha_bwd_v3(const at::Tensor &dout,         // [b, sq, hq, d]
 
 	    stream_config.log_level_ = 1;
         auto traits =
-            get_ck_fmha_bwd_traits_all(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value(), deterministic, true, true, 1);
+            get_ck_fmha_bwd_traits_all(mask, q_dtype_str, head_size, is_dropout, alibi_slopes_.has_value(), deterministic, true, is_v3_atomic_fp32, how_v3_bf16_cvt);
 
         auto args =
             get_ck_fmha_bwd_args(

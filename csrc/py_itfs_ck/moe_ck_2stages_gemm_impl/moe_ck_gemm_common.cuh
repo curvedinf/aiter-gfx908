@@ -17,6 +17,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                         std::optional<void *> a1_scale  // [m, 1], token scale
 )
 {
+    static constexpr bool PerTensorQuant = false;
     // ~~~~~~~~~~~~~~~~~~~~~~~~following start with ck things
     ck::index_t StrideA = K;
     ck::index_t StrideB = K;
@@ -65,7 +66,8 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t K0_M_A = 256 / K0_A;
     static constexpr ck::index_t K0_N_B = 256 / K0_B;
     static constexpr ck::index_t D0Vec = 1;
-    static constexpr ck::index_t D1Vec = 1;
+    // static constexpr ck::index_t D1Vec = 1;
+    static constexpr ck::index_t D1Vec = PerTensorQuant ? 1 : EVec;
     // std::cout<<"debug aiter GEMM1########:"  <<std::endl;
     //  std::cout<<"Aiter debug CK N:"  <<N<<std::endl;
     //  std::cout<<"Aiter debug CK K:"  <<K<<std::endl;
@@ -128,6 +130,8 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     constexpr ck::index_t NumDTensor = DsDataType::Size();
 
     constexpr auto I0 = ck::Number<0>{};
+    constexpr auto I1 = ck::Number<1>{};
+    static constexpr auto DStride = PerTensorQuant ? I0 : I1;
 
     // do GEMM
     auto device_op = DeviceOpInstance{};
@@ -150,7 +154,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                                K,
                                StrideA,
                                StrideB,
-                               std::array<ck::index_t, NumDTensor>{I0, I0},
+                               std::array<ck::index_t, NumDTensor>{DStride, DStride},
                                StrideE,
                                KBatch,
                                a_element_op,
@@ -197,6 +201,7 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                         std::optional<void *> a2_scale  // [max_num_tokens_padded, 1], token scale
 )
 {
+    static constexpr bool PerTensorQuant = false;
     // ~~~~~~~~~~~~~~~~~~~~~~~~following start with ck things
     ck::index_t StrideA = K;
     ck::index_t StrideB = K;
@@ -219,7 +224,6 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     using AElementOp = PassThrough;
     using BElementOp = PassThrough;
     // using CDEElementOp = MultiplyMultiply;
-
     static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::Default;
     static constexpr ck::index_t BLOCKSIZE = 256;
     static constexpr ck::index_t WAVES = BLOCKSIZE / 64;
@@ -240,7 +244,8 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t BK1 = ck::is_same_v<B0DataType, I4> ? 32 / sizeof(B0DataType) : 16 / sizeof(B0DataType);
     static constexpr ck::index_t EVec = 2;
     static constexpr ck::index_t D0Vec = 1;
-    static constexpr ck::index_t D1Vec = 1;
+    // static constexpr ck::index_t D1Vec = 1;
+    static constexpr ck::index_t D1Vec = PerTensorQuant ? 1 : EVec;
     static constexpr ck::index_t D2Vec = 1;
     static constexpr ck::index_t K0_A = KPerBlock / AK1;
     static constexpr ck::index_t K0_B = KPerBlock / BK1;
@@ -312,6 +317,8 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     constexpr ck::index_t NumDTensor = DsDataType::Size();
 
     constexpr auto I0 = ck::Number<0>{};
+    constexpr auto I1 = ck::Number<1>{};
+    static constexpr auto DStride = PerTensorQuant ? I0 : I1;
 
     // do GEMM
     auto device_op = DeviceOpInstance{};
@@ -334,7 +341,7 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                                K,
                                StrideA,
                                StrideB,
-                               std::array<ck::index_t, NumDTensor>{I0, I0, I0},
+                               std::array<ck::index_t, NumDTensor>{DStride, DStride, I0},
                                StrideE,
                                KBatch,
                                a_element_op,

@@ -39,8 +39,8 @@ def torch_moe_stage1(hidden_states,
     topk = topk_weight.shape[1]
     N = w1.shape[1]
     num_experts, model_dim, inter_dim = w2.shape
-    hidden_states = hidden_states.view(
-        B, -1, D).repeat(1, topk, 1)
+    # hidden_states = hidden_states.view(
+    #     B, -1, D).repeat(1, topk, 1)
 
     max_num_tokens_padded = topk_ids.numel() + num_experts * block_size - topk
 
@@ -51,6 +51,8 @@ def torch_moe_stage1(hidden_states,
         hidden_states = hidden_states * a1_scale
         w1 = w1 * w1_scale.view(E, -1, 1)
 
+    hidden_states = hidden_states.view(
+        B, -1, D).repeat(1, topk, 1)
     out = torch.zeros(
         (B, topk, N),
         dtype=ctype,
@@ -78,7 +80,6 @@ def torch_moe_stage2(hidden_states,
                      a2_scale=None,  # [expert]]
                      block_size=32
                      ):
-    
     ctype = torch.float  # compute type
     hidden_states = hidden_states.to(ctype)
     w2 = w2.to(ctype)
@@ -266,9 +267,9 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     quant_dtype = torch.float8_e4m3fnuz
     quant_dtype_w = torch.int8
-    w1_qt, w1_scale = aiter.pertoken_quant(w1.view(E,-1),
+    w1_qt, w1_scale = aiter.pertoken_quant(w1,
                                            quant_dtype=quant_dtype_w, dtypeMax=7)
-    w2_qt, w2_scale = aiter.pertoken_quant(w2.view(E, -1),
+    w2_qt, w2_scale = aiter.pertoken_quant(w2,
                                            quant_dtype=quant_dtype_w, dtypeMax=7)
     
     ##for debug with CK
@@ -276,7 +277,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     #                     dtype=quant_dtype_w, device="cuda") / 10
     
     
-    a1_qt, a1_scale = aiter.per_tensor_quant(input,  quant_dtype=quant_dtype)
+    a1_qt, a1_scale = aiter.pertoken_quant(input,  quant_dtype=quant_dtype)
 
     w1_qt = w1_qt.view(w1.shape)
     w2_qt = w2_qt.view(w2.shape)
@@ -299,12 +300,14 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
         input2 = F.silu(gate) * up
     else:
         input2 = F.gelu(out1_ref)
-    a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
+    a2_qt, a2_scale = aiter.pertoken_quant(input2.view(M, -1),  quant_dtype=quant_dtype)
+    a2_qt = a2_qt.view(M, topk, -1)
+    print(a2_qt.shape, a2_scale.shape)
     ##for debug with CK
     #a2_scale = torch.tensor(0.1, device='cuda:0')
     #sorted_weights = sorted_weights.fill_(0.1) 
     #topk_weights = topk_weights.fill_(0.1) 
-
+    
     out2_ref, us_ref = torch_moe_stage2(a2_qt,
                                         w1_qt,  # E, inter_dim*2, model_dim
                                         w2_qt,  # E, model_dim, inter_dim
@@ -314,7 +317,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                         dtype=dtype,
                                         # [expert, inter_dim, 1]
                                         w2_scale=w2_scale,
-                                        a2_scale=a2_scale,
+                                        a2_scale=a2_scale.view(M, -1, 1).repeat(1, topk, 1),
                                         block_size=BLOCK_SIZE_M
                                         )
  
@@ -403,7 +406,6 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
 for dtype in [torch.float16]:
     for m in [128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
-        print("m:",m)
     #for m in [4096]:
         for dim in [6144]:
             for inter_dim in [4096]:

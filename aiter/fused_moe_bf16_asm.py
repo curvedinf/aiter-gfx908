@@ -250,7 +250,7 @@ def ck_moe_2stages_win4(a1,
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, global_E,
                                                                                            model_dim, dtype, block_size, expert_mask)
     if w1.dtype == torch.uint32:#torch.uint32 torch.float8_e4m3fnuz
-        a1, a1_scale = aiter.per_tensor_quant_fp8_hip(a1, a1_scale)
+        a1, a1_scale = aiter.pertoken_quant(a1, quant_dtype = torch.float8_e4m3fnuz)
         # a1, a1_scale = aiter.per_tensor_quant(a1, quant_dtype=w1.dtype)
     else:
         a1_scale = None
@@ -275,7 +275,9 @@ def ck_moe_2stages_win4(a1,
         aiter.silu_and_mul(tmp, a2)
         a2 = tmp
     if w2.dtype == torch.uint32:
-        a2, a2_scale = aiter.per_tensor_quant_fp8_hip(a2, a2_scale)
+        # a2, a2_scale = aiter.per_tensor_quant_fp8_hip(a2, a2_scale)
+        a2_qt, a2_scale = aiter.pertoken_quant(a2.view(M, -1),  quant_dtype=torch.float8_e4m3fnuz)
+        a2 = a2_qt.view(M, topk, -1)
         # a2, a2_scale = aiter.per_tensor_quant(a2, quant_dtype=w2.dtype)
     else:
         if not hasattr(ck_moe_2stages, "one_float_tensor"):

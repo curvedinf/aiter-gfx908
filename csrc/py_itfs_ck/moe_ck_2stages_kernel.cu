@@ -225,7 +225,11 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         if (out.dtype() == at::ScalarType::Half)
         {
             // CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, MPerBlock);
-            if (MPerBlock == 64)
+            if (MPerBlock == 32)
+            {
+                ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, 32>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr);
+            }
+            else if (MPerBlock == 64)
             {
                 ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, 64>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr);
             }
@@ -234,10 +238,21 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
                 ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, 128>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, inter_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w2_scale_ptr, a2_scale_ptr);
             }
         }
-        // else if (out.dtype() == at::ScalarType::BFloat16)
-        //{
-        //     CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, MPerBlock);
-        // }
+        else if (out.dtype() == at::ScalarType::BFloat16)
+        {
+            if (MPerBlock == 32)
+            {
+                CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, 32);
+            }
+            else if (MPerBlock == 64)
+            {
+                CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, 64);
+            }
+            else if (MPerBlock == 128)
+            {
+                CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, 128);
+            }
+        }
     }
     // FP8
     else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz)

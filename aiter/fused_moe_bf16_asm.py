@@ -152,7 +152,7 @@ def get_block_size(token, topk, expert):
     token_per_expert = token * topk / expert
     support_list = [32, 64, 128]
     for el in support_list:
-        if token_per_expert < el:
+        if token_per_expert <= el * 4:
             return el
     return support_list[-1]
 

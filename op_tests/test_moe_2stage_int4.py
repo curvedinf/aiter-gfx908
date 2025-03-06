@@ -12,7 +12,7 @@ import aiter
 from aiter.test_common import checkAllclose, perftest
 from aiter import pertoken_quant
 from aiter.fused_moe_gelu import fused_topk
-from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck, ck_moe_2stages,ck_moe_2stages_win4
+from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck, ck_moe_2stages,ck_moe_2stages_win4, get_block_size
 from aiter.ops.shuffle import shuffle_weight
 from op_tests.int4_utils import *
 
@@ -261,7 +261,8 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     E, model_dim, inter_dim = w2.shape
     M, topk = topk_ids.shape
-    BLOCK_SIZE_M = 128
+    BLOCK_SIZE_M = get_block_size(M, topk, E)
+    print("BLOCK_SIZE_M:",BLOCK_SIZE_M)
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weights, E,
                                                                                            model_dim, dtype, BLOCK_SIZE_M)
 

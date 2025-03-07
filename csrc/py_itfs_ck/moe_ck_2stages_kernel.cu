@@ -254,7 +254,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         }
         else if (out.dtype() == at::ScalarType::BFloat16)
         {
-            CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock);
+            CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock);
         }
     }
     // FP8

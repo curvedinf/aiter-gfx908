@@ -12,11 +12,9 @@ import aiter
 from aiter.test_common import checkAllclose, perftest
 from aiter import pertoken_quant
 from aiter.fused_moe_gelu import fused_topk
-from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck, ck_moe_2stages,ck_moe_2stages_win4, get_block_size
+from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck, ck_moe_2stages,ck_moe_2stages_win4, get_mblock_size
 from aiter.ops.shuffle import shuffle_weight
 from op_tests.int4_utils import *
-
-
 
 @perftest(num_iters=3)
 def torch_moe_stage1(hidden_states,
@@ -261,8 +259,8 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     E, model_dim, inter_dim = w2.shape
     M, topk = topk_ids.shape
-    BLOCK_SIZE_M = get_block_size(M, topk, E)
-    print("BLOCK_SIZE_M:",BLOCK_SIZE_M)
+    BLOCK_SIZE_M = get_mblock_size(M)
+    print("BLOCK_SIZE_M:",BLOCK_SIZE_M," Token:",M)
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weights, E,
                                                                                            model_dim, dtype, BLOCK_SIZE_M)
 
@@ -405,8 +403,8 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 #    checkAllclose(out_ref, out_ck_nqt,
 #              msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
 
-for dtype in [torch.float16]:
-    for m in [128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
+for dtype in [torch.bfloat16]:
+    for m in [64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
     #for m in [4096]:
         for dim in [6144]:
             for inter_dim in [4096]:

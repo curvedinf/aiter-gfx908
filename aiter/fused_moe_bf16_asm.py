@@ -156,6 +156,11 @@ def get_block_size(token, topk, expert):
             return el
     return support_list[-1]
 
+def get_mblock_size(token):
+    if token > 128 :
+        return 128
+    else:
+        return 32    
 
 # Only support fp8 per tensor quant
 def ck_moe_2stages(a1,

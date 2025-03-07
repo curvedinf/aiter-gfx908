@@ -3,7 +3,7 @@
 #pragma once
 #include "moe_ck_gemm.hpp"
 #include <iostream>
-template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, bool Nswizzle, int MPerBlock>
+template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, bool Nswizzle, bool PerTensorQuant, int MPerBlock>
 void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
                         int topk,
                         void *&hidden_states,           // [m, k], input token
@@ -17,7 +17,6 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                         std::optional<void *> a1_scale  // [m, 1], token scale
 )
 {
-    static constexpr bool PerTensorQuant = false;
     // ~~~~~~~~~~~~~~~~~~~~~~~~following start with ck things
     ck::index_t StrideA = K;
     ck::index_t StrideB = K;
@@ -171,22 +170,22 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     invoker.Run(argument, StreamConfig{stream});
 }
 
-#define CK_MOE_STAGE1_GEMM_DEFINE(MPerfBlock)                                                                             \
-    template void ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, MPerfBlock>( \
-        const hipStream_t &stream,                                                                                        \
-        int tokens, int sorted_size, int N, int K,                                                                        \
-        int topk,                                                                                                         \
-        void *&hidden_states,                                                                                             \
-        void *&w1,                                                                                                        \
-        void *&w2,                                                                                                        \
-        void *&sorted_token_ids,                                                                                          \
-        void *&sorted_expert_ids,                                                                                         \
-        void *&num_valid_ids,                                                                                             \
-        void *&out,                                                                                                       \
-        std::optional<void *> w1_scale,                                                                                   \
+#define CK_MOE_STAGE1_GEMM_DEFINE(MPerfBlock)                                                                                             \
+    template void ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, PerTensorQuant, MPerfBlock>( \
+        const hipStream_t &stream,                                                                                                        \
+        int tokens, int sorted_size, int N, int K,                                                                                        \
+        int topk,                                                                                                                         \
+        void *&hidden_states,                                                                                                             \
+        void *&w1,                                                                                                                        \
+        void *&w2,                                                                                                                        \
+        void *&sorted_token_ids,                                                                                                          \
+        void *&sorted_expert_ids,                                                                                                         \
+        void *&num_valid_ids,                                                                                                             \
+        void *&out,                                                                                                                       \
+        std::optional<void *> w1_scale,                                                                                                   \
         std::optional<void *> a1_scale);
 
-template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, bool Nswizzle, int MPerBlock>
+template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, bool Nswizzle, bool PerTensorQuant, int MPerBlock>
 void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
                         int topk,
                         void *&inter_states,            // [max_num_tokens_padded, k], input token
@@ -201,7 +200,6 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                         std::optional<void *> a2_scale  // [max_num_tokens_padded, 1], token scale
 )
 {
-    static constexpr bool PerTensorQuant = false;
     // ~~~~~~~~~~~~~~~~~~~~~~~~following start with ck things
     ck::index_t StrideA = K;
     ck::index_t StrideB = K;
@@ -358,7 +356,7 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
 }
 
 #define CK_MOE_STAGE2_GEMM_DEFINE(MPerfBlock)                                                                             \
-    template void ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, MPerfBlock>( \
+    template void ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, PerTensorQuant, MPerfBlock>( \
         const hipStream_t &stream,                                                                                        \
         int tokens, int sorted_size, int N, int K,                                                                        \
         int topk,                                                                                                         \

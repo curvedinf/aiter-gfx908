@@ -25,7 +25,7 @@ using F16 = ck::half_t;
 using B16 = ck::bhalf_t;
 using F8 = ck::f8_t;
 using F32 = float;
-using I4  = ck::pk_i4_t;
+using I4 = ck::pk_i4_t;
 
 using Row = ck::tensor_layout::gemm::RowMajor;
 using Col = ck::tensor_layout::gemm::ColumnMajor;
@@ -80,18 +80,18 @@ struct MulABScale
 
     template <>
     __host__ __device__ constexpr void operator()<F16, int, float, float>(F16 &e,
-                                                                            const int &c,
-                                                                            const float &d0,
-                                                                            const float &d1) const
+                                                                          const int &c,
+                                                                          const float &d0,
+                                                                          const float &d1) const
     {
         e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d1 * d0);
     }
 
     template <>
     __host__ __device__ constexpr void operator()<B16, int, float, float>(B16 &e,
-                                                                            const int &c,
-                                                                            const float &d0,
-                                                                            const float &d1) const
+                                                                          const int &c,
+                                                                          const float &d0,
+                                                                          const float &d1) const
     {
         e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d1 * d0);
     }
@@ -123,18 +123,18 @@ struct MulABScaleWint4
 
     template <>
     __host__ __device__ constexpr void operator()<F16, int, float, float>(F16 &e,
-                                                                            const int &c,
-                                                                            const float &d0,
-                                                                            const float &d1) const
+                                                                          const int &c,
+                                                                          const float &d0,
+                                                                          const float &d1) const
     {
         e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d1 * d0 * 16.f);
     }
 
     template <>
     __host__ __device__ constexpr void operator()<B16, int, float, float>(B16 &e,
-                                                                            const int &c,
-                                                                            const float &d0,
-                                                                            const float &d1) const
+                                                                          const int &c,
+                                                                          const float &d0,
+                                                                          const float &d1) const
     {
         e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d1 * d0 * 16.f);
     }
@@ -166,26 +166,26 @@ struct TypeCastExpertWeight
 
     template <>
     __host__ __device__ constexpr void operator()<F16, int, float, float, float>(F16 &e,
-                                                                                   const int &c,
-                                                                                   const float &d0,
-                                                                                   const float &d1,
-                                                                                   const float &d2) const
+                                                                                 const int &c,
+                                                                                 const float &d0,
+                                                                                 const float &d1,
+                                                                                 const float &d2) const
     {
         e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d2);
     }
     template <>
     __host__ __device__ constexpr void operator()<B16, int, float, float, float>(B16 &e,
-                                                                                   const int &c,
-                                                                                   const float &d0,
-                                                                                   const float &d1,
-                                                                                   const float &d2) const
+                                                                                 const int &c,
+                                                                                 const float &d0,
+                                                                                 const float &d1,
+                                                                                 const float &d2) const
     {
         e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d2);
     }
 };
 
 // d0: ascale, d1: bscale, d2:expert weight
-//warning: hack hack hack here!!!! ignore d0 right now as kernel mul d0 * d2 outside. tofix:felix 
+// warning: hack hack hack here!!!! ignore d0 right now as kernel mul d0 * d2 outside. tofix:felix
 struct MulABScaleExpertWeight
 {
     template <typename E, typename C, typename D0, typename D1, typename D2>
@@ -210,29 +210,28 @@ struct MulABScaleExpertWeight
         e = ck::type_convert<B16>(c * d1 * d2);
     }
 
-        template <>
-        __host__ __device__ constexpr void operator()<F16, int, float, float, float>(F16 &e,
-                                                                                       const int &c,
-                                                                                       const float &d0,
-                                                                                       const float &d1,
-                                                                                       const float &d2) const
-        {
-            e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d1 * d2);
-        }
-        template <>
-        __host__ __device__ constexpr void operator()<B16, int, float, float, float>(B16 &e,
-                                                                                       const int &c,
-                                                                                       const float &d0,
-                                                                                       const float &d1,
-                                                                                       const float &d2) const
-        {
-            e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d1 * d2);
-        }
+    template <>
+    __host__ __device__ constexpr void operator()<F16, int, float, float, float>(F16 &e,
+                                                                                 const int &c,
+                                                                                 const float &d0,
+                                                                                 const float &d1,
+                                                                                 const float &d2) const
+    {
+        e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d1 * d2);
+    }
+    template <>
+    __host__ __device__ constexpr void operator()<B16, int, float, float, float>(B16 &e,
+                                                                                 const int &c,
+                                                                                 const float &d0,
+                                                                                 const float &d1,
+                                                                                 const float &d2) const
+    {
+        e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d1 * d2);
+    }
 };
 
-
 // d0: ascale, d1: bscale, d2:expert weight
-//warning: hack hack hack here!!!! ignore d0 right now as kernel mul d0 * d2 outside. tofix:felix 
+// warning: hack hack hack here!!!! ignore d0 right now as kernel mul d0 * d2 outside. tofix:felix
 struct MulABScaleExpertWeightWin4
 {
     template <typename E, typename C, typename D0, typename D1, typename D2>
@@ -257,27 +256,27 @@ struct MulABScaleExpertWeightWin4
         e = ck::type_convert<B16>(c * d1 * d2 * 16.f);
     }
 
-        template <>
-        __host__ __device__ constexpr void operator()<F16, int, float, float, float>(F16 &e,
-                                                                                       const int &c,
-                                                                                       const float &d0,
-                                                                                       const float &d1,
-                                                                                       const float &d2) const
-        {
-            e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d1 * d2 * 16.f);
-        }
-        template <>
-        __host__ __device__ constexpr void operator()<B16, int, float, float, float>(B16 &e,
-                                                                                       const int &c,
-                                                                                       const float &d0,
-                                                                                       const float &d1,
-                                                                                       const float &d2) const
-        {
-            e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d1 * d2 * 16.f);
-        }
+    template <>
+    __host__ __device__ constexpr void operator()<F16, int, float, float, float>(F16 &e,
+                                                                                 const int &c,
+                                                                                 const float &d0,
+                                                                                 const float &d1,
+                                                                                 const float &d2) const
+    {
+        e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d1 * d2 * 16.f);
+    }
+    template <>
+    __host__ __device__ constexpr void operator()<B16, int, float, float, float>(B16 &e,
+                                                                                 const int &c,
+                                                                                 const float &d0,
+                                                                                 const float &d1,
+                                                                                 const float &d2) const
+    {
+        e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d1 * d2 * 16.f);
+    }
 };
 
-template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, bool Nswizzle, int MPerBlock = 32>
+template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, bool Nswizzle, bool PerTensorQuant, int MPerBlock = 32>
 void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
                         int topk,
                         void *&hidden_states,                          // [m, k], input token
@@ -291,7 +290,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                         std::optional<void *> a1_scale = std::nullopt  // [m, 1], token scale
 );
 
-template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, bool Nswizzle, int MPerBlock = 32>
+template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, bool Nswizzle, bool PerTensorQuant, int MPerBlock = 32>
 void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
                         int topk,
                         void *&inter_states,                           // [max_num_tokens_padded, k], input token

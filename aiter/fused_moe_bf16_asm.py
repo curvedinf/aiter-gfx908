@@ -156,12 +156,6 @@ def get_block_size(token, topk, expert):
             return el
     return support_list[-1]
 
-def get_mblock_size(token):
-    if token > 128 :
-        return 128
-    else:
-        return 32    
-
 # Only support fp8 per tensor quant
 def ck_moe_2stages(a1,
                    w1,  # [expert(local_expert:EP), inter_dim(*2), dim] N,K
@@ -250,13 +244,23 @@ def ck_moe_2stages_win4(a1,
     device = topk_ids.device
     if block_size is None:
         block_size = get_block_size(M, topk, E)
+    
+    if fc1_scale.numel() == E:
+        quantType = "per_tensor"
+    elif fc1_scale.numel() == (E * w1.shape[1]):
+        quantType = "per_token"
+    else:
+        assert False, "Unsupported quant scale shape, only support per_tensor or per_token"
    
     #print("###block_size:",block_size)
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, global_E,
                                                                                            model_dim, dtype, block_size, expert_mask)
     if w1.dtype == torch.uint32:#torch.uint32 torch.float8_e4m3fnuz
-        a1, a1_scale = aiter.pertoken_quant(a1, quant_dtype = torch.float8_e4m3fnuz)
-        # a1, a1_scale = aiter.per_tensor_quant(a1, quant_dtype=w1.dtype)
+        if quantType == "per_tensor":
+            a1, a1_scale = aiter.per_tensor_quant_fp8_hip(a1)
+        elif quantType == "per_token":
+            a1, a1_scale = aiter.per_token_dynamic_quant_fp8_hip(a1)
+            # a1, a1_scale = aiter.pertoken_quant(a1, quant_dtype = torch.float8_e4m3fnuz)
     else:
         a1_scale = None
 
@@ -280,10 +284,12 @@ def ck_moe_2stages_win4(a1,
         aiter.silu_and_mul(tmp, a2)
         a2 = tmp
     if w2.dtype == torch.uint32:
-        # a2, a2_scale = aiter.per_tensor_quant_fp8_hip(a2, a2_scale)
-        a2_qt, a2_scale = aiter.pertoken_quant(a2.view(M, -1),  quant_dtype=torch.float8_e4m3fnuz)
-        a2 = a2_qt.view(M, topk, -1)
-        # a2, a2_scale = aiter.per_tensor_quant(a2, quant_dtype=w2.dtype)
+        if quantType == "per_tensor":
+            a2, a2_scale = aiter.per_tensor_quant_fp8_hip(a2)
+        elif quantType == "per_token":
+            a2_qt, a2_scale = aiter.per_token_dynamic_quant_fp8_hip(a2.view(M, -1))
+            # a2_qt, a2_scale = aiter.pertoken_quant(a2.view(M, -1),  quant_dtype=torch.float8_e4m3fnuz)
+            a2 = a2_qt.view(M, topk, -1)
     else:
         if not hasattr(ck_moe_2stages, "one_float_tensor"):
             ck_moe_2stages.one_float_tensor = torch.tensor(

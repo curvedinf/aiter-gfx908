@@ -6,8 +6,9 @@ using A0DataType = B16;
 using B0DataType = B16;
 using AccDataType = F32;
 using EDataType = B16;
-using CDEElementOp = TypeCast;
+using CDEElementOp = TypeCastExpertWeight;
 const bool Nswizzle =  true;
-CK_MOE_STAGE1_GEMM_DEFINE(32)
-CK_MOE_STAGE1_GEMM_DEFINE(64)
-CK_MOE_STAGE1_GEMM_DEFINE(128)
+const bool PerTensorQuant = false;
+CK_MOE_STAGE2_GEMM_DEFINE(32)
+CK_MOE_STAGE2_GEMM_DEFINE(64)
+CK_MOE_STAGE2_GEMM_DEFINE(128)

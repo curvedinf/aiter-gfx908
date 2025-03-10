@@ -4,7 +4,6 @@
             "f'{AITER_CSRC_DIR}/pybind/activation_pybind.cu'",
             "f'{AITER_CSRC_DIR}/kernels/activation_kernels.cu'"
         ],
-        "md_name": "'module_activation'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -18,9 +17,23 @@
             "f'{AITER_CSRC_DIR}/py_itfs_ck/attention_kernels.cu'",
             "f'{AITER_CSRC_DIR}/pybind/attention_ck_pybind.cu'"
         ],
-        "md_name": "'module_attention'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
+        "extra_ldflags": "None",
+        "extra_include": [],
+        "isASM": "False",
+        "verbose": "False",
+        "blob_gen_cmd": "''"
+    },
+    "module_pa_ragged": {
+        "srcs": [
+            "f'{AITER_CSRC_DIR}/pybind/attention_ragged_pybind.cu'",
+            "f'{AITER_CSRC_DIR}/kernels/attention_ragged.cu'"
+        ],
+        "flags_extra_cc": [],
+        "flags_extra_hip": [
+            "'-DENABLE_FP8'"
+        ],
         "extra_ldflags": "None",
         "extra_include": [],
         "isASM": "False",
@@ -32,7 +45,6 @@
             "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_pa.cpp'",
             "f'{AITER_CSRC_DIR}/pybind/attention_asm_pybind.cu'"
         ],
-        "md_name": "'module_attention_asm'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -46,7 +58,6 @@
             "f'{AITER_CSRC_DIR}/pybind/attention_pybind.cu'",
             "f'{AITER_CSRC_DIR}/kernels/attention.cu'"
         ],
-        "md_name": "'module_pa'",
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DENABLE_FP8'"
@@ -57,12 +68,24 @@
         "verbose": "False",
         "blob_gen_cmd": "''"
     },
+    "module_mla_asm": {
+        "srcs": [
+            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_mla.cpp'",
+            "f'{AITER_CSRC_DIR}/pybind/attention_asm_mla_pybind.cu'"
+        ],
+        "flags_extra_cc": [],
+        "flags_extra_hip": [],
+        "extra_ldflags": "None",
+        "extra_include": [],
+        "isASM": "True",
+        "verbose": "False",
+        "blob_gen_cmd": "''"
+    },
     "module_cache": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/pybind/cache_pybind.cu'",
             "f'{AITER_CSRC_DIR}/kernels/cache_kernels.cu'"
         ],
-        "md_name": "'module_cache'",
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DENABLE_FP8'"
@@ -79,7 +102,6 @@
             "f'{AITER_CSRC_DIR}/kernels/custom_all_reduce.cu'",
             "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_communication.cpp'"
         ],
-        "md_name": "'module_custom_all_reduce'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -94,7 +116,6 @@
             "f'{AITER_CSRC_DIR}/py_itfs_cu/custom.cu'",
             "f'{AITER_CSRC_DIR}/kernels/custom_kernels.cu'"
         ],
-        "md_name": "'module_custom'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -103,13 +124,26 @@
         "verbose": "False",
         "blob_gen_cmd": "''"
     },
+    "module_batched_gemm_a8w8": {
+        "srcs": [
+            "f'{AITER_CSRC_DIR}/ck_batched_gemm_a8w8/include'",
+            "f'{AITER_CSRC_DIR}/pybind/batched_gemm_a8w8_pybind.cu'",
+            "f'{AITER_CSRC_DIR}/ck_batched_gemm_a8w8/batched_gemm_a8w8.cu'"
+        ],
+        "flags_extra_cc": [],
+        "flags_extra_hip": [],
+        "extra_ldflags": "None",
+        "extra_include": [],
+        "isASM": "False",
+        "verbose": "False",
+        "blob_gen_cmd": "f'{AITER_CSRC_DIR}/ck_batched_gemm_a8w8/gen_instances.py --working_path {{}} --tune_file {AITER_CORE_DIR}/aiter/configs/a8w8_tuned_batched_gemm.csv'"
+    },
     "module_gemm_a8w8": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/ck_gemm_a8w8/include'",
             "f'{AITER_CSRC_DIR}/pybind/gemm_a8w8_pybind.cu'",
             "f'{AITER_CSRC_DIR}/ck_gemm_a8w8/gemm_a8w8.cu'"
         ],
-        "md_name": "'module_gemm_a8w8'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -124,7 +158,6 @@
             "f'{AITER_CSRC_DIR}/pybind/gemm_a8w8_blockscale_pybind.cu'",
             "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale/gemm_a8w8_blockscale.cu'"
         ],
-        "md_name": "'module_gemm_a8w8_blockscale'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -132,14 +165,12 @@
         "isASM": "False",
         "verbose": "False",
         "blob_gen_cmd": "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale/gen_instances.py --working_path {{}} --tune_file {AITER_CORE_DIR}/aiter/configs/a8w8_blockscale_tuned_gemm.csv'"
-    
     },
     "module_gemm_a8w8_asm": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/pybind/gemm_a8w8_asm_pybind.cu'",
             "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_gemm_a8w8.cpp'"
         ],
-        "md_name": "'module_gemm_a8w8_asm'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -152,10 +183,10 @@
         "srcs": [
             "f'{AITER_CSRC_DIR}/pybind/moe_op_pybind.cu'",
             "f'{AITER_CSRC_DIR}/kernels/topk_softmax_kernels.cu'",
+            "f'{AITER_CSRC_DIR}/kernels/topk_softmax_kernels_group.cu'",
             "f'{AITER_CSRC_DIR}/kernels/moe_align_block_size_kernels.cu'",
             "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_fmoe.cpp'"
         ],
-        "md_name": "'module_moe_asm'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -170,7 +201,6 @@
             "f'{CK_DIR}/example/ck_tile/15_fused_moe/instances'",
             "f'{AITER_CSRC_DIR}/py_itfs_ck/moe_kernels.cu'"
         ],
-        "md_name": "'module_moe'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -181,13 +211,27 @@
         "verbose": "False",
         "blob_gen_cmd": "''"
     },
+    "module_moe_ck2stages": {
+        "srcs": [
+            "f'{AITER_CSRC_DIR}/pybind/moe_ck_2stages_pybind.cu'",
+            "f'{AITER_CSRC_DIR}/py_itfs_ck/moe_ck_2stages_kernel.cu'",
+            "f'{AITER_CSRC_DIR}/py_itfs_ck/moe_ck_2stages_gemm_impl'"
+        ],
+        "md_name": "'module_moe_ck2stages'",
+        "flags_extra_cc": [],
+        "flags_extra_hip": [],
+        "extra_ldflags": "None",
+        "extra_include": [],
+        "isASM": "False",
+        "verbose": "False",
+        "blob_gen_cmd": "''"
+    },
     "module_moe_sorting": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/py_itfs_ck/moe_sorting_kernels.cu'",
             "f'{AITER_CSRC_DIR}/pybind/moe_sorting_pybind.cu'",
             "f'{CK_DIR}/example/ck_tile/13_moe_sorting/'"
         ],
-        "md_name": "'module_moe_sorting'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -204,7 +248,6 @@
             "f'{AITER_CSRC_DIR}/pybind/norm_pybind.cu'",
             "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_layernorm.cpp'"
         ],
-        "md_name": "'module_norm'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -220,7 +263,6 @@
             "f'{AITER_CSRC_DIR}/pybind/pos_encoding_pybind.cu'",
             "f'{AITER_CSRC_DIR}/kernels/pos_encoding_kernels.cu'"
         ],
-        "md_name": "'module_pos_encoding'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -235,7 +277,6 @@
             "f'{AITER_CSRC_DIR}/py_itfs_ck/rmsnorm_ck_kernels.cu'",
             "f'{AITER_CSRC_DIR}/pybind/rmsnorm_pybind.cu'"
         ],
-        "md_name": "'module_rmsnorm'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -253,7 +294,6 @@
             "f'{CK_DIR}/example/ck_tile/12_smoothquant/instances'",
             "f'{CK_DIR}/example/ck_tile/14_moe_smoothquant/instances'"
         ],
-        "md_name": "'module_smoothquant'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -265,13 +305,26 @@
         "verbose": "False",
         "blob_gen_cmd": "''"
     },
+    "module_batched_gemm_a8w8_tune": {
+        "srcs": [
+            "f'{AITER_CSRC_DIR}/pybind/batched_gemm_a8w8_tune_pybind.cu'",
+            "f'{AITER_CSRC_DIR}/ck_batched_gemm_a8w8/batched_gemm_a8w8_tune.cu'",
+            "f'{AITER_CSRC_DIR}/ck_batched_gemm_a8w8/include'"
+        ],
+        "flags_extra_cc": [],
+        "flags_extra_hip": [],
+        "extra_ldflags": "None",
+        "extra_include": [],
+        "isASM": "False",
+        "verbose": "False",
+        "blob_gen_cmd": "f'{AITER_CSRC_DIR}/ck_batched_gemm_a8w8/gen_instances.py --working_path {{}} --tune'"
+    },
     "module_gemm_a8w8_tune": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/pybind/gemm_a8w8_tune_pybind.cu'",
             "f'{AITER_CSRC_DIR}/ck_gemm_a8w8/gemm_a8w8_tune.cu'",
             "f'{AITER_CSRC_DIR}/ck_gemm_a8w8/include'"
         ],
-        "md_name": "'module_gemm_a8w8_tune'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -286,7 +339,6 @@
             "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale/gemm_a8w8_blockscale_tune.cu'",
             "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale/include'"
         ],
-        "md_name": "'module_gemm_a8w8_blockscale_tune'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -302,7 +354,6 @@
             "f'{AITER_CSRC_DIR}/kernels/binary_operator.cu'",
             "f'{AITER_CSRC_DIR}/kernels/unary_operator.cu'"
         ],
-        "md_name": "'module_aiter_operator'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -316,7 +367,6 @@
             "f'{AITER_CSRC_DIR}/pybind/quant_pybind.cu'",
             "f'{AITER_CSRC_DIR}/kernels/quant_kernels.cu'"
         ],
-        "md_name": "'module_quant'",
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DENABLE_FP8'"
@@ -332,7 +382,6 @@
             "f'{AITER_CSRC_DIR}/pybind/rope_pybind.cu'",
             "f'{AITER_CSRC_DIR}/kernels/rope_kernels.cu'"
         ],
-        "md_name": "'module_rope'",
         "flags_extra_cc": [],
         "flags_extra_hip": [],
         "extra_ldflags": "None",
@@ -346,7 +395,6 @@
             "f'{AITER_CSRC_DIR}/py_itfs_ck/mha_fwd_kernels.cu'",
             "f'{AITER_CSRC_DIR}/pybind/mha_fwd_pybind.cu'"
         ],
-        "md_name": "'module_mha_fwd'",
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
@@ -358,14 +406,13 @@
         ],
         "isASM": "False",
         "verbose": "False",
-        "blob_gen_cmd": "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 10 --output_dir {{}}'"
+        "blob_gen_cmd": "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 100 --output_dir {{}}'"
     },
     "module_mha_varlen_fwd": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/py_itfs_ck/mha_varlen_fwd_kernels.cu'",
             "f'{AITER_CSRC_DIR}/pybind/mha_varlen_fwd_pybind.cu'"
         ],
-        "md_name": "'module_mha_varlen_fwd'",
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
@@ -378,8 +425,8 @@
         "isASM": "False",
         "verbose": "False",
         "blob_gen_cmd": [
-            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 11 --output_dir {{}}'",
-            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 11 --output_dir {{}}'"
+            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd --receipt 200 --output_dir {{}}'",
+            "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d fwd_splitkv --receipt 200 --output_dir {{}}'"
         ]
     },
     "module_mha_bwd": {
@@ -387,7 +434,6 @@
             "f'{AITER_CSRC_DIR}/py_itfs_ck/mha_bwd_kernels.cu'",
             "f'{AITER_CSRC_DIR}/pybind/mha_bwd_pybind.cu'"
         ],
-        "md_name": "'module_mha_bwd'",
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
@@ -399,14 +445,31 @@
         ],
         "isASM": "False",
         "verbose": "False",
-        "blob_gen_cmd": "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd --receipt 10 --output_dir {{}}'"
+        "blob_gen_cmd": "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd --receipt 300 --output_dir {{}}'"
+    },
+    "module_fmha_v3_bwd": {
+        "srcs": [
+            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_fmha_bwd_v3_new.cpp'",
+            "f'{AITER_CSRC_DIR}/pybind/mha_bwd_asm_pybind.cu'"
+        ],
+        "flags_extra_cc": [],
+        "flags_extra_hip": [
+            "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
+            "'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3'"
+        ],
+        "extra_ldflags": "None",
+        "extra_include": [
+            "f'{CK_DIR}/example/ck_tile/01_fmha'"
+        ],
+        "isASM": "True",
+        "verbose": "False",
+        "blob_gen_cmd": "f'{AITER_CSRC_DIR}/py_itfs_cu/fmha_bwd_pre_post_kernel.py --receipt 300 --filter \"*@*_ndeterministic@*_nbias*_dropout*_ndeterministic*\" --output_dir {{}}'"
     },
     "module_mha_varlen_bwd": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/py_itfs_ck/mha_varlen_bwd_kernels.cu'",
             "f'{AITER_CSRC_DIR}/pybind/mha_varlen_bwd_pybind.cu'"
         ],
-        "md_name": "'module_mha_varlen_bwd'",
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
@@ -418,6 +481,6 @@
         ],
         "isASM": "False",
         "verbose": "False",
-        "blob_gen_cmd": "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd --receipt 11 --output_dir {{}}'"
+        "blob_gen_cmd": "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd --receipt 400 --output_dir {{}}'"
     }
 }

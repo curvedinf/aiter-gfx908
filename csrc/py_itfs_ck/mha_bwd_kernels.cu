@@ -228,7 +228,6 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d]
     TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
     TORCH_CHECK(out.dtype() == q_dtype, "query and out must have the same dtype");
     TORCH_CHECK(dout.dtype() == q_dtype, "query and dout must have the same dtype");
-    TORCH_CHECK(deterministic == true, "Only support deterministic for now");
 
     std::string q_dtype_str = q_dtype == torch::kFloat16 ? "fp16" : "bf16";
 
@@ -290,11 +289,11 @@ mha_bwd(const at::Tensor &dout,         // [b, sq, hq, d]
         dq = torch::empty_like(q);
     }
     if (dk_.has_value()) {
-    dk = dk_.value();
-    TORCH_CHECK(dk.dtype() == q_dtype, "dk must have the same dtype as q");
-    CHECK_DEVICE(dk);
-    TORCH_CHECK(dk.stride(-1) == 1, "dk must have contiguous last dimension");
-    CHECK_SHAPE(dk, batch_size, seqlen_k, num_heads_k, head_size);
+        dk = dk_.value();
+        TORCH_CHECK(dk.dtype() == q_dtype, "dk must have the same dtype as q");
+        CHECK_DEVICE(dk);
+        TORCH_CHECK(dk.stride(-1) == 1, "dk must have contiguous last dimension");
+        CHECK_SHAPE(dk, batch_size, seqlen_k, num_heads_k, head_size);
     } else {
         dk = torch::empty_like(k);
     }

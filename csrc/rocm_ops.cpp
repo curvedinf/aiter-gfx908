@@ -2,6 +2,7 @@
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 #include "activation.h"
 #include "attention.h"
+#include "attention_ragged.h"
 #include "attention_ck.h"
 #include "attention_asm.h"
 #include "cache.h"
@@ -59,10 +60,18 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             "                int max_num_partitions,"
             "                Tensor? alibi_slopes,"
             "                str kv_cache_dtype,"
-            "                str kv_cache_layout,"
-            "                float logits_soft_cap,"
-            "                Tensor k_scale, Tensor v_scale) -> ()");
-
+            "                float k_scale, float v_scale) -> ()");
+      m.def("paged_attention_ragged", &paged_attention_ragged,
+            "paged_attention_ragged(Tensor! out, Tensor exp_sums,"
+            "                Tensor max_logits, Tensor tmp_out,"
+            "                Tensor query, Tensor key_cache,"
+            "                Tensor value_cache, int num_kv_heads,"
+            "                float scale, Tensor block_tables,"
+            "                Tensor context_lens, int block_size,"
+            "                int max_context_len,"
+            "                Tensor? alibi_slopes,"
+            "                str kv_cache_dtype,"
+            "                float k_scale, float v_scale) -> ()");
       m.def("gemm_a8w8", &gemm_a8w8, "gemm_a8w8", py::arg("XQ"), py::arg("WQ"),
             py::arg("x_scale"), py::arg("w_scale"), py::arg("Out"),
             py::arg("bias") = std::nullopt, py::arg("splitK") = 0);
@@ -157,6 +166,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             py::arg("sorted_expert_ids"), py::arg("total_tokens_post_pad"),
             py::arg("moe_buf"), py::arg("num_experts"),
             py::arg("unit_size"), py::arg("local_expert_mask") = std::nullopt);
+
       m.def("pa_fwd_naive", &pa_fwd_naive, "pa_fwd_naive",
             py::arg("Q"),
             py::arg("K"),
@@ -181,7 +191,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             py::arg("out"), py::arg("input"),
             py::arg("gate"), py::arg("down"),
             py::arg("sorted_token_ids"), py::arg("sorted_weight_buf"),
-            py::arg("sorted_expert_ids"), py::arg("num_tokens_post_padded"),
+            py::arg("sorted_expert_ids"), py::arg("num_valid_ids"),
             py::arg("topk"), py::arg("input_scale"),
             py::arg("fc1_scale"), py::arg("fc2_scale"),
             py::arg("fc2_smooth_scale") = std::nullopt,
@@ -212,7 +222,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             py::arg("max_num_blocks"),
             py::arg("K_QScale") = std::nullopt,
             py::arg("V_QScale") = std::nullopt,
-            py::arg("out_") = std::nullopt);
+            py::arg("out_") = std::nullopt,
+            py::arg("high_precision") = 1);
       m.def("gemm_a8w8_asm", &gemm_a8w8_asm,
             "Asm gemm a8w8 ,  weight should be shuffle to layout(32,16)",
             py::arg("XQ"), py::arg("WQ"),
@@ -257,73 +268,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
       m.def("rope_thd_bwd_impl", &rope_thd_bwd_impl);
       m.def("rope_2d_fwd_impl", &rope_2d_fwd_impl);
       m.def("rope_2d_bwd_impl", &rope_2d_bwd_impl);
-      // m.def("mha_fwd", &mha_fwd,
-      //       py::arg("q"), py::arg("k"), py::arg("v"),
-      //       py::arg("dropout_p"),
-      //       py::arg("softmax_scale"),
-      //       py::arg("is_causal"),
-      //       py::arg("window_size_left"),
-      //       py::arg("window_size_right"),
-      //       py::arg("return_softmax_lse"),
-      //       py::arg("return_dropout_randval"),
-      //       py::arg("out") = std::nullopt,
-      //       py::arg("alibi_slopes") = std::nullopt,
-      //       py::arg("gen") = std::nullopt);
-      // m.def("mha_varlen_fwd", &mha_varlen_fwd,
-      //       py::arg("q"), py::arg("k"), py::arg("v"),
-      //       py::arg("cu_seqlens_q"),
-      //       py::arg("cu_seqlens_k"),
-      //       py::arg("max_seqlen_q"),
-      //       py::arg("max_seqlen_k"),
-      //       py::arg("dropout_p"),
-      //       py::arg("softmax_scale"),
-      //       py::arg("zero_tensors"),
-      //       py::arg("is_causal"),
-      //       py::arg("window_size_left"),
-      //       py::arg("window_size_right"),
-      //       py::arg("return_softmax_lse"),
-      //       py::arg("return_dropout_randval"),
-      //       py::arg("out") = std::nullopt,
-      //       py::arg("block_table") = std::nullopt,
-      //       py::arg("alibi_slopes") = std::nullopt,
-      //       py::arg("gen") = std::nullopt);
-      // m.def("mha_bwd", &mha_bwd,
-      //       py::arg("dout"),
-      //       py::arg("q"), py::arg("k"), py::arg("v"),
-      //       py::arg("out"),
-      //       py::arg("softmax_lse"),
-      //       py::arg("dropout_p"),
-      //       py::arg("softmax_scale"),
-      //       py::arg("is_causal"),
-      //       py::arg("window_size_left"),
-      //       py::arg("window_size_right"),
-      //       py::arg("deterministic"),
-      //       py::arg("dq") = std::nullopt,
-      //       py::arg("dk") = std::nullopt,
-      //       py::arg("dv") = std::nullopt,
-      //       py::arg("alibi_slopes") = std::nullopt,
-      //       py::arg("rng_state") = std::nullopt,
-      //       py::arg("gen") = std::nullopt);
-      // m.def("mha_varlen_bwd", &mha_varlen_bwd,
-      //       py::arg("dout"),
-      //       py::arg("q"), py::arg("k"), py::arg("v"),
-      //       py::arg("out"),
-      //       py::arg("softmax_lse"),
-      //       py::arg("cu_seqlens_q"),
-      //       py::arg("cu_seqlens_k"),
-      //       py::arg("max_seqlen_q"),
-      //       py::arg("max_seqlen_k"),
-      //       py::arg("dropout_p"),
-      //       py::arg("softmax_scale"),
-      //       py::arg("zero_tensors"),
-      //       py::arg("is_causal"),
-      //       py::arg("window_size_left"),
-      //       py::arg("window_size_right"),
-      //       py::arg("deterministic"),
-      //       py::arg("dq") = std::nullopt,
-      //       py::arg("dk") = std::nullopt,
-      //       py::arg("dv") = std::nullopt,
-      //       py::arg("alibi_slopes") = std::nullopt,
-      //       py::arg("rng_state") = std::nullopt,
-      //       py::arg("gen") = std::nullopt);
+      // Add api of mha
 }

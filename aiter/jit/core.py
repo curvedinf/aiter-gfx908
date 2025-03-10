@@ -14,6 +14,7 @@ from torch.utils import cpp_extension
 from torch.utils.file_baton import FileBaton
 import logging
 import json
+import multiprocessing
 from packaging.version import parse, Version
 
 PREBUILD_KERNELS = False
@@ -36,21 +37,40 @@ if find_aiter is not None:
     package_path = os.path.dirname(package_path)
     import site
     site_packages_dirs = site.getsitepackages()
-    ### develop mode
+    # develop mode
     if package_path not in site_packages_dirs:
         AITER_ROOT_DIR = AITER_CORE_DIR
-    ### install mode
+    # install mode
     else:
         AITER_ROOT_DIR = os.path.abspath(f"{AITER_CORE_DIR}/aiter_meta/")
 else:
     print("aiter is not installed.")
 
 AITER_CSRC_DIR = f'{AITER_ROOT_DIR}/csrc'
+os.environ["AITER_ASM_DIR"] = f'{AITER_ROOT_DIR}/hsa/'
 CK_DIR = os.environ.get("CK_DIR",
                         f"{AITER_ROOT_DIR}/3rdparty/composable_kernel")
-bd_dir = f"{this_dir}/build"
+
+@functools.lru_cache(maxsize=None)
+def get_user_jit_dir():
+    if 'JIT_WORKSPACE_DIR' in os.environ:
+        path = os.getenv('JIT_WORKSPACE_DIR')
+        os.makedirs(path, exist_ok=True)
+        return path
+    else:
+        if os.access(this_dir, os.W_OK):
+            return this_dir
+    home_jit_dir = os.path.expanduser('~') + '/.aiter/' + os.path.basename(this_dir)
+    if not os.path.exists(home_jit_dir):
+        shutil.copytree(this_dir, home_jit_dir)
+    return home_jit_dir
+
+bd_dir = f'{get_user_jit_dir()}/build'
 # copy ck to build, thus hippify under bd_dir
-shutil.copytree(CK_DIR, f'{bd_dir}/ck', dirs_exist_ok=True)
+if multiprocessing.current_process().name == 'MainProcess':
+    shutil.copytree(CK_DIR, f'{bd_dir}/ck', dirs_exist_ok=True)
+    if os.path.exists(f'{bd_dir}/ck/library'):
+        shutil.rmtree(f'{bd_dir}/ck/library')
 CK_DIR = f'{bd_dir}/ck'
 
 
@@ -119,7 +139,8 @@ def get_module(md_name):
         "cat /proc/sys/kernel/numa_balancing").read().strip()
     if numa_balance_set == "1":
         logger.warning("WARNING: NUMA balancing is enabled, which may cause errors. "
-                       "It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' ")
+                       "It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' "
+                       "for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing")
     return importlib.import_module(f'{__package__}.{md_name}')
 
 
@@ -132,8 +153,8 @@ def build_module(md_name, srcs, flags_extra_cc, flags_extra_hip, blob_gen_cmd, e
         opbd_dir = f'{op_dir}/build'
         src_dir = f'{op_dir}/build/srcs'
         os.makedirs(src_dir, exist_ok=True)
-        if os.path.exists(f'{this_dir}/{md_name}.so'):
-            os.remove(f'{this_dir}/{md_name}.so')
+        if os.path.exists(f'{get_user_jit_dir()}/{md_name}.so'):
+            os.remove(f'{get_user_jit_dir()}/{md_name}.so')
 
         sources = rename_cpp_to_cu(srcs, src_dir)
 
@@ -146,11 +167,7 @@ def build_module(md_name, srcs, flags_extra_cc, flags_extra_hip, blob_gen_cmd, e
             "-U__HIP_NO_HALF_CONVERSIONS__",
             "-U__HIP_NO_HALF_OPERATORS__",
 
-            "-mllvm", "-enable-post-misched=0",
-            "-mllvm", "-amdgpu-early-inline-all=true",
-            "-mllvm", "-amdgpu-function-calls=false",
             "-mllvm", "--amdgpu-kernarg-preload-count=16",
-            "-mllvm", "-amdgpu-coerce-illegal-types=1",
             # "-v", "--save-temps",
             "-Wno-unused-result",
             "-Wno-switch-bool",
@@ -169,7 +186,7 @@ def build_module(md_name, srcs, flags_extra_cc, flags_extra_hip, blob_gen_cmd, e
         if hip_version > Version('6.2.41132'):
             flags_hip += ["-mllvm", "-amdgpu-early-inline-all=true",
                           "-mllvm", "-amdgpu-function-calls=false"]
-        if hip_version > Version('6.2.41133') and hip_version < Version('6.3.00000'):
+        if hip_version > Version('6.2.41133'):
             flags_hip += ["-mllvm", "-amdgpu-coerce-illegal-types=1"]
 
         flags_cc += flags_extra_cc
@@ -222,11 +239,11 @@ def build_module(md_name, srcs, flags_extra_cc, flags_extra_hip, blob_gen_cmd, e
             with_cuda=True,
             is_python_module=True,
         )
-        shutil.copy(f'{opbd_dir}/{md_name}.so', f'{this_dir}')
+        shutil.copy(f'{opbd_dir}/{md_name}.so', f'{get_user_jit_dir()}')
     except Exception as e:
         logger.error('failed build jit [{}]\n-->[History]: {}'.format(
             md_name,
-            ''.join(traceback.format_exception(*sys.exc_info()))
+            '-->'.join(traceback.format_exception(*sys.exc_info()))
         ))
         sys.exit()
     logger.info(
@@ -247,9 +264,9 @@ def get_args_of_build(ops_name: str, exclue=[]):
 
     def convert(d_ops: dict):
         # judge isASM
-        if d_ops["isASM"].lower() == "true":
-            d_ops["flags_extra_hip"].append(
-                "rf'-DAITER_ASM_DIR=\\\"{AITER_ROOT_DIR}/hsa/\\\"'")
+        # if d_ops["isASM"].lower() == "true":
+        #     d_ops["flags_extra_hip"].append(
+        #         "rf'-DAITER_ASM_DIR=\\\"{AITER_ROOT_DIR}/hsa/\\\"'")
         del d_ops["isASM"]
         for k, val in d_ops.items():
             if isinstance(val, list):
@@ -291,33 +308,40 @@ def get_args_of_build(ops_name: str, exclue=[]):
                 return d_all_ops
             # no find opt_name in json.
             elif data.get(ops_name) == None:
-                logger.warning("Not found this operator in 'optCompilerConfig.json'. ")
+                logger.warning(
+                    "Not found this operator in 'optCompilerConfig.json'. ")
                 return d_opt_build_args
             # parser single opt
             else:
                 compile_ops_ = data.get(ops_name)
                 return convert(compile_ops_)
         else:
-            logger.warning("ERROR: pls use dict_format to write 'optCompilerConfig.json'! ")
+            logger.warning(
+                "ERROR: pls use dict_format to write 'optCompilerConfig.json'! ")
 
 
-def compile_ops(ops_name: str, fc_name: Optional[str] = None):
+def compile_ops(_md_name: str, fc_name: Optional[str] = None):
     def decorator(func):
-        def wrapper(*args, **kwargs):
+        def wrapper(*args, custom_build_args={}, **kwargs):
             loadName = fc_name
+            md_name = _md_name
             if fc_name is None:
                 loadName = func.__name__
-
             try:
                 module = None
                 if PREBUILD_KERNELS:
                     if hasattr(aiter_, loadName):
                         module = aiter_
                 if module is None:
-                    module = get_module(ops_name)
+                    module = get_module(custom_build_args.get('md_name',
+                                                              md_name))
             except Exception as e:
-                d_args = get_args_of_build(ops_name)
-                md_name = d_args["md_name"]
+                d_args = get_args_of_build(md_name)
+                d_args.update(custom_build_args)
+
+                # update module if we have coustom build
+                md_name = custom_build_args.get('md_name', md_name)
+
                 srcs = d_args["srcs"]
                 flags_extra_cc = d_args["flags_extra_cc"]
                 flags_extra_hip = d_args["flags_extra_hip"]
@@ -334,13 +358,13 @@ def compile_ops(ops_name: str, fc_name: Optional[str] = None):
 
                 def getTensorInfo(el):
                     if isinstance(el, torch.Tensor):
-                        return f'{el.shape} {el.dtype}'
+                        return f'{el.shape} {el.dtype} {hex(el.data_ptr())}'
                     return el
 
                 callargs = [
                     f"\n        {el} = {getTensorInfo(callargs[el])}" for el in callargs]
                 logger.info(
-                    f"    calling {ops_name}::{loadName}({', '.join(callargs)})")
+                    f"    calling {md_name}::{loadName}({', '.join(callargs)})")
 
             return op(*args, **kwargs)
         return wrapper

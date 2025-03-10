@@ -375,7 +375,7 @@ void fmoe_g1u1(torch::Tensor &out,                                           // 
                torch::Tensor &sorted_token_ids,                              // [max_num_tokens_padded]
                torch::Tensor &sorted_weight_buf,                             // [max_num_tokens_padded]
                torch::Tensor &sorted_expert_ids,                             // [max_num_m_blocks]
-               torch::Tensor &num_tokens_post_padded,                        // [1]
+               torch::Tensor &num_valid_ids,                                 // [1]
                uint32_t topk,                                                //
                torch::Tensor &input_scale,                                   // [token_cnt, 1]
                torch::Tensor &fc1_scale,                                     // [expert, 1, inter_dim]

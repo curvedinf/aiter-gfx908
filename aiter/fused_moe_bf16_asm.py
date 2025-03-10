@@ -66,8 +66,8 @@ def asm_moe(hidden_states,
         assert activation is None, f"asm_moe activation function cannot be specified when not use a8w4, \n\
             by default, 'silu' is used for g1u1 and 'gelu' is used for g1u0"
 
-    sorted_ids, sorted_weights, sorted_expert_ids, num_tokens_post_padded, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
-                                                                                                    model_dim, dtype, expert_mask)
+    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
+                                                                                                    model_dim, dtype, BLOCK_SIZE_M, expert_mask)
 
     if fc1_scale is None:
         # pure bf16
@@ -109,7 +109,7 @@ def asm_moe(hidden_states,
         aiter.dynamic_per_token_scaled_fp8_quant(a8, hidden_states, a8_scale)
         
         aiter.fmoe_fp8_blockscale_g1u1(moe_buf, a8, w1, w2, sorted_ids,
-                                       sorted_weights, sorted_expert_ids, num_tokens_post_padded,
+                                       sorted_weights, sorted_expert_ids, num_valid_ids,
                                        topk,
                                        fc1_scale.view(E, -1),
                                        fc2_scale.view(E, -1),
@@ -172,7 +172,7 @@ def asm_moe(hidden_states,
         if useInt4Weight:
             # sorted_ids = sorted_ids & 0xffffff
             fmoe_func(moe_buf, a8, w1, w2, sorted_ids,
-                      sorted_weights, sorted_expert_ids, num_tokens_post_padded,
+                      sorted_weights, sorted_expert_ids, num_valid_ids,
                       topk,
                       a8_scale,
                       fc1_scale,
@@ -181,7 +181,7 @@ def asm_moe(hidden_states,
                       activation)
         else:
             fmoe_func(moe_buf, a8, w1, w2, sorted_ids,
-                      sorted_weights, sorted_expert_ids, num_tokens_post_padded,
+                      sorted_weights, sorted_expert_ids, num_valid_ids,
                       topk,
                       a8_scale,
                       fc1_scale,

@@ -391,12 +391,12 @@ void fmoe_g1u1(torch::Tensor &out,                                           // 
         // fixme: not using heuristic_tile but this hack, todo coderfeli
         if (activation.has_value() && activation.value() == "silu")
         {
-            if (sub_X_cnt >= 16)
+            if (sub_X_cnt >= 32)
             {
                 static FMoeKernel impl_int4_512_silu("fmoe_int4fp8_g1u1_subGU_512_silu", "fmoe_int4fp8_g1u1_subGU_512_silu.co", 512);
                 impl_ptr = &impl_int4_512_silu;
             }
-            else if (sub_X_cnt >= 8)
+            else if (sub_X_cnt >= 16)
             {
                 static FMoeKernel impl_int4_256_silu("fmoe_int4fp8_g1u1_subGU_256_silu", "fmoe_int4fp8_g1u1_subGU_256_silu.co", 256);
                 impl_ptr = &impl_int4_256_silu;
@@ -409,12 +409,12 @@ void fmoe_g1u1(torch::Tensor &out,                                           // 
         }
         else
         {
-            if (sub_X_cnt >= 16)
+            if (sub_X_cnt >= 32)
             {
                 static FMoeKernel impl_int4_512_gelu("fmoe_int4fp8_g1u1_subGU_512_gelu", "fmoe_int4fp8_g1u1_subGU_512_gelu.co", 512);
                 impl_ptr = &impl_int4_512_gelu;
             }
-            else if (sub_X_cnt >= 8)
+            else if (sub_X_cnt >= 16)
             {
                 static FMoeKernel impl_int4_256_gelu("fmoe_int4fp8_g1u1_subGU_256_gelu", "fmoe_int4fp8_g1u1_subGU_256_gelu.co", 256);
                 impl_ptr = &impl_int4_256_gelu;

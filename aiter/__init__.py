@@ -59,4 +59,5 @@ from .ops.rope import *
 from .ops.topk import *
 from .ops.mha import *
 from .ops.gradlib import *
+from .ops.fmla import *
 from . import mla

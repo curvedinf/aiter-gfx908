@@ -3,7 +3,7 @@
 
 from torch import Tensor
 from typing import List, Optional
-from ..jit.core import compile_ops, CK_DIR, AITER_CSRC_DIR, AITER_ROOT_DIR
+from ..jit.core import compile_ops, CK_DIR, AITER_CSRC_DIR, AITER_ROOT_DIR, AITER_CORE_DIR
 import torch.nn.functional as F
 
 
@@ -118,10 +118,11 @@ def fmoe_fp8_g1u1_a16(
     fc2_smooth_scale: Tensor,
 ): ...
 
+
 @compile_ops("module_moe_asm")
 def fmoe_fp8_blockscale_g1u1(
     out: Tensor,
-    input: Tensor,  
+    input: Tensor,
     gate: Tensor,
     down: Tensor,
     sorted_token_ids: Tensor,
@@ -179,7 +180,7 @@ def ck_moe_stage2(
     sorted_weights: Tensor,
     num_valid_ids: Tensor,
     out: Tensor,
-    topk,
+    topk: int,
     w2_scale: Optional[Tensor] = None,
     a2_scale: Optional[Tensor] = None,
     block_m: Optional[int] = 32

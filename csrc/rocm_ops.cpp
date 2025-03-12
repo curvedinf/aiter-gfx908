@@ -2,6 +2,7 @@
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 #include "activation.h"
 #include "attention.h"
+#include "attention_ragged.h"
 #include "attention_ck.h"
 #include "attention_asm.h"
 #include "cache.h"
@@ -20,6 +21,11 @@
 #include "gemm_a8w8.h"
 #include "quant.h"
 #include "moe_ck.h"
+#include "rope.h"
+// #include "mha_varlen_fwd.h"
+// #include "mha_varlen_bwd.h"
+// #include "mha_bwd.h"
+// #include "mha_fwd.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
@@ -55,7 +61,17 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             "                Tensor? alibi_slopes,"
             "                str kv_cache_dtype,"
             "                float k_scale, float v_scale) -> ()");
-
+      m.def("paged_attention_ragged", &paged_attention_ragged,
+            "paged_attention_ragged(Tensor! out, Tensor exp_sums,"
+            "                Tensor max_logits, Tensor tmp_out,"
+            "                Tensor query, Tensor key_cache,"
+            "                Tensor value_cache, int num_kv_heads,"
+            "                float scale, Tensor block_tables,"
+            "                Tensor context_lens, int block_size,"
+            "                int max_context_len,"
+            "                Tensor? alibi_slopes,"
+            "                str kv_cache_dtype,"
+            "                float k_scale, float v_scale) -> ()");
       m.def("gemm_a8w8", &gemm_a8w8, "gemm_a8w8", py::arg("XQ"), py::arg("WQ"),
             py::arg("x_scale"), py::arg("w_scale"), py::arg("Out"),
             py::arg("bias") = std::nullopt, py::arg("splitK") = 0);
@@ -189,7 +205,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             py::arg("topk"),
             py::arg("fc1_scale"), py::arg("fc2_scale"),
             py::arg("fc1_smooth_scale"), py::arg("fc2_smooth_scale") = std::nullopt,
-            py::arg("fc_scale_blkn") = std::128, py::arg("fc_scale_blkk") = std::128);
+            py::arg("fc_scale_blkn") = 128, py::arg("fc_scale_blkk") = 128);
       m.def("add", &aiter_add, "apply for add with transpose and broadcast.");
       m.def("mul", &aiter_mul, "apply for mul with transpose and broadcast.");
       m.def("sub", &aiter_sub, "apply for sub with transpose and broadcast.");
@@ -205,7 +221,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             py::arg("max_num_blocks"),
             py::arg("K_QScale") = std::nullopt,
             py::arg("V_QScale") = std::nullopt,
-            py::arg("out_") = std::nullopt);
+            py::arg("out_") = std::nullopt,
+            py::arg("high_precision") = 1);
       m.def("gemm_a8w8_asm", &gemm_a8w8_asm,
             "Asm gemm a8w8 ,  weight should be shuffle to layout(32,16)",
             py::arg("XQ"), py::arg("WQ"),
@@ -241,7 +258,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
             py::arg("w1_scale") = std::nullopt, py::arg("w2_scale") = std::nullopt,
             py::arg("a1_scale") = std::nullopt, py::arg("a2_scale") = std::nullopt,
             py::arg("block_m") = 32, py::arg("expert_mask") = std::nullopt);
-
       m.def("rope_fwd_impl", &rope_fwd_impl);
       m.def("rope_bwd_impl", &rope_bwd_impl);
       m.def("rope_cached_fwd_impl", &rope_cached_fwd_impl);
@@ -250,4 +266,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
       m.def("rope_thd_bwd_impl", &rope_thd_bwd_impl);
       m.def("rope_2d_fwd_impl", &rope_2d_fwd_impl);
       m.def("rope_2d_bwd_impl", &rope_2d_bwd_impl);
+      // Add api of mha
 }

@@ -103,67 +103,6 @@ def torch_moe_stage2(hidden_states,
     return (out * topk_weights.view(token_num, -1, 1)).sum(1).to(dtype)
 
 
-def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
-              # following for quant
-              fc1_scale=None,  # [expert, inter_dim, 1]
-              fc2_scale=None,  # [expert, model_dim, 1]
-              fc1_smooth_scale=None,  # [expert, 1, model_dim]
-              fc2_smooth_scale=None,  # [expert, 1, inter_dim]
-              ):
-    B, D = hidden_states.shape
-    topk = topk_weight.shape[1]
-    dtype = hidden_states.dtype
-    hidden_states = hidden_states.view(
-        B, -1, D).repeat(1, topk, 1)
-    out = torch.zeros(
-        (B, topk, D),
-        dtype=dtype,
-        device=hidden_states.device,
-    )
-    # g1u1(w1 include gate and up)
-    if w2.shape[2]*2 == w1.shape[1]:
-        moeType = "g1u1"
-        inter_dim = w2.shape[2]
-    # g1u0(w1 only include gate)
-    else:
-        moeType = "g1u0"
-        inter_dim = w1.shape[1]
-    # gose to quant D_w8a8/w8a8
-    if fc1_scale is not None:
-        expert = w1.shape[0]
-        w2D = w2.shape[-1]
-        w1 = (w1.view(-1, D).to(fc1_scale) *
-              fc1_scale.view(-1, 1)).to(dtype).view(expert, -1, D)
-        w2 = (w2.view(-1, w2D).to(fc2_scale) *
-              fc2_scale.view(-1, 1)).to(dtype).view(expert, -1, w2D)
-    if fc1_smooth_scale is not None:
-        expert = fc1_smooth_scale.shape[0]
-        fc1_smooth_scale = fc1_smooth_scale.view(expert, -1).to(dtype)
-        fc2_smooth_scale = fc2_smooth_scale.view(expert, -1).to(dtype)
-
-    for E_id in range(w1.shape[0]):
-        mask = topk_ids == E_id
-        if mask.sum():
-            sub_tokens = hidden_states[mask]
-            if fc1_smooth_scale is not None:
-                sub_tokens = sub_tokens * (
-                    fc1_smooth_scale[E_id])
-            act_input = sub_tokens @ (w1[E_id].transpose(0, 1))
-            if moeType == "g1u1":
-                gate, up = act_input.split([inter_dim, inter_dim], dim=-1)
-                act_out = F.silu(gate) * up
-            else:
-                act_out = F.gelu(act_input)
-            if fc2_smooth_scale is not None:
-                act_out = act_out * (
-                    fc2_smooth_scale[E_id])
-            out[mask] = act_out @ (w2[E_id].transpose(0, 1))
-
-    return (
-        out * topk_weight.view(B, -1, 1).to(out.dtype)
-    ).sum(dim=1)
-
-
 @perftest()
 def ck_moe_stage1(hidden_states,
                   w1,  # [E, inter_dim*2, model_dim]
@@ -232,13 +171,14 @@ def ck_moe_fused_2stages(hidden_states,
                          # [expert(local_expert:EP), model_dim, 1]
                          fc2_scale=None,
                          block_size=32,
-                         a1_scale=None
+                         a1_scale=None,
+                         activation='silu'
                          ):
     return ck_moe_2stages(hidden_states, w1, w2, topk_weight, topk_ids,
-                          fc1_scale, fc2_scale, block_size=block_size, a1_scale=a1_scale)
+                          fc1_scale, fc2_scale, block_size=block_size, a1_scale=a1_scale, activation=activation)
 
 
-def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=False, shared_E=0):
+def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=False, shared_E=0, activation='silu'):
     input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
     if use_g1u1:
         w1 = torch.randn((E+shared_E, inter_dim*2, model_dim),
@@ -278,9 +218,15 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                         block_size=BLOCK_SIZE_M)
     if use_g1u1:
         gate, up = out1_ref.split([inter_dim, inter_dim], dim=-1)
-        input2 = F.silu(gate) * up
+        if activation == 'silu':
+            input2 = F.silu(gate) * up
+        else:
+            input2 = F.gelu(gate) * up
     else:
-        input2 = F.gelu(out1_ref)
+        if activation == 'silu':
+            input2 = F.silu(out1_ref)
+        else:
+            input2 = F.gelu(out1_ref)
     a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
     # a2_qt, a2_scale = aiter.per_tensor_quant_fp8_hip(input2)
     out2_ref, us_ref = torch_moe_stage2(a2_qt,
@@ -296,7 +242,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                         block_size=BLOCK_SIZE_M
                                         )
 
-    out_ref = torch_moe(input, w1, w2, topk_weights, topk_ids)
+    out_ref = torch_moe(input, w1, w2, topk_weights, topk_ids, activation=activation)
 
     # checkAllclose(out_ref, out2_ref, msg="[torch] 1_stage vs 2_stage")
 
@@ -338,6 +284,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                              w2_qt, layout=(32, 32)),
                                          topk_weights, topk_ids,
                                          w1_scale, w2_scale,
+                                         activation=activation
                                          #  block_size=BLOCK_SIZE_M
                                          )
 
@@ -362,4 +309,4 @@ for dtype in [torch.float16]:
             for inter_dim in [6144, 16384]:
                 expert, topk = 8, 2
                 test_fmoe(dtype, m, dim, inter_dim, expert, topk,
-                          quant='fp8quant', use_g1u1=True)
+                          quant='fp8quant', use_g1u1=True, activation='gelu')

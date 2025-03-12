@@ -169,7 +169,8 @@ def ck_moe_2stages(a1,
                    a1_scale=None,  # [1]
                    a2_scale=None,  # [1]
                    block_size=None,
-                   expert_mask=None
+                   expert_mask=None,
+                   activation="silu"
                    ):
     E, model_dim, inter_dim = w2.shape
     global_E = E
@@ -203,11 +204,17 @@ def ck_moe_2stages(a1,
 
     # g1u0
     if w2.shape[2] == w1.shape[1]:
-        a2 = F.gelu(a2)
+        if activation == "gelu":
+            a2 = F.gelu(a2)
+        else:
+            a2 = F.silu(a2)
     # g1u1
     else:
         tmp = torch.empty((M, topk, inter_dim), dtype=dtype, device=device)
-        aiter.silu_and_mul(tmp, a2)
+        if activation == "gelu":
+            aiter.gelu_and_mul(tmp, a2)
+        else:
+            aiter.silu_and_mul(tmp, a2)
         a2 = tmp
     if w2.dtype == torch.float8_e4m3fnuz:
         a2, a2_scale = aiter.per_tensor_quant_fp8_hip(a2, a2_scale)
@@ -235,7 +242,8 @@ def ck_moe_2stages_win4(a1,
                    a1_scale=None,  # [1]
                    a2_scale=None,  # [1]
                    block_size=None,
-                   expert_mask=None
+                   expert_mask=None,
+                   activation="silu"
                    ):
     E, model_dim, inter_dim = w2.shape
     inter_dim = inter_dim * 8
@@ -280,11 +288,17 @@ def ck_moe_2stages_win4(a1,
     #print("a2 shape:",a2.shape)
     # g1u0
     if w2.shape[2] == w1.shape[1]:
-        a2 = F.gelu(a2)
+        if activation == "gelu":
+            a2 = F.gelu(a2)
+        else:
+            a2 = F.silu(a2)
     # g1u1
     else:
         tmp = torch.empty((M, topk, inter_dim), dtype=dtype, device=device)
-        aiter.silu_and_mul(tmp, a2)
+        if activation == "gelu":
+            aiter.gelu_and_mul(tmp, a2)
+        else:
+            aiter.silu_and_mul(tmp, a2)
         a2 = tmp
     if w2.dtype == torch.uint32:
         if quantType == "per_tensor":
@@ -312,7 +326,8 @@ def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
               fc2_scale=None,  # [expert(local_expert:EP), model_dim, 1]
               fc1_smooth_scale=None,  # [expert(local_expert:EP), 1, model_dim]
               fc2_smooth_scale=None,  # [expert(local_expert:EP), 1, inter_dim]
-              expert_mask=None):
+              expert_mask=None,
+              activation="silu"):
     computeType = torch.float
     dtype = hidden_states.dtype
     hidden_states = hidden_states.to(computeType)
@@ -363,9 +378,15 @@ def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
             act_input = sub_tokens @ (w1[E_id].transpose(0, 1))
             if moeType == "g1u1":
                 gate, up = act_input.split([inter_dim, inter_dim], dim=-1)
-                act_out = F.silu(gate) * up
+                if activation == "gelu":
+                    act_out = F.gelu(gate) * up
+                else:
+                    act_out = F.silu(gate) * up
             else:
-                act_out = F.gelu(act_input)
+                if activation == "gelu":
+                    act_out = F.gelu(act_input)
+                else:
+                    act_out = F.silu(act_input)
             if fc2_smooth_scale is not None:
                 act_out = act_out * (fc2_smooth_scale[E_id])
             out[mask] = act_out @ (w2[E_id].transpose(0, 1))

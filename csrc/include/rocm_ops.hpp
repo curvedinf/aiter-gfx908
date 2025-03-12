@@ -483,3 +483,7 @@
       m.def("rocb_destroy_extension", &rocb_destroy_extension, "destroy_extension"); \
       m.def("rocb_mm", &RocSolIdxBlas, "mm");                                        \
       m.def("rocb_findallsols", &RocFindAllSolIdxBlas, "rocblas_find_all_sols");
+
+#define FLASH_MLA_FWD_PYBIND                                                            \
+      m.def("get_mla_metadata", &get_mla_metadata);                                 \
+      m.def("flash_mla_fwd_with_kvcache_impl", &flash_mla_fwd_with_kvcache_impl);

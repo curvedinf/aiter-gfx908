@@ -27,6 +27,7 @@
 #include "rope.h"
 #include "rocsolgemm.cuh"
 #include "hipbsolgemm.cuh"
+#include "fmla.h"
 
 // #include "mha_varlen_fwd.h"
 // #include "mha_varlen_bwd.h"
@@ -74,5 +75,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
       CACHE_PYBIND;
       HIPBSOLGEMM_PYBIND;
       ROCSOLGEMM_PYBIND;
+      FLASH_MLA_FWD_PYBIND;
 }
 #endif

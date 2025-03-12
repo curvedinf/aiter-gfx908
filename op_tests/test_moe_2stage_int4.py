@@ -333,7 +333,8 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                 sorted_weights,
                                 num_valid_ids,
                                 w2_scale, a2_scale,
-                                dtype, topk, BLOCK_SIZE_M)
+                                dtype, topk, BLOCK_SIZE_M,
+                                activation=activation)
     
     #print("CK GEMM2 OUT:",out2_qt)    
     checkAllclose(out2_ref, out2_qt,msg=f'ck_moe_stage2:{us_s2:.2f} us_s2, {token*model_dim*inter_dim*topk*2/us_s2/1000/1000:.2f} tflops......(quant:{quant_dtype})')

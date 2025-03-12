@@ -259,9 +259,15 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     if use_g1u1:
         gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
-        input2 = F.silu(gate) * up
+        if activation == 'silu':
+            input2 = F.silu(gate) * up
+        else:
+            input2 = F.gelu(gate) * up
     else:
-        input2 = F.gelu(out1_qt)
+        if activation == 'silu':
+            input2 = F.silu(out1_qt)
+        else:
+            input2 = F.gelu(out1_qt)
     # a2_qt, a2_scale = aiter.per_tensor_quant_fp8_hip(input2)
     a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
 
@@ -296,6 +302,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                           shuffle_weight(w2, layout=(32, 32)),
                                           topk_weights, topk_ids,
                                           None, None,
+                                         activation=activation
                                           #   block_size=BLOCK_SIZE_M
                                           )
 

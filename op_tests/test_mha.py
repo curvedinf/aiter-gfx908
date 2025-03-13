@@ -18,7 +18,7 @@ def run_torch(
     q,
     k,
     v,
-    alibi_slopes=None,
+    bias=None,
     dout=None,
     dropout_p=0.0,
     dropout_mask=None,
@@ -27,13 +27,15 @@ def run_torch(
     upcast=True,
     reorder_ops=False
 ):
-    (_, seqlen_q, _, _) = q.shape
+    (batch_size, seqlen_q, _, _) = q.shape
     (_, seqlen_k, _, _) = k.shape
 
-    if alibi_slopes is not None:
-        attn_bias = attn_bias_from_alibi_slopes(alibi_slopes, seqlen_q, seqlen_k, causal=causal)
-    else:
-        attn_bias = None
+    if bias == None:
+        attn_bias = bias
+    elif bias.shape[0] == batch_size:
+        attn_bias = attn_bias_from_alibi_slopes(bias, seqlen_q, seqlen_k, causal=causal)
+    elif bias.shape[0] == seqlen_q:
+        attn_bias = bias
 
     out, _ = attention_ref(
             q,
@@ -145,7 +147,7 @@ def test_flash_attn_output(
     dropout_p,
     causal,
     local,
-    alibi,
+    bias_type,
     deterministic,
     mha_type,
     dtype
@@ -162,22 +164,24 @@ def test_flash_attn_output(
     k = torch.randn(batch_size, seqlen_k, nheads_k, d, device="cuda", dtype=dtype, requires_grad=True)
     v = torch.randn(batch_size, seqlen_k, nheads_k, d_v, device="cuda", dtype=dtype, requires_grad=True)
 
-    if alibi:
-        alibi_slopes = torch.rand(batch_size, nheads, device="cuda", dtype=torch.float32)
+    if bias_type == "alibi":
+        bias = torch.rand(batch_size, nheads, device="cuda", dtype=torch.float32)
+    elif bias_type == "elmt":
+        bias = torch.rand(seqlen_q, seqlen_k, device="cuda", dtype=torch.float32)
     else:
-        alibi_slopes = None
+        bias = None
 
     dout = torch.randn_like(v)
 
     out, dropout_mask, dq, dk, dv = run_ck(
-        q, k, v, alibi_slopes, dout, dropout_p, causal,
+        q, k, v, bias, dout, dropout_p, causal,
         window_size, deterministic, return_lse, return_attn_probs)
 
     out_ref, dq_ref, dk_ref, dv_ref = run_torch(
-        q, k, v, alibi_slopes, dout, dropout_p, dropout_mask, causal, window_size)
+        q, k, v, bias, dout, dropout_p, dropout_mask, causal, window_size)
 
     out_pt, dq_pt, dk_pt, dv_pt = run_torch(
-        q, k, v, alibi_slopes, dout, dropout_p, dropout_mask, causal, window_size,
+        q, k, v, bias, dout, dropout_p, dropout_mask, causal, window_size,
         upcast=False, reorder_ops=True)
 
     print(f"Output max diff: {(out - out_ref).abs().max().item()}")

@@ -44,8 +44,8 @@ if __name__ == "__main__":
                         help="Path to Python source containing desired kernel in its scope. File will be executed.")
     parser.add_argument("--kernel-name", "-n", type=str, default="", help="Name of the kernel to compile",
                         required=True)
-    parser.add_argument("--num-warps", "-w", type=int, default=4, help="Number of warps to launch the kernel")
-    parser.add_argument("--num-stages", "-ns", type=int, default=2,
+    parser.add_argument("--num-warps", "-w", type=int, default=1, help="Number of warps to launch the kernel")
+    parser.add_argument("--num-stages", "-ns", type=int, default=3,
                         help="Number of stages (meta-parameter of the kernel)")
     parser.add_argument("--out-name", "-on", type=str, default=None, help="Out name for the compiled kernel")
     parser.add_argument("--out-path", "-o", type=Path, default=None, help="Out filename")
@@ -120,9 +120,8 @@ if __name__ == "__main__":
     # dump C stub code
     suffix = kernel_suffix(signature.values(), attrs)
     func_name = '_'.join([out_name, sig_hash, suffix])
-    # print(func_name)
-    # print(dir(ccinfo.asm))
-    hex_ = str(binascii.hexlify(ccinfo.asm["hsaco"]))[2:-1]
+
+    hex_ = binascii.hexlify(ccinfo.asm["hsaco"]).decode('utf-8')
     params = {
         "kernel_name": func_name,
         "triton_kernel_name": args.kernel_name,

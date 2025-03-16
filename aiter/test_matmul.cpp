@@ -3,7 +3,7 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>
-#include "matmul_fp16.0dab83ee_0d1d2d34567c89c1011c.h"
+#include "matmul_fp16.53107118_0d1d2d34567c89c10d11c.h"
 
 class MatmulFP16Test : public ::testing::Test {
 protected:
@@ -65,7 +65,6 @@ protected:
     bool compareResults() {
         const float tolerance = 0.01f;  // Adjust based on needed precision
         for (int i = 0; i < M * N; i++) {
-            std::cout<<__half2float(h_C[i])<<' '<<__half2float(h_expected[i])<<std::endl;
             float diff = std::abs(__half2float(h_C[i]) - __half2float(h_expected[i]));
             if (diff > tolerance) {
                 return false;
@@ -84,7 +83,7 @@ TEST_F(MatmulFP16Test, CorrectResult) {
     ASSERT_EQ(hipSuccess, hipStreamCreate(&stream));
     
     // Call the matrix multiplication function
-    ASSERT_EQ(hipSuccess, matmul_fp16_0dab83ee_0d1d2d34567c89c1011c(
+    ASSERT_EQ(hipSuccess, matmul_fp16_53107118_0d1d2d34567c89c10d11c(
         stream, d_C, d_A, d_B, M, N, K, N, K, N));
     
     // Synchronize and check for errors

@@ -279,5 +279,5 @@ def layernorm2d_fwd_with_add(
     return
 
 if __name__ == "__main__":
-    compile_kernel(__file__, "_layernorm_kernel", "*fp16:16,*fp16:16,*fp16:16,*fp16:16,i32,i32,i32,i32,fp32,64", "M,1,1", 1, 3, "layer_norm")
-    compile_kernel(__file__, "_fused_add_layernorm_kernel", "*fp16:16,*fp16:16,*fp16:16,*fp16:16,*fp16:16,*fp16:16,i32,i32,i32,i32,fp32,64", "M,1,1", 1, 3, "layernorm2d_fwd_with_add")
+    compile_kernel(__file__, "_layernorm_kernel", "*fp16:16,*fp16:16,*fp16:16,*fp16:16,i32,i32,i32,i32,fp32,64", "M,1,1", 4, 2, "layer_norm")
+    compile_kernel(__file__, "_fused_add_layernorm_kernel", "*fp16:16,*fp16:16,*fp16:16,*fp16:16,*fp16:16,*fp16:16,i32,i32,i32,i32,fp32,64", "M,1,1", 4, 2, "layernorm2d_fwd_with_add")

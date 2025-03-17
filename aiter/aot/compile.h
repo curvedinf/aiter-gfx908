@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#ifndef TT_KERNEL_INCLUDES
-#define TT_KERNEL_INCLUDES
+#pragma once
 
 #include <hip/hip_runtime.h>
 #include <inttypes.h>
@@ -13,5 +12,3 @@ void unload_{kernel_name}(void);
 void load_{kernel_name}(void);
 // tt-linker: {kernel_name}:{full_signature}:{algo_info}
 hipError_t{_placeholder} {kernel_name}(hipStream_t stream, {signature});
-
-#endif

@@ -57,7 +57,7 @@ void load_{kernel_name}() {{
 {kernel_docstring}
 */
 hipError_t {kernel_name}(hipStream_t stream, {signature}) {{
-    if ({kernel_name}_func == NULL)
+    if ({kernel_name}_func == nullptr)
        load_{kernel_name}();
     unsigned int gX = {gridX};
     unsigned int gY = {gridY};
@@ -66,5 +66,5 @@ hipError_t {kernel_name}(hipStream_t stream, {signature}) {{
     void *args[{num_args}] = {{ {arg_pointers} }};
     // TODO: shared memory
     if(gX * gY * gZ > 0)
-      return hipModuleLaunchKernel({kernel_name}_func, gX, gY, gZ, {num_warps} * warpSize, 1, 1, {shared}, stream, args, NULL);
+      return hipModuleLaunchKernel({kernel_name}_func, gX, gY, gZ, {num_warps} * warpSize, 1, 1, {shared}, stream, args, nullptr);
 }}

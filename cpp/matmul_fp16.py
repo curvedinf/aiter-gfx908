@@ -4,6 +4,8 @@
 import triton
 import triton.language as tl
 import torch
+import subprocess
+from triton_compile import compile_kernel
 
 
 @triton.jit
@@ -35,8 +37,6 @@ def matmul_fp16(C, A, B, M, N, K,
       a_ptrs += BLOCK_K * stride_ak
       b_ptrs += BLOCK_K * stride_bk
       
-#   tl.device_print(accumulator)
-#   c = mul(accumulator, accumulator)
   # Write back the block of the output matrix C with masks.
   offs_cm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
   offs_cn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -45,8 +45,4 @@ def matmul_fp16(C, A, B, M, N, K,
   tl.store(c_ptrs, accumulator.to(tl.float16), mask=c_mask)
 
 if __name__ == "__main__":
-  C= torch.empty(16, 16, dtype=torch.float16, device="cuda")
-  A= torch.ones(16, 16, dtype=torch.float16, device="cuda")
-  B= torch.ones(16, 16, dtype=torch.float16, device="cuda")
-  matmul_fp16[(1,1,1)](C, A, B, 16, 16, 16, 16, 1, 16, 1, 16, 1, 16, 16, 16)
-  print(C)
+  compile_kernel(__file__, "matmul_fp16", "*fp16:16,*fp16:16,*fp16:16,i32,i32,i32,i32,i32:1,i32,i32:1,i32:16,i32:1,16,16,16", "(M+16-1)/16,(N+16-1)/16,1", 1, 3, "matmul_fp16")

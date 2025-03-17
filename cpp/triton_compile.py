@@ -39,45 +39,28 @@ NOTE: when resolving the scope of /path/to/kernel.py, the file will be executed 
 used to run this `compile.py` script
 """
 
-if __name__ == "__main__":
+def compile_kernel(path, kernel_name:str, signature:str, grid:str, num_warps:int=1, num_stages:int=3, out_name:str=None, out_path:Path=None):
+    out_name = out_name if out_name else kernel_name
+    out_path = out_path if out_path else Path(out_name)
 
-    # command-line arguments
-    parser = ArgumentParser(description=desc)
-    parser.add_argument("path",
-                        help="Path to Python source containing desired kernel in its scope. File will be executed.")
-    parser.add_argument("--kernel-name", "-n", type=str, default="", help="Name of the kernel to compile",
-                        required=True)
-    parser.add_argument("--num-warps", "-w", type=int, default=1, help="Number of warps to launch the kernel")
-    parser.add_argument("--num-stages", "-ns", type=int, default=3,
-                        help="Number of stages (meta-parameter of the kernel)")
-    parser.add_argument("--out-name", "-on", type=str, default=None, help="Out name for the compiled kernel")
-    parser.add_argument("--out-path", "-o", type=Path, default=None, help="Out filename")
-    parser.add_argument("--signature", "-s", type=str, help="Signature of the kernel", required=True)
-    parser.add_argument("--grid", "-g", type=str, help="Launch grid of the kernel", required=True)
-    args = parser.parse_args()
-
-    out_name = args.out_name if args.out_name else args.kernel_name
-    out_path = args.out_path if args.out_path else Path(out_name)
-
-    # execute python sources and extract functions wrapped in JITFunction
-    arg_path = Path(args.path)
+    arg_path = Path(path)
     sys.path.insert(0, str(arg_path.parent))
     spec = importlib.util.spec_from_file_location(arg_path.stem, arg_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    kernel = getattr(mod, args.kernel_name)
-    grid = args.grid.split(",")
+    kernel = getattr(mod, kernel_name)
+    grid = grid.split(",")
     assert len(grid) == 3
 
     # validate and parse signature
-    signature = list(map(lambda s: s.strip(" "), args.signature.split(",")))
+    signature = list(map(lambda s: s.strip(" "), signature.split(",")))
 
     def hash_signature(signature: List[str]):
         m = hashlib.sha256()
         m.update(" ".join(signature).encode())
         return m.hexdigest()[:8]
 
-    meta_sig = f"warps{args.num_warps}xstages{args.num_stages}"
+    meta_sig = f"warps{num_warps}xstages{num_stages}"
     sig_hash = hash_signature(signature + [meta_sig])
 
     def constexpr(s):
@@ -100,7 +83,7 @@ if __name__ == "__main__":
     signature = {i: s.split(":")[0] for i, s in enumerate(signature) if i not in constants}
     const_sig = 'x'.join([str(v) for v in constants.values()])
     doc_string = [f"{kernel.arg_names[i]}={constants[i]}" for i in constants.keys()]
-    doc_string += [f"num_warps={args.num_warps}", f"num_stages={args.num_stages}"]
+    doc_string += [f"num_warps={num_warps}", f"num_stages={num_stages}"]
 
     # compile ast into cubin
     for h in hints.values():
@@ -111,7 +94,7 @@ if __name__ == "__main__":
     for i in equal_to_1:
         constants.update({i: 1})
     src = triton.compiler.ASTSource(fn=kernel, constants=constants, signature=signature, attrs=attrs)
-    opts = {"num_warps": args.num_warps, "num_stages": args.num_stages}
+    opts = {"num_warps": num_warps, "num_stages": num_stages}
     ccinfo = triton.compile(src, options=opts)
     arg_names = []
     arg_types = []
@@ -127,7 +110,7 @@ if __name__ == "__main__":
     hex_ = binascii.hexlify(ccinfo.asm["hsaco"]).decode('utf-8')
     params = {
         "kernel_name": func_name,
-        "triton_kernel_name": args.kernel_name,
+        "triton_kernel_name": kernel_name,
         "bin_size": len(hex_),
         "bin_data": ", ".join([f"0x{x}{y}" for x, y in zip(hex_[::2], hex_[1::2])]),
         "signature": ", ".join([f"{ty_to_cpp(ty)} {name}" for name, ty in zip(arg_names, arg_types)]),
@@ -136,7 +119,7 @@ if __name__ == "__main__":
         "num_args": len(arg_names),
         "kernel_docstring": doc_string,
         "shared": ccinfo.metadata.shared,
-        "num_warps": args.num_warps,
+        "num_warps": num_warps,
         "algo_info": '_'.join([const_sig, meta_sig]),
         "gridX": grid[0],
         "gridY": grid[1],
@@ -147,3 +130,23 @@ if __name__ == "__main__":
         template_path = Path(__file__).parent / f"compile.{ext}"
         with out_path.with_suffix(f".{sig_hash}_{suffix}.{ext}").open("w") as fp:
             fp.write(Path(template_path).read_text().format(**params))
+
+
+
+if __name__ == "__main__":
+
+    # command-line arguments
+    parser = ArgumentParser(description=desc)
+    parser.add_argument("path",
+                        help="Path to Python source containing desired kernel in its scope. File will be executed.")
+    parser.add_argument("--kernel-name", "-n", type=str, default="", help="Name of the kernel to compile",
+                        required=True)
+    parser.add_argument("--num-warps", "-w", type=int, default=1, help="Number of warps to launch the kernel")
+    parser.add_argument("--num-stages", "-ns", type=int, default=3,
+                        help="Number of stages (meta-parameter of the kernel)")
+    parser.add_argument("--out-name", "-on", type=str, default=None, help="Out name for the compiled kernel")
+    parser.add_argument("--out-path", "-o", type=Path, default=None, help="Out filename")
+    parser.add_argument("--signature", "-s", type=str, help="Signature of the kernel", required=True)
+    parser.add_argument("--grid", "-g", type=str, help="Launch grid of the kernel", required=True)
+    args = parser.parse_args()
+    compile_kernel(**vars(args))

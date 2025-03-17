@@ -5,7 +5,7 @@ import torch
 import triton
 import triton.language as tl
 from typing import Optional
-
+from cpp.triton_compile import compile_kernel
 
 @triton.jit
 def _layernorm_kernel(
@@ -277,3 +277,7 @@ def layernorm2d_fwd_with_add(
     )
 
     return
+
+if __name__ == "__main__":
+    compile_kernel(__file__, "_layernorm_kernel", "*fp16:16,*fp16:16,*fp16:16,*fp16:16,i32,i32,i32,i32,fp32,64", "M,1,1", 1, 3, "layer_norm")
+    compile_kernel(__file__, "_fused_add_layernorm_kernel", "*fp16:16,*fp16:16,*fp16:16,*fp16:16,*fp16:16,*fp16:16,i32,i32,i32,i32,fp32,64", "M,1,1", 1, 3, "layernorm2d_fwd_with_add")

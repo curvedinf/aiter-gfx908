@@ -191,7 +191,7 @@ def ck_moe_2stages(a1,
     else:
         a1_scale = None
 
-    a2 = torch.zeros(
+    a2 = torch.empty(
         (M, topk, w1.shape[1]),
         dtype=dtype,
         device=device,
@@ -275,7 +275,7 @@ def ck_moe_2stages_win4(a1,
     else:
         a1_scale = None
 
-    a2 = torch.zeros(
+    a2 = torch.empty(
         (M, topk, w1.shape[1]),
         dtype=dtype,
         device=device,
@@ -312,7 +312,6 @@ def ck_moe_2stages_win4(a1,
             ck_moe_2stages.one_float_tensor = torch.tensor(
                 1.0, dtype=torch.float, device=device)
         a2_scale = ck_moe_2stages.one_float_tensor
-    
     aiter.ck_moe_stage2(a2, w1, w2, sorted_ids,
                         sorted_expert_ids, sorted_weights,
                         num_valid_ids, moe_buf, topk, fc2_scale, a2_scale, block_size)

@@ -16,7 +16,7 @@ from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck, ck_moe_
 from aiter.ops.shuffle import shuffle_weight
 from op_tests.int4_utils import *
 
-@perftest(num_iters=3)
+@perftest(num_iters=2, num_warmup=1)
 def torch_moe_stage1(hidden_states,
                      w1,  # E, inter_dim*2, model_dim
                      w2,  # E, model_dim, inter_dim
@@ -66,7 +66,7 @@ def torch_moe_stage1(hidden_states,
     return out.to(dtype)
 
 
-@perftest(num_iters=3)
+@perftest(num_iters=2, num_warmup=1)
 def torch_moe_stage2(hidden_states,
                      w1,  # E, inter_dim*2, model_dim
                      w2,  # E, model_dim, inter_dim
@@ -293,7 +293,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     #print("#######CK Stage 1##########")
     #print("CK GEMM1 OUT:",out1_qt)
     checkAllclose(out1_ref, out1_qt,
-                  msg=f'ck_moe_stage1:{us_s1:.2f} us_s1, {token*model_dim*inter_dim*topk*2/us_s1/1000/1000:.2f} tflops......(quant:{quant_dtype})')
+                  msg=f'ck_moe_stage1:{us_s1:.2f} us_s1, {token*model_dim*inter_dim*2*topk*2/us_s1/1000/1000:.2f} tflops......(quant:{quant_dtype})')
     if use_g1u1:
         gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
         if activation== 'silu':
@@ -371,14 +371,14 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 #              msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
 
 for dtype in [torch.float16]:
-    for m in [64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
+    for m in [1, 3, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096, 136000]:
         for dim in [6144]:
             for inter_dim in [4096]:
                 expert, topk = 8, 2
                 test_fmoe(dtype, m, dim, inter_dim, expert, topk,
                           quant='fp8_perTokenQuant', use_g1u1=True, activation='silu')
 
-for dtype in [torch.float16]:
+for dtype in [torch.bfloat16]:
     for m in [64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
         for dim in [6144]:
             for inter_dim in [4096]:

@@ -7,7 +7,7 @@ import torch
 
 
 @triton.jit
-def kernel(C, A, B, M, N, K,
+def matmul_fp16(C, A, B, M, N, K,
           stride_cm, stride_cn,
           stride_am, stride_ak,
           stride_bk, stride_bn,
@@ -48,5 +48,5 @@ if __name__ == "__main__":
   C= torch.empty(16, 16, dtype=torch.float16, device="cuda")
   A= torch.ones(16, 16, dtype=torch.float16, device="cuda")
   B= torch.ones(16, 16, dtype=torch.float16, device="cuda")
-  kernel[(1,1,1)](C, A, B, 16, 16, 16, 16, 1, 16, 1, 16, 1, 16, 16, 16)
+  matmul_fp16[(1,1,1)](C, A, B, 16, 16, 16, 16, 1, 16, 1, 16, 1, 16, 16, 16)
   print(C)

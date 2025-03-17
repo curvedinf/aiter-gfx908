@@ -15,14 +15,14 @@ float random_float() {
 
 class MatmulFP16Test : public ::testing::Test {
 protected:
-    void SetUp() override {
+    void init(int M_, int N_, int K_) {
         // Initialize HIP
         ASSERT_EQ(hipSuccess, hipInit(0));
         
         // Set dimensions that are multiples of BLOCK_M/N/K (16)
-        M = 32;
-        N = 32;
-        K = 32;
+        M = M_;
+        N = N_;
+        K = K_;
         
         // Allocate host memory
         h_A.resize(M * K);
@@ -51,7 +51,7 @@ protected:
         ASSERT_EQ(hipSuccess, hipMemcpy(d_B, h_B.data(), K * N * sizeof(__half), hipMemcpyHostToDevice));
     }
     
-    void TearDown() override {
+    void free() {
         hipFree(d_A);
         hipFree(d_B);
         hipFree(d_C);
@@ -87,35 +87,29 @@ protected:
 };
 
 TEST_F(MatmulFP16Test, CorrectResult) {
-    hipStream_t stream;
-    ASSERT_EQ(hipSuccess, hipStreamCreate(&stream));
-    
-    // Call the matrix multiplication function
-    ASSERT_EQ(hipSuccess, matmul_fp16_53107118_0d1d2d34567c89c10d11c(
-        stream, d_C, d_A, d_B, M, N, K, N, K, N));
-    
-    // Synchronize and check for errors
-    ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream));
-    
-    // Copy result back to host
-    ASSERT_EQ(hipSuccess, hipMemcpy(h_C.data(), d_C, M * N * sizeof(__half), hipMemcpyDeviceToHost));
-    
-    // Verify results
-    EXPECT_TRUE(compareResults());
-    
-    hipStreamDestroy(stream);
+    for(int M = 16; M <= 64; M *= 2) {
+        for(int N = 16; N <= 64; N *= 2) {
+            for(int K = 16; K <= 32; K *= 2) {
+                init(M, N, K);
+                hipStream_t stream;
+                ASSERT_EQ(hipSuccess, hipStreamCreate(&stream));
+                
+                // Call the matrix multiplication function
+                ASSERT_EQ(hipSuccess, matmul_fp16_53107118_0d1d2d34567c89c10d11c(
+                    stream, d_C, d_A, d_B, M, N, K, N, K, N));
+                
+                // Synchronize and check for errors
+                ASSERT_EQ(hipSuccess, hipStreamSynchronize(stream));
+                
+                // Copy result back to host
+                ASSERT_EQ(hipSuccess, hipMemcpy(h_C.data(), d_C, M * N * sizeof(__half), hipMemcpyDeviceToHost));
+                
+                // Verify results
+                EXPECT_TRUE(compareResults());
+                
+                hipStreamDestroy(stream);
+                free();
+            }
+        }
+    }
 }
-
-// TEST_F(MatmulFP16Test, ZeroDimension) {
-//     hipStream_t stream;
-//     ASSERT_EQ(hipSuccess, hipStreamCreate(&stream));
-    
-//     // Test with zero dimensions
-//     hipError_t result = matmul_fp16_36f7d82d_0d1d2d34567c89c10d11c(
-//         stream, d_C, d_A, d_B, 0, N, K, N, K, N);
-    
-//     // Should handle zero dimensions gracefully
-//     EXPECT_EQ(hipSuccess, result);
-    
-//     hipStreamDestroy(stream);
-// }

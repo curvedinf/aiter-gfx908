@@ -8,14 +8,14 @@
 #include <string.h>
 #include <hip/hip_runtime.h>
 
-// helpers to check for cuda errors
-#define CUDA_CHECK(ans) {{\
+// helpers to check for hip errors
+#define HIP_CHECK(ans) {{\
     gpuAssert((ans), __FILE__, __LINE__);\
   }}\
 
 static inline void gpuAssert(hipError_t code, const char *file, int line) {{
   if (code != hipSuccess) {{
-    const char *prefix = "Triton Error [CUDA]: ";
+    const char *prefix = "Triton Error [HIP]: ";
     const char *str;
     hipDrvGetErrorString(code, &str);
     char err[1024] = {{0}};
@@ -34,22 +34,22 @@ unsigned char HSACO_NAME[{bin_size}] = {{ {bin_data} }};
 
 
 void unload_{kernel_name}(void) {{
-    CUDA_CHECK(hipModuleUnload({kernel_name}_mod));
+    HIP_CHECK(hipModuleUnload({kernel_name}_mod));
 }}
 
-// TODO: some code duplication with `runtime/backend/cuda.c`
+
 void load_{kernel_name}() {{
     int dev = 0;
     void *bin = (void *)&HSACO_NAME;
     int shared = {shared};
-    CUDA_CHECK(hipModuleLoadData(&{kernel_name}_mod, bin));
-    CUDA_CHECK(hipModuleGetFunction(&{kernel_name}_func, {kernel_name}_mod, "{triton_kernel_name}"));
+    HIP_CHECK(hipModuleLoadData(&{kernel_name}_mod, bin));
+    HIP_CHECK(hipModuleGetFunction(&{kernel_name}_func, {kernel_name}_mod, "{triton_kernel_name}"));
     // set dynamic shared memory if necessary
     int shared_optin;
-    CUDA_CHECK(hipDeviceGetAttribute(&shared_optin, hipDeviceAttributeSharedMemPerBlockOptin, dev));
+    HIP_CHECK(hipDeviceGetAttribute(&shared_optin, hipDeviceAttributeSharedMemPerBlockOptin, dev));
     if (shared > 49152 && shared_optin > 49152) {{
-      CUDA_CHECK(hipFuncSetCacheConfig({kernel_name}_func, hipFuncCachePreferShared));
-      CUDA_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>({kernel_name}_func), hipFuncAttributeMaxDynamicSharedMemorySize, shared_optin))
+      HIP_CHECK(hipFuncSetCacheConfig({kernel_name}_func, hipFuncCachePreferShared));
+      HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>({kernel_name}_func), hipFuncAttributeMaxDynamicSharedMemorySize, shared_optin))
     }}
 }}
 

@@ -6,7 +6,12 @@
 #include <gtest/gtest.h>
 #include <vector>
 #include <cmath>
+#include <random>
 #include "matmul_fp16.53107118_0d1d2d34567c89c10d11c.h"
+
+float random_float() {
+    return static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+}
 
 class MatmulFP16Test : public ::testing::Test {
 protected:
@@ -27,10 +32,10 @@ protected:
         
         // Initialize input matrices with test data
         for (int i = 0; i < M * K; i++) {
-            h_A[i] = __float2half(1.f);  // Some pattern for matrix A
+            h_A[i] = __float2half(random_float());  // Some pattern for matrix A
         }
         for (int i = 0; i < K * N; i++) {
-            h_B[i] = __float2half(1.f);  // Some pattern for matrix B
+            h_B[i] = __float2half(random_float());  // Some pattern for matrix B
         }
         
         // Calculate expected results in FP32 for higher precision

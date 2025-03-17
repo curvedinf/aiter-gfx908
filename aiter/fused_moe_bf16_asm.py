@@ -191,7 +191,7 @@ def ck_moe_2stages(a1,
     else:
         a1_scale = None
 
-    a2 = torch.empty(
+    a2 = torch.zeros(
         (M, topk, w1.shape[1]),
         dtype=dtype,
         device=device,
@@ -275,7 +275,7 @@ def ck_moe_2stages_win4(a1,
     else:
         a1_scale = None
 
-    a2 = torch.empty(
+    a2 = torch.zeros(
         (M, topk, w1.shape[1]),
         dtype=dtype,
         device=device,

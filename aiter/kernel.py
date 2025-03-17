@@ -1,9 +1,7 @@
 import triton
 import triton.language as tl
 import torch
-# @triton.jit
-# def mul(x, y):
-#     return x * y
+
 
 @triton.jit
 def kernel(C, A, B, M, N, K,

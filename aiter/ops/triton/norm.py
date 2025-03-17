@@ -5,7 +5,7 @@ import torch
 import triton
 import triton.language as tl
 from typing import Optional
-from cpp.triton_compile import compile_kernel
+from aiter.aot.triton_compile import compile_kernel
 
 @triton.jit
 def _layernorm_kernel(

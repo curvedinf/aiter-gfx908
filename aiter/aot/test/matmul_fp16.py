@@ -3,9 +3,7 @@
 
 import triton
 import triton.language as tl
-import torch
-import subprocess
-from triton_compile import compile_kernel
+from aiter.aot.triton_compile import compile_kernel
 
 
 @triton.jit

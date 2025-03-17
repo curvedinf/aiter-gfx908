@@ -151,12 +151,12 @@ def asm_moe(hidden_states,
 
 
 def get_block_size(token, topk, expert):
-    token_per_expert = token * topk / expert
-    support_list = [32, 64, 128]
-    for el in support_list:
-        if token_per_expert <= el * 4:
-            return el
-    return support_list[-1]
+    if token <= 128:
+        return 32
+    elif token <= 256:
+        return 64
+    else:
+        return 128
 
 # Only support fp8 per tensor quant
 def ck_moe_2stages(a1,

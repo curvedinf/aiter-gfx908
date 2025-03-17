@@ -28,8 +28,8 @@ static inline void gpuAssert(hipError_t code, const char *file, int line) {{
 
 // globals
 #define HSACO_NAME {kernel_name}_hsaco
-hipModule_t {kernel_name}_mod = NULL;
-hipFunction_t {kernel_name}_func = NULL;
+hipModule_t {kernel_name}_mod = nullptr;
+hipFunction_t {kernel_name}_func = nullptr;
 unsigned char HSACO_NAME[{bin_size}] = {{ {bin_data} }};
 
 

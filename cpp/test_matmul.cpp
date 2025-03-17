@@ -20,9 +20,9 @@ protected:
         ASSERT_EQ(hipSuccess, hipInit(0));
         
         // Set dimensions that are multiples of BLOCK_M/N/K (16)
-        M = 16;
-        N = 16;
-        K = 16;
+        M = 32;
+        N = 32;
+        K = 32;
         
         // Allocate host memory
         h_A.resize(M * K);

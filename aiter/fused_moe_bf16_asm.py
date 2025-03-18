@@ -52,6 +52,7 @@ def asm_moe(hidden_states,
             fc2_smooth_scale=None,  # [expert(local_expert:EP), 1, inter_dim]
             a16=False,
             per_tensor_quant_scale=None,
+            block_shape=None,
             expert_mask=None,
             activation = ActivationType.Silu
             ):
@@ -64,12 +65,9 @@ def asm_moe(hidden_states,
     device = topk_ids.device
     useInt4Weight = w1.dtype in {torch.int32, torch.uint32}
     lastdim_mul = 8 if useInt4Weight else 1
-    if not useInt4Weight:
-        assert activation is None, f"asm_moe activation function cannot be specified when not use a8w4, \n\
-            by default, 'silu' is used for g1u1 and 'gelu' is used for g1u0"
 
-    sorted_ids, sorted_weights, sorted_expert_ids, num_tokens_post_padded, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
-                                                                                                    model_dim, dtype, expert_mask)
+    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, E,
+                                                                                                    model_dim, dtype, BLOCK_SIZE_M, expert_mask)
 
     if fc1_scale is None:
         # pure bf16
@@ -111,7 +109,7 @@ def asm_moe(hidden_states,
         aiter.dynamic_per_token_scaled_fp8_quant(a8, hidden_states, a8_scale)
         
         aiter.fmoe_fp8_blockscale_g1u1(moe_buf, a8, w1, w2, sorted_ids,
-                                       sorted_weights, sorted_expert_ids, num_tokens_post_padded,
+                                       sorted_weights, sorted_expert_ids, num_valid_ids,
                                        topk,
                                        fc1_scale.view(E, -1),
                                        fc2_scale.view(E, -1),
@@ -119,7 +117,6 @@ def asm_moe(hidden_states,
                                        scale_blk_n,
                                        scale_blk_k,
                                        fc2_smooth_scale)
-        return moe_buf
     else:
         # a8w8 fmoe, opt: smooth quant
         a8_type = w1.dtype if not useInt4Weight else torch.float8_e4m3fnuz
@@ -174,7 +171,7 @@ def asm_moe(hidden_states,
         if useInt4Weight:
             # sorted_ids = sorted_ids & 0xffffff
             fmoe_func(moe_buf, a8, w1, w2, sorted_ids,
-                      sorted_weights, sorted_expert_ids, num_tokens_post_padded,
+                      sorted_weights, sorted_expert_ids, num_valid_ids,
                       topk,
                       a8_scale,
                       fc1_scale,
@@ -183,12 +180,13 @@ def asm_moe(hidden_states,
                       activation)
         else:
             fmoe_func(moe_buf, a8, w1, w2, sorted_ids,
-                      sorted_weights, sorted_expert_ids, num_tokens_post_padded,
+                      sorted_weights, sorted_expert_ids, num_valid_ids,
                       topk,
                       a8_scale,
                       fc1_scale,
                       fc2_scale,
                       fc2_smooth_scale)
+    return moe_buf
 
 
 def get_block_size(token, topk, expert):

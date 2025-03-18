@@ -62,7 +62,7 @@ def asm_moe_test(hidden_states, w1, w2, topk_weight, topk_ids,
                    w1,
                    w2,
                    topk_weight,
-                   topk_ids, fc1_scale, fc2_scale, fc1_smooth_scale, fc2_smooth_scale, a16, None, None, activation)
+                   topk_ids, fc1_scale, fc2_scale, fc1_smooth_scale, fc2_smooth_scale, a16, None, None, None, activation = activation)
 
 
 @perftest()

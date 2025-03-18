@@ -302,7 +302,7 @@ void fmoe_int8_g1u0(torch::Tensor &out,               // [token_cnt, dim]
                     torch::Tensor &fc1_scale,         // [expert, 1, inter_dim]
                     torch::Tensor &fc2_scale,         // [expert, 1, dim]
                     torch::Tensor &fc2_smooth_scale,  // [expert, 1, inter_dim],
-                    ActivationType activation)
+                    ActivationType activation = ActivationType::Silu)
 {
     FMoeKernel *impl_ptr = nullptr;
     int inter_dim = down.size(2);
@@ -376,13 +376,13 @@ void fmoe_g1u1(torch::Tensor &out,                                           // 
                torch::Tensor &sorted_token_ids,                              // [max_num_tokens_padded]
                torch::Tensor &sorted_weight_buf,                             // [max_num_tokens_padded]
                torch::Tensor &sorted_expert_ids,                             // [max_num_m_blocks]
-               torch::Tensor &num_tokens_post_padded,                        // [1]
+               torch::Tensor &num_valid_ids,                                 // [1]
                uint32_t topk,                                                //
                torch::Tensor &input_scale,                                   // [token_cnt, 1]
                torch::Tensor &fc1_scale,                                     // [expert, 1, inter_dim]
                torch::Tensor &fc2_scale,                                     // [expert, 1, dim]
                std::optional<torch::Tensor> fc2_smooth_scale = std::nullopt, // [expert, 1, inter_dim]
-               std::optional<std::string> activation = "silu")
+               ActivationType activation = ActivationType::Silu)
 {
     struct FMoeKernelConfig
     {
@@ -399,7 +399,7 @@ void fmoe_g1u1(torch::Tensor &out,                                           // 
     {
         // int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 256, 128});
         // fixme: not using heuristic_tile but this hack, todo coderfeli
-        if (activation.has_value() && activation.value() == "silu")
+        if (activation == ActivationType::Silu)
         {
             if (sub_X_cnt >= 32)
             {

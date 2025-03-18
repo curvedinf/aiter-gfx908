@@ -162,7 +162,7 @@ def ck_moe(
     block_m: Optional[int] = 32,
     expert_mask: Optional[Tensor] = None,
     activation: Optional[str] = None,
-): 
+): ...
 
 
 @compile_ops("module_moe_ck2stages")

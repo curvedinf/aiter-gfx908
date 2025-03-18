@@ -397,9 +397,9 @@ def torch_moe(hidden_states, w1, w2, topk_weight, topk_ids,
         activation_f = F.gelu
 
     if activation is not None:
-        if activation == "silu":
+        if activation == ActivationType.Silu:
             activation_f = F.silu
-        elif activation == "gelu":
+        elif activation == ActivationType.Gelu:
             activation_f = F.gelu
 
     if fc1_scale is not None:

@@ -12,7 +12,7 @@ import aiter
 from aiter.test_common import checkAllclose, perftest
 from aiter import pertoken_quant
 from aiter.fused_moe_gelu import fused_topk
-from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck, ck_moe_2stages
+from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck, ck_moe_2stages, get_block_size
 from aiter.ops.shuffle import shuffle_weight
 from aiter import ActivationType
 
@@ -193,7 +193,8 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     E, model_dim, inter_dim = w2.shape
     M, topk = topk_ids.shape
-    BLOCK_SIZE_M = 128
+    BLOCK_SIZE_M = get_block_size(M, topk, E)
+
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weights, E,
                                                                                            model_dim, dtype, BLOCK_SIZE_M)
 
@@ -311,9 +312,9 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
 
 for dtype in [torch.float16]:
-    for m in [32, 128]:
-        for dim in [8192]:
-            for inter_dim in [6144, 16384]:
+    for m in [1,3, 5, 7, 32, 128, 257, 385, 1025]:
+        for dim in [4096,6144]:
+            for inter_dim in [4096,6144]:
                 expert, topk = 8, 2
                 test_fmoe(dtype, m, dim, inter_dim, expert, topk,
-                          quant='fp8quant', use_g1u1=True, activation=ActivationType.Gelu)
+                          quant='fp8quant', use_g1u1=True, activation=ActivationType.Silu)

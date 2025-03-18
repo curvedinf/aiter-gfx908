@@ -266,6 +266,10 @@ def ck_moe_2stages_win4(a1,
     #print("###block_size:",block_size)
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, global_E,
                                                                                            model_dim, dtype, block_size, expert_mask)
+    
+    # np.savetxt("sorted_ids.txt", sorted_ids.cpu(), fmt='%d')
+    # np.savetxt("sorted_expert_ids.txt", sorted_expert_ids.cpu(), fmt='%d')
+    # print(num_valid_ids)
     if w1.dtype == torch.uint32:#torch.uint32 torch.float8_e4m3fnuz
         if quantType == "per_tensor":
             a1, a1_scale = aiter.per_tensor_quant_fp8_hip(a1)

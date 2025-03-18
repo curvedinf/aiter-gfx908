@@ -86,7 +86,7 @@ __global__ void TreeSpeculativeSamplingTargetOnly(IdType* predicts, IdType* acce
   DType sum_relu_q_minus_p(0);
   vec_t<DType, VEC_SIZE> q_vec, p_vec;
   DType relu_q_minus_p[VEC_SIZE];
-  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+  for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     q_vec.fill(DType(0));
     p_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
@@ -114,7 +114,7 @@ __global__ void TreeSpeculativeSamplingTargetOnly(IdType* predicts, IdType* acce
   DType u = coin * sum_relu_q_minus_p;
 
   DType aggregate_relu_q_minus_p(0);
-  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+  for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     q_vec.fill(DType(0));
     p_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {

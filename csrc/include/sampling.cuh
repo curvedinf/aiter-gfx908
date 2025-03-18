@@ -36,6 +36,9 @@ using namespace hipcub;
 template <typename T>
 using numeric_limits = std::numeric_limits<T>;
 
+#ifdef CEIL_DEV
+#define CEIL_DEV(a, b) (((a) + (b) - 1) / (b))
+#endif
 
 #define DISPATCH_DETERMINISTIC(deterministic, DETERMINISTIC, ...) \
   if (deterministic) {                                            \
@@ -275,7 +278,7 @@ __global__ void SamplingFromProbKernel(DType* probs, DType* uniform_samples, IdT
   DType aggregate(0);
   float u = uniform_samples[bx];
 
-  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+  for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     probs_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
       probs_vec.load(probs + row_idx * d + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
@@ -316,7 +319,7 @@ __global__ void TopKSamplingFromProbKernel(DType* probs, DType* uniform_samples,
     __syncthreads();
     DType u = uniform_samples[round * batch_size + bx] * q;
     aggregate = DType(0);
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       probs_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         probs_vec.load(probs + bx * d + (i * BLOCK_THREADS + tx) * VEC_SIZE);
@@ -334,7 +337,7 @@ __global__ void TopKSamplingFromProbKernel(DType* probs, DType* uniform_samples,
     pivot = max(pivot, probs[bx * d + sampled_id]);
 
     Pair<DType> aggregate_gt_pivot{DType(0), 0};
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       probs_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         probs_vec.load(probs + bx * d + (i * BLOCK_THREADS + tx) * VEC_SIZE);
@@ -405,7 +408,7 @@ __global__ void TopPSamplingFromProbKernel(DType* probs, DType* uniform_samples,
     __syncthreads();
     DType u = uniform_samples[round * batch_size + bx] * q;
     aggregate = DType(0);
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       probs_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         probs_vec.load(probs + row_idx * d + (i * BLOCK_THREADS + tx) * VEC_SIZE);
@@ -423,7 +426,7 @@ __global__ void TopPSamplingFromProbKernel(DType* probs, DType* uniform_samples,
     pivot = max(pivot, probs[row_idx * d + sampled_id]);
 
     DType aggregate_gt_pivot = DType(0);
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       probs_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         probs_vec.load(probs + row_idx * d + (i * BLOCK_THREADS + tx) * VEC_SIZE);
@@ -485,7 +488,7 @@ __global__ void MinPSamplingFromProbKernel(DType* probs, DType* uniform_samples,
   DType pivot = DType(0);
 
   DType max_p = 0;
-  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+  for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     probs_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
       probs_vec.load(probs + bx * d + (i * BLOCK_THREADS + tx) * VEC_SIZE);
@@ -511,7 +514,7 @@ __global__ void MinPSamplingFromProbKernel(DType* probs, DType* uniform_samples,
     __syncthreads();
     DType u = uniform_samples[round * batch_size + bx] * q;
     aggregate = DType(0);
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       probs_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         probs_vec.load(probs + bx * d + (i * BLOCK_THREADS + tx) * VEC_SIZE);
@@ -532,7 +535,7 @@ __global__ void MinPSamplingFromProbKernel(DType* probs, DType* uniform_samples,
     }
 
     DType aggregate_gt_pivot = DType(0);
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       probs_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         probs_vec.load(probs + bx * d + (i * BLOCK_THREADS + tx) * VEC_SIZE);
@@ -598,7 +601,7 @@ __global__ void TopKTopPSamplingFromProbKernel(DType* probs, DType* uniform_samp
     __syncthreads();
     DType u = uniform_samples[round * batch_size + bx] * q;
     aggregate = DType(0);
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       probs_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         probs_vec.load(probs + bx * d + (i * BLOCK_THREADS + tx) * VEC_SIZE);
@@ -616,7 +619,7 @@ __global__ void TopKTopPSamplingFromProbKernel(DType* probs, DType* uniform_samp
     pivot = max(pivot, probs[bx * d + sampled_id]);
 
     Pair<DType> aggregate_gt_pivot{DType(0), 0};
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       probs_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         probs_vec.load(probs + bx * d + (i * BLOCK_THREADS + tx) * VEC_SIZE);
@@ -845,7 +848,7 @@ __global__ void TopPRenormProbKernel(DType* probs, DType* renormed_prob, DType* 
   DType probs_greater_than_pivot[VEC_SIZE];  // pivot initialized to 0
 
   DType threadlocal_max_val = DType(0);
-  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+  for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     probs_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
       probs_vec.load(probs + row_idx * d + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
@@ -882,7 +885,7 @@ __global__ void TopPRenormProbKernel(DType* probs, DType* renormed_prob, DType* 
     float mid = (low + high) / 2;
     min_gt_low = high;
     max_le_high = low;
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       probs_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         probs_vec.load(probs + row_idx * d + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
@@ -930,7 +933,7 @@ __global__ void TopPRenormProbKernel(DType* probs, DType* renormed_prob, DType* 
   DType normalizer = __frcp_rn(max(sum_low, 1e-8));
 
   // normalize
-  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+  for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     probs_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
       probs_vec.load(probs + row_idx * d + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
@@ -963,7 +966,7 @@ __global__ void TopKMaskLogitsKernel(DType* logits, DType* masked_logits, IdType
 
     DType threadlocal_max_val = DType(-numeric_limits<float>::infinity()),
           threadlocal_min_val = DType(numeric_limits<float>::infinity());
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       logits_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         logits_vec.load(logits + row_idx * d + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
@@ -1006,7 +1009,7 @@ __global__ void TopKMaskLogitsKernel(DType* logits, DType* masked_logits, IdType
       float mid = (low + high) / 2;
       min_gt_low = high;
       max_le_high = low;
-      for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+      for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
         logits_vec.fill(DType(0));
         if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
           logits_vec.load(logits + row_idx * d + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
@@ -1053,7 +1056,7 @@ __global__ void TopKMaskLogitsKernel(DType* logits, DType* masked_logits, IdType
   }
 
   // masking
-  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+  for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     logits_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
       logits_vec.load(logits + row_idx * d + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
@@ -1088,7 +1091,7 @@ __global__ void TopKRenormProbKernel(DType* probs, DType* renormed_prob, IdType*
     DType probs_greater_than_pivot[VEC_SIZE];  // pivot initialized to 0
 
     DType threadlocal_max_val = DType(0);
-    for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+    for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
       probs_vec.fill(DType(0));
       if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
         probs_vec.load(probs + row_idx * d + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
@@ -1125,7 +1128,7 @@ __global__ void TopKRenormProbKernel(DType* probs, DType* renormed_prob, IdType*
       float mid = (low + high) / 2;
       min_gt_low = high;
       max_le_high = low;
-      for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+      for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
         probs_vec.fill(DType(0));
         if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
           probs_vec.load(probs + row_idx * d + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
@@ -1176,7 +1179,7 @@ __global__ void TopKRenormProbKernel(DType* probs, DType* renormed_prob, IdType*
   }
 
   // normalize
-  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+  for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     probs_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
       probs_vec.load(probs + row_idx * d + i * BLOCK_THREADS * VEC_SIZE + tx * VEC_SIZE);
@@ -1309,7 +1312,7 @@ __global__ void ChainSpeculativeSampling(DType* draft_probs, IdType* draft_token
   DType sum_relu_q_minus_p(0);
   vec_t<DType, VEC_SIZE> q_vec, p_vec;
   DType relu_q_minus_p[VEC_SIZE];
-  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+  for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     q_vec.fill(DType(0));
     p_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {
@@ -1342,7 +1345,7 @@ __global__ void ChainSpeculativeSampling(DType* draft_probs, IdType* draft_token
             sum_relu_q_minus_p;
 
   DType aggregate_relu_q_minus_p(0);
-  for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
+  for (uint32_t i = 0; i < CEIL_DEV(d, BLOCK_THREADS * VEC_SIZE); ++i) {
     q_vec.fill(DType(0));
     p_vec.fill(DType(0));
     if ((i * BLOCK_THREADS + tx) * VEC_SIZE < d) {

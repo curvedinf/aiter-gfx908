@@ -51,7 +51,6 @@ def fmoe(
 class _ActivationType():
     ...
 
-
 ActivationType = _ActivationType(0)
 
 
@@ -147,6 +146,25 @@ def fmoe_fp8_blockscale_g1u1(
     fc_scale_blkk: Optional[Tensor] = 128,
     fc2_smooth_scale: Optional[Tensor] = None,
 ): ...
+
+
+@compile_ops("module_moe_asm")
+def moe_stage1_fp8_g1u1(
+    out: Tensor,
+    input: Tensor,
+    gate: Tensor,
+    down: Tensor,
+    sorted_token_ids: Tensor,
+    sorted_weight_buf: Tensor,
+    sorted_expert_ids: Tensor,
+    num_valid_ids: Tensor,
+    topk: int,
+    fc1_scale: Tensor,
+    fc2_scale: Optional[Tensor] = None,
+    input_scale: Optional[Tensor] = None,
+    fc2_smooth_scale: Optional[Tensor] = None,
+): ...
+
 
 
 @compile_ops("module_moe")

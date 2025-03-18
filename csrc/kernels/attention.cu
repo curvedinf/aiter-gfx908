@@ -19,6 +19,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <hip/hip_bf16.h>
 #include "hip_compat.h"
+#include "attention.h"
 
 #include <algorithm>
 #include "dtype_fp8.cuh"

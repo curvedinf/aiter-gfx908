@@ -28,22 +28,22 @@ def get_dtype_max(dtype):
 
 
 def pertoken_quant(x, y_scale_dtype=torch.float, x_scale=None, quant_dtype=torch.int8, dtypeMax=None):
+    x = x.to(torch.float)
     if x_scale is None:
         hidden_states = x
     else:
         # smooth quant
-        hidden_states = x.to(x_scale) * x_scale
+        hidden_states = x * x_scale
     # [m, 1]
     per_token_amax, _ = torch.max(
         input=torch.abs(hidden_states),
         dim=-1,
         keepdim=True
     )
-
     if not dtypeMax:
         dtypeMax = get_dtype_max(quant_dtype)
 
-    per_token_scale = per_token_amax.to(dtype=torch.float32) / dtypeMax
+    per_token_scale = per_token_amax / dtypeMax
     per_token_scale[per_token_scale == 0] = 1
 
     # quant hidden_states
@@ -52,14 +52,31 @@ def pertoken_quant(x, y_scale_dtype=torch.float, x_scale=None, quant_dtype=torch
     return y, y_scale
 
 
-def per_tensor_quant(x, scale=None, scale_dtype=torch.float, quant_dtype=torch.int8):
+def per_tensor_quant(x, scale=None, scale_dtype=torch.float, quant_dtype=torch.int8, dtypeMax=None):
+    x = x.to(torch.float)
     if scale is None:
-        dtypeMax = get_dtype_max(quant_dtype)
-        scale = torch.abs(x.to(torch.float)).max() / dtypeMax
+        if not dtypeMax:
+            dtypeMax = get_dtype_max(quant_dtype)
+        scale = torch.abs(x).max() / dtypeMax
     y = x/scale
 
     return y.to(quant_dtype), scale.to(scale_dtype)
 
+
+def per_tensor_quant_fp8_hip(x, scale=None):
+    y = torch.empty(x.shape, dtype=torch.float8_e4m3fnuz, device=x.device)
+    if scale is None:
+        scale = torch.empty(1, dtype=torch.float, device=x.device)
+        dynamic_scaled_fp8_quant(y, x, scale)
+    else:
+        static_scaled_fp8_quant(y, x, scale)
+    return y, scale
+
+def per_token_dynamic_quant_fp8_hip(x):
+    y = torch.empty(x.shape, dtype=torch.float8_e4m3fnuz, device=x.device)
+    scale = torch.empty(x.shape[:-1], dtype=torch.float, device=x.device).unsqueeze(-1)
+    dynamic_per_token_scaled_fp8_quant(y, x, scale)
+    return y, scale
 
 @compile_ops("module_quant")
 def static_scaled_fp8_quant(
@@ -70,11 +87,7 @@ def static_scaled_fp8_quant(
 @compile_ops("module_quant")
 def dynamic_scaled_fp8_quant(
     out: Tensor, input: Tensor, scale: Tensor
-):
-    '''
-    must init out as zeroes
-    '''
-    ...
+):...
 
 
 @compile_ops("module_quant")

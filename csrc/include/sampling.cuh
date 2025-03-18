@@ -36,7 +36,7 @@ using namespace hipcub;
 template <typename T>
 using numeric_limits = std::numeric_limits<T>;
 
-#ifdef CEIL_DEV
+#ifndef CEIL_DEV
 #define CEIL_DEV(a, b) (((a) + (b) - 1) / (b))
 #endif
 
@@ -661,26 +661,26 @@ __global__ void TopKTopPSamplingFromProbKernel(DType* probs, DType* uniform_samp
   }
 }
 
-template <typename T, typename IdType>
-cudaError_t SamplingFromProb(T* probs, T* uniform_samples, IdType* output, uint32_t batch_size,
-                             uint32_t d, bool deterministic, cudaStream_t stream = 0) {
-  constexpr uint32_t BLOCK_THREADS = 1024;
-  const uint32_t vec_size = std::gcd(16 / sizeof(T), d);
-  dim3 nblks(batch_size);
-  dim3 nthrs(BLOCK_THREADS);
-  IdType* row_indices_placeholder = nullptr;
-  void* args[] = {&probs, &uniform_samples, &output, &row_indices_placeholder, &d};
-  const uint32_t smem_size = sizeof(SamplingTempStorage<T, BLOCK_THREADS, SCAN_ALGO, REDUCE_ALGO>);
+// template <typename T, typename IdType>
+// cudaError_t SamplingFromProb(T* probs, T* uniform_samples, IdType* output, uint32_t batch_size,
+//                              uint32_t d, bool deterministic, cudaStream_t stream = 0) {
+//   constexpr uint32_t BLOCK_THREADS = 1024;
+//   const uint32_t vec_size = std::gcd(16 / sizeof(T), d);
+//   dim3 nblks(batch_size);
+//   dim3 nthrs(BLOCK_THREADS);
+//   IdType* row_indices_placeholder = nullptr;
+//   void* args[] = {&probs, &uniform_samples, &output, &row_indices_placeholder, &d};
+//   const uint32_t smem_size = sizeof(SamplingTempStorage<T, BLOCK_THREADS, SCAN_ALGO, REDUCE_ALGO>);
 
-  DISPATCH_ALIGNED_VEC_SIZE(
-      vec_size, VEC_SIZE, {DISPATCH_DETERMINISTIC(deterministic, DETERMINISTIC, {
-        auto kernel = SamplingFromProbKernel<BLOCK_THREADS, SCAN_ALGO, REDUCE_ALGO, VEC_SIZE,
-                                             DETERMINISTIC, T, IdType>;
-        HIP_CALL(
-            cudaLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream));
-      })});
-  return cudaSuccess;
-}
+//   DISPATCH_ALIGNED_VEC_SIZE(
+//       vec_size, VEC_SIZE, {DISPATCH_DETERMINISTIC(deterministic, DETERMINISTIC, {
+//         auto kernel = SamplingFromProbKernel<BLOCK_THREADS, SCAN_ALGO, REDUCE_ALGO, VEC_SIZE,
+//                                              DETERMINISTIC, T, IdType>;
+//         HIP_CALL(
+//             cudaLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream));
+//       })});
+//   return cudaSuccess;
+// }
 
 template <typename T, typename IdType>
 cudaError_t ParallelSamplingFromProb(T* probs, T* uniform_samples, IdType* output,

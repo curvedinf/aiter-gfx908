@@ -25,7 +25,7 @@
 #include "quant.h"
 #include "moe_ck.h"
 #include "rope.h"
-#include "speculative_sampling.h"
+// #include "speculative_sampling.h"
 #include "eagle_utils.h"
 #include "rocsolgemm.cuh"
 #include "hipbsolgemm.cuh"

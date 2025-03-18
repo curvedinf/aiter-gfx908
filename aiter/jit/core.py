@@ -252,7 +252,7 @@ def build_module(md_name, srcs, flags_extra_cc, flags_extra_hip, blob_gen_cmd, e
             md_name,
             '-->'.join(traceback.format_exception(*sys.exc_info()))
         ))
-        raise Exception(f"ailed build jit [{md_name}]...")
+        raise Exception(f"failed build jit [{md_name}]...")
     logger.info(
         f'finish build [{md_name}], cost {time.perf_counter()-startTS:.8f}s')
     return module

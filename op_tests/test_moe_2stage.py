@@ -354,7 +354,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                 w1_scale, a1_scale,
                                 dtype, topk, BLOCK_SIZE_M)
     #checkAllclose(out1_ref, out1_qt,
-                  msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
+    #              msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
 
     if use_g1u1:
         gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)

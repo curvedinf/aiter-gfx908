@@ -209,7 +209,7 @@ def ck_moe_2stages(a1,
                    a2_scale=None,  # [1]
                    block_size=None,
                    expert_mask=None,
-                   activation="silu"
+                   activation = ActivationType.Silu
                    ):
     E, model_dim, inter_dim = w2.shape
     global_E = E
@@ -243,14 +243,14 @@ def ck_moe_2stages(a1,
 
     # g1u0
     if w2.shape[2] == w1.shape[1]:
-        if activation == "gelu":
+        if activation == ActivationType.Gelu:
             a2 = F.gelu(a2)
         else:
             a2 = F.silu(a2)
     # g1u1
     else:
         tmp = torch.empty((M, topk, inter_dim), dtype=dtype, device=device)
-        if activation == "gelu":
+        if activation == ActivationType.Gelu:
             aiter.gelu_and_mul(tmp, a2)
         else:
             aiter.silu_and_mul(tmp, a2)
@@ -282,7 +282,7 @@ def ck_moe_2stages_win4(a1,
                    a2_scale=None,  # [1]
                    block_size=None,
                    expert_mask=None,
-                   activation="silu"
+                   activation = ActivationType.Silu
                    ):
     E, model_dim, inter_dim = w2.shape
     inter_dim = inter_dim * 8
@@ -327,14 +327,14 @@ def ck_moe_2stages_win4(a1,
     #print("a2 shape:",a2.shape)
     # g1u0
     if w2.shape[2] == w1.shape[1]:
-        if activation == "gelu":
+        if activation == ActivationType.Gelu:
             a2 = F.gelu(a2)
         else:
             a2 = F.silu(a2)
     # g1u1
     else:
         tmp = torch.empty((M, topk, inter_dim), dtype=dtype, device=device)
-        if activation == "gelu":
+        if activation == ActivationType.Gelu:
             aiter.gelu_and_mul(tmp, a2)
         else:
             aiter.silu_and_mul(tmp, a2)

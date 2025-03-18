@@ -14,7 +14,7 @@ from aiter import pertoken_quant
 from aiter.fused_moe_gelu import fused_topk
 from aiter.fused_moe_bf16_asm import asm_moe, torch_moe, moe_sorting_ck, ck_moe_2stages
 from aiter.ops.shuffle import shuffle_weight
-
+from aiter import ActivationType
 
 @perftest(num_iters=3)
 def torch_moe_stage1(hidden_states,
@@ -172,13 +172,13 @@ def ck_moe_fused_2stages(hidden_states,
                          fc2_scale=None,
                          block_size=32,
                          a1_scale=None,
-                         activation='silu'
+                         activation=ActivationType.Silu
                          ):
     return ck_moe_2stages(hidden_states, w1, w2, topk_weight, topk_ids,
                           fc1_scale, fc2_scale, block_size=block_size, a1_scale=a1_scale, activation=activation)
 
 
-def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=False, shared_E=0, activation='silu'):
+def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=False, shared_E=0, activation=ActivationType.Silu):
     input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
     if use_g1u1:
         w1 = torch.randn((E+shared_E, inter_dim*2, model_dim),
@@ -218,12 +218,12 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                         block_size=BLOCK_SIZE_M)
     if use_g1u1:
         gate, up = out1_ref.split([inter_dim, inter_dim], dim=-1)
-        if activation == 'silu':
+        if activation == ActivationType.Silu:
             input2 = F.silu(gate) * up
         else:
             input2 = F.gelu(gate) * up
     else:
-        if activation == 'silu':
+        if activation == ActivationType.Silu:
             input2 = F.silu(out1_ref)
         else:
             input2 = F.gelu(out1_ref)
@@ -259,12 +259,12 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     if use_g1u1:
         gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
-        if activation == 'silu':
+        if activation == ActivationType.Silu:
             input2 = F.silu(gate) * up
         else:
             input2 = F.gelu(gate) * up
     else:
-        if activation == 'silu':
+        if activation == ActivationType.Silu:
             input2 = F.silu(out1_qt)
         else:
             input2 = F.gelu(out1_qt)
@@ -316,4 +316,4 @@ for dtype in [torch.float16]:
             for inter_dim in [6144, 16384]:
                 expert, topk = 8, 2
                 test_fmoe(dtype, m, dim, inter_dim, expert, topk,
-                          quant='fp8quant', use_g1u1=True, activation='gelu')
+                          quant='fp8quant', use_g1u1=True, activation=ActivationType.Gelu)

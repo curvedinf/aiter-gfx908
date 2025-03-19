@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import List
 
 import triton
-from triton.compiler.code_generator import kernel_suffix
+try:
+    old_compiler = True
+    from triton.compiler.code_generator import kernel_suffix
+except ImportError:
+    old_compiler = False
+
 from triton.backends.amd.driver import ty_to_cpp
 
 desc = """
@@ -39,7 +44,7 @@ NOTE: when resolving the scope of /path/to/kernel.py, the file will be executed 
 used to run this `compile.py` script
 """
 
-def compile_kernel(path, kernel_name:str, signature:str, grid:str, num_warps:int=1, num_stages:int=3, out_name:str=None, out_path:Path=None):
+def compile_kernel(path, kernel_name:str, signature:str, grid:str, num_warps:int=1, num_stages:int=3, out_name:str=None, out_path:Path=None, waves_per_eu=0, kpack=2, matrix_instr_nonkdim=16):
     out_name = out_name if out_name else kernel_name
     out_path = out_path if out_path else Path(out_name)
 
@@ -75,39 +80,87 @@ def compile_kernel(path, kernel_name:str, signature:str, grid:str, num_warps:int
         except ValueError:
             pass
         return None
+    
+    if old_compiler:
+        hints = {i: constexpr(s.split(":")[1]) for i, s in enumerate(signature) if ":" in s}
+        hints = {k: v for k, v in hints.items() if v is not None}
+        constants = {i: constexpr(s) for i, s in enumerate(signature)}
+        constants = {k: v for k, v in constants.items() if v is not None}
+        signature = {i: s.split(":")[0] for i, s in enumerate(signature) if i not in constants}
+        const_sig = 'x'.join([str(v) for v in constants.values()])
+        doc_string = [f"{kernel.arg_names[i]}={constants[i]}" for i in constants.keys()]
+        doc_string += [f"num_warps={num_warps}", f"num_stages={num_stages}", f"waves_per_eu={waves_per_eu}", f"matrix_instr_nonkdim={matrix_instr_nonkdim}"]
 
-    hints = {i: constexpr(s.split(":")[1]) for i, s in enumerate(signature) if ":" in s}
-    hints = {k: v for k, v in hints.items() if v is not None}
-    constants = {i: constexpr(s) for i, s in enumerate(signature)}
-    constants = {k: v for k, v in constants.items() if v is not None}
-    signature = {i: s.split(":")[0] for i, s in enumerate(signature) if i not in constants}
-    const_sig = 'x'.join([str(v) for v in constants.values()])
-    doc_string = [f"{kernel.arg_names[i]}={constants[i]}" for i in constants.keys()]
-    doc_string += [f"num_warps={num_warps}", f"num_stages={num_stages}"]
+        # compile ast into cubin
+        for h in hints.values():
+            assert h in [1, 16], f"Only 1 and 16 are valid hints, got {h}"
+        divisible_by_16 = [i for i, h in hints.items() if h == 16]
+        equal_to_1 = [i for i, h in hints.items() if h == 1]
+        attrs = triton.compiler.AttrsDescriptor(divisible_by_16=divisible_by_16, equal_to_1=equal_to_1)
+        for i in equal_to_1:
+            constants.update({i: 1})
+        src = triton.compiler.ASTSource(fn=kernel, constants=constants, signature=signature, attrs=attrs)
+        opts = {"num_warps": num_warps, "num_stages": num_stages, "waves_per_eu": waves_per_eu, "matrix_instr_nonkdim": matrix_instr_nonkdim}
+        ccinfo = triton.compile(src, options=opts)
+        arg_names = []
+        arg_types = []
+        for i in signature.keys():
+            if i not in equal_to_1:
+                arg_names += [kernel.arg_names[i]]
+                arg_types += [signature[i]]
 
-    # compile ast into cubin
-    for h in hints.values():
-        assert h in [1, 16], f"Only 1 and 16 are valid hints, got {h}"
-    divisible_by_16 = [i for i, h in hints.items() if h == 16]
-    equal_to_1 = [i for i, h in hints.items() if h == 1]
-    attrs = triton.compiler.AttrsDescriptor(divisible_by_16=divisible_by_16, equal_to_1=equal_to_1)
-    for i in equal_to_1:
-        constants.update({i: 1})
-    src = triton.compiler.ASTSource(fn=kernel, constants=constants, signature=signature, attrs=attrs)
-    opts = {"num_warps": num_warps, "num_stages": num_stages}
-    ccinfo = triton.compile(src, options=opts)
-    arg_names = []
-    arg_types = []
-    for i in signature.keys():
-        if i not in equal_to_1:
-            arg_names += [kernel.arg_names[i]]
-            arg_types += [signature[i]]
+        # dump C stub code
+        suffix = kernel_suffix(signature.values(), attrs)
+    else:
+        hints = {(i, ): constexpr(s.split(":")[1]) for i, s in enumerate(signature) if ":" in s}
+        hints = {k: v for k, v in hints.items() if v is not None}
+        constants = {kernel.arg_names[i]: constexpr(s) for i, s in enumerate(signature)}
+        constants = {k: v for k, v in constants.items() if v is not None}
+        for key, value in hints.items():
+            if value == 1:
+                constants[kernel.arg_names[key[0]]] = value
+        signature = {kernel.arg_names[i]: s.split(":")[0] for i, s in enumerate(signature)}
+        for key in constants:
+            signature[key] = 'constexpr'
+        const_sig = 'x'.join([str(v) for v in constants.values()])
+        doc_string = [f"{k}={v}" for k, v in constants.items()]
+        doc_string += [f"num_warps={num_warps}", f"num_stages={num_stages}", f"waves_per_eu={waves_per_eu}", f"kpack={kpack}", f"matrix_instr_nonkdim={matrix_instr_nonkdim}"]
+        # compile ast into cubin
+        for h in hints.values():
+            assert h in [1, 16], f"Only 1 and 16 are valid hints, got {h}"
+        attrs = {k: [["tt.divisibility", 16]] for k, v in hints.items() if v == 16}
+        src = triton.compiler.ASTSource(fn=kernel, constexprs=constants, signature=signature, attrs=attrs)
+        opts = {"num_warps": num_warps, "num_stages": num_stages, "waves_per_eu": waves_per_eu, "kpack": kpack, "matrix_instr_nonkdim": matrix_instr_nonkdim}
+        ccinfo = triton.compile(src, options=opts)
+        if ccinfo.metadata.global_scratch_size > 0:
+            raise RuntimeError("AOT compiling kernels with global scratch requirements is not yet implemented")
 
-    # dump C stub code
-    suffix = kernel_suffix(signature.values(), attrs)
+        arg_names = []
+        arg_types = []
+        arg_names_not_1 = []
+        arg_types_not_1 = []
+        for i, arg_name in enumerate(kernel.arg_names):
+            if arg_name not in constants:
+                arg_names.append(arg_name)
+                arg_types.append(signature[arg_name])
+                arg_names_not_1.append(arg_name)
+                arg_types_not_1.append(signature[arg_name])
+            elif hints.get((i, ), None) == 1:
+                arg_names.append(arg_name)
+                arg_types.append("i32")
+
+        # dump C stub code
+        suffix = ''
+        for i, ty in enumerate(signature.values()):
+            suffix += str(i)
+            if hints.get((i, ), None) == 1:
+                suffix += 'c'
+            if hints.get((i, ), None) == 16:
+                suffix += 'd'
+
     func_name = '_'.join([out_name, sig_hash, suffix])
-
     hex_ = binascii.hexlify(ccinfo.asm["hsaco"]).decode('utf-8')
+
     params = {
         "kernel_name": func_name,
         "triton_kernel_name": kernel_name,
@@ -142,6 +195,9 @@ if __name__ == "__main__":
     parser.add_argument("--kernel-name", "-n", type=str, default="", help="Name of the kernel to compile",
                         required=True)
     parser.add_argument("--num-warps", "-w", type=int, default=1, help="Number of warps to launch the kernel")
+    parser.add_argument("--waves-per-eu", type=int, default=0)
+    parser.add_argument("--matrix-instr-nonkdim", type=int, default=16)
+    parser.add_argument("--kpack", type=int, default=0)
     parser.add_argument("--num-stages", "-ns", type=int, default=3,
                         help="Number of stages (meta-parameter of the kernel)")
     parser.add_argument("--out-name", "-on", type=str, default=None, help="Out name for the compiled kernel")

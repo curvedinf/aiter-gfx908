@@ -192,10 +192,11 @@ def ck_moe_stage1(hidden_states,
                         sorted_expert_ids, num_valid_ids, out, topk, w1_scale, a1_scale, block_size)
     
 
-    gate, up = out.split([inter_dim, inter_dim], dim=-1)
-    input2 = F.silu(gate) * up
+    tmp = torch.empty((token_num, topk, inter_dim), dtype=dtype,  device=hidden_states.device)
+    aiter.silu_and_mul(tmp, out)
+    out = tmp
     
-    return input2#out
+    return out
 
 
 @perftest()

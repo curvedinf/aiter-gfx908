@@ -546,6 +546,8 @@ def _fwd_kernel_stage2_asm(
     stride_mid_os,
     stride_obs,
     stride_oh,
+    bs,
+    nheads,
     NUM_KV_SPLITS: tl.constexpr,
     BLOCK_DV: tl.constexpr,
     Lv: tl.constexpr,

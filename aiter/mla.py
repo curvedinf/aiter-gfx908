@@ -18,12 +18,13 @@ def mla_decode_fwd(
     logit_cap=0.0,
     num_kv_splits=None,  # for experts only!!!
 ):
+
+    num_page, page_size, nhead_kv, qk_head_dim = kv_buffer.shape
     device = q.device
     assert logit_cap <= 0, f"{logit_cap=} is not support yet"
     if sm_scale is None:
         sm_scale = 1.0 / (qk_head_dim**0.5)
 
-    num_page, page_size, nhead_kv, qk_head_dim = kv_buffer.shape
     bs, nhead, v_head_dim = o.shape
 
     if num_kv_splits is None:
@@ -64,6 +65,8 @@ def mla_decode_fwd(
         attn_lse.stride(1),
         o.stride(0),
         o.stride(1),
+        bs,
+        nhead,
         NUM_KV_SPLITS=num_kv_splits,
         BLOCK_DV=BLOCK_DV,
         Lv=Lv,

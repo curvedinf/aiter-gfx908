@@ -89,7 +89,7 @@ def compile_kernel(path, kernel_name:str, signature:str, grid:str, num_warps:int
         signature = {i: s.split(":")[0] for i, s in enumerate(signature) if i not in constants}
         const_sig = 'x'.join([str(v) for v in constants.values()])
         doc_string = [f"{kernel.arg_names[i]}={constants[i]}" for i in constants.keys()]
-        doc_string += [f"num_warps={num_warps}", f"num_stages={num_stages}", f"waves_per_eu={waves_per_eu}", f"matrix_instr_nonkdim={matrix_instr_nonkdim}"]
+        doc_string += [f"num_warps={num_warps}", f"num_stages={num_stages}", f"waves_per_eu={waves_per_eu}", f"kpack={kpack}", f"matrix_instr_nonkdim={matrix_instr_nonkdim}"]
 
         # compile ast into cubin
         for h in hints.values():
@@ -100,7 +100,7 @@ def compile_kernel(path, kernel_name:str, signature:str, grid:str, num_warps:int
         for i in equal_to_1:
             constants.update({i: 1})
         src = triton.compiler.ASTSource(fn=kernel, constants=constants, signature=signature, attrs=attrs)
-        opts = {"num_warps": num_warps, "num_stages": num_stages, "waves_per_eu": waves_per_eu, "matrix_instr_nonkdim": matrix_instr_nonkdim}
+        opts = {"num_warps": num_warps, "num_stages": num_stages, "waves_per_eu": waves_per_eu, "kpack": kpack, "matrix_instr_nonkdim": matrix_instr_nonkdim}
         ccinfo = triton.compile(src, options=opts)
         arg_names = []
         arg_types = []
@@ -195,9 +195,9 @@ if __name__ == "__main__":
     parser.add_argument("--kernel-name", "-n", type=str, default="", help="Name of the kernel to compile",
                         required=True)
     parser.add_argument("--num-warps", "-w", type=int, default=1, help="Number of warps to launch the kernel")
-    parser.add_argument("--waves-per-eu", type=int, default=0)
-    parser.add_argument("--matrix-instr-nonkdim", type=int, default=16)
-    parser.add_argument("--kpack", type=int, default=0)
+    parser.add_argument("--waves-per-eu", type=int, default=1)
+    parser.add_argument("--matrix-instr-nonkdim", type=int, default=0)
+    parser.add_argument("--kpack", type=int, default=1)
     parser.add_argument("--num-stages", "-ns", type=int, default=3,
                         help="Number of stages (meta-parameter of the kernel)")
     parser.add_argument("--out-name", "-on", type=str, default=None, help="Out name for the compiled kernel")

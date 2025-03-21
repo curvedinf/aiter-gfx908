@@ -57,7 +57,7 @@ TEST_F(MLADecodeTest, BasicFunctionality) {
     );
     
     // Verify output has expected shape
-    // EXPECT_EQ(output.sizes(), std::vector<int64_t>({batch_size, num_heads, head_dim}));
+    EXPECT_EQ(output.sizes(), std::vector<int64_t>({batch_size, num_heads, v_head_dim}));
 }
 
 TEST_F(MLADecodeTest, CustomScaleAndSplits) {

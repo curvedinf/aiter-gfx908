@@ -17,6 +17,8 @@ def mla_decode_fwd(
     sm_scale=None,  # 1.0 / (qk_head_dim**0.5)
     logit_cap=0.0,
     num_kv_splits=None,  # for experts only!!!
+    logits=None,
+    attn_lse=None,
 ):
 
     num_page, page_size, nhead_kv, qk_head_dim = kv_buffer.shape
@@ -32,10 +34,12 @@ def mla_decode_fwd(
         cu_num = device_properties.multi_processor_count
         num_kv_splits = min(16, max(1, cu_num//bs))
 
-    logits = torch.empty(
-        (bs, num_kv_splits, nhead, v_head_dim), dtype=torch.float, device=device)
-    attn_lse = torch.empty(
-        (bs, num_kv_splits, nhead,  1), dtype=torch.float, device=device)
+    if logits is None:
+        logits = torch.empty(
+            (bs, num_kv_splits, nhead, v_head_dim), dtype=torch.float, device=device)
+    if attn_lse is None:
+        attn_lse = torch.empty(
+            (bs, num_kv_splits, nhead,  1), dtype=torch.float, device=device)
 
     aiter.mla_stage1_asm_fwd(
         q,

@@ -101,15 +101,16 @@ public:
         uint32_t O_elemSize = sizeof(T_O);
 
         int stride_X = input.stride(0) * input.element_size();
-        int stride_GU = dim * I_elemSize;;
+        int stride_GU = dim * I_elemSize;
+        ;
         if (is_int4)
         {
             stride_GU /= 2;
         }
         int stride_expert_GU = stride_GU * hidden_dim;
-        //int stride_expert_D = stride_D * dim;
+        // int stride_expert_D = stride_D * dim;
         int stride_expert_GUDQN = w1_dqn.has_value() ? w1_dqn.value().stride(0) * sizeof(float) : 0;
-        //int stride_expert_DDQN = w2_dqn.has_value() ? w2_dqn.value().stride(0) * sizeof(float) : 0;
+        // int stride_expert_DDQN = w2_dqn.has_value() ? w2_dqn.value().stride(0) * sizeof(float) : 0;
         int stride_expert_SMTDQN = hidden_dim * sizeof(float);
         int stride_O = hidden_dim * O_elemSize * topk;
         if (hidden_dim * 2 == w1.size(1))
@@ -156,19 +157,19 @@ public:
         int gdx = ((hidden_dim + sub_GU - 1) / sub_GU);
         int gdy = sub_X_cnt;
         int gdz = 1;
-        //std::cout << "args.dim: " << args.dim << std::endl;
-        //std::cout << "args.hidden_dim: " << args.hidden_dim << std::endl;
-        //std::cout << "args.token_cnt: " << args.token_cnt << std::endl;
-        //std::cout << "args.eprt_cnt: " << args.eprt_cnt << std::endl;
-        //std::cout << "args.stride_X: " << args.Xs << std::endl;
-        //std::cout << "args.stride_GU: " << args.GUs << std::endl;
-        //std::cout << "args.stride_O: " << args.Os << std::endl;
-        //std::cout << "args.stride_expert_GU: " << args.eGUs << std::endl;
-        //std::cout << "args.stride_expert_GUDQN: " << args.eGUQs << std::endl;
-        //std::cout << "args.stride_expert_SMTDQN: " << args.eSMQs << std::endl;
-        //std::cout << "args.topk: " << args.topk << std::endl;
-        //std::cout << "gdx: " << gdx << std::endl;
-        //std::cout << "gdy: " << gdy << std::endl;
+        // std::cout << "args.dim: " << args.dim << std::endl;
+        // std::cout << "args.hidden_dim: " << args.hidden_dim << std::endl;
+        // std::cout << "args.token_cnt: " << args.token_cnt << std::endl;
+        // std::cout << "args.eprt_cnt: " << args.eprt_cnt << std::endl;
+        // std::cout << "args.stride_X: " << args.Xs << std::endl;
+        // std::cout << "args.stride_GU: " << args.GUs << std::endl;
+        // std::cout << "args.stride_O: " << args.Os << std::endl;
+        // std::cout << "args.stride_expert_GU: " << args.eGUs << std::endl;
+        // std::cout << "args.stride_expert_GUDQN: " << args.eGUQs << std::endl;
+        // std::cout << "args.stride_expert_SMTDQN: " << args.eSMQs << std::endl;
+        // std::cout << "args.topk: " << args.topk << std::endl;
+        // std::cout << "gdx: " << gdx << std::endl;
+        // std::cout << "gdy: " << gdy << std::endl;
 
         const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
         const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -189,19 +190,19 @@ public:
     };
 };
 
-void moe_stage1_fp8_g1u1(torch::Tensor &out,               // [token_cnt, dim]
-                              torch::Tensor &input,             // [token_cnt, dim] M,K
-                              torch::Tensor &gate,              // [expert, hidden_dim*2, dim] N,K
-                              torch::Tensor &down,              // [expert, dim, hidden_dim]
-                              torch::Tensor &sorted_token_ids,  // [max_num_tokens_padded]
-                              torch::Tensor &sorted_weight_buf, // [max_num_tokens_padded]
-                              torch::Tensor &sorted_expert_ids, // [max_num_m_blocks]
-                              torch::Tensor &num_valid_ids,     // [1]
-                              uint32_t topk,                    //
-                              torch::Tensor &fc1_scale,         // [expert, 1, hidden_dim]
-                              std::optional<torch::Tensor> &fc2_scale,     // [expert, 1, dim]
-                              torch::Tensor input_scale,        // [expert, 1, dim]
-                              std::optional<torch::Tensor> fc2_smooth_scale = std::nullopt) // [expert, 1, hidden_dim])
+void moe_stage1_fp8_g1u1(torch::Tensor &out,                                           // [token_cnt, dim]
+                         torch::Tensor &input,                                         // [token_cnt, dim] M,K
+                         torch::Tensor &gate,                                          // [expert, hidden_dim*2, dim] N,K
+                         torch::Tensor &down,                                          // [expert, dim, hidden_dim]
+                         torch::Tensor &sorted_token_ids,                              // [max_num_tokens_padded]
+                         torch::Tensor &sorted_weight_buf,                             // [max_num_tokens_padded]
+                         torch::Tensor &sorted_expert_ids,                             // [max_num_m_blocks]
+                         torch::Tensor &num_valid_ids,                                 // [1]
+                         uint32_t topk,                                                //
+                         torch::Tensor &fc1_scale,                                     // [expert, 1, hidden_dim]
+                         std::optional<torch::Tensor> &fc2_scale,                      // [expert, 1, dim]
+                         torch::Tensor input_scale,                                    // [expert, 1, dim]
+                         std::optional<torch::Tensor> fc2_smooth_scale = std::nullopt) // [expert, 1, hidden_dim])
 {
     MoeStage1_Kernel *impl_ptr = nullptr;
     int hidden_dim = down.size(2);
@@ -211,7 +212,7 @@ void moe_stage1_fp8_g1u1(torch::Tensor &out,               // [token_cnt, dim]
 
     if (out.dtype() == at::ScalarType::BFloat16 && hidden_dim % 256 == 0)
     {
-        static MoeStage1_Kernel impl_128_novs("stage1_moe_fp8_g1u1_subX128_subGU128", "stage1_moe_fp8_g1u1_subX128_subGU128.co", 128);
+        static MoeStage1_Kernel impl_128_novs("fmoe_stage1_bf16_pertokenFp8_g1u1_128x128", "fmoe_stage1_bf16_pertokenFp8_g1u1_128x128.co", 128);
         impl_ptr = &impl_128_novs;
     }
     else

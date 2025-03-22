@@ -17,10 +17,14 @@ def getLogger():
         console_handler = logging.StreamHandler()
         if int(os.environ.get("AITER_LOG_MORE", 0)):
             formatter = logging.Formatter(
-                fmt="[%(name)s %(levelname)s] %(asctime)s.%(msecs)03d - %(process)d:%(processName)s - %(pathname)s:%(lineno)d - %(funcName)s\n%(message)s",
+                fmt="[%(name)s %(levelname)s] %(asctime)s.%(msecs)03d - %(processName)s:%(process)d - %(pathname)s:%(lineno)d - %(funcName)s\n%(message)s",
                 datefmt="%Y-%m-%d %H:%M:%S",
             )
-            console_handler.setFormatter(formatter)
+        else:
+            formatter = logging.Formatter(
+                fmt="[%(name)s] %(message)s",
+            )
+        console_handler.setFormatter(formatter)
         console_handler.setLevel(logging.INFO)
         logger.addHandler(console_handler)
 

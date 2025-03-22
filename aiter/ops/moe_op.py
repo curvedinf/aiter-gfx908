@@ -3,8 +3,21 @@
 
 from torch import Tensor
 from typing import List, Optional
-from ..jit.core import compile_ops, CK_DIR, AITER_CSRC_DIR, AITER_ROOT_DIR, AITER_CORE_DIR
+from ..jit.core import (
+    compile_ops,
+    CK_DIR,
+    AITER_CSRC_DIR,
+    AITER_ROOT_DIR,
+    AITER_CORE_DIR,
+)
 import torch.nn.functional as F
+
+
+@compile_ops("module_moe_asm")
+class _ActivationType: ...
+
+
+ActivationType = _ActivationType(0)
 
 
 @compile_ops("module_moe_asm")
@@ -45,13 +58,6 @@ def fmoe(
     num_valid_ids: Tensor,
     topk: int,
 ): ...
-
-
-@compile_ops("module_moe_asm", fc_name='ActivationType')
-class _ActivationType():
-    ...
-
-ActivationType = _ActivationType(0)
 
 
 @compile_ops("module_moe_asm")
@@ -166,7 +172,6 @@ def moe_stage1_fp8_g1u1(
 ): ...
 
 
-
 @compile_ops("module_moe")
 def ck_moe(
     hidden_states: Tensor,
@@ -179,7 +184,7 @@ def ck_moe(
     fc1_smooth_scale: Optional[Tensor] = None,
     fc2_smooth_scale: Optional[Tensor] = None,
     block_m: Optional[int] = 32,
-    expert_mask: Optional[Tensor] = None
+    expert_mask: Optional[Tensor] = None,
 ): ...
 
 
@@ -195,7 +200,7 @@ def ck_moe_stage1(
     topk: int,
     w1_scale: Optional[Tensor] = None,
     a1_scale: Optional[Tensor] = None,
-    block_m: Optional[int] = 32
+    block_m: Optional[int] = 32,
 ): ...
 
 
@@ -212,5 +217,5 @@ def ck_moe_stage2(
     topk: int,
     w2_scale: Optional[Tensor] = None,
     a2_scale: Optional[Tensor] = None,
-    block_m: Optional[int] = 32
+    block_m: Optional[int] = 32,
 ): ...

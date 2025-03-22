@@ -338,7 +338,7 @@
             "Aligning the number of tokens to be processed by each expert such " \
             "that it is divisible by the block size.");                          \
       m.def("fmoe", &fmoe);                                                      \
-      py::enum_<ActivationType>(m, "_ActivationType")                            \
+      py::enum_<ActivationType>(m, "ActivationType")                            \
           .value("Silu", ActivationType::Silu)                                   \
           .value("Gelu", ActivationType::Gelu)                                   \
           .export_values();                                                      \
@@ -430,7 +430,7 @@
       m.def("batched_rotary_embedding", &batched_rotary_embedding, "batched_rotary_embedding");
 
 #define QUANT_PYBIND                                                                   \
-      py::enum_<QuantType>(m, "_QuantType")                                            \
+      py::enum_<QuantType>(m, "QuantType")                                            \
           .value("No", QuantType::No)                                                  \
           .value("per_Tensor", QuantType::per_Tensor)                                  \
           .value("per_Token", QuantType::per_Token)                                    \

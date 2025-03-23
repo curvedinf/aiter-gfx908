@@ -1,5 +1,5 @@
 from jinja2 import Template
-from csrc.cpp_itfs.utils import compile_template_op, transfer_hsaco, AITER_CORE_DIR
+from csrc.cpp_itfs.utils import compile_template_op, transfer_hsaco, AITER_CORE_DIR, get_default_func_name, not_built, run_lib
 from aiter.aot.triton_compile import compile_kernel
 import triton
 
@@ -11,10 +11,14 @@ with open("asm_mla_decode_fwd.cpp.jinja", "r") as f:
 
 
 def compile(hsaco_path: str, page_size: int, q_itemsize: int, kv_itemsize: int, num_kv_splits:int, v_head_dim:int, func_name: str = None):
-    bin_size, bin_data = transfer_hsaco(hsaco_path)
-    triton_kernel, triton_header, triton_source = compile_kernel(f"{AITER_CORE_DIR}/aiter/ops/triton/decode_mla.py", "_fwd_kernel_stage2_asm", f"*fp32:16,*fp32:16,*bf16:16,*i32:16,i32,i32,i32,i32,i32,i32,i32,{num_kv_splits},{triton.next_power_of_2(v_head_dim)},{v_head_dim},64", "bs,nheads,1", 4, 2, "decode_mla_stage2_asm", waves_per_eu=4, kpack=2, matrix_instr_nonkdim=16)
+    func_name = get_default_func_name(MD_NAME, (page_size, q_itemsize, kv_itemsize, num_kv_splits, v_head_dim))
+    if not_built(func_name):
+        bin_size, bin_data = transfer_hsaco(hsaco_path)
+        triton_kernel, triton_header, triton_source = compile_kernel(f"{AITER_CORE_DIR}/aiter/ops/triton/decode_mla.py", "_fwd_kernel_stage2_asm", f"*fp32:16,*fp32:16,*bf16:16,*i32:16,i32,i32,i32,i32,i32,i32,i32,{num_kv_splits},{triton.next_power_of_2(v_head_dim)},{v_head_dim},64", "bs,nheads,1", 4, 2, "decode_mla_stage2_asm", waves_per_eu=4, kpack=2, matrix_instr_nonkdim=16)
 
-    return compile_template_op(src_template, MD_NAME, ["../utils.h", "../../include", triton_header], [triton_source], bin_size=bin_size, bin_data=bin_data, page_size=page_size, q_itemsize=q_itemsize, kv_itemsize=kv_itemsize, triton_header=triton_header, triton_kernel=triton_kernel, func_name=func_name)
+        return compile_template_op(src_template, MD_NAME, ["../utils.h", "../../include", triton_header], [triton_source], bin_size=bin_size, bin_data=bin_data, page_size=page_size, q_itemsize=q_itemsize, kv_itemsize=kv_itemsize, triton_header=triton_header, triton_kernel=triton_kernel, func_name=func_name)
+    else:
+        return run_lib(func_name)
 
 
 def asm_mla_decode_fwd(q,         # [num_seqs, num_heads, head_size]

@@ -91,7 +91,7 @@ def test_mla(ctx_lens, batch_size, nhead,
     logits_ref, lse_ref = attn_logits.split([v_head_dim, 1], dim=-1)
     logits_ref = rearrange(logits_ref, 'bs h sp d -> bs sp h d')
     lse_ref = rearrange(lse_ref, 'bs h sp d -> bs sp h d')
-    attn_logits = torch.empty_like(attn_logits.transpose(1,2).contiguous())
+    attn_logits = torch.empty_like(attn_logits.transpose(1, 2).contiguous())
     # print(f'{out_ref.view(batch_size, -1)=}')
     logits, attn_lse = attn_logits.split([v_head_dim, 1], dim=-1)
     logits = logits.contiguous()
@@ -110,6 +110,7 @@ def test_mla(ctx_lens, batch_size, nhead,
                                                    kv_indices,
                                                    kv_last_page_lens,
                                                    sm_scale,
+                                                   num_kv_splits=num_kv_splits,
                                                    logits=logits,
                                                    attn_lse=attn_lse
                                                    )

@@ -110,6 +110,7 @@ def test_mla(ctx_lens, batch_size, nhead,
                                                    kv_indices,
                                                    kv_last_page_lens,
                                                    sm_scale,
+                                                   num_kv_splits=num_kv_splits,
                                                    logits=logits,
                                                    attn_lse=attn_lse
                                                    )

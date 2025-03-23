@@ -1,6 +1,5 @@
 from jinja2 import Template
-from cpp.utils import compile_template_op
-from cpp.torch_utils import torch_to_c_types
+from csrc.cpp_itfs.utils import compile_template_op
 import ctypes
 import math
 
@@ -12,7 +11,7 @@ with open("pa_ragged.cpp.jinja", "r") as f:
 
 
 def compile(gqa_ratio: int, head_size: int, npar_loops: int, dtype: str, kv_dtype: str, fp8_kv_dtype: str, out_dtype: str, block_size: int, alibi_enabled: str, folder: str = None):
-    return compile_template_op(src_template, MD_NAME, ["../utils.h", "pa.cuh", "../../csrc/include"], [], gqa_ratio=gqa_ratio, head_size=head_size, npar_loops=npar_loops, dtype=dtype, kv_dtype=kv_dtype, fp8_kv_dtype=fp8_kv_dtype, out_dtype=out_dtype, block_size=block_size, alibi_enabled=alibi_enabled, folder=folder)
+    return compile_template_op(src_template, MD_NAME, ["../utils.h", "pa.cuh", "../../include"], [], gqa_ratio=gqa_ratio, head_size=head_size, npar_loops=npar_loops, dtype=dtype, kv_dtype=kv_dtype, fp8_kv_dtype=fp8_kv_dtype, out_dtype=out_dtype, block_size=block_size, alibi_enabled=alibi_enabled, folder=folder)
 
 
 def paged_attention_ragged(out,         # [num_seqs, num_heads, head_size]
@@ -34,6 +33,7 @@ def paged_attention_ragged(out,         # [num_seqs, num_heads, head_size]
                            v_scale,
                            fp8_out_scale):
     import torch
+    from csrc.cpp_itfs.torch_utils import torch_to_c_types
     if kv_cache_dtype == "auto":
         if query.dtype == torch.bfloat16:
             dtype = "__hip_bfloat16"
@@ -100,6 +100,6 @@ if __name__ == "__main__":
     parser.add_argument("--out_dtype", type=str, required=True)
     parser.add_argument("--block_size", type=int, required=True)
     parser.add_argument("--alibi_enabled", type=str, required=True)
-    parser.add_argument("--folder", type=str, default=None)
+    parser.add_argument("--func_name", type=str, default=None)
     args = parser.parse_args()
     compile(**vars(args))

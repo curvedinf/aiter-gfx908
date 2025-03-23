@@ -7,6 +7,9 @@
 #include "lru_cache.h"
 #include <memory>
 #include <cstdlib>
+#include <openssl/md5.h>  
+#include <iomanip> 
+
 
 static std::filesystem::path aiter_root_dir;
 __inline__ void init_root_dir(){
@@ -110,7 +113,7 @@ public:
 
 
 template<typename... Args>
-__inline__ void run_lib(std::string folder,Args... args) {
+__inline__ void run_lib(std::string folder, Args... args) {
     auto AITER_MAX_CACHE_SIZE = getenv("AITER_MAX_CACHE_SIZE");
     if(!AITER_MAX_CACHE_SIZE){
         AITER_MAX_CACHE_SIZE = "-1";
@@ -120,4 +123,22 @@ __inline__ void run_lib(std::string folder,Args... args) {
     std::string lib_path = (aiter_root_dir/"build"/folder/"lib.so").string();
     libs.put(folder, std::make_shared<SharedLibrary>(lib_path));
     (*libs.get(folder))->call(std::forward<Args>(args)...);
+}
+
+
+__inline__ std::string hash_signature(const std::string& signature) {
+    unsigned char digest[MD5_DIGEST_LENGTH];
+    MD5_CTX context;
+
+    // Compute the MD5 hash
+    MD5_Init(&context);
+    MD5_Update(&context, signature.data(), signature.size());
+    MD5_Final(digest, &context);
+
+    // Convert binary digest to hex string
+    std::stringstream ss;
+    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(digest[i]);
+    }
+    return ss.str();
 }

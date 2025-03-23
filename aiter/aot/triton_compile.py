@@ -179,10 +179,14 @@ def compile_kernel(path, kernel_name:str, signature:str, grid:str, num_warps:int
         "gridZ": grid[2],
         "_placeholder": "",
     }
+    output_files = []
     for ext in ['h', 'cpp']:
         template_path = Path(__file__).parent / f"compile.{ext}"
-        with out_path.with_suffix(f".{sig_hash}_{suffix}.{ext}").open("w") as fp:
+        output_file = out_path.with_suffix(f".{sig_hash}_{suffix}.{ext}")
+        output_files.append(output_file)
+        with output_file.open("w") as fp:
             fp.write(Path(template_path).read_text().format(**params))
+    return func_name, *output_files
 
 
 

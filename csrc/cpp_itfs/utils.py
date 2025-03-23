@@ -7,7 +7,10 @@ from packaging.version import parse, Version
 from collections import OrderedDict
 from functools import lru_cache
 import binascii
+import hashlib
 
+this_dir = os.path.dirname(os.path.abspath(__file__))
+AITER_CORE_DIR = os.path.abspath(f"{this_dir}/../../")
 
 HOME_PATH = os.environ.get('HOME')
 AITER_MAX_CACHE_SIZE = os.environ.get('AITER_MAX_CACHE_SIZE', None)
@@ -126,7 +129,11 @@ def run_lib(folder):
     return lib.call
 
 
-def compile_template_op(src_template, md_name, includes=None, sources=None, cxxflags=None, folder=None, **kwargs):
+def hash_signature(signature: str):
+    return hashlib.md5(signature.encode("utf-8")).hexdigest()
+
+
+def compile_template_op(src_template, md_name, includes=None, sources=None, cxxflags=None, func_name=None, **kwargs):
     if includes is None:
         includes = []
     if sources is None:
@@ -134,15 +141,17 @@ def compile_template_op(src_template, md_name, includes=None, sources=None, cxxf
     if cxxflags is None:
         cxxflags = []
     kwargs = OrderedDict(kwargs)
-    if folder is None:
-        folder = f"{md_name}_{'_'.join([str(v) for v in kwargs.values()])}"
-    src_file = src_template.render(**kwargs)
-    if not os.path.exists(f"{BUILD_DIR}/{folder}/lib.so") or os.environ.get("AITER_FORCE_COMPILE", "0") == "1":
-        compile_lib(src_file, folder, includes, sources, cxxflags)
-    return run_lib(folder)
+    if func_name is None:
+        signature = '_'.join([str(v) for v in kwargs.values()])
+        func_name = f"{md_name}_{hash_signature(signature)}"
+    src_file = src_template.render(func_name=func_name, **kwargs)
+    if not os.path.exists(f"{BUILD_DIR}/{func_name}/lib.so") or os.environ.get("AITER_FORCE_COMPILE", "0") == "1":
+        compile_lib(src_file, func_name, includes, sources, cxxflags)
+    return run_lib(func_name)
+
 
 def transfer_hsaco(hsaco_path):
     with open(hsaco_path, "rb") as f:
         hsaco = f.read()
     hsaco_hex = binascii.hexlify(hsaco).decode('utf-8')
-    return ", ".join([f"0x{x}{y}" for x, y in zip(hsaco_hex[::2], hsaco_hex[1::2])])
+    return len(hsaco_hex), ", ".join([f"0x{x}{y}" for x, y in zip(hsaco_hex[::2], hsaco_hex[1::2])])

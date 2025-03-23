@@ -14,7 +14,7 @@ import torch.nn.functional as F
 
 
 @compile_ops("module_moe_asm", "ActivationType")
-class _ActivationType: ...
+def _ActivationType(dummy): ...
 
 
 ActivationType = _ActivationType(0)

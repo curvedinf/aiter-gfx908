@@ -81,7 +81,7 @@ def per_tensor_quant_fp8_hip(x, scale=None):
 
 
 @compile_ops("module_quant", "QuantType")
-class _QuantType: ...
+def _QuantType(dummy): ...
 
 
 QuantType = _QuantType(0)

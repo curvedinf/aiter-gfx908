@@ -278,7 +278,9 @@ def asm_moe_stage1(
 
 
 @benchmark()
-def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quantCfg, use_g1u1=False):
+def test_fmoe(
+    dtype, token, model_dim, inter_dim, E, topk, quantCfg, BLOCK_SIZE_M, use_g1u1=False
+):
     qType, QDType = quantCfg
     torch_quant = aiter.get_torch_quant(qType)
     input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
@@ -291,7 +293,6 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quantCfg, use_g1u1=Fa
     score = torch.randn((token, E), device="cuda", dtype=dtype)
     topk_weights, topk_ids = fused_topk(input, score, topk, True)
 
-    BLOCK_SIZE_M = 32
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
         moe_sorting_ck(topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M)
     )
@@ -418,6 +419,7 @@ for dtype in [torch.bfloat16]:
                     expert,
                     topk,
                     quantCfg=(aiter.QuantType.per_Token, torch.float8_e4m3fnuz),
+                    BLOCK_SIZE_M=48,
                     use_g1u1=True,
                 )
 # for dtype in [torch.bfloat16]:

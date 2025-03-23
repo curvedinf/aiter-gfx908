@@ -14,7 +14,7 @@ def compile(hsaco_path: str, page_size: int, q_itemsize: int, kv_itemsize: int, 
     bin_size, bin_data = transfer_hsaco(hsaco_path)
     triton_kernel, triton_header, triton_source = compile_kernel(f"{AITER_CORE_DIR}/aiter/ops/triton/decode_mla.py", "_fwd_kernel_stage2_asm", f"*fp32:16,*fp32:16,*bf16:16,*i32:16,i32,i32,i32,i32,i32,i32,i32,{num_kv_splits},{triton.next_power_of_2(v_head_dim)},{v_head_dim},64", "bs,nheads,1", 4, 2, "decode_mla_stage2_asm", waves_per_eu=4, kpack=2, matrix_instr_nonkdim=16)
 
-    return compile_template_op(src_template, MD_NAME, ["../utils.h", "../../include"], [triton_source], bin_size=bin_size, bin_data=bin_data, page_size=page_size, q_itemsize=q_itemsize, kv_itemsize=kv_itemsize, triton_header=triton_header, triton_kernel=triton_kernel, func_name=func_name)
+    return compile_template_op(src_template, MD_NAME, ["../utils.h", "../../include", triton_header], [triton_source], bin_size=bin_size, bin_data=bin_data, page_size=page_size, q_itemsize=q_itemsize, kv_itemsize=kv_itemsize, triton_header=triton_header, triton_kernel=triton_kernel, func_name=func_name)
 
 
 def asm_mla_decode_fwd(q,         # [num_seqs, num_heads, head_size]
@@ -34,7 +34,7 @@ def asm_mla_decode_fwd(q,         # [num_seqs, num_heads, head_size]
     if not q.is_contiguous():
         raise ValueError(f"{asm_mla_decode_fwd.__name__}: only support Q.is_contiguous() for now")
     
-    if q.dtype() != torch.bfloat16:
+    if q.dtype != torch.bfloat16:
         raise ValueError(f"{asm_mla_decode_fwd.__name__}: only support dtype == torch.bfloat16 for now")
     
     num_kv_heads = kv_buffer.size(2)
@@ -63,8 +63,8 @@ def asm_mla_decode_fwd(q,         # [num_seqs, num_heads, head_size]
         num_kv_splits = min(16, max(1, cu_num // num_seqs))
 
     func = compile(f"{AITER_CORE_DIR}/hsa/mla_stage1_a16w16_bf16.co", page_size, q.itemsize, kv_buffer.itemsize, num_kv_splits, v_head_dim)
-    
-    func(torch_to_c_types(q, kv_buffer, kv_indptr, kv_page_indices, kv_last_page_lens, softmax_scale, logits, attn_lse, num_seqs, num_heads, num_kv_heads, kv_split, q.stride(0), kv_buffer.stride(0), attn_lse.stride(0), attn_lse.stride(2), attn_lse.stride(1), output.stride(0), output.stride(1), torch.cuda.current_stream()))
+    func(*torch_to_c_types(q, kv_buffer, kv_indptr, kv_page_indices, kv_last_page_lens, softmax_scale, logits, attn_lse, output, num_seqs, num_heads, num_kv_heads, kv_split, q.stride(0), kv_buffer.stride(0), attn_lse.stride(0), attn_lse.stride(1), attn_lse.stride(2), output.stride(0), output.stride(1), torch.cuda.current_stream()))
+    return logits, attn_lse 
 
 
 if __name__ == "__main__":

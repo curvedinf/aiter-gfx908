@@ -67,4 +67,6 @@ hipError_t {kernel_name}(hipStream_t stream, {signature}) {{
     // TODO: shared memory
     if(gX * gY * gZ > 0)
       return hipModuleLaunchKernel({kernel_name}_func, gX, gY, gZ, {num_warps} * warpSize, 1, 1, {shared}, stream, args, nullptr);
+    else
+      return hipErrorInvalidValue;
 }}

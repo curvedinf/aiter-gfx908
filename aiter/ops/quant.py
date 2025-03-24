@@ -58,7 +58,7 @@ def per_tensor_quant(x, scale=None, scale_dtype=torch.float, quant_dtype=torch.i
         scale = torch.abs(x).max() / dtypeMax
     y = x / scale
 
-    return y.to(quant_dtype), scale.to(scale_dtype)
+    return y.to(quant_dtype), scale.view(1).to(scale_dtype)
 
 
 def get_torch_quant(qType):

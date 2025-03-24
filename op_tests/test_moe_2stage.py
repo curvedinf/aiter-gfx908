@@ -51,7 +51,7 @@ def torch_moe_stage1(
         w1 = (w1.view(-1, D) * fc1_scale.view(-1, 1)).view(num_experts, -1, D)
     if a1_scale is not None and w1_scale is not None:
         hidden_states = hidden_states * a1_scale
-        w1 = w1 * w1_scale.view(num_experts, -1, 1)
+        w1 = w1 * w1_scale.view(w1_scale.shape[0], -1, 1)
 
     hidden_states = hidden_states.view(B, -1, D).repeat(1, topk, 1)
 
@@ -94,10 +94,11 @@ def torch_moe_stage2(
     # M, _ = hidden_states.shape
     num_experts, model_dim, inter_dim = w2.shape
     max_num_m_blocks = sorted_expert_ids.shape[0]
+    hidden_states = hidden_states.view(token_num, topk, inter_dim)
 
     # gose to quant D_w8a8/w8a8
     if a2_scale is not None and w2_scale is not None:
-        hidden_states = hidden_states * a2_scale
+        hidden_states = hidden_states * a2_scale.view(token_num, -1, 1)
         w2 = w2 * w2_scale.view(num_experts, -1, 1)
 
     out = torch.zeros(
@@ -285,7 +286,7 @@ def test_fmoe(
     torch_quant = aiter.get_torch_quant(qType)
     input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
     if use_g1u1:
-        w1 = torch.randn((E, inter_dim * 2, model_dim), dtype=dtype, device="cuda") / 10
+        w1 = torch.randn((E, inter_dim * 2, model_dim), dtype=dtype, device="cuda")
     else:
         w1 = torch.randn((E, inter_dim, model_dim), dtype=dtype, device="cuda")
     w2 = torch.randn((E, model_dim, inter_dim), dtype=dtype, device="cuda")
@@ -296,9 +297,12 @@ def test_fmoe(
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
         moe_sorting_ck(topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M)
     )
-
-    w1_qt, w1_scale = torch_quant(w1, quant_dtype=QDType)
-    w2_qt, w2_scale = torch_quant(w2, quant_dtype=QDType)
+    if qType == aiter.QuantType.per_Tensor:
+        w1_qt, w1_scale = aiter.pertoken_quant(w1.view(E, -1), quant_dtype=QDType)
+        w2_qt, w2_scale = aiter.pertoken_quant(w2.view(E, -1), quant_dtype=QDType)
+    else:
+        w1_qt, w1_scale = torch_quant(w1, quant_dtype=QDType)
+        w2_qt, w2_scale = torch_quant(w2, quant_dtype=QDType)
     w1_qt = w1_qt.view(w1.shape)
     w2_qt = w2_qt.view(w2.shape)
 
@@ -343,6 +347,10 @@ def test_fmoe(
         out1_ck,
         msg=f"[perf]  ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{QDType})",
     )
+
+    if qType == aiter.QuantType.per_Tensor:
+        a1_scale = a1_scale.view(1).repeat(token)
+        w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
     out1_asm, us = asm_moe_stage1(
         a1_qt,
         shuffle_weight(w1_qt, (16, 16)),
@@ -363,7 +371,9 @@ def test_fmoe(
         msg=f"[perf] asm_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{QDType})",
     )
 
-    # ######################## stage 2 start ###########
+    # # ######################## stage 2 start ###########
+    # if qType == aiter.QuantType.per_Token:
+    #     out1_ref = out1_ref.view(token, -1)
     # a2_qt, a2_scale = torch_quant(out1_ref, quant_dtype=QDType)
     # out2_ref, us_ref = torch_moe_stage2(
     #     a2_qt,
@@ -382,7 +392,10 @@ def test_fmoe(
     #     block_size=BLOCK_SIZE_M,
     # )
 
+    # if qType == aiter.QuantType.per_Token:
+    #     out1_ck = out1_ck.view(token, -1)
     # a2_qt, a2_scale = torch_quant(out1_ck, quant_dtype=QDType)
+    # a2_qt = a2_qt.view(token, topk, -1)
     # out2_ck, us = ck_moe_stage2(
     #     a2_qt,
     #     w1_qt,
@@ -402,12 +415,12 @@ def test_fmoe(
     #     out2_ck,
     #     msg=f"ck_moe_stage2:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{QDType})",
     # )
-    # ######################## stage 2 end ###########
+    # # ######################## stage 2 end ###########
 
 
+# per Token quant
 for dtype in [torch.bfloat16]:
-    # for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
-    for m in [1]:
+    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
         for dim in [6144]:
             for inter_dim in [4096]:
                 expert, topk = 8, 2
@@ -422,10 +435,21 @@ for dtype in [torch.bfloat16]:
                     BLOCK_SIZE_M=32,
                     use_g1u1=True,
                 )
-# for dtype in [torch.bfloat16]:
-#    for m in [80]:
-#        for dim in [1024]:
-#            for inter_dim in [256]:
-#                expert, topk = 4, 2
-#                test_fmoe(dtype, m, dim, inter_dim, expert, topk,
-#                          quant='fp8quant', use_g1u1=True)
+
+# per Tensor quant
+for dtype in [torch.bfloat16]:
+    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
+        for dim in [6144]:
+            for inter_dim in [4096]:
+                expert, topk = 8, 2
+                test_fmoe(
+                    dtype,
+                    m,
+                    dim,
+                    inter_dim,
+                    expert,
+                    topk,
+                    quantCfg=(aiter.QuantType.per_Tensor, torch.float8_e4m3fnuz),
+                    BLOCK_SIZE_M=32,
+                    use_g1u1=True,
+                )

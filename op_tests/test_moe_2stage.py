@@ -419,7 +419,7 @@ for dtype in [torch.bfloat16]:
                     expert,
                     topk,
                     quantCfg=(aiter.QuantType.per_Token, torch.float8_e4m3fnuz),
-                    BLOCK_SIZE_M=48,
+                    BLOCK_SIZE_M=32,
                     use_g1u1=True,
                 )
 # for dtype in [torch.bfloat16]:

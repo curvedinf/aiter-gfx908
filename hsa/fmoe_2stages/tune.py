@@ -138,21 +138,27 @@ def go(
     untunedf,
     tunedf,
 ):
-    blockMs = [16, 32, 48, 64, 128]
+    blockMs = [16, 32, 48, 64, 128, 160]
     asm_kernels = {
         16: [
             "fmoe_stage1_bf16_pertokenFp8_g1u1_16x64",
             "fmoe_stage1_bf16_pertokenFp8_g1u1_16x64_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x512_pf2",
         ],
         32: [
             "fmoe_stage1_bf16_pertokenFp8_g1u1_32x64",
             "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_2tg_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_2tg_pf3",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_3tg_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x512_pf2",
         ],
         48: ["fmoe_stage1_bf16_pertokenFp8_g1u1_48x128"],
         128: [
             "fmoe_stage1_bf16_pertokenFp8_g1u1_128x128",
             "fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2",
         ],
+        160: ["fmoe_stage1_bf16_pertokenFp8_g1u1_160x128_pf2"],
     }
     args = [
         "token",
@@ -206,6 +212,7 @@ def go(
         ref = F.silu(gate) * up
 
         tasks = []
+        tasks_ck = []
         for blockM in blockMs:
             sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
                 moe_sorting_ck(topk_ids, topk_weights, expert, model_dim, dtype, blockM)
@@ -237,7 +244,7 @@ def go(
                 )
 
             if blockM in [32, 64, 128]:
-                tasks.append(
+                tasks_ck.append(
                     (
                         f"ck_{blockM}",  # tag
                         ck_stage1,  # func
@@ -258,7 +265,7 @@ def go(
                         ),
                     )
                 )
-        rets = mp_tuner(tasks)
+        rets = mp_tuner(tasks + tasks_ck)
 
         profileDF = []
         for tag, us, _ in rets:

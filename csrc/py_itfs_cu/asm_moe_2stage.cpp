@@ -73,11 +73,24 @@ CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out)
         static CFG cfg_fmoe_stage1_bf16_pertokenFp8_g1u1 = {
             ADD_CFG(16, 64, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_16x64"),
             ADD_CFG(16, 64, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_16x64_pf2"),
+
+            ADD_CFG(16, 512, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_16x512_pf2"),
+
             ADD_CFG(32, 64, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x64"),
+
             ADD_CFG(32, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128"),
+            ADD_CFG(32, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_2tg_pf2"),
+            ADD_CFG(32, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_2tg_pf3"),
+            ADD_CFG(32, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_3tg_pf2"),
+
+            ADD_CFG(32, 512, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x512_pf2"),
+
             ADD_CFG(48, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_48x128"),
+
             ADD_CFG(128, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_128x128"),
             ADD_CFG(128, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2"),
+
+            ADD_CFG(160, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_160x128_pf2"),
         };
         return &cfg_fmoe_stage1_bf16_pertokenFp8_g1u1;
     }

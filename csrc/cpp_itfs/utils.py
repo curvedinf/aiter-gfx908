@@ -124,8 +124,10 @@ def compile_lib(src_file, folder, includes=None, sources=None, cxxflags=None):
 
 
 @lru_cache(maxsize=AITER_MAX_CACHE_SIZE)
-def run_lib(func_name):
-    lib = ctypes.CDLL(f"{BUILD_DIR}/{func_name}/lib.so", os.RTLD_LAZY)
+def run_lib(func_name, folder=None):
+    if folder is None:
+        folder = func_name
+    lib = ctypes.CDLL(f"{BUILD_DIR}/{folder}/lib.so", os.RTLD_LAZY)
     return getattr(lib, func_name)
 
 

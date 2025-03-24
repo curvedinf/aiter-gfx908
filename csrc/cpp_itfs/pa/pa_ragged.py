@@ -10,8 +10,8 @@ with open("pa_ragged.cpp.jinja", "r") as f:
     src_template = Template(f.read())
 
 
-def compile(gqa_ratio: int, head_size: int, npar_loops: int, dtype: str, kv_dtype: str, fp8_kv_dtype: str, out_dtype: str, block_size: int, alibi_enabled: str, folder: str = None):
-    return compile_template_op(src_template, MD_NAME, ["../utils.h", "pa.cuh", "../../include"], [], gqa_ratio=gqa_ratio, head_size=head_size, npar_loops=npar_loops, dtype=dtype, kv_dtype=kv_dtype, fp8_kv_dtype=fp8_kv_dtype, out_dtype=out_dtype, block_size=block_size, alibi_enabled=alibi_enabled, folder=folder)
+def compile(gqa_ratio: int, head_size: int, npar_loops: int, dtype: str, kv_dtype: str, fp8_kv_dtype: str, out_dtype: str, block_size: int, alibi_enabled: str, func_name: str = None):
+    return compile_template_op(src_template, MD_NAME, ["../utils.h", "pa.cuh", "../../include"], [], gqa_ratio=gqa_ratio, head_size=head_size, npar_loops=npar_loops, dtype=dtype, kv_dtype=kv_dtype, fp8_kv_dtype=fp8_kv_dtype, out_dtype=out_dtype, block_size=block_size, alibi_enabled=alibi_enabled, func_name=func_name)
 
 
 def paged_attention_ragged(out,         # [num_seqs, num_heads, head_size]

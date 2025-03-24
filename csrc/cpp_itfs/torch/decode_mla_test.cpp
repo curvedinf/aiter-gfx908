@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 #include "decode_mla.h"
+#include "../utils.h"
+
 
 class MLADecodeTest : public ::testing::Test {
 protected:

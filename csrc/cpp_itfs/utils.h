@@ -15,10 +15,10 @@
 
 namespace aiter{
 
-std::once_flag init_libs_lru_cache, init_func_names_lru_cache;
+static std::once_flag init_libs_lru_cache, init_func_names_lru_cache, init_root_dir_flag;
 
 template<typename K, typename V>
-void init_lru_cache(std::unique_ptr<LRUCache<K, V>>& lru_cache){
+__inline__ void init_lru_cache(std::unique_ptr<LRUCache<K, V>>& lru_cache){
     auto AITER_MAX_CACHE_SIZE = getenv("AITER_MAX_CACHE_SIZE");
     if(!AITER_MAX_CACHE_SIZE){
         AITER_MAX_CACHE_SIZE = "-1";
@@ -28,6 +28,7 @@ void init_lru_cache(std::unique_ptr<LRUCache<K, V>>& lru_cache){
 }
 
 static std::filesystem::path aiter_root_dir;
+
 __inline__ void init_root_dir(){
     char* AITER_ROOT_DIR = std::getenv("AITER_ROOT_DIR");
     if (!AITER_ROOT_DIR){
@@ -37,6 +38,7 @@ __inline__ void init_root_dir(){
 }
 
 __inline__ std::filesystem::path get_root_dir(){
+    std::call_once(init_root_dir_flag, init_root_dir);
     return aiter_root_dir;
 }
 
@@ -134,7 +136,7 @@ __inline__ void run_lib(std::string func_name, std::string folder, Args... args)
     std::call_once(init_libs_lru_cache, init_lru_cache<std::string, std::shared_ptr<SharedLibrary>>, libs);
     auto func_lib = libs->get(func_name);
     if(!func_lib){
-        std::string lib_path = (aiter_root_dir/"build"/folder/"lib.so").string();
+        std::string lib_path = (get_root_dir()/"build"/folder/"lib.so").string();
         libs->put(func_name, std::make_shared<SharedLibrary>(lib_path));
         func_lib = libs->get(func_name);
     }

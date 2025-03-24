@@ -47,7 +47,6 @@ void {{func_name}}(void* Q,                 //   [num_seqs, num_heads, head_size
                     int num_seqs,
                     int num_heads,
                     int num_kv_heads,
-                    int kv_split,
                     int stride_Q,
                     int stride_Page,
                     int attn_lse_stride_0,
@@ -73,7 +72,6 @@ void {{func_name}}(void* Q,                 //   [num_seqs, num_heads, head_size
                     int num_seqs,
                     int num_heads,
                     int num_kv_heads,
-                    int kv_split,
                     int stride_Q,
                     int stride_Page,
                     int attn_lse_stride_0,
@@ -99,7 +97,7 @@ void {{func_name}}(void* Q,                 //   [num_seqs, num_heads, head_size
     args.ptr_LTL = kv_last_page_lens;
     args.scalar = softmax_scale;
     args.s_MQA = gqa_ratio;
-    args.s_kv_split = kv_split;
+    args.s_kv_split = {{num_kv_splits}};
     args.s_Q_Bs = stride_Q * {{q_itemsize}};
     args.s_Bs = stride_Page * {{kv_itemsize}};
     args.s_log2_plen = log2_page;
@@ -107,7 +105,7 @@ void {{func_name}}(void* Q,                 //   [num_seqs, num_heads, head_size
                             &arg_size,
                             (gqa_ratio + 15) / 16, // gdx
                             num_seqs,              // gdy
-                            kv_split,              // gdz
+                            {{num_kv_splits}},              // gdz
                             256,                   // bdx: 4 wv64
                             1,                     // bdy
                             1,                     // bdz

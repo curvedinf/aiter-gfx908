@@ -1,15 +1,12 @@
 #include <fmt/core.h>
 #include "pa_ragged.h"
 #include "../utils.h"
-#include <mutex>
 
 
 namespace aiter{
 #define MD_NAME "pa_ragged"
 
 #define DIVIDE_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
-
-std::once_flag init_flag;
 
 void paged_attention_ragged(
     std::optional<std::string> folder, int num_seqs, int num_kv_heads, int num_heads, int max_num_partitions,
@@ -23,8 +20,6 @@ void paged_attention_ragged(
     const float *fp8_out_scale_ptr, void *out_ptr,
     const float *alibi_slopes_ptr, float logits_soft_cap, double scale,
     const hipStream_t stream) {
-  std::call_once(init_flag, init_root_dir);
-
   int npar_loops = DIVIDE_ROUND_UP(max_num_partitions, warpSize);
 
   std::vector<std::string> args = {std::to_string(gqa_ratio), std::to_string(head_size), std::to_string(npar_loops), dtype, kv_dtype, kv_cache_dtype, out_dtype, std::to_string(block_size), alibi_enabled};
@@ -61,4 +56,6 @@ void paged_attention_ragged(
           v_scale_ptr, fp8_out_scale_ptr, reinterpret_cast<const void*>(stream));
 
 }
+#undef MD_NAME
+#undef DIVIDE_ROUND_UP
 }

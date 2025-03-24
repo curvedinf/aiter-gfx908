@@ -1,10 +1,12 @@
 #pragma once
 
 #include <hip/hip_runtime.h>
+#include <optional>
 
 
+namespace aiter{
 void paged_attention_ragged(
-    int num_seqs, int num_kv_heads, int num_heads, int max_num_partitions,
+    std::optional<std::string> folder, int num_seqs, int num_kv_heads, int num_heads, int max_num_partitions,
     int q_stride, int kv_block_stride, int kv_head_stride, int kv_seq_stride,
     int gqa_ratio, int head_size, std::string dtype, std::string kv_dtype,
     std::string kv_cache_dtype, std::string out_dtype, int block_size,
@@ -14,4 +16,5 @@ void paged_attention_ragged(
     const float* k_scale_ptr, const float* v_scale_ptr,
     const float* fp8_out_scale_ptr, void* out_ptr,
     const float* alibi_slopes_ptr, float logits_soft_cap, double scale,
-    const void* stream);
+    const hipStream_t stream);
+}

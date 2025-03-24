@@ -2,6 +2,7 @@
 #include <torch/torch.h>
 #include "pa_ragged_torch.h"
 
+using namespace aiter;
 
 TEST(PagedAttentionTest, BasicTest) {
     // Test parameters

@@ -2,6 +2,7 @@
 #include "pa_ragged_torch.h"
 #include "pa_ragged.h"
 
+namespace aiter{
 void paged_attention_ragged_torch(
     torch::Tensor &out,  // [num_seqs, num_heads, head_size]
     torch::Tensor &workspace_buffer,
@@ -21,8 +22,7 @@ void paged_attention_ragged_torch(
     const std::string &kv_cache_dtype, const std::string &kv_cache_layout,
     float logits_soft_cap, torch::Tensor &k_scale, torch::Tensor &v_scale,
     const std::optional<torch::Tensor> &fp8_out_scale) {
-  const void *stream =
-      reinterpret_cast<void *>(at::hip::getCurrentHIPStream().stream());
+  const hipStream_t stream = at::hip::getCurrentHIPStream().stream();
   std::string dtype;
   std::string kv_dtype;
   if (kv_cache_dtype == "auto") {
@@ -77,11 +77,12 @@ void paged_attention_ragged_torch(
       alibi_slopes ? alibi_slopes.value().data_ptr<float>() : nullptr;
   std::string alibi_enabled = alibi_slopes ? "true" : "false";
   paged_attention_ragged(
-      num_seqs, num_kv_heads, num_heads, max_num_partitions, q_stride,
+      std::nullopt, num_seqs, num_kv_heads, num_heads, max_num_partitions, q_stride,
       kv_block_stride, kv_head_stride, kv_seq_stride, gqa_ratio, head_size,
       dtype, kv_dtype, kv_cache_dtype, dtype, block_size, alibi_enabled,
       query_ptr, key_cache_ptr, value_cache_ptr, workspace_buffer_ptr,
       kv_indptr_ptr, kv_page_indices_ptr, kv_last_page_lens_ptr, k_scale_ptr,
       v_scale_ptr, fp8_out_scale_ptr, out_ptr, alibi_slopes_ptr,
       logits_soft_cap, scale, stream);
+}
 }

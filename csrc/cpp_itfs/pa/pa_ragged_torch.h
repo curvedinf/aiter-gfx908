@@ -4,7 +4,7 @@
 #include <c10/hip/HIPGuard.h>
 #include <torch/all.h>
 
-
+namespace aiter{
 void paged_attention_ragged_torch(
     torch::Tensor& out,  // [num_seqs, num_heads, head_size]
     torch::Tensor& workspace_buffer,
@@ -24,3 +24,4 @@ void paged_attention_ragged_torch(
     const std::string& kv_cache_dtype, const std::string& kv_cache_layout,
     float logits_soft_cap, torch::Tensor& k_scale, torch::Tensor& v_scale,
     const c10::optional<torch::Tensor>& fp8_out_scale);
+}

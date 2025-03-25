@@ -30,12 +30,12 @@ void asm_mla_decode_fwd(
                     int output_stride_0,
                     int output_stride_1,
                     const int page_size,
-                    const int q_itemsize,
-                    const int kv_itemsize,
+                    const std::string q_dtype,
+                    const std::string kv_dtype,
                     const int num_kv_splits,
                     const int v_head_dim,
                     const hipStream_t stream) {
-  std::vector<std::string> args{std::to_string(page_size), std::to_string(q_itemsize), std::to_string(kv_itemsize), std::to_string(num_kv_splits), std::to_string(v_head_dim)};
+  std::vector<std::string> args{std::to_string(page_size), q_dtype, kv_dtype, std::to_string(num_kv_splits), std::to_string(v_head_dim)};
   std::string func_name = get_default_func_name(MD_NAME, args);
   if(!folder){
     folder = func_name;
@@ -44,14 +44,14 @@ void asm_mla_decode_fwd(
     std::string cmd = fmt::format(
         R"(python3 -m csrc.cpp_itfs.mla.asm_mla_decode_fwd --hsaco_path={hsaco_path} \
                                     --page_size={page_size} \
-                                    --q_itemsize={q_itemsize} \
-                                    --kv_itemsize={kv_itemsize} \
+                                    --q_dtype={q_dtype} \
+                                    --kv_dtype={kv_dtype} \
                                     --num_kv_splits={num_kv_splits} \
                                     --v_head_dim={v_head_dim})",
         fmt::arg("hsaco_path", "../../../hsa/mla_stage1_a16w16_bf16.co"),
         fmt::arg("page_size", page_size),
-        fmt::arg("q_itemsize", q_itemsize),
-        fmt::arg("kv_itemsize", kv_itemsize),
+        fmt::arg("q_dtype", q_dtype),
+        fmt::arg("kv_dtype", kv_dtype),
         fmt::arg("num_kv_splits", num_kv_splits),
         fmt::arg("v_head_dim", v_head_dim));
     executeCmd(cmd);

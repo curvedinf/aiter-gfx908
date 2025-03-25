@@ -27,8 +27,8 @@ void asm_mla_decode_fwd(
                     int output_stride_0,
                     int output_stride_1,
                     const int page_size,
-                    const int q_itemsize,
-                    const int kv_itemsize,
+                    const std::string q_dtype,
+                    const std::string kv_dtype,
                     const int num_kv_splits,
                     const int v_head_dim,
                     const hipStream_t stream);

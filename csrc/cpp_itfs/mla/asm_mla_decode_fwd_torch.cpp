@@ -69,7 +69,7 @@ void mla_decode_fwd(
     if(num_kv_splits.value() != logits.value().size(1)){
         throw std::invalid_argument("mla_decode_fwd: num_kv_splits != logits.size(1)");
     }
-
-    asm_mla_decode_fwd(std::nullopt, q.data_ptr(), kv_buffer.data_ptr(), kv_indptr.data_ptr(), kv_indices.data_ptr(), kv_last_page_lens.data_ptr(), softmax_scale.value(), logits.value().data_ptr(), attn_lse.value().data_ptr(), output.data_ptr(), num_seqs, num_heads, num_kv_heads, q.stride(0), kv_buffer.stride(0), attn_lse.value().stride(0), attn_lse.value().stride(1), attn_lse.value().stride(2), output.stride(0), output.stride(1), page_size, q.itemsize(), kv_buffer.itemsize(), num_kv_splits.value(), v_head_dim, stream);
+    
+    asm_mla_decode_fwd(std::nullopt, q.data_ptr(), kv_buffer.data_ptr(), kv_indptr.data_ptr(), kv_indices.data_ptr(), kv_last_page_lens.data_ptr(), softmax_scale.value(), logits.value().data_ptr(), attn_lse.value().data_ptr(), output.data_ptr(), num_seqs, num_heads, num_kv_heads, q.stride(0), kv_buffer.stride(0), attn_lse.value().stride(0), attn_lse.value().stride(1), attn_lse.value().stride(2), output.stride(0), output.stride(1), page_size, "__hip_bfloat16", "__hip_bfloat16", num_kv_splits.value(), v_head_dim, stream);
 }
 }

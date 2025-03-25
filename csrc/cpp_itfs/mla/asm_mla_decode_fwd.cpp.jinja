@@ -1,5 +1,6 @@
 #include <hip/hip_runtime.h>
 #include "aiter_hip_common.h"
+#include <hip/hip_bf16.h>
 #include "{{triton_header}}"
 
 
@@ -99,8 +100,8 @@ void {{func_name}}(void* Q,                 //   [num_seqs, num_heads, head_size
     args.scalar = softmax_scale;
     args.s_MQA = gqa_ratio;
     args.s_kv_split = {{num_kv_splits}};
-    args.s_Q_Bs = stride_Q * {{q_itemsize}};
-    args.s_Bs = stride_Page * {{kv_itemsize}};
+    args.s_Q_Bs = stride_Q * sizeof({{q_dtype}});
+    args.s_Bs = stride_Page * sizeof({{kv_dtype}});
     args.s_log2_plen = log2_page;
     impl_ptr.launch_kernel({&args,
                             &arg_size,

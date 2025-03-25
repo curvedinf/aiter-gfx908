@@ -33,6 +33,8 @@ struct __attribute__((packed)) KernelArgs
     p3 _p17;
 };
 
+unsigned char hsaco[{{bin_size}}] = { {{bin_data}} };
+
 extern "C" {
 void {{func_name}}(void* Q,                 //   [num_seqs, num_heads, head_size]
                     void* KV,                //   [num_page, page_size, num_kv_heads, head_size]
@@ -81,7 +83,6 @@ void {{func_name}}(void* Q,                 //   [num_seqs, num_heads, head_size
                     int output_stride_1,
                     void* stream
                     ){
-    unsigned char hsaco[{{bin_size}}] = { {{bin_data}} };
     static AiterAsmKernelFast impl_ptr("mla_stage1_a16w16_bf16", hsaco);
     constexpr int page_size = {{page_size}};
     uint32_t log2_page = (uint32_t)log2f(page_size);

@@ -6,8 +6,8 @@
 namespace aiter{
 void asm_mla_decode_fwd(
                     std::optional<std::string> folder, 
-                    void* Q,                 //   [num_seqs, num_heads, head_size]
-                    void* KV,                //   [num_page, page_size, num_kv_heads, head_size]
+                    void* q,                 //   [num_seqs, num_heads, head_size]
+                    void* kv_buffer,                //   [num_page, page_size, num_kv_heads, head_size]
                     void* kv_indptr,         //   [batch_size+1]
                     void* kv_page_indices,   //   [num_page_used]
                     void* kv_last_page_lens, //   [batch_size]
@@ -19,8 +19,8 @@ void asm_mla_decode_fwd(
                     int num_seqs,
                     int num_heads,
                     int num_kv_heads,
-                    int stride_Q,
-                    int stride_Page,
+                    int q_stride_0,
+                    int kv_buffer_stride_0,
                     int attn_lse_stride_0,
                     int attn_lse_stride_1,
                     int attn_lse_stride_2,

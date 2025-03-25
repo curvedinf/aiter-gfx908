@@ -9,8 +9,8 @@ namespace aiter{
 
 void asm_mla_decode_fwd(
                     std::optional<std::string> folder, 
-                    void* Q,                 //   [num_seqs, num_heads, head_size]
-                    void* KV,                //   [num_page, page_size, num_kv_heads, head_size]
+                    void* q,                 //   [num_seqs, num_heads, head_size]
+                    void* kv_buffer,                //   [num_page, page_size, num_kv_heads, head_size]
                     void* kv_indptr,         //   [batch_size+1]
                     void* kv_page_indices,   //   [num_page_used]
                     void* kv_last_page_lens, //   [batch_size]
@@ -22,8 +22,8 @@ void asm_mla_decode_fwd(
                     int num_seqs,
                     int num_heads,
                     int num_kv_heads,
-                    int stride_Q,
-                    int stride_Page,
+                    int q_stride_0,
+                    int kv_buffer_stride_0,
                     int attn_lse_stride_0,
                     int attn_lse_stride_1,
                     int attn_lse_stride_2,
@@ -56,7 +56,7 @@ void asm_mla_decode_fwd(
         fmt::arg("v_head_dim", v_head_dim));
     executeCmd(cmd);
   }
-  run_lib(func_name, folder.value(), Q, KV, kv_indptr, kv_page_indices, kv_last_page_lens, softmax_scale, logits, attn_lse, output, num_seqs, num_heads, num_kv_heads, stride_Q, stride_Page, attn_lse_stride_0, attn_lse_stride_1, attn_lse_stride_2, output_stride_0, output_stride_1, reinterpret_cast<const void*>(stream));
+  run_lib(func_name, folder.value(), q, kv_buffer, kv_indptr, kv_page_indices, kv_last_page_lens, softmax_scale, logits, attn_lse, output, num_seqs, num_heads, num_kv_heads, q_stride_0, kv_buffer_stride_0, attn_lse_stride_0, attn_lse_stride_1, attn_lse_stride_2, output_stride_0, output_stride_1, reinterpret_cast<const void*>(stream));
 }
 #undef MD_NAME
 }

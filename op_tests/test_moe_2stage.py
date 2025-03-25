@@ -22,6 +22,8 @@ from aiter.fused_moe_bf16_asm import (
 from aiter.ops.shuffle import shuffle_weight
 from aiter import ActivationType
 
+# torch.int4 = torch.uint32
+
 
 @perftest(num_iters=3)
 def torch_moe_stage1(
@@ -100,7 +102,7 @@ def torch_moe_stage2(
 
     # gose to quant D_w8a8/w8a8
     if a2_scale is not None and w2_scale is not None:
-        hidden_states = hidden_states * a2_scale.view(token_num, -1, 1)
+        hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
         w2 = w2 * w2_scale.view(num_experts, -1, 1)
 
     out = torch.zeros(
@@ -133,7 +135,7 @@ def ck_moe_stage1(
 ):
     token_num = hidden_states.shape[0]
     D = w1.shape[1]
-    #num_experts, model_dim, inter_dim = w2.shape
+    # num_experts, model_dim, inter_dim = w2.shape
     max_num_tokens_padded = sorted_token_ids.shape[0]
     # max_num_tokens_padded = sorted_expert_ids.shape[0]*block_size
 
@@ -280,9 +282,18 @@ def asm_moe_stage1(
 
 @benchmark()
 def test_fmoe(
-    dtype, token, model_dim, inter_dim, E, topk, quantCfg, BLOCK_SIZE_M, use_g1u1=False
+    dtype,
+    token,
+    model_dim,
+    inter_dim,
+    E,
+    topk,
+    qType,
+    AQDType,
+    WQDType,
+    BLOCK_SIZE_M,
+    use_g1u1=False,
 ):
-    qType, AQDType, WQDType = quantCfg
     torch_quant = aiter.get_torch_quant(qType)
     input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
     if use_g1u1:
@@ -300,14 +311,14 @@ def test_fmoe(
     if qType == aiter.QuantType.per_Tensor:
         w1_qt, w1_scale = aiter.pertoken_quant(w1.view(E, -1), quant_dtype=WQDType)
         w2_qt, w2_scale = aiter.pertoken_quant(w2.view(E, -1), quant_dtype=WQDType)
-    elif WQDType == torch.uint32:#int4 w quant
-        w1_qt, w1_scale = aiter.pertoken_quant(w1,quant_dtype=torch.int8, dtypeMax=7)
-        w2_qt, w2_scale = aiter.pertoken_quant(w2,quant_dtype=torch.int8, dtypeMax=7)
+    elif qType == aiter.QuantType.per_Token and WQDType == torch.int4:  # int4 w quant
+        w1_qt, w1_scale = aiter.pertoken_quant(w1, quant_dtype=torch.int8, dtypeMax=7)
+        w2_qt, w2_scale = aiter.pertoken_quant(w2, quant_dtype=torch.int8, dtypeMax=7)
     else:
         w1_qt, w1_scale = torch_quant(w1, quant_dtype=WQDType)
-        w2_qt, w2_scale = torch_quant(w2, quant_dtype=WQDType)    
-    w1_qt = w1_qt.view(w1.shape)
-    w2_qt = w2_qt.view(w2.shape)
+        w2_qt, w2_scale = torch_quant(w2, quant_dtype=WQDType)
+    w1_qt = w1_qt_aiter = w1_qt.view(w1.shape)
+    w2_qt = w2_qt_aiter = w2_qt.view(w2.shape)
 
     a1_qt, a1_scale = torch_quant(input, quant_dtype=AQDType)
 
@@ -331,14 +342,16 @@ def test_fmoe(
 
     # out_ref = torch_moe(input, w1, w2, topk_weights, topk_ids)
     # checkAllclose(out_ref, out2_ref, msg="[torch] 1_stage vs 2_stage")
-    if WQDType == torch.uint32:#int4 w quant
-        w1b = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w1_qt, (32, 32), use_int4=True)))
-        w2b = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w2_qt, (32, 32), use_int4=True)))
+    if WQDType == torch.int4:  # int4 w quant
+        w1_qt_aiter = rearrange_4bit_elements(convert_int8_to_uint32_int4(w1_qt_aiter))
+        w2_qt_aiter = rearrange_4bit_elements(convert_int8_to_uint32_int4(w2_qt_aiter))
+    w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(32, 32))
+    w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(32, 32))
 
     out1_ck, us = ck_moe_stage1(
         a1_qt,
-        w1b if WQDType == torch.uint32 else shuffle_weight(w1_qt, layout=(32, 32)),
-        w2b if WQDType == torch.uint32 else w2,
+        w1_qt_aiter,
+        w2_qt_aiter,
         sorted_ids,
         sorted_expert_ids,
         num_valid_ids,
@@ -355,28 +368,30 @@ def test_fmoe(
         msg=f"[perf]  ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
     )
 
-    if qType == aiter.QuantType.per_Tensor:
-        a1_scale = a1_scale.view(1).repeat(token)
-        w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
-    out1_asm, us = asm_moe_stage1(
-        a1_qt,
-        shuffle_weight(w1_qt, (16, 16)),
-        shuffle_weight(w2_qt, (16, 16)),
-        sorted_ids,
-        sorted_weights,
-        sorted_expert_ids,
-        num_valid_ids,
-        w1_scale,
-        a1_scale,
-        dtype,
-        topk,
-        BLOCK_SIZE_M,
-    )
-    #checkAllclose(
-    #    out1_ref,
-    #    out1_asm,
-    #    msg=f"[perf] asm_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
-    #)
+    if WQDType != torch.int4:
+        # asm int4 2 stage not support yet
+        if qType == aiter.QuantType.per_Tensor:
+            a1_scale = a1_scale.view(1).repeat(token)
+            w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
+        out1_asm, us = asm_moe_stage1(
+            a1_qt,
+            shuffle_weight(w1_qt, (16, 16)),
+            shuffle_weight(w2_qt, (16, 16)),
+            sorted_ids,
+            sorted_weights,
+            sorted_expert_ids,
+            num_valid_ids,
+            w1_scale,
+            a1_scale,
+            dtype,
+            topk,
+            BLOCK_SIZE_M,
+        )
+        checkAllclose(
+            out1_ref,
+            out1_asm,
+            msg=f"[perf] asm_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
+        )
 
     # ######################## stage 2 start ###########
     if qType == aiter.QuantType.per_Token:
@@ -405,8 +420,8 @@ def test_fmoe(
     a2_qt = a2_qt.view(token, topk, -1)
     out2_ck, us = ck_moe_stage2(
         a2_qt,
-        w1b if WQDType == torch.uint32 else w1_qt,
-        w2b if WQDType == torch.uint32 else shuffle_weight(w2_qt, layout=(32, 32)),
+        w1_qt_aiter,
+        w2_qt_aiter,
         sorted_ids,
         sorted_expert_ids,
         sorted_weights,
@@ -425,9 +440,9 @@ def test_fmoe(
     # # ######################## stage 2 end ###########
 
 
-# per Token quant
+# per Token quant/a8w8
 for dtype in [torch.bfloat16]:
-    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:   
+    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096][-1:]:
         for dim in [6144]:
             for inter_dim in [4096]:
                 expert, topk = 8, 2
@@ -438,13 +453,14 @@ for dtype in [torch.bfloat16]:
                     inter_dim,
                     expert,
                     topk,
-                    quantCfg=(aiter.QuantType.per_Token, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),
-                    #quantCfg=(aiter.QuantType.per_Token, torch.float8_e4m3fnuz, torch.uint32),#torch.uint32->W in4
+                    aiter.QuantType.per_Token,
+                    torch.float8_e4m3fnuz,
+                    torch.float8_e4m3fnuz,
                     BLOCK_SIZE_M=128,
                     use_g1u1=True,
                 )
 
-# per Tensor quant
+# per Tensor quant/a8w8
 for dtype in [torch.bfloat16]:
     for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
         for dim in [6144]:
@@ -457,7 +473,28 @@ for dtype in [torch.bfloat16]:
                     inter_dim,
                     expert,
                     topk,
-                    quantCfg=(aiter.QuantType.per_Tensor, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),
+                    aiter.QuantType.per_Tensor,
+                    torch.float8_e4m3fnuz,
+                    torch.float8_e4m3fnuz,
+                    BLOCK_SIZE_M=32,
+                    use_g1u1=True,
+                )
+# per Tensor quant/a8w4
+for dtype in [torch.bfloat16]:
+    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
+        for dim in [6144]:
+            for inter_dim in [4096]:
+                expert, topk = 8, 2
+                test_fmoe(
+                    dtype,
+                    m,
+                    dim,
+                    inter_dim,
+                    expert,
+                    topk,
+                    aiter.QuantType.per_Token,
+                    torch.float8_e4m3fnuz,
+                    torch.int4,
                     BLOCK_SIZE_M=32,
                     use_g1u1=True,
                 )

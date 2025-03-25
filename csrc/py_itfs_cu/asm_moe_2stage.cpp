@@ -65,9 +65,10 @@ struct FMoe2StageConfig
     }
 using CFG = std::unordered_map<std::string, FMoe2StageConfig>;
 
-CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out)
+CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1)
 {
     if (inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
+        w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
         out.scalar_type() == at::ScalarType::BFloat16)
     {
         static CFG cfg_fmoe_stage1_bf16_pertokenFp8_g1u1 = {
@@ -157,7 +158,7 @@ void moe_stage1_fp8_g1u1(
     const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    CFG *config_map = get_cfg(input, out);
+    CFG *config_map = get_cfg(input, out, w1);
     static std::unordered_map<std::string, std::unique_ptr<AiterAsmKernel>> impl_ptr_map;
     int hidden_dim = out.size(2);
     int sub_X_cnt = sorted_expert_ids.size(0);

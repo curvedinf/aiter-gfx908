@@ -106,7 +106,7 @@ class NinjaBuildExtension(BuildExtension):
 setup(
     name=PACKAGE_NAME,
     version="0.1.0",
-    packages=["aiter_meta","aiter"],
+    packages=["aiter_meta","aiter", "csrc/cpp_itfs"],
     include_package_data=True,
     package_data={
         '': ['*'],

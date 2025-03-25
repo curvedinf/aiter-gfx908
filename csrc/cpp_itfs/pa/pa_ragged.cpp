@@ -31,7 +31,7 @@ void paged_attention_ragged(
 
   if (not_built(folder.value())) {
     std::string cmd = fmt::format(
-        R"(python3 pa_ragged.py --gqa_ratio={gqa_ratio} \
+        R"(python3 -m csrc.cpp_itfs.pa.pa_ragged --gqa_ratio={gqa_ratio} \
                                     --head_size={head_size} \
                                     --npar_loops={npar_loops} \
                                     --dtype={dtype} \

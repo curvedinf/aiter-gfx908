@@ -42,7 +42,7 @@ void asm_mla_decode_fwd(
   }
   if (not_built(folder.value())) {
     std::string cmd = fmt::format(
-        R"(python3 asm_mla_decode_fwd.py --hsaco_path={hsaco_path} \
+        R"(python3 -m csrc.cpp_itfs.mla.asm_mla_decode_fwd --hsaco_path={hsaco_path} \
                                     --page_size={page_size} \
                                     --q_itemsize={q_itemsize} \
                                     --kv_itemsize={kv_itemsize} \

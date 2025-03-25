@@ -1,12 +1,12 @@
 from jinja2 import Template
-from csrc.cpp_itfs.utils import compile_template_op
+from csrc.cpp_itfs.utils import compile_template_op, AITER_CORE_DIR
 import ctypes
 import math
 
 
 MD_NAME = "pa_ragged"
 warpSize = 64
-with open("pa_ragged.cpp.jinja", "r") as f:
+with open(f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa_ragged.cpp.jinja", "r") as f:
     src_template = Template(f.read())
 
 

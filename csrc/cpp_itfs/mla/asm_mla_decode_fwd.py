@@ -6,7 +6,7 @@ import triton
 
 MD_NAME = "asm_mla_decode_fwd"
 warpSize = 64
-with open("asm_mla_decode_fwd.cpp.jinja", "r") as f:
+with open(f"{AITER_CORE_DIR}/csrc/cpp_itfs/mla/asm_mla_decode_fwd.cpp.jinja", "r") as f:
     src_template = Template(f.read())
 
 

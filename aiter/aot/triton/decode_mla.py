@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
-from aiter.aot.triton_compile import compile_kernel
+from aiter.aot.triton.compile import compile_kernel
 from aiter.jit.core import AITER_ROOT_DIR
 
 

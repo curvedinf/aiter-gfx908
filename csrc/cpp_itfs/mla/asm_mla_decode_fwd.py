@@ -18,7 +18,7 @@ def compile(hsaco_path: str, page_size: int, q_dtype: str, kv_dtype: str, num_kv
         bin_size, bin_data = transfer_hsaco(hsaco_path)
         triton_kernel, triton_header, triton_source = compile_kernel(f"{AITER_CORE_DIR}/aiter/ops/triton/decode_mla.py", "_fwd_kernel_stage2_asm", f"*fp32:16,*fp32:16,*bf16:16,*i32:16,i32,i32,i32,i32,i32,i32,i32,{num_kv_splits},{triton.next_power_of_2(v_head_dim)},{v_head_dim},64", "bs,nheads,1", 4, 2, "decode_mla_stage2_asm", waves_per_eu=4, kpack=2, matrix_instr_nonkdim=16)
 
-        return compile_template_op(src_template, MD_NAME, ["../utils.h", "../../include", triton_header], [triton_source], bin_size=bin_size, bin_data=bin_data, page_size=page_size, q_dtype=q_dtype, kv_dtype=kv_dtype, triton_header=triton_header, triton_kernel=triton_kernel, num_kv_splits=num_kv_splits, func_name=func_name)
+        return compile_template_op(src_template, MD_NAME, ["../utils.h", "../../include", triton_header], [triton_source], bin_size=bin_size, bin_data=bin_data, page_size=page_size, q_dtype=q_dtype, kv_dtype=kv_dtype, triton_header=triton_header, kernel_name="mla_stage1_a16w16_bf16", triton_kernel=triton_kernel, num_kv_splits=num_kv_splits, func_name=func_name)
     else:
         return run_lib(func_name)
 

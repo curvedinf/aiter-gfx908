@@ -9,7 +9,7 @@ import functools
 import argparse
 import sys
 
-from aiter.ops.triton.moe_op import fused_moe as triton_moe 
+from aiter.ops.triton.moe_op import fused_moe as triton_moe
 
 
 def torch_moe(a, b, c, a_scale, b_scale, b_zp, group_size, topk_ids, topk_weights, routed_weight, sorted_token_ids, expert_ids, num_tokens_post_padded, dtype, fp8_w8a8, int8_w8a16, int4_w4a16):

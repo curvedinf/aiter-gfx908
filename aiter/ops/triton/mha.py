@@ -1,6 +1,7 @@
 import torch
 import triton
 import triton.language as tl
+from utils.benchmark_utils import get_model_configs, get_available_models, mha_input_helper
 
 from typing import Optional, Tuple
 
@@ -729,9 +730,11 @@ def _flash_attn_forward(
         dropout_mask = None
 
 
-    BLOCK_M = 32 #TODO. Add config/tuning support
-    BLOCK_N = 32 #TODO Add config/tuning support
+    BLOCK_M = 128 #TODO. Add config/tuning support
+    BLOCK_N = 64 #TODO Add config/tuning support
     grid = lambda META:(triton.cdiv(seqlen_q, META['BLOCK_M']), num_q_heads, batch)
+
+
     _attn_fwd[grid](q,
                     k,
                     v,
@@ -1263,3 +1266,305 @@ def flash_attn_varlen_fp8_func(
         block_table,
         torch.is_grad_enabled()
     )
+
+
+
+
+def model_benchmark_configs(args):
+    config_file = args.model_configs
+    configs = get_model_configs(config_path=config_file, model_families=["llama3"], model=args.model)
+    fa_configs = []
+    batch_size = args.b if args.b else 1
+
+    for model_name, config in configs.items():
+        HQ = config["num_attention_heads"]
+        HK = HQ if config["num_key_value_heads"] is None else config["num_key_value_heads"]
+        N_CTX_Q = args.sq if args.sq else 8192
+        N_CTX_K = args.sk if args.sk else N_CTX_Q
+        HEAD_DIM = config["hidden_size"] // HQ
+        fa_configs.append((model_name, batch_size, HQ, HK, N_CTX_Q, N_CTX_K, HEAD_DIM))
+
+    return fa_configs
+
+
+def test_correctness(custom, args):
+    dtype = arg_to_torch_dtype[args.dtype]
+    hk = args.hq if not args.hk else args.hk
+    sk = args.sq if not args.sk else args.sk
+    head_size = 128 if not args.d else args.d
+    mode = 'fwd'
+    x_names = ['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
+    causal = args.causal if not args.model else True
+    int8 = args.int8
+    quantize_p = args.quantize_p and int8
+    int8_kv = args.int8_kv and int8
+
+    assert not (args.bench_torch and args.varlen), "Torch sdpa does not support variable sequence lengths"
+    
+    if custom:
+        x_vals_list = [(args.b, args.hq, hk, args.sq, sk)]
+    else:
+        x_vals_list = model_benchmark_configs(args)
+        x_names = ['model', 'BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K', 'D_HEAD']
+
+
+    def bench_flash_attention(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, causal, mode, provider, device="cuda",
+                              model=None):
+        assert mode in ["fwd", "bwd"]
+        assert not (int8_kv and quantize_p)
+
+        # Bwd pass only supports causal=True right now
+        if mode == 'bwd':
+            causal = True
+
+        equal_seqlens = not args.varlen
+        q, k, v, input_metadata = mha_input_helper(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype,
+                                                        equal_seqlens=equal_seqlens)
+      
+        if causal:
+            input_metadata.need_causal()
+
+
+        if "Torch" in provider:
+            assert not args.varlen, "Torch sdpa does not support variable sequence lengths"
+            q = q.reshape(BATCH, N_CTX_Q, HQ, D_HEAD).transpose(1, 2)
+            k = k.reshape(BATCH, N_CTX_K, HK, D_HEAD).transpose(1, 2)
+            v = v.reshape(BATCH, N_CTX_K, HK, D_HEAD).transpose(1, 2)
+            fn = lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, dropout_p=0.0, is_causal=causal, scale=input_metadata.sm_scale, enable_gqa=(HQ != HK))
+        else:
+            o = torch.empty_like(q)
+            input_metadata.set_persistent(args.persistent)
+            fn = lambda: flash_attn_varlen_func(q, k, v, input_metadata.cu_seqlens_q, input_metadata.cu_seqlens_k,
+                                                N_CTX_Q, N_CTX_K, dropout_p=0.0, softmax_scale=input_metadata.sm_scale,
+                                                causal=causal, window_size=(-1, -1), alibi_slopes=None, deterministic=False,
+                                                return_lse=False, return_attn_probs=False)
+            if mode == 'bwd':
+                o, _ = fn()
+                do = torch.randn_like(o)
+                fn = lambda: o.backward(do, retain_graph=True)
+
+        return fn()
+        
+    # Benchmark the flash attention using both providers
+
+    # Assume that we use the first configuration from x_vals_list for benchmarking.
+    for config in x_vals_list:
+        # Build a dictionary from x_names and config values, and add D_HEAD
+        cfg = {name: value for name, value in zip(x_names, config)}
+        cfg["D_HEAD"] = head_size  # head size computed above
+
+        # Run benchmark with Triton provider
+        triton_result = bench_flash_attention(
+            **cfg,
+            dtype=dtype,
+            causal=causal,
+            mode=mode,
+            provider="Triton"
+        )
+        triton_result = triton_result[0]
+
+        # Run benchmark with Torch provider
+        torch_result = bench_flash_attention(
+            **cfg,
+            dtype=dtype,
+            causal=causal,
+            mode=mode,
+            provider="Torch"
+        )
+
+        torch_result = torch_result.transpose(1,2).flatten(0,1)
+
+        # Check that the results are close
+        torch.testing.assert_close(triton_result, torch_result, rtol=2e-2, atol=2e-2)
+        print(f"Results are close for config: {cfg} for triton kernel and torch.sdpa!")
+    
+
+
+def run_benchmark(custom, args):
+    
+    dtype = arg_to_torch_dtype[args.dtype]
+    hk = args.hq if not args.hk else args.hk
+    sk = args.sq if not args.sk else args.sk
+    head_size = 128 if not args.d else args.d
+    mode = 'fwd'
+    x_names = ['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
+    causal = args.causal if not args.model else True
+    int8 = args.int8
+    quantize_p = args.quantize_p and int8
+    int8_kv = args.int8_kv and int8
+
+    assert not (args.bench_torch and args.varlen), "Torch sdpa does not support variable sequence lengths"
+    
+    configs = []
+    plot_name = f'fused-attention-{mode}-d{head_size}-layout{args.layout}'
+    extra_args = {'D_HEAD': head_size, 'dtype': dtype, 'causal': causal, 'mode': mode}
+    if custom:
+        x_vals_list = [(args.b, args.hq, hk, args.sq, sk)]
+    else:
+        x_vals_list = model_benchmark_configs(args)
+        x_names = ['model', 'BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K', 'D_HEAD']
+        plot_name = f'fused-attention-{mode}-layout{args.layout}'
+        extra_args = {'dtype': dtype, 'causal': causal, 'mode': mode}
+
+    print_time = args.return_time
+
+    if args.bench_torch:
+        unit = 'ms' if print_time else 'TFLOPS'
+        line_vals = [f'Triton ({unit})', f'Torch ({unit})']
+    else:
+        line_vals = ['Time (ms)' if print_time else 'TFLOPS'] 
+
+    configs.append(
+        triton.testing.Benchmark(x_names=x_names, x_vals=x_vals_list, line_arg='provider', line_vals=line_vals,
+                                 line_names=line_vals, styles=[('green', '-'), ('red', '-')],
+                                 ylabel='Time (ms)' if print_time else 'TFLOPS', plot_name=plot_name, args=extra_args))
+
+    @triton.testing.perf_report(configs)
+    def bench_flash_attention(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, causal, mode, provider, device="cuda",
+                              model=None):
+        assert mode in ["fwd", "bwd"]
+        assert not (int8_kv and quantize_p)
+        warmup = 25
+        rep = 100
+
+        # Bwd pass only supports causal=True right now
+        if mode == 'bwd':
+            causal = True
+
+        flops_per_matmul = 0
+
+        equal_seqlens = not args.varlen
+        q, k, v, input_metadata = mha_input_helper(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype,
+                                                        equal_seqlens=equal_seqlens)
+        for i in range(0, input_metadata.num_contexts):
+            seqlen_q = (input_metadata.cu_seqlens_q[i + 1] - input_metadata.cu_seqlens_q[i]).item()
+            seqlen_k = (input_metadata.cu_seqlens_k[i + 1] - input_metadata.cu_seqlens_k[i]).item()
+            # x2 in both cases for 2 GEMMs
+            if causal:
+                valid_out_elements = ((seqlen_k**2 + seqlen_k) / 2) if seqlen_q > seqlen_k else \
+                        (seqlen_q * seqlen_k - ((seqlen_q**2 - seqlen_q) / 2))
+                flops_per_matmul += valid_out_elements * HQ * D_HEAD * 2
+            else:
+                flops_per_matmul += seqlen_q * seqlen_k * HQ * D_HEAD * 2
+
+        
+        if causal:
+            input_metadata.need_causal()
+
+
+        if "Torch" in provider:
+            assert not args.varlen, "Torch sdpa does not support variable sequence lengths"
+            q = q.reshape(BATCH, N_CTX_Q, HQ, D_HEAD).transpose(1, 2)
+            k = k.reshape(BATCH, N_CTX_K, HK, D_HEAD).transpose(1, 2)
+            v = v.reshape(BATCH, N_CTX_K, HK, D_HEAD).transpose(1, 2)
+            if HQ != HK:  # TODO: sdpa(..., enable_gqa=True) works but gives very bad perf
+                k = k.repeat_interleave(q.size(-3) // k.size(-3), -3)
+                v = v.repeat_interleave(q.size(-3) // v.size(-3), -3)
+            fn = lambda: torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, attn_mask=None, dropout_p=0.0, is_causal=causal, scale=input_metadata.sm_scale)
+        else:
+            o = torch.empty_like(q)
+            input_metadata.set_persistent(args.persistent)
+            fn = lambda: flash_attn_varlen_func(q, k, v, input_metadata.cu_seqlens_q, input_metadata.cu_seqlens_k,
+                                                N_CTX_Q, N_CTX_K, dropout_p=0.0, softmax_scale=input_metadata.sm_scale,
+                                                causal=causal, window_size=(-1, -1), alibi_slopes=None, deterministic=False,
+                                                return_lse=False, return_attn_probs=False)
+            if mode == 'bwd':
+                o, _ = fn()
+                do = torch.randn_like(o)
+                fn = lambda: o.backward(do, retain_graph=True)
+
+        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        total_flops = 2 * flops_per_matmul
+        if mode == "bwd":
+            total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
+        if print_time:
+            return ms
+        else:
+            return total_flops / ms * 1e-9
+
+    bench_flash_attention.run(save_path=".", print_data=True, show_plots=True)
+
+
+def supported_layouts():
+    layouts = \
+        'bhsd: Q, K, V are individual tensors of [batch, num_heads, seqlen_q/k, head_size]' \
+        'bshd: Q, K, V are individual tensors of [batch, seqlen_q/k, num_heads, head_size]' \
+        'thd: Q, K, V are individual tensors of [total_q/k, num_heads, head_size]' \
+        'This layout is sometimes called "varlen" or "grouped" layout.'
+    return layouts
+
+
+def parse_args():
+    import argparse
+    parser = argparse.ArgumentParser(
+        prog="Benchmark FlashAttention",
+        allow_abbrev=False,
+    )
+    parser.add_argument('-model_configs', type=str, default="utils/model_configs.json", help="Model config json file.")
+
+    available_models = get_available_models(model_families=["llama3"])  # Dynamically load model names
+    model_help = (
+        "Model name to benchmark. Select from: [" + ", ".join(available_models) +
+        "]. Use 'all' to benchmark all models. Not providing runs the default benchmark script with custom configs.")
+    parser.add_argument('-model', type=str, default="all", help=model_help)
+    parser.add_argument("-b", type=int, default=0)
+    parser.add_argument("-hq", type=int, default=0)
+    parser.add_argument("-hk", type=int, default=0)
+    parser.add_argument("-sq", type=int, default=0)
+    parser.add_argument("-sk", type=int, default=0)
+    parser.add_argument("-varlen", action='store_true', default=False,
+                        help='If specified, uses variable sequence lengths. The t in the layout thd for q is at max b*sq')
+    parser.add_argument("-d", type=int, default=0)
+    parser.add_argument("-causal", action='store_true', default=False)
+    parser.add_argument("-int8", action='store_true', default=False)
+    parser.add_argument("-quantize_p", action='store_true', default=False)
+    parser.add_argument("-int8_kv", action='store_true', default=False)
+    parser.add_argument("-dtype", default='fp16')
+    parser.add_argument("-bench_torch", action='store_true', default=False)
+    parser.add_argument("-return_time", action='store_true', default=False)
+    parser.add_argument("-layout", type=str, default='bhsd', help=supported_layouts())
+    parser.add_argument(
+        "-persistent", nargs='?', const='fixed', choices=['fixed', 'dynamic'], default=None,
+        help="Enable persistent kernels. Use '-persistent dynamic' for dynamic scheduling of the tiles.")
+    return parser.parse_args()
+
+
+arg_to_torch_dtype = {'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp32': torch.float32}
+
+
+def main():
+    args = parse_args()
+    custom_config = False
+    # assert args.layout == 'thd' or not args.equal_seqlens or args.model, \
+    #        "Equal sequence lengths arg must be used with the thd layout or a model config."
+    if args.hq or args.hk or args.d:
+        custom_config = True
+        assert args.b and args.hq and args.sq and args.d, \
+               "If custom config is specified, please provide \
+                all of batch, number of Q heads, Q sequence length \
+                and head size."
+
+    if args.model:
+        assert not (args.hq or args.hk or args.d), \
+                "Specifying model fixes hq, hk and d already. Do not provide them!"
+
+    assert args.dtype in arg_to_torch_dtype, \
+           "Only fp16, bf16 and f32 types currently supported."
+
+    if args.model:
+        print("Note: Model config sets causal masking and THD layout (varlen) by default.")
+
+    test_correctness(custom_config, args)
+    
+    run_benchmark(custom_config, args)
+
+
+if __name__ == '__main__':
+    import sys
+    sys.exit(main())
+
+
+
+

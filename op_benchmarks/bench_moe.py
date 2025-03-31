@@ -9,7 +9,7 @@ import sys
 
 def model_benchmark_configs(args):
     config_file = args.model_configs
-    configs = get_model_configs(config_path=config_file, model_families=["mistral"])
+    configs = get_model_configs(config_path=config_file, models="mistral")
     moe_configs = []
     M = args.M if args.M else 4096  # check size
     # M, K, N, E, top_k
@@ -122,8 +122,8 @@ def parse_args():
         prog="Benchmark MoE GEMM",
         allow_abbrev=False,
     )
-    parser.add_argument('-model_configs', type=str, default="model_configs.json", help="Model config json file.")
-    available_models = get_available_models(model_families=["mistral"])  # Dynamically load model names
+    parser.add_argument('-model_configs', type=str, default="utils/model_configs.json", help="Model config json file.")
+    available_models = get_available_models()  # Dynamically load model names
     model_help = ("Model name to benchmark. Select from: [" + ", ".join(available_models) +
                   "]. Use 'all' to benchmark all models or leave blank for the default benchmark script.")
     parser.add_argument('-model', type=str, default=None, help=model_help)

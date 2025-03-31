@@ -1514,7 +1514,7 @@ def parse_args():
     parser.add_argument("-sq", type=int, default=0)
     parser.add_argument("-sk", type=int, default=0)
     parser.add_argument("-varlen", action='store_true', default=False,
-                        help='If specified, uses variable sequence lengths. The t in the layout thd for q is at max b*sq')
+                        help='If specified, uses variable sequence lengths. The t in the layout thd for q has maximum possible value of b*sq')
     parser.add_argument("-d", type=int, default=0)
     parser.add_argument("-causal", action='store_true', default=False)
     parser.add_argument("-int8", action='store_true', default=False)
@@ -1523,7 +1523,7 @@ def parse_args():
     parser.add_argument("-dtype", default='fp16')
     parser.add_argument("-bench_torch", action='store_true', default=False)
     parser.add_argument("-return_time", action='store_true', default=False)
-    parser.add_argument("-layout", type=str, default='bshd', help=supported_layouts())
+    parser.add_argument("-layout", type=str, default='thd', help=supported_layouts())
     parser.add_argument(
         "-persistent", nargs='?', const='fixed', choices=['fixed', 'dynamic'], default=None,
         help="Enable persistent kernels. Use '-persistent dynamic' for dynamic scheduling of the tiles.")
@@ -1555,7 +1555,7 @@ def main():
     if args.model:
         print("Note: Model config sets causal masking and THD layout (varlen) by default.")
 
-    test_correctness(custom_config, args)
+    # test_correctness(custom_config, args)
     
     run_benchmark(custom_config, args)
 

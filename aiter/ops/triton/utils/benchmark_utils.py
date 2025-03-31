@@ -12,7 +12,7 @@ def get_model_configs(config_path='./utils/model_configs.json', models="llama3,m
 
     Args:
         config_path (str): User-provided path to the configuration JSON file.
-        model_families (list): List of model family names to retrieve.
+        models: List of model names to retrieve, with pattern <modelfamily_modelsize>. If modelfamily specified only, retrieves all the modelsizes.
 
     Returns:
         dict: A dictionary of available models and their configurations for the specified families.
@@ -59,10 +59,9 @@ def get_available_models(config_file='utils/model_configs.json'):
 
     Args:
         config_file (str): Path to the configuration JSON file.
-        model_families (list): List of model family names to retrieve.
 
     Returns:
-        list: A list of available models for the specified families.
+        list: A list of available model configs.
     """
     # Resolve config path relative to ./perf-kernels/
     config_path = os.path.join(BASE_DIR, config_file)

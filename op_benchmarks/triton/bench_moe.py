@@ -36,13 +36,13 @@ def fused_moe(M, N, K, top_k, E, routed_weight=False, dtype=torch.float16, int4_
         a, b, triton_out, b_zp, b_scale, topk_weights, topk_ids, sorted_token_ids, expert_ids, num_tokens_post_padded, config = input_helper_int4_w4a16(
         M, N, K, top_k, E, routed_weight=routed_weight, dtype=dtype, group_size=group_size, has_zp=has_zp)
 
-        triton_moe(a, b, triton_out, None, b_scale, b_zp, topk_weights, topk_ids, sorted_token_ids, expert_ids,
+        return lambda: triton_moe(a, b, triton_out, None, b_scale, b_zp, topk_weights, topk_ids, sorted_token_ids, expert_ids,
                         num_tokens_post_padded, routed_weight, top_k, config, torch_to_tl_dtype[dtype], use_fp8_w8a8=False, use_int8_w8a16=False, use_int4_w4a16=True, block_shape=(0, group_size))
     else:
         a, b, triton_out, b_zp, a_scale, b_scale, topk_weights, topk_ids, sorted_token_ids, expert_ids, num_tokens_post_padded, config = input_helper(
             M, N, K, top_k, E, routed_weight=routed_weight, dtype=dtype, fp8_w8a8=fp8_w8a8, int8_w8a16=int8_w8a16)
 
-        triton_moe(a, b, triton_out, a_scale, b_scale, b_zp, topk_weights, topk_ids, sorted_token_ids, expert_ids,
+        return lambda: triton_moe(a, b, triton_out, a_scale, b_scale, b_zp, topk_weights, topk_ids, sorted_token_ids, expert_ids,
                         num_tokens_post_padded, routed_weight, top_k, config, torch_to_tl_dtype[dtype], fp8_w8a8, int8_w8a16, False)
 
 
@@ -96,7 +96,7 @@ def run_benchmark(custom, args):
         mem_write = (M * top_k * N) * c_bytes
         mem = mem_read + mem_write
 
-        fn = lambda: fused_moe(M, N, K, top_k, E, routed_weight=routed_weight, dtype=torch.float16, int4_w4a16=int4_w4a16,
+        fn = fused_moe(M, N, K, top_k, E, routed_weight=routed_weight, dtype=torch.float16, int4_w4a16=int4_w4a16,
                 fp8_w8a8=fp8_w8a8, int8_w8a16=int8_w8a16, group_size=group_size, has_zp=has_zp)
 
         ms = triton.testing.do_bench(fn, warmup=25, rep=100)
@@ -128,7 +128,6 @@ def parse_args():
                   "]. Use 'all' to benchmark all models or leave blank for the default benchmark script.")
     parser.add_argument('-model', type=str, default=None, help=model_help)
     parser.add_argument("-M", type=int, default=0, help="M dimension")
-    parser.add_argument("-top_k", type=int, default=0, help="top_k experts per token")
     parser.add_argument("-group_size", type=int, default=16, help="group_size for in4")
     parser.add_argument("-routed_weight", action='store_true', default=False)
     parser.add_argument("-int8_w8a16", action='store_true', default=False)

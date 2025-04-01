@@ -11,13 +11,7 @@ from ..jit.core import (
     AITER_CORE_DIR,
 )
 import torch.nn.functional as F
-
-
-@compile_ops("module_moe_asm", "ActivationType")
-def _ActivationType(dummy): ...
-
-
-ActivationType = _ActivationType(0)
+from .enum import ActivationType, Enum
 
 
 @compile_ops("module_moe_asm")
@@ -75,7 +69,7 @@ def fmoe_int8_g1u0(
     fc1_scale: Tensor,
     fc2_scale: Tensor,
     fc2_smooth_scale: Tensor,
-    activation: Optional[_ActivationType] = ActivationType.Silu,
+    activation: Optional[Enum] = ActivationType.Silu,
 ): ...
 
 
@@ -94,7 +88,7 @@ def fmoe_g1u1(
     fc1_scale: Tensor,
     fc2_scale: Tensor,
     fc2_smooth_scale: Optional[Tensor] = None,
-    activation: Optional[_ActivationType] = ActivationType.Silu,
+    activation: Optional[Enum] = ActivationType.Silu,
 ): ...
 
 
@@ -155,20 +149,21 @@ def fmoe_fp8_blockscale_g1u1(
 
 
 @compile_ops("module_moe_asm")
-def moe_stage1_fp8_g1u1(
-    out: Tensor,
+def moe_stage1_g1u1(
     input: Tensor,
-    gate: Tensor,
-    down: Tensor,
+    w1: Tensor,
+    w2: Tensor,
     sorted_token_ids: Tensor,
-    sorted_weight_buf: Tensor,
     sorted_expert_ids: Tensor,
     num_valid_ids: Tensor,
-    topk: int,
-    fc1_scale: Tensor,
-    fc2_scale: Optional[Tensor] = None,
-    input_scale: Optional[Tensor] = None,
-    fc2_smooth_scale: Optional[Tensor] = None,
+    out: Tensor,
+    inter_dim: int,
+    kernelName: str,
+    block_m: int,
+    ksplit: int = 0,
+    activation: Enum = ActivationType.Silu,
+    a1_scale: Optional[Tensor] = None,
+    w1_scale: Optional[Tensor] = None,
 ): ...
 
 

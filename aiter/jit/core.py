@@ -50,7 +50,8 @@ else:
 
 AITER_CSRC_DIR = f"{AITER_ROOT_DIR}/csrc"
 AITER_GRADLIB_DIR = f"{AITER_ROOT_DIR}/gradlib"
-os.environ["AITER_ASM_DIR"] = f"{AITER_ROOT_DIR}/hsa/"
+AITER_ASM_DIR = f"{AITER_ROOT_DIR}/hsa/"
+os.environ["AITER_ASM_DIR"] = AITER_ASM_DIR
 CK_DIR = os.environ.get("CK_DIR", f"{AITER_ROOT_DIR}/3rdparty/composable_kernel")
 
 
@@ -143,7 +144,7 @@ def check_numa():
     if numa_balance_set == "1":
         logger.warning(
             "WARNING: NUMA balancing is enabled, which may cause errors. "
-            "It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' "
+            "It is recommended to disable NUMA balancing by running \"sudo sh -c 'echo 0 > /proc/sys/kernel/numa_balancing'\" "
             "for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing"
         )
 

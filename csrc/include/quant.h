@@ -4,14 +4,6 @@
 
 #include <torch/extension.h>
 
-enum class QuantType : int
-{
-    No,
-    per_Tensor,
-    per_Token,
-    per_128x128,
-};
-
 void static_scaled_fp8_quant(torch::Tensor &out,          // [..., d]
                              torch::Tensor const &input,  // [..., d]
                              torch::Tensor const &scale); // [1]

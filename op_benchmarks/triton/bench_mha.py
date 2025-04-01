@@ -6,6 +6,7 @@ import torch
 import os
 import sys
 import warnings
+import argparse
 
 # Add two parent directories to sys.path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -136,8 +137,8 @@ def test_correctness(custom, args):
     head_size = 128 if not args.d else args.d
     mode = 'fwd'
     x_names = ['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
-    causal = args.causal if not args.model else True
-    varlen = args.layout == 'thd' # True if args.model else args.layout == 'thd'
+    causal = args.causal
+    varlen = args.layout == 'thd'
 
     if custom:
         x_vals_list = [(args.b, args.hq, hk, args.sq, sk)]
@@ -244,8 +245,9 @@ def run_benchmark(custom, args):
     head_size = 128 if not args.d else args.d
     mode = 'fwd'
     x_names = ['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
-    causal = args.causal # args.causal if not args.model else True
-    varlen = args.layout == 'thd' # True if args.model else args.layout == 'thd'
+    causal = args.causal 
+    varlen = args.layout == 'thd'
+    
     configs = []
     plot_name = f'fused-attention-{mode}-D_HEAD-{head_size}-layout-{args.layout}-fp8-{args.fp8}-causal-{causal}'
     extra_args = {'D_HEAD': head_size, 'dtype': dtype, 'causal': causal, 'mode': mode}
@@ -395,9 +397,19 @@ def supported_layouts():
         'thd: Q, K, V are individual tensors of [total_q/k, num_heads, head_size]. '
     return layouts
 
+# argparse lacks support for boolean argument type (sigh...)
+def str2bool(v):
+    if isinstance(v, bool) or v is None:
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def parse_args():
-    import argparse
+    
     parser = argparse.ArgumentParser(
         prog="Benchmark FlashAttention",
         allow_abbrev=False,
@@ -417,7 +429,7 @@ def parse_args():
     parser.add_argument("-equal_seqlens", action='store_true', default=False,
                         help='If specified, uses equal sequence lengths with thd layout, i.e t = b * sq')
     parser.add_argument("-d", type=int, default=0)
-    parser.add_argument("-causal", action='store_true', default=False)
+    parser.add_argument("-causal", type=str2bool, default=None)
     parser.add_argument("-fp8", action='store_true', default=False)
     parser.add_argument("-quantize_p", action='store_true', default=False)
     parser.add_argument("-dtype", default='fp16')
@@ -429,7 +441,7 @@ def parse_args():
     parser.add_argument("-return_bandwidth", action='store_true', default=False, help="Prints only memory bandwidth.")
     parser.add_argument("-test_correctness", action='store_true', default=False,
                          help="Tests correctness of the Triton provider comparing the output to the Torch sdpa.")
-    parser.add_argument("-layout", type=str, default='bshd', help=supported_layouts())
+    parser.add_argument("-layout", type=str, default=None, help=supported_layouts())
     
 
     parser.add_argument(
@@ -443,6 +455,20 @@ arg_to_torch_dtype = {'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp32': tor
 
 def main():
     args = parse_args()
+    
+    if args.model:
+        if args.causal is None:  # User didn’t specify -causal
+            args.causal = True
+        if args.layout is None:  # User didn’t specify -layout
+            args.layout = 'thd'
+        print(f"Note: using -model config defaults: causal={args.causal}, layout={args.layout}. This is the most common real life scenario, but can be overridden with -causal and -layout flags.")
+    else:
+        # the defaults for causal and varlen when not using the -model
+        if args.causal is None:  # User didn’t specify -causal
+            args.causal = False
+        if args.layout is None:  # User didn’t specify -layout
+            args.layout = 'bshd'
+    
     custom_config = False
     assert not args.test_correctness or (not args.layout=="thd") or args.equal_seqlens, \
         "Varlen not supported for -test_correctness, so use -equal_seqlens if using thd layout."
@@ -462,9 +488,6 @@ def main():
 
     assert args.dtype in arg_to_torch_dtype, \
            "Only fp16, bf16 and f32 types currently supported."
-
-    # if args.model:
-    #     print("Note: Model config sets causal masking and THD layout (varlen) by default.")
 
     assert args.layout in supported_layouts(), f"{args.layout} is not in supported layouts: {supported_layouts()}."
 

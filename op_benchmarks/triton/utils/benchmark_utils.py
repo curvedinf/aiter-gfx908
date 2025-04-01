@@ -74,3 +74,78 @@ def get_available_models(config_file='utils/model_configs.json'):
     models = [f"{family}-{model}" for family in configs for model in configs[family]]
 
     return models
+
+
+
+import sys
+import time
+import os
+import tempfile
+
+import re
+from prettytable import PrettyTable
+
+def parse_vgpr_usage(file_path, table_start="result-table-name"):
+    with open(file_path, "r") as f:
+        lines = f.readlines()
+    
+    # Extract VGPR-related information
+    vgpr_info = []
+    table_lines = []
+    in_table = False
+
+    for line in lines:
+        # Parse autotuning outputs
+        if re.search(r"Autotuning kernel", line):
+            vgpr_info.append(line.strip())
+        if re.search(r"Triton autotuning for function", line):
+            vgpr_info.append(line.strip())
+
+        if re.search(r"\.name:", line):
+            vgpr_info.append(line.strip())
+        if re.search(r"\.vgpr_count:", line) or re.search(r"\.vgpr_spill_count:", line):
+            vgpr_info.append(line.strip())
+        # Detect start of table
+        if re.match(rf"^\s*{table_start}", line):
+            vgpr_info.append(line.strip())
+            in_table = True
+        elif in_table:
+            table_lines.append(line.strip())
+
+    # Print extracted information
+    print("\n".join(vgpr_info))
+
+    table = PrettyTable()
+    table.field_names = table_lines[0].split()
+    [table.add_row(line.split()[1:]) for line in table_lines[1:]]
+    
+    print(table)
+
+def print_vgpr(fun, table_start="result-table-name"):
+    # Create a temporary file
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp_file:
+        output_file = temp_file.name
+
+        # Redirect stdout and stderr to the temporary file
+        sys.stdout = temp_file
+        sys.stderr = temp_file
+        
+        os.environ["AMDGCN_ENABLE_DUMP"] = "1"
+        os.environ["TRITON_ALWAYS_COMPILE"] = "1"
+        os.environ["TRITON_PRINT_AUTOTUNING"] = "1"
+        fun() # run the function
+        
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+    # Restore stdout and stderr to normal
+    sys.stdout = sys.__stdout__
+    sys.stderr = sys.__stderr__
+
+    time.sleep(0.5)  # Ensure everything is written before reading
+
+    # Parse and print relevant output
+    parse_vgpr_usage(output_file, table_start)
+
+    # Remove the temporary file
+    os.unlink(output_file)

@@ -20,8 +20,6 @@ import pytest
 
 import argparse
 
-
-
 def is_hip():
     return triton.runtime.driver.active.get_current_target().backend == "hip"
 
@@ -87,7 +85,6 @@ def input_helper(B, H, prefix_length, extend_length, kv_lora_rank, qk_rope_head_
     total_extend = cu_seqlens_extend[-1].item()
     total_prefix = cu_seqlens_prefix[-1].item()
     
-
     q_extend = torch.randn(total_extend, H, v_head_dim + qk_rope_head_dim, dtype=dtype, device=device).requires_grad_(requires_grad)
 
     # extend parts

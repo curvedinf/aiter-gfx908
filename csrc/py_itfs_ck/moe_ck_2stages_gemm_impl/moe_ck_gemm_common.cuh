@@ -3,7 +3,7 @@
 #pragma once
 #include "moe_ck_gemm.hpp"
 #include <iostream>
-template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, int MPerBlock, int KPerBlock, int MWaves, int NWaves, bool Nswizzle, bool PerTensorQuant>
+template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, int MPerBlock, int KPerBlock, int MWaves, int NWaves, bool Nswizzle, bool PerTensorQuant, int ActOP>
 void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
                         int topk,
                         void *&hidden_states,           // [m, k], input token
@@ -43,7 +43,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     // static constexpr ck::index_t MPerBlock = 128;
     static constexpr ck::index_t MNPerXDL = 32;
     static constexpr ck::index_t BLOCKSIZE = 256;
-    static constexpr ck::index_t NPerBlock = 128;
+    static constexpr ck::index_t NPerBlock = MNPerXDL * NWaves;
     static constexpr ck::index_t WAVES = BLOCKSIZE / 64;
     // static constexpr ck::index_t MWaves = 1;
     // static constexpr ck::index_t NWaves = WAVES / MWaves;
@@ -90,7 +90,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                //    MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
                 //  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|
                CShuffleMXDLPerWave,    1,   S<1, 32, 1, 8>, S<EVec, D0Vec, D1Vec>,
-               ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v1, Nswizzle, true, uint32_t, A0DataType>;
+               ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v1, ActOP, Nswizzle, true, true, ck::index_t, A0DataType>;
         // kernel 2: 128->32x128x128
         //  <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,  AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   128,   32,   128,    128,  16,  16,  32,   32,    1,    2,     S<8, 16, 1>,     S<1, 0, 2>,    S<1, 0, 2>,               2,             16,             16,          0,     S<8, 16, 1>,    S<1, 0, 2>,     S<1, 0, 2>,             2,              16,             16,          0,          1,           1,               S<1, 16, 1, 8>,      S<8, 8, 1>,  ck::BlockGemmPipelineScheduler::Interwave, ck::BlockGemmPipelineVersion::v1, EDataType>;
 
@@ -143,19 +143,19 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     invoker.Run(argument, StreamConfig{stream});
 }
 
-#define CK_MOE_STAGE1_GEMM_DEFINE(MPerfBlock, KPerBlock, MWaves, NWaves)                                                                                             \
-    template void ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerfBlock, KPerBlock, MWaves, NWaves, Nswizzle, PerTensorQuant>( \
-        const hipStream_t &stream,                                                                                                                                   \
-        int tokens, int sorted_size, int N, int K,                                                                                                                   \
-        int topk,                                                                                                                                                    \
-        void *&hidden_states,                                                                                                                                        \
-        void *&w1,                                                                                                                                                   \
-        void *&w2,                                                                                                                                                   \
-        void *&sorted_token_ids,                                                                                                                                     \
-        void *&sorted_expert_ids,                                                                                                                                    \
-        void *&num_valid_ids,                                                                                                                                        \
-        void *&out,                                                                                                                                                  \
-        std::optional<void *> w1_scale,                                                                                                                              \
+#define CK_MOE_STAGE1_GEMM_DEFINE(MPerfBlock, KPerBlock, MWaves, NWaves, ActOP)                                                                                             \
+    template void ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, MPerfBlock, KPerBlock, MWaves, NWaves, Nswizzle, PerTensorQuant, ActOP>( \
+        const hipStream_t &stream,                                                                                                                                          \
+        int tokens, int sorted_size, int N, int K,                                                                                                                          \
+        int topk,                                                                                                                                                           \
+        void *&hidden_states,                                                                                                                                               \
+        void *&w1,                                                                                                                                                          \
+        void *&w2,                                                                                                                                                          \
+        void *&sorted_token_ids,                                                                                                                                            \
+        void *&sorted_expert_ids,                                                                                                                                           \
+        void *&num_valid_ids,                                                                                                                                               \
+        void *&out,                                                                                                                                                         \
+        std::optional<void *> w1_scale,                                                                                                                                     \
         std::optional<void *> a1_scale);
 
 template <typename A0DataType, typename B0DataType, typename AccDataType, typename EDataType, typename CDEElementOp, int MPerBlock, int KPerBlock, int MWaves, int NWaves, bool Nswizzle, bool PerTensorQuant>
@@ -246,7 +246,7 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
               //    MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
                //  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|
               CShuffleMXDLPerWave,    1,   S<1, CShuffleMLane, 1, CShuffleNLane>, S<EVec, D0Vec, D1Vec, D2Vec>,
-              ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v1, Nswizzle, false, uint32_t, A0DataType>;
+              ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v1, 0, Nswizzle, false, false, ck::index_t, A0DataType>;
        // kernel 2: 128->32x128x128
        //  <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,  AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   128,   32,   128,    128,  16,  16,  32,   32,    1,    2,     S<8, 16, 1>,     S<1, 0, 2>,    S<1, 0, 2>,               2,             16,             16,          0,     S<8, 16, 1>,    S<1, 0, 2>,     S<1, 0, 2>,             2,              16,             16,          0,          1,           1,               S<1, 16, 1, 8>,      S<8, 8, 1>,  ck::BlockGemmPipelineScheduler::Interwave, ck::BlockGemmPipelineVersion::v1, EDataType>;
 

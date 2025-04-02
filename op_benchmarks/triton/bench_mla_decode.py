@@ -51,8 +51,11 @@ def get_benchmark_configs():
 
 def model_benchmark_configs(args):
     config_file = args.model_configs
-    assert "deepseek" in args.model, "Only deepseek models are supported for this benchmark."
-    configs = get_model_configs(config_path=config_file, models=args.model)
+    if args.model == "all":
+        configs = get_model_configs(config_path=config_file, models="deepseek")
+    else:
+        assert "deepseek" in args.model, "Only deepseek models are supported for this benchmark."
+        configs = get_model_configs(config_path=config_file, models=args.model)
     batch_size = args.b if args.b else 128
 
     x_names = [

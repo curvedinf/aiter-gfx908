@@ -13,7 +13,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(os.path.dirname(current_dir))
 sys.path.append(parent_dir)
 
-from op_tests.triton.utils import mla_decode_ref
+
+from aiter.ops.triton import mla_decode
 
 
 import triton
@@ -149,7 +150,7 @@ def benchmark(args):
             dtype=torch.float32,
         )
 
-        fn = lambda: mla_decode_ref.decode_attention_fwd(
+        fn = lambda: mla_decode.decode_attention_fwd(
             q,
             kv_buffer,
             kv_buffer[..., :kv_lora_rank],

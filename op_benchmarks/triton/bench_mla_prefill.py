@@ -14,6 +14,8 @@ import time
 import triton
 import triton.language as tl
 
+from utils.benchmark_utils import get_model_configs, get_available_models, print_vgpr
+
 import sys
 import torch
 import pytest
@@ -24,40 +26,6 @@ def is_hip():
     return triton.runtime.driver.active.get_current_target().backend == "hip"
 
 is_hip_ = is_hip()
-
-
-def mha_varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlens=False, requires_grad=True):
-    torch.manual_seed(20)
-
-    # Random sequence lengths. Using N_CTX * Z as kind of maximum possible sum of individual seqs
-    if not equal_seqlens:
-        max_seqlens_q = N_CTX_Q
-        max_seqlens_k = N_CTX_K
-        if N_CTX_Q == N_CTX_K:
-            seqlens_q = torch.randint(1, max_seqlens_q + 1, (Z, ), dtype=torch.int32)
-            seqlens_k = seqlens_q
-        else:
-            seqlens_q = torch.randint(1, max_seqlens_q + 1, (Z, ), dtype=torch.int32)
-            seqlens_k = torch.randint(1, max_seqlens_k + 1, (Z, ), dtype=torch.int32)
-    else:
-        seqlens_q = torch.full((Z, ), N_CTX_Q)
-        seqlens_k = torch.full((Z, ), N_CTX_K)
-
-    # Calculate cumulative sequence lengths
-    cu_seqlens_q = torch.cat([torch.tensor([0], dtype=torch.int32), seqlens_q.cumsum(dim=0, dtype=torch.int32)])
-    cu_seqlens_k = torch.cat([torch.tensor([0], dtype=torch.int32), seqlens_k.cumsum(dim=0, dtype=torch.int32)])
-
-    cu_seqlens_q = cu_seqlens_q.to(device="cuda")
-    cu_seqlens_k = cu_seqlens_k.to(device="cuda")
-    # Initialize q, k, v with variable lengths
-    total_q = cu_seqlens_q[-1].item()
-    total_k = cu_seqlens_k[-1].item()
-
-    q = torch.randn((total_q, HQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_(requires_grad)
-    k = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_(requires_grad)
-    v = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_(requires_grad)
-    sm_scale = D_HEAD**-0.5
-    return q, k, v, cu_seqlens_q, cu_seqlens_k, sm_scale
 
 
 
@@ -163,13 +131,42 @@ def get_benchmark_configs():
                   ]
     return x_names, x_vals_list
 
+def model_benchmark_configs(args):
+    config_file = args.model_configs
+    # Only deepseek models are supported for this benchmark.
+    if args.model == "all":
+        configs = get_model_configs(config_path=config_file, models="deepseek")
+    else:
+        assert "deepseek" in args.model, "Only deepseek models are supported for this benchmark."
+        configs = get_model_configs(config_path=config_file, models=args.model)
+    
+    batch_size = args.b if args.b else 1
+
+    x_names = ["model", "B", "H", "prefix", "extend", "kv_lora_rank", "qk_rope_head_dim", "v_head_dim", "attn_impl"]
+
+    x_vals_list = []
+
+    for model_name, config in configs.items():
+        HQ = config["num_attention_heads"]
+        # HK = HQ if config["num_key_value_heads"] is None else config["num_key_value_heads"]
+        prefix = args.prefix if args.prefix else 16324 # max positional embedding in deepseek-V3 model
+        extend = args.extend if args.extend else 8192 # max positional embedding in deepseek-V3 model
+        attn_impl = args.attn_impl if args.attn_impl else "non-absorb"
+        x_vals_list.append((model_name, batch_size, HQ, prefix,  extend, 512, 64, 128, attn_impl))
+
+    return x_names, x_vals_list
+
 
 def benchmark(args):
     dtype = arg_to_torch_dtype[args.dtype]
     torch.set_default_dtype(dtype)
 
     configs = []
-    x_names, x_vals_list = get_benchmark_configs()
+
+    if args.model:
+        x_names, x_vals_list = model_benchmark_configs(args)
+    else:
+        x_names, x_vals_list = get_benchmark_configs()
 
     line_vals = ["mla_extend"]
 
@@ -182,7 +179,7 @@ def benchmark(args):
 
     @triton.testing.perf_report(configs)
     def bench_MLA(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, attn_impl, sm_scale, logit_cap, device,
-                  provider):
+                  provider=None, model=None):
                 
         warmup = 25
         rep = 100
@@ -213,6 +210,17 @@ def parse_args():
         prog="Benchmark MLA Prefill",
         allow_abbrev=False,
     )
+    parser.add_argument('-model_configs', type=str, default="utils/model_configs.json", help="Model config json file.")
+    available_models = get_available_models(filter="deepseek")  # Dynamically load model names
+    model_help = (
+        "Model name to benchmark. Select from: [" + ", ".join(available_models) +
+        "]. Use 'all' to benchmark all models. Provide model family (the part before -) to benchmark all models in that family. One can provide multiple as -model \"llama3,mistral_7B\""
+    )
+    parser.add_argument('-model', type=str, default="", help=model_help)
+    parser.add_argument('-b', type=int, default=0, help="Batch size")
+    parser.add_argument('-prefix', type=int, default=0, help="Prefix length")
+    parser.add_argument('-extend', type=int, default=0, help="Extend length")
+    parser.add_argument('-attn_impl', type=str, default="non-absorb", help="Whether to use absorbed or non-absorbed attention. Options: absorb, non-absorb")
     parser.add_argument("-dtype", default='bf16')
     parser.add_argument("-device", default='cuda')
     parser.add_argument("-print_vgpr", action="store_true", default=False)

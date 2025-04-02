@@ -6,6 +6,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include "aiter_hip_common.h"
+#include "moe_op.h"
+#include "asm_moe_2stage_configs.hpp"
 
 struct __attribute__((packed)) KernelArgs
 {
@@ -49,50 +51,18 @@ struct __attribute__((packed)) KernelArgs
     p3 _p18;
     unsigned int topk;
     p3 _p19;
+    unsigned int splitk;
+    p3 _p20;
+    unsigned int activation;
+    p3 _p21;
 };
 
-struct FMoe2StageConfig
-{
-    std::string name;
-    std::string co_name;
-    int tile_M;
-    int tile_N;
-};
-
-#define ADD_CFG(M, N, path, name)             \
-    {                                         \
-        name, { name, path name ".co", M, N } \
-    }
-using CFG = std::unordered_map<std::string, FMoe2StageConfig>;
-
-CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1)
+static CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1)
 {
     if (inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
         w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
         out.scalar_type() == at::ScalarType::BFloat16)
     {
-        static CFG cfg_fmoe_stage1_bf16_pertokenFp8_g1u1 = {
-            ADD_CFG(16, 64, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_16x64"),
-            ADD_CFG(16, 64, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_16x64_pf2"),
-
-            ADD_CFG(16, 512, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_16x512_pf2"),
-
-            ADD_CFG(32, 64, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x64"),
-
-            ADD_CFG(32, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128"),
-            ADD_CFG(32, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_2tg_pf2"),
-            ADD_CFG(32, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_2tg_pf3"),
-            ADD_CFG(32, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_3tg_pf2"),
-
-            ADD_CFG(32, 512, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_32x512_pf2"),
-
-            ADD_CFG(48, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_48x128"),
-
-            ADD_CFG(128, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_128x128"),
-            ADD_CFG(128, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2"),
-
-            ADD_CFG(160, 128, "fmoe_2stages/", "fmoe_stage1_bf16_pertokenFp8_g1u1_160x128_pf2"),
-        };
         return &cfg_fmoe_stage1_bf16_pertokenFp8_g1u1;
     }
     else
@@ -100,6 +70,7 @@ CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1)
         TORCH_CHECK(false, "Unsupported input_type:", inp.scalar_type(), ", out_type:", out.scalar_type());
     }
 };
+
 std::string get_heuristic_kernel(int m_num, int N, int blockk_size, CFG *cfgs)
 {
     hipDevice_t dev;
@@ -140,17 +111,19 @@ std::string get_heuristic_kernel(int m_num, int N, int blockk_size, CFG *cfgs)
     }
     return selected;
 }
-void moe_stage1_fp8_g1u1(
+void moe_stage1_g1u1(
     torch::Tensor &input,             // [token_cnt, model_dim] M,K
     torch::Tensor &w1,                // [expert, inter_dim*2, model_dim] N,K
     torch::Tensor &w2,                // [expert, model_dim, inter_dim]
     torch::Tensor &sorted_token_ids,  // [max_num_tokens_padded]
-    torch::Tensor &sorted_weight_buf, // [max_num_tokens_padded]
     torch::Tensor &sorted_expert_ids, // [max_num_m_blocks]
     torch::Tensor &num_valid_ids,     // [1]
-    torch::Tensor &out,               // [token_cnt, topk, inter_dim]
+    torch::Tensor &out,               // [token_cnt, topk, inter_dim*2]
+    int inter_dim,
     std::string &kernelName,
-    int block_size,
+    int block_m,
+    int ksplit = 0,
+    ActivationType activation = ActivationType::Silu,
     std::optional<torch::Tensor> a1_scale = std::nullopt, // [token_cnt, 1], token scale
     std::optional<torch::Tensor> w1_scale = std::nullopt  // [expert, 1, inter_dim], gate(up) scale
 )
@@ -160,11 +133,12 @@ void moe_stage1_fp8_g1u1(
 
     CFG *config_map = get_cfg(input, out, w1);
     static std::unordered_map<std::string, std::unique_ptr<AiterAsmKernel>> impl_ptr_map;
-    int hidden_dim = out.size(2);
+    int model_dim = input.size(1);
+    int hidden_dim = inter_dim;
     int sub_X_cnt = sorted_expert_ids.size(0);
     if (kernelName.empty())
     {
-        kernelName = get_heuristic_kernel(sub_X_cnt, hidden_dim, block_size, config_map);
+        kernelName = get_heuristic_kernel(sub_X_cnt, inter_dim, block_m, config_map);
     }
 
     AiterAsmKernel *impl_ptr = nullptr;
@@ -183,7 +157,7 @@ void moe_stage1_fp8_g1u1(
         impl_ptr = result.first->second.get();
     }
     else
-        TORCH_CHECK(false, __func__, " Unsupported " + kernelName);
+        TORCH_CHECK(false, __func__, " not find kernel " + kernelName);
 
     int token_cnt = out.size(0);
     int topk = out.size(1);
@@ -194,16 +168,16 @@ void moe_stage1_fp8_g1u1(
     int eprt = w1.size(0);
     const auto &cfg = it->second;
     uint32_t sub_GU = cfg.tile_N;
-    TORCH_CHECK(block_size == cfg.tile_M, __func__, "need make sure block_size == cfg.tile_M");
+    TORCH_CHECK(block_m == cfg.tile_M, __func__, " kernel: ", cfg.name, " need block_m == ", cfg.tile_M);
 
     int stride_X = input.stride(0) * input.element_size();
     int stride_GU = dim * w1.element_size();
 
-    int stride_expert_GU = stride_GU * hidden_dim;
+    int stride_expert_GU = stride_GU * inter_dim;
     int stride_expert_GUDQN = w1_scale.has_value() ? w1_scale.value().stride(0) * sizeof(float) : 0;
-    int stride_expert_SMTDQN = hidden_dim * sizeof(float);
-    int stride_O = hidden_dim * out.element_size() * topk;
-    if (hidden_dim * 2 == w1.size(1))
+    int stride_expert_SMTDQN = inter_dim * sizeof(float);
+    int stride_O = out.stride(0) * out.element_size();
+    if (inter_dim * 2 == w1.size(1))
     {
         stride_expert_GU *= 2;
     }
@@ -222,7 +196,7 @@ void moe_stage1_fp8_g1u1(
     args.ptr_STP = sorted_token_ids.data_ptr();
     args.ptr_SEP = sorted_expert_ids.data_ptr();
     args.dim = dim;
-    args.hidden_dim = hidden_dim;
+    args.hidden_dim = inter_dim;
     args.token_cnt = token_cnt;
     args.eprt_cnt = eprt;
     args.Xs = stride_X;
@@ -232,6 +206,11 @@ void moe_stage1_fp8_g1u1(
     args.eGUQs = stride_expert_GUDQN;
     args.eSMQs = stride_expert_SMTDQN;
     args.topk = topk;
+    args.splitk = ksplit;
+    args.activation = static_cast<int>(activation);
+
+    uint32_t k_num = 1 << ksplit;
+    TORCH_CHECK(model_dim % k_num == 0, __func__, " Unsupported ksplit for model_dim:", model_dim, " k_num:", k_num);
 
     void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE,
                       &arg_size, HIP_LAUNCH_PARAM_END};
@@ -239,7 +218,21 @@ void moe_stage1_fp8_g1u1(
     int bdx = 256;
     int gdx = ((hidden_dim + sub_GU - 1) / sub_GU);
     int gdy = sub_X_cnt;
-    int gdz = 1;
+    int gdz = k_num;
+
+    // std::cout << "dim:" << args.dim << std::endl;
+    // std::cout << "hidden:" << args.hidden_dim << std::endl;
+    // std::cout << "token:" << args.token_cnt << std::endl;
+    // std::cout << "eprt:" << args.eprt_cnt << std::endl;
+    // std::cout << "Xs:" << args.Xs << std::endl;
+    // std::cout << "GUs:" << args.GUs << std::endl;
+    // std::cout << "Os:" << args.Os << std::endl;
+    // std::cout << "GUs:" << args.eGUs << std::endl;
+    // std::cout << "GUQs:" << args.eGUQs << std::endl;
+    // std::cout << "SMQs:" << args.eSMQs << std::endl;
+    // std::cout << "topk:" << args.topk << std::endl;
+    // std::cout << "splitk:" << args.splitk << std::endl;
+    // printf("gdx:%d, gdy:%d, gdz:%d, tgs:%d\n", gdx, gdy, gdz, sub_X_cnt * gdx * gdz);
 
     impl_ptr->launch_kernel({&args,
                              &arg_size,

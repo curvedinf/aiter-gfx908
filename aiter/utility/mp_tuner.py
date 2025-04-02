@@ -39,9 +39,7 @@ def mp_tuner(tasks):
     time.sleep(2)
 
     gpu_map = {el.get(): i for i, el in enumerate(pids)}
-    rets = [
-        pool.apply_async(worker, args=(gpu_map, *task)) for i, task in enumerate(tasks)
-    ]
+    rets = [pool.apply_async(worker, args=(gpu_map, *task)) for task in tasks]
 
     pool.close()
     pool.join()

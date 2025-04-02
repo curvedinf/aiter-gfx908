@@ -119,8 +119,6 @@ def per_token_quant_hip(x, scale=None, quant_dtype=torch.int8):
         y = torch.empty(shape, dtype=quant_dtype, device=device)
         dynamic_per_token_scaled_fp8_quant(y, x, scale)
     elif quant_dtype == torch.int8:
-        shape = x.shape
-        device = x.device
         M, N = x.view(-1, shape[-1]).shape
         y = torch.empty((M, N), dtype=torch.int8, device=device)
         scale = torch.empty(M, dtype=torch.float, device=device)

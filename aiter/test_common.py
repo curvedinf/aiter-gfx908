@@ -10,27 +10,30 @@ import pandas as pd
 from aiter import logger
 
 
-def perftest(num_iters=101, num_warmup=5, testGraph=False, num_rotate_args=0):
+def perftest(
+    num_iters=101, num_warmup=5, testGraph=False, num_rotate_args=0, needTrace=False
+):
     def decorator(func):
         def wrapper(*args, **kwargs):
-            run_iters(num_warmup, func, *args, **kwargs)
             num = num_rotate_args
             if num < 1:
-                current_device_index = torch.cuda.current_device()
+                gpu_id = torch.cuda.current_device()
                 inputSize = sum(
                     [el.nbytes for el in args if isinstance(el, torch.Tensor)]
                 )
-                cache_size = (
-                    torch.cuda.get_device_properties(current_device_index).L2_cache_size
-                    * 64
-                    * 128
+                properties = torch.cuda.get_device_properties(gpu_id)
+                cache_size = min(
+                    properties.L2_cache_size * 64 * 128,
+                    properties.total_memory - inputSize,
                 )
                 num = (cache_size + inputSize - 1) // inputSize
             num = min(num, num_iters)
+
             rotate_args = [
                 (copy.deepcopy(args), copy.deepcopy(kwargs)) for _ in range(num)
             ]
 
+            run_iters(num_warmup, func, *args, **kwargs)
             if int(os.environ.get("AITER_LOG_MORE", 0)):
                 latencies = []
                 start_event = torch.cuda.Event(enable_timing=True)
@@ -63,11 +66,16 @@ def perftest(num_iters=101, num_warmup=5, testGraph=False, num_rotate_args=0):
                 with_stack=True,
                 with_modules=True,
                 #  record_shapes=True,
-                #  on_trace_ready=tpf.tensorboard_trace_handler(
-                #      './aiter_logs/'),
+                on_trace_ready=(
+                    tpf.tensorboard_trace_handler("./aiter_logs/")
+                    if needTrace
+                    else None
+                ),
             ) as prof:
                 data = run_iters_rotate(num_iters, func, rotate_args)
+
             avg = get_trace_perf(prof, num_iters)
+
             return data, avg
 
         return wrapper
@@ -103,9 +111,21 @@ def run_iters_rotate(num_iters, func, rotate_args):
 
 
 def run_perftest(
-    func, *args, num_iters=101, num_warmup=10, num_rotate_args=0, **kwargs
+    func,
+    *args,
+    num_iters=101,
+    num_warmup=10,
+    num_rotate_args=0,
+    needTrace=False,
+    **kwargs,
 ):
-    @perftest(num_iters=num_iters, num_warmup=num_warmup)
+
+    @perftest(
+        num_iters=num_iters,
+        num_warmup=num_warmup,
+        num_rotate_args=num_rotate_args,
+        needTrace=needTrace,
+    )
     def worker(*args, **kwargs):
         return func(*args, **kwargs)
 
@@ -122,7 +142,7 @@ def log_args(func, *args, **kwargs):
 
     def getTensorInfo(el):
         if isinstance(el, torch.Tensor):
-            return f"{el.shape} {el.dtype} {hex(el.data_ptr())}"
+            return f"{el.shape} {el.dtype} {el.device} {hex(el.data_ptr())}"
         elif isinstance(el, tuple):
             viewNum = 5
             if len(el) > viewNum:

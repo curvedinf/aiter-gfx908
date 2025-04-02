@@ -6,9 +6,14 @@ import torch.nn.functional as F
 import aiter
 import pandas as pd
 import argparse
-from aiter.fused_moe_bf16_asm import (
+import time
+from aiter import ActivationType, QuantType
+from aiter.fused_moe import (
     fused_topk,
-    moe_sorting_ck,
+    moe_sorting,
+    asm_stage1,
+    ck_stage1,
+    torch_moe_stage1,
 )
 from aiter.ops.shuffle import shuffle_weight
 from aiter.utility.mp_tuner import mp_tuner
@@ -18,147 +23,68 @@ from aiter import QuantType
 torch.set_default_device("cuda")
 
 
-def asm_stage1(
-    a1_qt,
-    w1_qt,
-    w2_qt,
-    sorted_ids,
-    sorted_weights,
-    sorted_expert_ids,
-    num_valid_ids,
-    out,
-    kernelName,
-    blockM,
-    a1_scale,
-    w1_scale,
-):
-    aiter.moe_stage1_fp8_g1u1(
-        a1_qt,
-        w1_qt,
-        w2_qt,
-        sorted_ids,
-        sorted_weights,
-        sorted_expert_ids,
-        num_valid_ids,
-        out,
-        kernelName,
-        blockM,
-        a1_scale,
-        w1_scale,
-    )
-    return out
-
-
-def ck_stage1(
-    input,
-    w1,
-    w2,
-    sorted_ids,
-    sorted_expert_ids,
-    num_valid_ids,
-    out,
-    topk,
-    w1_scale,
-    a1_scale,
-    blockM,
-    token,
-    dtype,
-):
-    tmp = torch.empty(
-        (token, topk, w1.shape[1]),
-        dtype=dtype,
-        device=input.device,
-    )
-    aiter.ck_moe_stage1(
-        input,
-        w1,
-        w2,
-        sorted_ids,
-        sorted_expert_ids,
-        num_valid_ids,
-        tmp,
-        topk,
-        w1_scale,
-        a1_scale,
-        blockM,
-    )
-    aiter.silu_and_mul(out, tmp)
-    return out
-
-
-def torch_moe_stage1(
-    hidden_states,
-    w1,  # E, inter_dim*2, model_dim
-    w2,  # E, model_dim, inter_dim
-    topk_weight,
-    topk_ids,
-    dtype=torch.float16,
-    # following for quant
-    fc1_scale=None,  # [expert, inter_dim, 1]
-    w1_scale=None,  # [1]
-    a1_scale=None,  # [expert]]
-    block_size=32,
-):
-    ctype = torch.float  # compute type
-    hidden_states = hidden_states.to(ctype)
-    w1 = w1.to(ctype)
-
-    B, D = hidden_states.shape
-    topk = topk_weight.shape[1]
-    N = w1.shape[1]
-    num_experts, model_dim, inter_dim = w2.shape
-
-    max_num_tokens_padded = topk_ids.numel() + num_experts * block_size - topk
-
-    # gose to quant D_w8a8/w8a8
-    if fc1_scale is not None:
-        w1 = (w1.view(-1, D) * fc1_scale.view(-1, 1)).view(num_experts, -1, D)
-    if a1_scale is not None and w1_scale is not None:
-        hidden_states = hidden_states * a1_scale
-        w1 = w1 * w1_scale.view(num_experts, -1, 1)
-
-    hidden_states = hidden_states.view(B, -1, D).repeat(1, topk, 1)
-
-    out = torch.zeros(
-        (B, topk, N),
-        dtype=ctype,
-        device=hidden_states.device,
-    )
-    for E_id in range(w1.shape[0]):
-        mask = topk_ids == E_id
-        if mask.sum():
-            sub_tokens = hidden_states[mask]
-            act_input = sub_tokens @ (w1[E_id].transpose(0, 1))
-            out[mask] = act_input
-
-    return out.to(dtype)
-
-
 def go(
     untunedf,
     tunedf,
 ):
-    blockMs = [16, 32, 48, 64, 128, 160]
+    startTS = time.perf_counter()
+    blockMs = [16, 32, 48, 64, 80, 96, 112, 128, 144, 160]
     asm_kernels = {
         16: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x64",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x64_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x512_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x128_4tg_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x128_4tg_pf3",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x256_2tg_pf3",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x256_3tg_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x512_2tg_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x512_pf3",
         ],
         32: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x64",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_2tg_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_2tg_pf3",
             "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_3tg_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_3tg_pf3",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x256_2tg_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x256_2tg_pf3",
             "fmoe_stage1_bf16_pertokenFp8_g1u1_32x512_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x512_pf3",
         ],
-        48: ["fmoe_stage1_bf16_pertokenFp8_g1u1_48x128"],
+        48: [
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x128_2tg_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x128_2tg_pf3",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x256_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x256_pf3",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x512_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x512_pf3",
+        ],
+        64: [
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_64x128_2tg_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_64x128_2tg_pf3",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_64x256_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_64x256_pf3",
+        ],
+        80: [
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_80x128_2tg_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_80x128_pf3",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_80x256_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_80x256_pf3",
+        ],
+        96: [
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_96x128_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_96x128_pf3",
+        ],
+        112: [
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_112x128_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_112x128_pf3",
+        ],
         128: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_128x128",
             "fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2",
         ],
-        160: ["fmoe_stage1_bf16_pertokenFp8_g1u1_160x128_pf2"],
+        144: [
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_144x128_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_144x128_pf3",
+        ],
+        160: [
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_160x128_pf2",
+            "fmoe_stage1_bf16_pertokenFp8_g1u1_160x128_pf3",
+        ],
     }
     args = [
         "token",
@@ -166,6 +92,7 @@ def go(
         "inter_dim",
         "expert",
         "topk",
+        "act_type",
         "dtype",
         "q_dtype",
         "q_type",
@@ -175,12 +102,22 @@ def go(
     prorfiles = []
     bests = []
     for line in untunedf[args].values:
-        token, model_dim, inter_dim, expert, topk, dtype, q_dtype, q_type, use_g1u1 = (
-            line
-        )
+        (
+            token,
+            model_dim,
+            inter_dim,
+            expert,
+            topk,
+            act_type,
+            dtype,
+            q_dtype,
+            q_type,
+            use_g1u1,
+        ) = line
         dtype = eval(dtype)
         q_dtype = eval(q_dtype)
         q_type = eval(q_type)
+        act_type = eval(act_type)
         torch_quant = aiter.get_torch_quant(q_type)
         input = torch.randn((token, model_dim), dtype=dtype)
         if use_g1u1:
@@ -203,10 +140,10 @@ def go(
             w2_qt,
             topk_weights,
             topk_ids,
+            activation=act_type,
             dtype=dtype,
-            fc1_scale=None,
-            w1_scale=w1_scale,
             a1_scale=a1_scale,
+            w1_scale=w1_scale,
         )
         gate, up = out1_ref.split([inter_dim, inter_dim], dim=-1)
         ref = F.silu(gate) * up
@@ -215,7 +152,7 @@ def go(
         tasks_ck = []
         for blockM in blockMs:
             sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
-                moe_sorting_ck(topk_ids, topk_weights, expert, model_dim, dtype, blockM)
+                moe_sorting(topk_ids, topk_weights, expert, model_dim, dtype, blockM)
             )
             out = torch.empty(
                 (token, topk, inter_dim),
@@ -224,19 +161,20 @@ def go(
             for el in asm_kernels.get(blockM, []):
                 tasks.append(
                     (
-                        el,  # tag
+                        (el, blockM),  # tag
                         asm_stage1,  # func
                         (
                             a1_qt,
                             shuffle_weight(w1_qt, (16, 16)),
                             shuffle_weight(w2_qt, (16, 16)),
                             sorted_ids,
-                            sorted_weights,
                             sorted_expert_ids,
                             num_valid_ids,
                             out,
-                            el,
                             blockM,
+                            el,
+                            0,
+                            act_type,
                             a1_scale,
                             w1_scale,
                         ),
@@ -246,7 +184,7 @@ def go(
             if blockM in [32, 64, 128]:
                 tasks_ck.append(
                     (
-                        f"ck_{blockM}",  # tag
+                        (f"ck_{blockM}", blockM),  # tag
                         ck_stage1,  # func
                         (
                             a1_qt,
@@ -256,19 +194,17 @@ def go(
                             sorted_expert_ids,
                             num_valid_ids,
                             out,
-                            topk,
-                            w1_scale,
-                            a1_scale,
                             blockM,
-                            token,
-                            dtype,
+                            act_type,
+                            a1_scale,
+                            w1_scale,
                         ),
                     )
                 )
         rets = mp_tuner(tasks + tasks_ck)
 
         profileDF = []
-        for tag, us, _ in rets:
+        for (tag, block_m), us, _ in rets:
             err = checkAllclose(
                 ref.to("cpu"), _, msg=f"[{tag:<50}]: {us:.2f}us ......      "
             )
@@ -279,19 +215,25 @@ def go(
                     inter_dim,
                     expert,
                     topk,
+                    act_type,
                     dtype,
                     q_dtype,
                     q_type,
                     use_g1u1,
+                    block_m,
+                    0,
                     us,
                     tag,
                     f"{err:.1%}",
                 ]
             )
-        profileDF = pd.DataFrame(profileDF, columns=args + ["us", "tag", "err"])
+        profileDF = pd.DataFrame(
+            profileDF, columns=args + ["block_m", "ksplit", "us", "tag", "err"]
+        )
         best_one = profileDF.loc[profileDF["us"].idxmin()]
         prorfiles.append(profileDF)
         bests.append(best_one)
+    print(f"finish tuning, cost {time.perf_counter()-startTS:.8f}s")
     return pd.concat(prorfiles), pd.concat(bests, axis=1).T
 
 

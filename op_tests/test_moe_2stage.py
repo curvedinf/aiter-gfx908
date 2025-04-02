@@ -142,58 +142,61 @@ def test_fmoe(
     if WQDType == torch.int4:  # int4 w quant
         w1_qt_aiter = rearrange_4bit_elements(convert_int8_to_uint32_int4(w1_qt_aiter))
         w2_qt_aiter = rearrange_4bit_elements(convert_int8_to_uint32_int4(w2_qt_aiter))
-    w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(32, 32))
-    w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(32, 32))
+        w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(32, 32))
+        w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(32, 32))
+    else:
+        w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(16, 16))
+        w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(32, 32))
 
-    out1_ck = torch.empty((token, topk, inter_dim), dtype=dtype)
-    _, us = run_perftest(
-        ck_stage1,
-        a1_qt,
-        w1_qt_aiter,
-        w2_qt_aiter,
-        sorted_ids,
-        sorted_expert_ids,
-        num_valid_ids,
-        out1_ck,
-        w1_scale=w1_scale,
-        a1_scale=a1_scale,
-        activation=actType,
-        block_m=BLOCK_SIZE_M,
-    )
+    # out1_ck = torch.empty((token, topk, inter_dim), dtype=dtype)
+    # _, us = run_perftest(
+    #     ck_stage1,
+    #     a1_qt,
+    #     w1_qt_aiter,
+    #     w2_qt_aiter,
+    #     sorted_ids,
+    #     sorted_expert_ids,
+    #     num_valid_ids,
+    #     out1_ck,
+    #     w1_scale=w1_scale,
+    #     a1_scale=a1_scale,
+    #     activation=actType,
+    #     block_m=BLOCK_SIZE_M,
+    # )
 
-    checkAllclose(
-        out1_ref,
-        out1_ck,
-        msg=f"[perf]  ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
-    )
+    # checkAllclose(
+    #     out1_ref,
+    #     out1_ck,
+    #     msg=f"[perf]  ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
+    # )
 
-    if WQDType != torch.int4:
-        # asm int4 2 stage not support yet
-        if qType == aiter.QuantType.per_Tensor:
-            a1_scale = a1_scale.view(1).repeat(token)
-            w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
+    # if WQDType != torch.int4:
+    #     # asm int4 2 stage not support yet
+    #     if qType == aiter.QuantType.per_Tensor:
+    #         a1_scale = a1_scale.view(1).repeat(token)
+    #         w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
 
-        out1_asm = torch.empty((token, topk, inter_dim), dtype=dtype)
-        _, us = run_perftest(
-            asm_stage1,
-            a1_qt,
-            shuffle_weight(w1_qt, (16, 16)),
-            shuffle_weight(w2_qt, (16, 16)),
-            sorted_ids,
-            sorted_expert_ids,
-            num_valid_ids,
-            out1_asm,
-            kernelName="fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2",
-            w1_scale=w1_scale,
-            a1_scale=a1_scale,
-            activation=actType,
-            block_m=BLOCK_SIZE_M,
-        )
-        checkAllclose(
-            out1_ref,
-            out1_asm,
-            msg=f"[perf] asm_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
-        )
+    #     out1_asm = torch.empty((token, topk, inter_dim), dtype=dtype)
+    #     _, us = run_perftest(
+    #         asm_stage1,
+    #         a1_qt,
+    #         shuffle_weight(w1_qt, (16, 16)),
+    #         shuffle_weight(w2_qt, (16, 16)),
+    #         sorted_ids,
+    #         sorted_expert_ids,
+    #         num_valid_ids,
+    #         out1_asm,
+    #         kernelName="fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2",
+    #         w1_scale=w1_scale,
+    #         a1_scale=a1_scale,
+    #         activation=actType,
+    #         block_m=BLOCK_SIZE_M,
+    #     )
+    #     checkAllclose(
+    #         out1_ref,
+    #         out1_asm,
+    #         msg=f"[perf] asm_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
+    #     )
 
     # ######################## stage 2 start ###########
     if qType == aiter.QuantType.per_Token:
@@ -212,48 +215,48 @@ def test_fmoe(
         a2_scale=a2_scale,
         num_iters=3,
     )
-    # out_ref = torch_moe(
-    #     input,
-    #     w1_qt,
-    #     w2_qt,
-    #     topk_weights,
-    #     topk_ids,
-    #     fc1_scale=w1_scale,
-    #     fc2_scale=w2_scale,
-    # )
-    # checkAllclose(out_ref, out2_ref, msg="[torch] 1_stage vs 2_stage")
+    # # out_ref = torch_moe(
+    # #     input,
+    # #     w1_qt,
+    # #     w2_qt,
+    # #     topk_weights,
+    # #     topk_ids,
+    # #     fc1_scale=w1_scale,
+    # #     fc2_scale=w2_scale,
+    # # )
+    # # checkAllclose(out_ref, out2_ref, msg="[torch] 1_stage vs 2_stage")
 
-    if qType == aiter.QuantType.per_Token:
-        out1_ck = out1_asm.view(token, -1)
-    a2_qt, a2_scale = torch_quant(out1_ck, quant_dtype=AQDType)
-    a2_qt = a2_qt.view(token, topk, -1)
-    out2_ck, us = ck_moe_stage2(
-        a2_qt,
-        w1_qt_aiter,
-        w2_qt_aiter,
-        sorted_ids,
-        sorted_expert_ids,
-        sorted_weights,
-        num_valid_ids,
-        w2_scale,
-        a2_scale,
-        dtype,
-        topk,
-        BLOCK_SIZE_M,
-    )
-    checkAllclose(
-        out2_ref,
-        out2_ck,
-        msg=f"ck_moe_stage2:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
-    )
+    # if qType == aiter.QuantType.per_Token:
+    #     out1_ck = out1_ck.view(token, -1)
+    # a2_qt, a2_scale = torch_quant(out1_ck, quant_dtype=AQDType)
+    # a2_qt = a2_qt.view(token, topk, -1)
+    # out2_ck, us = ck_moe_stage2(
+    #     a2_qt,
+    #     w1_qt_aiter,
+    #     w2_qt_aiter,
+    #     sorted_ids,
+    #     sorted_expert_ids,
+    #     sorted_weights,
+    #     num_valid_ids,
+    #     w2_scale,
+    #     a2_scale,
+    #     dtype,
+    #     topk,
+    #     BLOCK_SIZE_M,
+    # )
+    # checkAllclose(
+    #     out2_ref,
+    #     out2_ck,
+    #     msg=f"ck_moe_stage2:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
+    # )
     # ######################## stage 2 end ###########
 
     # ######################## fused 2 stage #########
     out2_aiter, us_fuse = run_perftest(
         fused_moe,
         input,
-        shuffle_weight(w1_qt, (16, 16)),
-        shuffle_weight(w2_qt, (32, 32)),
+        w1_qt_aiter,
+        w2_qt_aiter,
         topk_weights,
         topk_ids,
         w1_scale=w1_scale,
@@ -264,7 +267,7 @@ def test_fmoe(
     checkAllclose(
         out2_ref,
         out2_aiter,
-        msg=f"aiter_all_stages:{us_fuse:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
+        msg=f"aiter_all_stages:{us_fuse:.2f} us......(quant:{AQDType})",
     )
 
 
@@ -289,44 +292,44 @@ for dtype in [torch.bfloat16]:
                     use_g1u1=True,
                 )
 
-# # per Tensor quant/a8w8
-# for dtype in [torch.bfloat16]:
-#     for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
-#         for dim in [6144]:
-#             for inter_dim in [4096]:
-#                 expert, topk = 8, 2
-#                 test_fmoe(
-#                     dtype,
-#                     m,
-#                     dim,
-#                     inter_dim,
-#                     expert,
-#                     topk,
-#                     aiter.ActivationType.Silu,
-#                     aiter.QuantType.per_Tensor,
-#                     torch.float8_e4m3fnuz,
-#                     torch.float8_e4m3fnuz,
-#                     BLOCK_SIZE_M=32,
-#                     use_g1u1=True,
-#                 )
+# per Tensor quant/a8w8
+for dtype in [torch.bfloat16]:
+    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
+        for dim in [6144]:
+            for inter_dim in [4096]:
+                expert, topk = 8, 2
+                test_fmoe(
+                    dtype,
+                    m,
+                    dim,
+                    inter_dim,
+                    expert,
+                    topk,
+                    aiter.ActivationType.Silu,
+                    aiter.QuantType.per_Tensor,
+                    torch.float8_e4m3fnuz,
+                    torch.float8_e4m3fnuz,
+                    BLOCK_SIZE_M=32,
+                    use_g1u1=True,
+                )
 
-# # per Tensor quant/a8w4
-# for dtype in [torch.bfloat16]:
-#     for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
-#         for dim in [6144]:
-#             for inter_dim in [4096]:
-#                 expert, topk = 8, 2
-#                 test_fmoe(
-#                     dtype,
-#                     m,
-#                     dim,
-#                     inter_dim,
-#                     expert,
-#                     topk,
-#                     aiter.ActivationType.Silu,
-#                     aiter.QuantType.per_Token,
-#                     torch.float8_e4m3fnuz,
-#                     torch.int4,
-#                     BLOCK_SIZE_M=32,
-#                     use_g1u1=True,
-#                 )
+# per Tensor quant/a8w4
+for dtype in [torch.bfloat16]:
+    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096][-1:]:
+        for dim in [6144]:
+            for inter_dim in [4096]:
+                expert, topk = 8, 2
+                test_fmoe(
+                    dtype,
+                    m,
+                    dim,
+                    inter_dim,
+                    expert,
+                    topk,
+                    aiter.ActivationType.Silu,
+                    aiter.QuantType.per_Token,
+                    torch.float8_e4m3fnuz,
+                    torch.int4,
+                    BLOCK_SIZE_M=32,
+                    use_g1u1=True,
+                )

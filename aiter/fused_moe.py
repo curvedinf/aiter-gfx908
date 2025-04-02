@@ -83,6 +83,7 @@ def fused_moe(
     # following for tuning
     block_size_M=None,
 ):
+    """user API"""
     E, model_dim, inter_dim = w2.shape
     M, topk = topk_ids.shape
     inter_dim = get_inter_dim(w1.shape, w2.shape)
@@ -97,9 +98,10 @@ def fused_moe(
     if expert_mask is not None:
         global_E = expert_mask.numel()
     dtype = hidden_states.dtype
+    q_dtype_w = w1.dtype
+    q_dtype_a = w1.dtype if w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
 
     if block_size_M is None:
-        q_dtype = w1.dtype if w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
         _, _, block_size_M, *_ = get_2stage_cfgs(
             M,
             model_dim,
@@ -107,12 +109,14 @@ def fused_moe(
             E,
             topk,
             dtype,
-            q_dtype,
+            q_dtype_a,
+            q_dtype_w,
             quant_type,
             isG1U1,
             activation,
         )
     run_1stage = M < 256
+    run_1stage = False
     block_size_M = 32 if run_1stage else block_size_M
 
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
@@ -134,6 +138,8 @@ def fused_moe(
             block_size_M,
             activation=activation,
             quant_type=quant_type,
+            q_dtype_a=q_dtype_a,
+            q_dtype_w=q_dtype_w,
             w1_scale=w1_scale,
             w2_scale=w2_scale,
             a1_scale=a1_scale,
@@ -154,6 +160,8 @@ def fused_moe(
             block_size_M,
             activation=activation,
             quant_type=quant_type,
+            q_dtype_a=q_dtype_a,
+            q_dtype_w=q_dtype_w,
             w1_scale=w1_scale,
             w2_scale=w2_scale,
             a1_scale=a1_scale,
@@ -176,6 +184,8 @@ def fused_moe_1stage(
     activation=ActivationType.Silu,
     quant_type=QuantType.No,
     # following for quant
+    q_dtype_a=None,
+    q_dtype_w=None,
     w1_scale=None,  # [expert(local_expert:EP), inter_dim, 1]
     w2_scale=None,  # [expert(local_expert:EP), model_dim, 1]
     a1_scale=None,  # [expert(local_expert:EP), 1, model_dim]
@@ -197,8 +207,7 @@ def fused_moe_1stage(
 
     else:
         quant_func = get_hip_quant(quant_type)
-        q_dtype = w1.dtype if w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
-        a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype)
+        a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a)
         if quant_type == QuantType.per_1x128:
             fmoe_func = functools.partial(
                 aiter.fmoe_fp8_blockscale_g1u1,
@@ -259,7 +268,8 @@ def get_2stage_cfgs(
     expert,
     topk,
     dtype,
-    q_dtype,
+    q_dtype_a,
+    q_dtype_w,
     q_type,
     use_g1u1,
     activation,
@@ -277,7 +287,8 @@ def get_2stage_cfgs(
                 "expert",
                 "topk",
                 "dtype",
-                "q_dtype",
+                "q_dtype_a",
+                "q_dtype_w",
                 "q_type",
                 "use_g1u1",
             ]
@@ -289,7 +300,8 @@ def get_2stage_cfgs(
         expert,
         topk,
         str(dtype),
-        str(q_dtype),
+        str(q_dtype_a),
+        str(q_dtype_w),
         str(q_type),
         use_g1u1,
     )
@@ -303,6 +315,10 @@ def get_2stage_cfgs(
         ksplit = cfg["ksplit"]
         tag = cfg["tag"]
 
+    # war
+    if q_dtype_w == torch.uint32:
+        tag = "ck"
+
     if "ck" in tag:
         return (
             ck_stage1,
@@ -312,9 +328,10 @@ def get_2stage_cfgs(
         )
 
     # TODO: remove when stage2 support more size
-    if block_m not in [32, 64, 128]:
+    tmpList = [32, 64, 128]
+    if block_m not in tmpList:
         tag = ""
-        block_m = 64
+        block_m = ([el for el in tmpList if block_m < el] + [128])[0]
 
     return (
         functools.partial(
@@ -343,6 +360,8 @@ def fused_moe_2stages(
     activation=ActivationType.Silu,
     quant_type=QuantType.No,
     # following for quant
+    q_dtype_a=None,
+    q_dtype_w=None,
     w1_scale=None,  # [expert(local_expert:EP), inter_dim, 1]
     w2_scale=None,  # [expert(local_expert:EP), model_dim, 1]
     a1_scale=None,  # [expert(local_expert:EP), 1, model_dim]
@@ -351,7 +370,6 @@ def fused_moe_2stages(
 
     quant_func = get_hip_quant(quant_type)
     # quant_func = get_torch_quant(quant_type)
-    q_dtype = w1.dtype if w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
 
     E, model_dim, inter_dim = w2.shape
     token_num, _ = hidden_states.shape
@@ -366,13 +384,17 @@ def fused_moe_2stages(
         E,
         topk,
         dtype,
-        q_dtype,
+        q_dtype_a,
+        q_dtype_w,
         quant_type,
         isG1U1,
         activation,
     )
 
-    a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype)
+    a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a)
+    if quant_type == QuantType.per_Tensor:
+        a1_scale = a1_scale.view(1).repeat(token_num)
+        w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[1])
     a2 = torch.empty(
         (token_num, topk, inter_dim),
         dtype=dtype,
@@ -391,9 +413,9 @@ def fused_moe_2stages(
         w1_scale=w1_scale,
     )
 
-    if quant_type == aiter.QuantType.per_Token:
+    if quant_type == QuantType.per_Token:
         a2 = a2.view(token_num, -1)
-    a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype)
+    a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
     a2 = a2.view(token_num, topk, inter_dim)
     stage2(
         a2,

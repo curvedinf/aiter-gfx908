@@ -94,7 +94,8 @@ def go(
         "topk",
         "act_type",
         "dtype",
-        "q_dtype",
+        "q_dtype_a",
+        "q_dtype_w",
         "q_type",
         "use_g1u1",
     ]
@@ -110,12 +111,14 @@ def go(
             topk,
             act_type,
             dtype,
-            q_dtype,
+            q_dtype_a,
+            q_dtype_w,
             q_type,
             use_g1u1,
         ) = line
         dtype = eval(dtype)
-        q_dtype = eval(q_dtype)
+        q_dtype_a = eval(q_dtype_a)
+        q_dtype_w = eval(q_dtype_w)
         q_type = eval(q_type)
         act_type = eval(act_type)
         torch_quant = aiter.get_torch_quant(q_type)
@@ -128,13 +131,13 @@ def go(
 
         score = torch.randn((token, expert), dtype=dtype)
         topk_weights, topk_ids = fused_topk(input, score, topk, True)
-        w1_qt, w1_scale = torch_quant(w1, quant_dtype=q_dtype)
-        w2_qt, w2_scale = torch_quant(w2, quant_dtype=q_dtype)
+        w1_qt, w1_scale = torch_quant(w1, quant_dtype=q_dtype_w)
+        w2_qt, w2_scale = torch_quant(w2, quant_dtype=q_dtype_w)
         w1_qt = w1_qt.view(w1.shape)
         w2_qt = w2_qt.view(w2.shape)
-        a1_qt, a1_scale = torch_quant(input, quant_dtype=q_dtype)
+        a1_qt, a1_scale = torch_quant(input, quant_dtype=q_dtype_a)
 
-        out1_ref = torch_moe_stage1(
+        ref = torch_moe_stage1(
             a1_qt,
             w1_qt,
             w2_qt,
@@ -145,8 +148,6 @@ def go(
             a1_scale=a1_scale,
             w1_scale=w1_scale,
         )
-        gate, up = out1_ref.split([inter_dim, inter_dim], dim=-1)
-        ref = F.silu(gate) * up
 
         tasks = []
         tasks_ck = []
@@ -217,7 +218,8 @@ def go(
                     topk,
                     act_type,
                     dtype,
-                    q_dtype,
+                    q_dtype_a,
+                    q_dtype_w,
                     q_type,
                     use_g1u1,
                     block_m,

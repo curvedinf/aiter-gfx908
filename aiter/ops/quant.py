@@ -123,7 +123,7 @@ def per_token_quant_hip(x, scale=None, quant_dtype=torch.int8):
         y = torch.empty((M, N), dtype=torch.int8, device=device)
         scale = torch.empty(M, dtype=torch.float, device=device)
         smooth_scale = torch.ones(N, dtype=torch.float, device=device)
-        aiter.smoothquant_fwd(y, x, smooth_scale, scale)
+        smoothquant_fwd(y, x, smooth_scale, scale)
         y = y.view(shape)
     else:
         raise ValueError(f"unsupported: {quant_dtype=}")

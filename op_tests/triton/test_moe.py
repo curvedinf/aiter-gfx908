@@ -264,7 +264,6 @@ def input_helper_int4_w4a16(M: int, N: int, K: int , top_k: int, E: int, routed_
 
     a = torch.randn((M, K), dtype=dtype, device='cuda')
     b = torch.rand((E, N, K), dtype=dtype, device='cuda')
-    print(f"b_orig.shape={b.shape} b_orig={b}")
 
     b_q = torch.empty((E, N, K // 2), dtype=torch.uint8, device='cuda')
     b_scale = torch.empty((E, N, K // group_size), dtype=dtype, device='cuda')

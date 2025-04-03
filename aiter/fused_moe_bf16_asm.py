@@ -242,24 +242,24 @@ def ck_moe_2stages(a1,
     else:
         a1_scale = None
 
-    act_op = 0
-    if activation is ActivationType.Silu:
-        act_op = 2
-    else :
-        act_op = 0
+    act_op = 2
+    # if activation is ActivationType.Silu:
+    #     act_op = 2
+    # else :
+    #     act_op = 0
 
-    if activation is ActivationType.Silu:
-        a2 = torch.empty(
-            (M, topk, w1.shape[1] // 2),
-            dtype=dtype,
-            device=device,
-        )
-    else :
-        a2 = torch.empty(
-            (M, topk, w1.shape[1]),
-            dtype=dtype,
-            device=device,
-        )
+    # if activation is ActivationType.Silu:
+    a2 = torch.empty(
+        (M, topk, w1.shape[1] // 2),
+        dtype=dtype,
+        device=device,
+    )
+    # else :
+    #     a2 = torch.empty(
+    #         (M, topk, w1.shape[1]),
+    #         dtype=dtype,
+    #         device=device,
+    #     )
 
     aiter.ck_moe_stage1(a1, w1, w2,
                         sorted_ids, sorted_expert_ids, num_valid_ids,

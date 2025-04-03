@@ -152,7 +152,7 @@ struct TypeCastExpertWeight
                                                                                    const float &d1,
                                                                                    const float &d2) const
     {
-        e = ck::type_convert<F16>(c * d2);
+        e = ck::type_convert<F16>(c);
     }
     template <>
     __host__ __device__ constexpr void operator()<B16, float, float, float, float>(B16 &e,
@@ -161,7 +161,7 @@ struct TypeCastExpertWeight
                                                                                    const float &d1,
                                                                                    const float &d2) const
     {
-        e = ck::type_convert<B16>(c * d2);
+        e = ck::type_convert<B16>(c);
     }
 
     template <>
@@ -171,7 +171,7 @@ struct TypeCastExpertWeight
                                                                                    const float &d1,
                                                                                    const float &d2) const
     {
-        e = ck::type_convert<F16>(ck::type_convert<F32>(c) * d2);
+        e = ck::type_convert<F16>(ck::type_convert<F32>(c));
     }
     template <>
     __host__ __device__ constexpr void operator()<B16, int, float, float, float>(B16 &e,
@@ -180,7 +180,7 @@ struct TypeCastExpertWeight
                                                                                    const float &d1,
                                                                                    const float &d2) const
     {
-        e = ck::type_convert<B16>(ck::type_convert<F32>(c) * d2);
+        e = ck::type_convert<B16>(ck::type_convert<F32>(c));
     }
 };
 

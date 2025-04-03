@@ -464,7 +464,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         TORCH_CHECK(a2_scale.value().dtype() == at::ScalarType::Float,
                     "Scales must be Float dtype!");
         using AccDataType = F32;
-        using CDEElementOp = MulABScaleExpertWeight;
+        using CDEElementOp = TypeCastExpertWeight;
         const bool Nswizzle = false;
         if (out.dtype() == at::ScalarType::Half)
         {

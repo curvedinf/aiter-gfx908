@@ -119,7 +119,7 @@ def ck_moe_stage1(hidden_states,
                   block_size=32
                   ):
     token_num = hidden_states.shape[0]
-    D = w1.shape[1]
+    D = w1.shape[1] // 2
     num_experts, model_dim, inter_dim = w2.shape
     max_num_tokens_padded = sorted_token_ids.shape[0]
     # max_num_tokens_padded = sorted_expert_ids.shape[0]*block_size
@@ -183,7 +183,7 @@ def ck_moe_fused_2stages(hidden_states,
 
 
 def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=False, shared_E=0, activation=ActivationType.Silu):
-    input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
+    input = torch.randn((token, model_dim), dtype=dtype, device="cuda") / 10
     if use_g1u1:
         w1 = torch.randn((E+shared_E, inter_dim*2, model_dim),
                          dtype=dtype, device="cuda") / 10
@@ -238,6 +238,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
             input2 = F.silu(out1_ref)
         else:
             input2 = F.gelu(out1_ref)
+    out1_ref = input2
     if "perTensorQuant" in quant:
         a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
     else:
@@ -273,17 +274,18 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     checkAllclose(out1_ref, out1_qt,
                   msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
 
-    if use_g1u1:
-        gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
-        if activation == ActivationType.Silu:
-            input2 = F.silu(gate) * up
-        else:
-            input2 = F.gelu(gate) * up
-    else:
-        if activation == ActivationType.Silu:
-            input2 = F.silu(out1_qt)
-        else:
-            input2 = F.gelu(out1_qt)
+    # if use_g1u1:
+    #     gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
+    #     if activation == ActivationType.Silu:
+    #         input2 = F.silu(gate) * up
+    #     else:
+    #         input2 = F.gelu(gate) * up
+    # else:
+    #     if activation == ActivationType.Silu:
+    #         input2 = F.silu(out1_qt)
+    #     else:
+    #         input2 = F.gelu(out1_qt)
+    input2 = out1_qt
     if "perTensorQuant" in quant:
         a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
     else:

@@ -316,7 +316,7 @@ def get_2stage_cfgs(
         tag = cfg["tag"]
 
     # war
-    if q_dtype_w == torch.uint32:
+    if q_dtype_w in [torch.bfloat16, torch.float16, torch.uint32]:
         tag = "ck"
 
     if "ck" in tag:

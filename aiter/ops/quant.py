@@ -63,10 +63,11 @@ def pertoken_quant(
     return y, y_scale
 
 
-def per_tensor_quant(x, scale=None, scale_dtype=torch.float, quant_dtype=torch.int8):
+def per_tensor_quant(x, scale=None, scale_dtype=torch.float, quant_dtype=torch.int8, dtypeMax=None):
     x = x.to(torch.float)
     if scale is None:
-        dtypeMax = get_dtype_max(quant_dtype)
+        if dtypeMax is None:
+            dtypeMax = get_dtype_max(quant_dtype)
         scale = torch.abs(x).max() / dtypeMax
     y = x / scale
 

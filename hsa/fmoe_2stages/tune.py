@@ -19,9 +19,10 @@ from aiter.ops.shuffle import shuffle_weight
 from aiter.utility.mp_tuner import mp_tuner
 from aiter.test_common import checkAllclose
 from aiter import QuantType
+from aiter.int4_utils import *
 
 torch.set_default_device("cuda")
-
+torch.int4 = torch.uint32
 
 def go(
     untunedf,
@@ -119,22 +120,33 @@ def go(
         dtype = eval(dtype)
         q_dtype_a = eval(q_dtype_a)
         q_dtype_w = eval(q_dtype_w)
+        if q_dtype_a == torch.int8:
+            print(f'no moe solution for ', line)
+            continue
         q_type = eval(q_type)
         act_type = eval(act_type)
         torch_quant = aiter.get_torch_quant(q_type)
         input = torch.randn((token, model_dim), dtype=dtype)
-        if use_g1u1:
-            w1 = torch.randn((expert, inter_dim * 2, model_dim), dtype=dtype) / 10
+        if q_dtype_w == torch.int4:
+            if use_g1u1:
+                w1 = torch.randn((expert, inter_dim * 2, model_dim), dtype=dtype) / 10
+            else:
+                w1 = torch.randn((expert, inter_dim, model_dim), dtype=dtype)
+            w2 = torch.randn((expert, model_dim, inter_dim), dtype=dtype)
+            w1_qt, w1_scale = torch_quant(w1, quant_dtype=torch.int8, dtypeMax=7)
+            w2_qt, w2_scale = torch_quant(w2, quant_dtype=torch.int8, dtypeMax=7)
         else:
-            w1 = torch.randn((expert, inter_dim, model_dim), dtype=dtype)
-        w2 = torch.randn((expert, model_dim, inter_dim), dtype=dtype)
-
-        score = torch.randn((token, expert), dtype=dtype)
-        topk_weights, topk_ids = fused_topk(input, score, topk, True)
-        w1_qt, w1_scale = torch_quant(w1, quant_dtype=q_dtype_w)
-        w2_qt, w2_scale = torch_quant(w2, quant_dtype=q_dtype_w)
+            if use_g1u1:
+                w1 = torch.randn((expert, inter_dim * 2, model_dim), dtype=dtype) / 10
+            else:
+                w1 = torch.randn((expert, inter_dim, model_dim), dtype=dtype)
+            w2 = torch.randn((expert, model_dim, inter_dim), dtype=dtype)
+            w1_qt, w1_scale = torch_quant(w1, quant_dtype=q_dtype_w)
+            w2_qt, w2_scale = torch_quant(w2, quant_dtype=q_dtype_w)
         w1_qt = w1_qt.view(w1.shape)
         w2_qt = w2_qt.view(w2.shape)
+        score = torch.randn((token, expert), dtype=dtype)
+        topk_weights, topk_ids = fused_topk(input, score, topk, True)
         a1_qt, a1_scale = torch_quant(input, quant_dtype=q_dtype_a)
 
         ref = torch_moe_stage1(
@@ -159,37 +171,44 @@ def go(
                 (token, topk, inter_dim),
                 dtype=dtype,
             )
-            for el in asm_kernels.get(blockM, []):
-                tasks.append(
-                    (
-                        (el, blockM),  # tag
-                        asm_stage1,  # func
+            if use_g1u1 and dtype == torch.bfloat16 and \
+                act_type == ActivationType.Silu and q_dtype_w == torch.float8_e4m3fnuz:
+                for el in asm_kernels.get(blockM, []):
+                    tasks.append(
                         (
-                            a1_qt,
-                            shuffle_weight(w1_qt, (16, 16)),
-                            shuffle_weight(w2_qt, (16, 16)),
-                            sorted_ids,
-                            sorted_expert_ids,
-                            num_valid_ids,
-                            out,
-                            blockM,
-                            el,
-                            0,
-                            act_type,
-                            a1_scale,
-                            w1_scale,
-                        ),
+                            (el, blockM),  # tag
+                            asm_stage1,  # func
+                            (
+                                a1_qt,
+                                shuffle_weight(w1_qt, (16, 16)),
+                                shuffle_weight(w2_qt, (16, 16)),
+                                sorted_ids,
+                                sorted_expert_ids,
+                                num_valid_ids,
+                                out,
+                                blockM,
+                                el,
+                                0,
+                                act_type,
+                                a1_scale,
+                                w1_scale,
+                            ),
+                        )
                     )
-                )
 
             if blockM in [32, 64, 128]:
+                if q_dtype_w == torch.int4:
+                    w1_qt_shffle = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w1_qt, (32, 32), use_int4=True)))
+                else:
+                    w1_qt_shffle = shuffle_weight(w1_qt, layout=(32, 32))
+                
                 tasks_ck.append(
                     (
                         (f"ck_{blockM}", blockM),  # tag
                         ck_stage1,  # func
                         (
                             a1_qt,
-                            shuffle_weight(w1_qt, layout=(32, 32)),
+                            w1_qt_shffle,
                             w2_qt,
                             sorted_ids,
                             sorted_expert_ids,
@@ -202,6 +221,8 @@ def go(
                         ),
                     )
                 )
+        if tasks is None and tasks_ck is None:
+            print(f'no moe solution for ', line)
         rets = mp_tuner(tasks + tasks_ck)
 
         profileDF = []

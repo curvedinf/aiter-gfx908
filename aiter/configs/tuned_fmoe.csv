@@ -16,3 +16,5 @@ token,model_dim,inter_dim,expert,topk,act_type,dtype,q_dtype_a,q_dtype_w,q_type,
 4096,6144,4096,8,2,ActivationType.Silu,torch.bfloat16,torch.float8_e4m3fnuz,torch.float8_e4m3fnuz,QuantType.per_Token,1,80,0,2164.1758900000023,fmoe_stage1_bf16_pertokenFp8_g1u1_80x256_pf2,0.0%
 6144,6144,4096,8,2,ActivationType.Silu,torch.bfloat16,torch.float8_e4m3fnuz,torch.float8_e4m3fnuz,QuantType.per_Token,1,64,0,3204.4755999999998,fmoe_stage1_bf16_pertokenFp8_g1u1_64x128_2tg_pf3,0.0%
 8192,6144,4096,8,2,ActivationType.Silu,torch.bfloat16,torch.float8_e4m3fnuz,torch.float8_e4m3fnuz,QuantType.per_Token,1,80,0,4236.31321,fmoe_stage1_bf16_pertokenFp8_g1u1_80x128_2tg_pf2,0.0%
+512,6144,4096,8,2,ActivationType.Silu,torch.bfloat16,torch.bfloat16,torch.bfloat16,QuantType.No,1,64,0,824.0347499999999,ck_64,0.1%
+512,6144,4096,8,2,ActivationType.Silu,torch.bfloat16,torch.float8_e4m3fnuz,torch.uint32,QuantType.per_Token,1,128,0,707.42506,ck_128,0.1%

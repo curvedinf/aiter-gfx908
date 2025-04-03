@@ -12,7 +12,7 @@ from aiter.test_common import checkAllclose, perftest
 from aiter.fused_moe import asm_moe, torch_moe, moe_sorting, fused_topk
 from aiter.ops.shuffle import shuffle_weight
 from aiter import pertoken_quant, ck_moe
-from int4_utils import *
+from aiter.int4_utils import *
 from aiter import ActivationType
 
 BLOCK_SIZE_M = 32

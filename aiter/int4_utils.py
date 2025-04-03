@@ -1,7 +1,4 @@
 import torch
-import torch
-import triton
-import triton.language as tl
 
 # AMD
 #    packed_4_bits (pack)   = [0, 2, 4, 6, 1, 3, 5, 7]

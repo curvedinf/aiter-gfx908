@@ -271,7 +271,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     out1_qt, us = ck_moe_stage1(a1_qt,
                                 shuffle_weight(w1_qt, layout=(32, 32)),
-                                w2,
+                                w2_qt,
                                 sorted_ids,
                                 sorted_expert_ids,
                                 num_valid_ids,
@@ -360,4 +360,4 @@ for dtype in [torch.float16]:
             for inter_dim in [4096]:
                 expert, topk = 8, 2
                 test_fmoe(dtype, m, dim, inter_dim, expert, topk,
-                          quant='perTensorQuant', use_g1u1=True, activation=ActivationType.Gelu)
+                          quant='fp8perTensorQuant', use_g1u1=True, activation=ActivationType.Gelu)

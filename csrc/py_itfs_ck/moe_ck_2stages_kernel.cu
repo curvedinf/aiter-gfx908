@@ -232,26 +232,26 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock, ActOP);
     }
     // FP8 Wint4
-    // else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::UInt32)
-    // {
-    //     using A0DataType = F8;
-    //     using B0DataType = I4;
-    //     const bool Nswizzle = false;
-    //     TORCH_CHECK(a1_scale.has_value() && w1_scale.has_value(),
-    //                 "MoE Quant must input scale!");
-    //     TORCH_CHECK(a1_scale.value().dtype() == at::ScalarType::Float,
-    //                 "Scales must be Float dtype!");
-    //     using AccDataType = F32;
-    //     using CDEElementOp = MulABScaleWint4;
-    //     if (out.dtype() == at::ScalarType::Half)
-    //     {
-    //         CK_MOE_STAGE1_GEMM_IMPL_INT4(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock, ActOP);
-    //     }
-    //     else if (out.dtype() == at::ScalarType::BFloat16)
-    //     {
-    //         CK_MOE_STAGE1_GEMM_IMPL_INT4(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock, ActOP);
-    //     }
-    // }
+    else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::UInt32)
+    {
+        using A0DataType = F8;
+        using B0DataType = I4;
+        const bool Nswizzle = false;
+        TORCH_CHECK(a1_scale.has_value() && w1_scale.has_value(),
+                    "MoE Quant must input scale!");
+        TORCH_CHECK(a1_scale.value().dtype() == at::ScalarType::Float,
+                    "Scales must be Float dtype!");
+        using AccDataType = F32;
+        using CDEElementOp = MulABScaleWint4;
+        if (out.dtype() == at::ScalarType::Half)
+        {
+            CK_MOE_STAGE1_GEMM_IMPL_INT4(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock, ActOP);
+        }
+        else if (out.dtype() == at::ScalarType::BFloat16)
+        {
+            CK_MOE_STAGE1_GEMM_IMPL_INT4(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock, ActOP);
+        }
+    }
     // FP8
     else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
     {

@@ -24,7 +24,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     ck::index_t StrideE = N;
     ck::index_t KBatch = 1;
     // using AccDataType = F32;
-    using CShuffleDataType = F32;
+    using CShuffleDataType = EDataType;
     using DsDataType = ck::Tuple<F32, F32>;
 
     using A0Layout = Row;
@@ -41,7 +41,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
 
     static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::Default;
     // static constexpr ck::index_t MPerBlock = 128;
-    static constexpr ck::index_t MNPerXDL = 32;
+    static constexpr ck::index_t MNPerXDL = ck::is_same_v<B0DataType, I4> ? 16 : 32;
     static constexpr ck::index_t BLOCKSIZE = 256;
     static constexpr ck::index_t NPerBlock = MNPerXDL * NWaves;
     static constexpr ck::index_t WAVES = BLOCKSIZE / 64;
@@ -49,7 +49,7 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     // static constexpr ck::index_t NWaves = WAVES / MWaves;
     static constexpr ck::index_t MXDLPerWave = MPerBlock / (MNPerXDL * MWaves);
     static constexpr ck::index_t NXDLPerWave = NPerBlock / (MNPerXDL * NWaves);
-    static constexpr ck::index_t CShuffleMXDLPerWave = ck::is_same_v<B0DataType, I4> ? 1 : MXDLPerWave;
+    static constexpr ck::index_t CShuffleMXDLPerWave = ck::is_same_v<B0DataType, I4> ? 2 : MXDLPerWave;
     // static constexpr ck::index_t KPerBlock = ck::is_same_v<B0DataType, I4> ? 128 : 256 / sizeof(A0DataType);
     static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);
     static constexpr ck::index_t BK1 = ck::is_same_v<B0DataType, I4> ? 32 : 16 / sizeof(B0DataType);
@@ -199,13 +199,13 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t BLOCKSIZE = 256;
     static constexpr ck::index_t WAVES = BLOCKSIZE / 64;
     static constexpr ck::index_t NPerBlock = 128;
-    static constexpr ck::index_t MNPerXDL = 32;
+    static constexpr ck::index_t MNPerXDL = ck::is_same_v<B0DataType, I4> ? 16 : 32;
     // static constexpr ck::index_t MWaves = 1;
     // static constexpr ck::index_t NWaves = WAVES / MWaves;
     static constexpr ck::index_t MXDLPerWave = MPerBlock / (MNPerXDL * MWaves);
     static constexpr ck::index_t NXDLPerWave = NPerBlock / (MNPerXDL * NWaves);
     // static constexpr ck::index_t KPerBlock = ck::is_same_v<B0DataType, I4> ? 128 : 256 / sizeof(A0DataType);
-    static constexpr ck::index_t CShuffleMXDLPerWave = ck::is_same_v<B0DataType, I4> ? 1 : MXDLPerWave;
+    static constexpr ck::index_t CShuffleMXDLPerWave = ck::is_same_v<B0DataType, I4> ? 2 : MXDLPerWave;
     static constexpr ck::index_t CShuffleNLane = ck::is_same_v<B0DataType, I4> ? 32 : NPerBlock / 2 / NXDLPerWave; // 64
     static constexpr ck::index_t CShuffleMLane = BLOCKSIZE / CShuffleNLane;
     static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);

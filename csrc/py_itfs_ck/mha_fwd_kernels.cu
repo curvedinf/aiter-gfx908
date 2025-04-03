@@ -6,31 +6,10 @@
 #include "py_itfs_common.h"
 #include "mha_common.h"
 
-#include "fmha_fwd.hpp"
-#include "mask.hpp"
+#include "mha_fwd.h"
 
 namespace aiter {
 namespace torch_itfs {
-fmha_fwd_traits get_ck_fmha_fwd_traits(const mask_info &mask,
-                                       std::string dtype,
-                                       int head_size_q,
-                                       int head_size_v,
-                                       bool has_dropout,
-                                       bool has_lse,
-                                       bias_enum bias_type)
-{
-    return fmha_fwd_traits{head_size_q,
-                           head_size_v,
-                           dtype,
-                           false, // is_group_mode
-                           true,  // is_v_rowmajor
-                           mask.type,
-                           bias_type,
-                           has_lse,
-                           has_dropout,
-                           false}; // do_fp8_static_quant
-}
-
 fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                                    bool has_dropout_randval,
                                    const mask_info &mask,
@@ -136,14 +115,14 @@ fmha_fwd_args get_ck_fmha_fwd_args(bool has_lse,
                          nhead_stride_q,
                          nhead_stride_k,
                          nhead_stride_v,
-                         0, // nhead_stride_bias, FA without bias
+                         0, // nhead_stride_bias
                          nhead_stride_randval,
                          nhead_stride_lse,
                          nhead_stride_o,
                          batch_stride_q,
                          batch_stride_k,
                          batch_stride_v,
-                         0, // batch_stride_bias, FA without bias
+                         0, // batch_stride_bias
                          batch_stride_randval,
                          batch_stride_lse,
                          batch_stride_o,
@@ -302,16 +281,6 @@ mha_fwd(at::Tensor &q, // [b, sq, hq, d]
         auto stream = at::cuda::getCurrentHIPStream().stream();
         ck_tile::stream_config stream_config{stream};
 
-        auto traits =
-            get_ck_fmha_fwd_traits(
-                mask,
-                q_dtype_str,
-                head_size_q,
-                head_size_v,
-                has_dropout,
-                has_lse,
-                bias_type);
-
         auto args =
             get_ck_fmha_fwd_args(
                 has_lse,
@@ -336,7 +305,13 @@ mha_fwd(at::Tensor &q, // [b, sq, hq, d]
                 p_dropout,
                 drop_seed_offset);
 
-        float t = fmha_fwd(traits, args, stream_config);
+        float t = aiter::mha_fwd(args,
+                                 stream_config,
+                                 mask,
+                                 q_dtype_str,
+                                 false, // is_group_mode
+                                 bias_type,
+                                 has_lse);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
     }
     else {

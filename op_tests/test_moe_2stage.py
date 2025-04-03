@@ -333,9 +333,13 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
 
 for dtype in [torch.float16]:
-    for m in [1,3, 5, 7, 32, 128, 257, 385, 1025]:
-        for dim in [4096,6144]:
-            for inter_dim in [4096,6144]:
+    # for m in [1,3, 5, 7, 32, 128, 257, 385, 1025]:
+    #     for dim in [4096,6144]:
+    #         for inter_dim in [4096,6144]:
+    
+    for m in [8,16, 32, 64, 128, 257, 385, 1025, 2048, 4096]:
+        for dim in [6144]:
+            for inter_dim in [4096]:
                 expert, topk = 8, 2
                 test_fmoe(dtype, m, dim, inter_dim, expert, topk,
                           quant='fp8perTokenQuant', use_g1u1=True, activation=ActivationType.Silu)

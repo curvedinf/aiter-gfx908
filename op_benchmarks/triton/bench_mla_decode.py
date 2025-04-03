@@ -27,7 +27,7 @@ torch.set_printoptions(sci_mode=False)
 
 def get_benchmark_configs():
     x_names = [
-        "ctx_lens",
+        "max_ctx_len",
         "batch_size",
         "nhead",
         "kv_lora_rank",
@@ -44,7 +44,7 @@ def get_benchmark_configs():
         (8192, 16, 16, 512, 128, 64, 128, torch.bfloat16, torch.bfloat16, 1, 32),
         (16324, 16, 16, 512, 128, 64, 128, torch.bfloat16, torch.bfloat16, 1, 32),
         # 163840 is the max positional embedding in deepseek-V3 model
-        (16324, 16, 16, 512, 128, 64, 128, torch.bfloat16, torch.bfloat16, 1, 32),
+        (163840, 1, 16, 512, 128, 64, 128, torch.bfloat16, torch.bfloat16, 1, 32),
     ]
     return x_names, x_vals_list
 
@@ -60,7 +60,7 @@ def model_benchmark_configs(args):
 
     x_names = [
         "model_name",
-        "ctx_lens",
+        "max_ctx_len",
         "batch_size",
         "nhead",
         "kv_lora_rank",
@@ -77,10 +77,8 @@ def model_benchmark_configs(args):
 
     for model_name, config in configs.items():
         HQ = config["num_attention_heads"]
-        HK = HQ if config["num_key_value_heads"] is None else config["num_key_value_heads"]
-        N_CTX_K = args.sk if args.sk else 163840 # max positional embedding in deepseek-V3 model
-        HEAD_DIM = config["hidden_size"] // HQ
-        x_vals_list.append((model_name, N_CTX_K, batch_size, HQ, 512, 128, 64, 128, torch.bfloat16, torch.bfloat16, 1, 32))
+        max_ctx_len = args.sk if args.max_ctx_len else 163840 # max positional embedding in deepseek-V3 model
+        x_vals_list.append((model_name, max_ctx_len, batch_size, HQ, 512, 128, 64, 128, torch.bfloat16, torch.bfloat16, 1, 32))
 
     return x_names, x_vals_list
 
@@ -107,7 +105,7 @@ def benchmark(args):
 
     @triton.testing.perf_report(configs)
     def bench_mla_decode(
-        ctx_lens,
+        max_ctx_len,
         batch_size,
         nhead,
         kv_lora_rank,
@@ -142,7 +140,11 @@ def benchmark(args):
 
         sm_scale = 1.0 / (qk_head_dim**0.5)
 
-        seq_lens = torch.tensor([torch.randint(1, ctx_lens, (1,)).item() for _ in range(batch_size)], dtype=torch.int)
+        if args.equal_seqlens:
+            seq_lens = torch.tensor([max_ctx_len for _ in range(batch_size)], dtype=torch.int)
+        else:
+            seq_lens = torch.tensor([torch.randint(1, max_ctx_len, (1,)).item() for _ in range(batch_size)], dtype=torch.int)
+        
         kv_indptr = torch.zeros((batch_size + 1,), dtype=torch.int)
         kv_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens, dim=0)
         kv_indices = torch.randint(
@@ -179,6 +181,7 @@ def parse_args():
         prog="Benchmark MLA Prefill",
         allow_abbrev=False,
     )
+    parser.add_argument('-plot_name', type=str, default="MLA-decode", help="Name of the results plot|table.")
     parser.add_argument('-model_configs', type=str, default="utils/model_configs.json", help="Model config json file.")
     available_models = get_available_models(filter="deepseek")  # Dynamically load model names
     model_help = (
@@ -187,7 +190,7 @@ def parse_args():
     )
     parser.add_argument('-model', type=str, default="", help=model_help)
     parser.add_argument('-b', type=int, default=0, help="Custom batch size.")
-    parser.add_argument('-sk', type=int, default=0, help="Custom context length.")
+    parser.add_argument('-max_ctx_len', type=int, default=0, help="Custom max context length. Equal to the actual context lens if -equal_seqlens, otherwise max.")
     parser.add_argument("-dtype", default='bf16')
     parser.add_argument("-device", default='cuda')
     parser.add_argument("-print_vgpr", action="store_true", default=False)
@@ -198,90 +201,17 @@ def parse_args():
 
 arg_to_torch_dtype = {'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp32': torch.float32}
 
-import re
-from prettytable import PrettyTable
-
-def parse_vgpr_usage(file_path):
-    with open(file_path, "r") as f:
-        lines = f.readlines()
-    
-    # Extract VGPR-related information
-    vgpr_info = []
-    table_lines = []
-    in_table = False
-
-    for line in lines:
-        # Parse autotuning outputs
-        if re.search(r"Autotuning kernel", line):
-            vgpr_info.append(line.strip())
-        if re.search(r"Triton autotuning for function", line):
-            vgpr_info.append(line.strip())
-
-        if re.search(r"\.name:", line):
-            vgpr_info.append(line.strip())
-        if re.search(r"\.vgpr_count:", line) or re.search(r"\.vgpr_spill_count:", line):
-            vgpr_info.append(line.strip())
-        # Detect start of table
-        if re.match(r"^\s*MLA-decode:", line):
-            in_table = True
-            # table_lines.append(line.strip())
-        elif in_table:
-            table_lines.append(line.strip())
-
-    # Print extracted information
-    print("\n".join(vgpr_info))
-
-    table = PrettyTable()
-    table.field_names = table_lines[0].split()
-    [table.add_row(line.split()[1:]) for line in table_lines[1:]]
-
-    print(table)
-
 
 def run_bench(args):
     torch.manual_seed(0)
     torch.set_default_device(args.device)
     benchmark(args)
 
-import sys
-import time
-import re
-import os
-import tempfile
-
-def print_vgpr(args):
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp_file:
-        output_file = temp_file.name
-
-        # Redirect stdout and stderr to the temporary file
-        sys.stdout = temp_file
-        sys.stderr = temp_file
-        
-        os.environ["AMDGCN_ENABLE_DUMP"] = "1"
-        os.environ["TRITON_ALWAYS_COMPILE"] = "1"
-        os.environ["TRITON_PRINT_AUTOTUNING"] = "1"
-        run_bench(args)  # Run the benchmark
-        
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-    # Restore stdout and stderr to normal
-    sys.stdout = sys.__stdout__
-    sys.stderr = sys.__stderr__
-
-    time.sleep(0.5)  # Ensure everything is written before reading
-
-    # Parse and print relevant output
-    parse_vgpr_usage(output_file)
-
-    # Remove the temporary file
-    os.unlink(output_file)
 
 def main():
     args = parse_args()
-    if args.print_vgpr:
-        print_vgpr(args)
+    if args.print_vgpr: # print the vgpr usage of the kernel
+        print_vgpr(lambda: run_bench(args), table_start=args.plot_name)
         return 0
     run_bench(args)
 

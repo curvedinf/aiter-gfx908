@@ -170,7 +170,7 @@ def benchmark(args):
 
     line_vals = ["mla_extend"]
 
-    plot_name = "MLA-decode"
+    plot_name = args.plot_name
 
     configs.append(
         triton.testing.Benchmark(x_names=x_names, x_vals=x_vals_list, line_arg='provider', line_vals=line_vals,
@@ -216,6 +216,7 @@ def parse_args():
         "Model name to benchmark. Select from: [" + ", ".join(available_models) +
         "]. Use 'all' to benchmark all models. Provide model family (the part before -) to benchmark all models in that family. One can provide multiple as -model \"llama3,mistral_7B\""
     )
+    parser.add_argument('-plot_name', type=str, default="MLA-prefill", help="Name for the results plot|table")
     parser.add_argument('-model', type=str, default="", help=model_help)
     parser.add_argument('-b', type=int, default=0, help="Batch size")
     parser.add_argument('-prefix', type=int, default=0, help="Prefix length")
@@ -223,7 +224,7 @@ def parse_args():
     parser.add_argument('-attn_impl', type=str, default="non-absorb", help="Whether to use absorbed or non-absorbed attention. Options: absorb, non-absorb")
     parser.add_argument("-dtype", default='bf16')
     parser.add_argument("-device", default='cuda')
-    parser.add_argument("-print_vgpr", action="store_true", default=False)
+    parser.add_argument("-print_vgpr", action="store_true", default=False, help="Prints the VGPR usage of the compiled triton kernel.")
     parser.add_argument("-equal_seqlens", action="store_true", default=False,
                          help="Equal sequence lengths, i.e. total (prefix|extend) tokens = B * (prefix|extend). Otherwise we have randint(1, (prefix|extend), (B,)) as sequence lengths.")
     parser.add_argument("-include_gemms", action="store_true", default=False, help="Measure the w_kc and w_vc projection gemms (2 x torch.bmm calls) as part of the benchmark run.")
@@ -231,90 +232,17 @@ def parse_args():
 
 arg_to_torch_dtype = {'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp32': torch.float32}
 
-import re
-from prettytable import PrettyTable
-
-def parse_vgpr_usage(file_path):
-    with open(file_path, "r") as f:
-        lines = f.readlines()
-    
-    # Extract VGPR-related information
-    vgpr_info = []
-    table_lines = []
-    in_table = False
-
-    for line in lines:
-        # Parse autotuning outputs
-        if re.search(r"Autotuning kernel", line):
-            vgpr_info.append(line.strip())
-        if re.search(r"Triton autotuning for function", line):
-            vgpr_info.append(line.strip())
-
-        if re.search(r"\.name:", line):
-            vgpr_info.append(line.strip())
-        if re.search(r"\.vgpr_count:", line) or re.search(r"\.vgpr_spill_count:", line):
-            vgpr_info.append(line.strip())
-        # Detect start of table
-        if re.match(r"^\s*MLA-decode:", line):
-            in_table = True
-            # table_lines.append(line.strip())
-        elif in_table:
-            table_lines.append(line.strip())
-
-    # Print extracted information
-    print("\n".join(vgpr_info))
-
-    table = PrettyTable()
-    table.field_names = table_lines[0].split()
-    [table.add_row(line.split()[1:]) for line in table_lines[1:]]
-
-    print(table)
-
 
 def run_bench(args):
     torch.manual_seed(0)
     torch.set_default_device(args.device)
     benchmark(args)
 
-import sys
-import time
-import re
-import os
-import tempfile
-
-def print_vgpr(args):
-    # Create a temporary file
-    with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp_file:
-        output_file = temp_file.name
-
-        # Redirect stdout and stderr to the temporary file
-        sys.stdout = temp_file
-        sys.stderr = temp_file
-        
-        os.environ["AMDGCN_ENABLE_DUMP"] = "1"
-        os.environ["TRITON_ALWAYS_COMPILE"] = "1"
-        os.environ["TRITON_PRINT_AUTOTUNING"] = "1"
-        run_bench(args)  # Run the benchmark
-        
-        sys.stdout.flush()
-        sys.stderr.flush()
-
-    # Restore stdout and stderr to normal
-    sys.stdout = sys.__stdout__
-    sys.stderr = sys.__stderr__
-
-    time.sleep(0.5)  # Ensure everything is written before reading
-
-    # Parse and print relevant output
-    parse_vgpr_usage(output_file)
-
-    # Remove the temporary file
-    os.unlink(output_file)
 
 def main():
     args = parse_args()
-    if args.print_vgpr:
-        print_vgpr(args)
+    if args.print_vgpr: # print the vgpr usage of the kernel
+        print_vgpr(lambda: run_bench(args), table_start=args.plot_name)
         return 0
     run_bench(args)
 

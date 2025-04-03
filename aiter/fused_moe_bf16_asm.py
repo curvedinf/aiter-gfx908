@@ -242,7 +242,10 @@ def ck_moe_2stages(a1,
     else:
         a1_scale = None
 
-    act_op = 2
+    if activation == ActivationType.Silu:
+        act_op = 2
+    else:
+        act_op = 0
     # if activation is ActivationType.Silu:
     #     act_op = 2
     # else :

@@ -33,7 +33,7 @@ struct FlashMlaKernelTrait
     static_assert(kSizeD >= kSizeDV);
 };
 
-using FlashMlaKernelTraitsInstance = FlashMlaKernelTrait<576, 512, 64, 64, 4>;
+using FlashMlaKernelTraitsInstance = FlashMlaKernelTrait<576, 512, 64, 16, 4>;
 
 union TileSchedulerMetaData
 {
@@ -109,7 +109,7 @@ __global__ void kn_get_mla_metadata(
     __shared__ int lds_num_blocks[Traits::kMaxBatchSize];
     __shared__ int lds_num_splits[Traits::kMaxBatchSize];
 
-    int32_t sum_blocks = batch_size * Traits::kFixedOverheadNumBlocks;
+    int32_t sum_blocks = 0;
     for (int32_t i = threadIdx.x; i < batch_size; i += warpSize)
     {
         const int32_t num_blocks = ck_tile::integer_divide_ceil(p_seqlens_k[i], Traits::kBlockN);
@@ -121,6 +121,8 @@ __global__ void kn_get_mla_metadata(
     {
         sum_blocks += __shfl_xor(sum_blocks, offset);
     }
+
+    sum_blocks += batch_size * Traits::kFixedOverheadNumBlocks;
 
     if (threadIdx.x == 0)
     {
@@ -134,6 +136,7 @@ __global__ void kn_get_mla_metadata(
         int32_t cum_num_splits = 0;
 
         lds_num_splits[0] = 0;
+
         for (int32_t i = 0; i < num_cu_parts; ++i)
         {
             TileSchedulerMetaData::Core metadata;
@@ -175,7 +178,7 @@ __global__ void kn_get_mla_metadata(
         }
     }
 
-    for (int32_t i = threadIdx.x; i < batch_size; i += warpSize)
+    for (int32_t i = threadIdx.x; i <= batch_size; i += warpSize)
     {
         p_num_splits[i] = lds_num_splits[i];
     }
@@ -276,26 +279,26 @@ std::vector<torch::Tensor> get_mla_metadata(
     return {tile_scheduler_metadata, num_splits};
 }
 
-std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
-    const torch::Tensor& query,
-    const torch::Tensor& key_cache,
-    const torch::Tensor& value_cache,
-    const int32_t        head_size_v,
-    const torch::Tensor& cache_seqlens,
-    const torch::Tensor& block_table,
-    const float          softmax_scale,
-    const bool           is_causal,
-    const torch::Tensor& tile_scheduler_metadata,
-    const torch::Tensor& num_splits)
-{
-    using Traits = FlashMlaKernelTraitsInstance;
-
-    FlashMlaFwdParams params = {};
-    
-    DISPATCH_TYPES(
-        query.scalar_type(),
-        "fmla_fwd",
-        [&](){
-            dispatch_fmla_fwd_splictkv_combine<Traits, scalar_t>(params);
-        }(););
-}
+// std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
+//     const torch::Tensor& query,
+//     const torch::Tensor& key_cache,
+//     const torch::Tensor& value_cache,
+//     const int32_t        head_size_v,
+//     const torch::Tensor& cache_seqlens,
+//     const torch::Tensor& block_table,
+//     const float          softmax_scale,
+//     const bool           is_causal,
+//     const torch::Tensor& tile_scheduler_metadata,
+//     const torch::Tensor& num_splits)
+// {
+//     using Traits = FlashMlaKernelTraitsInstance;
+//
+//     FlashMlaFwdParams params = {};
+//     
+//     DISPATCH_TYPES(
+//         query.scalar_type(),
+//         "fmla_fwd",
+//         [&](){
+//             dispatch_fmla_fwd_splictkv_combine<Traits, scalar_t>(params);
+//         }(););
+// }

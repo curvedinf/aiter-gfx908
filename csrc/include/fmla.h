@@ -18,7 +18,7 @@ std::vector<torch::Tensor> get_mla_metadata(
 //   [0] output:      [batch size, seqlen of q,     head count of q, head dim of v]
 //   [1] softmax_lse: [batch size, head count of q, seqlen of q]
 std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
-    const torch::Tensor& query,                     // [batch size,  seqlen of q, head count of q,  head dim of qk]
+    torch::Tensor& query,                           // [batch size,  seqlen of q, head count of q,  head dim of qk]
     const torch::Tensor& key_cache,                 // [block count, block size,  head count of kv, head dim of qk]
     const torch::Tensor& value_cache,               // [block count, block size,  head count of kv, head dim of v ]
     const int32_t        head_size_v,

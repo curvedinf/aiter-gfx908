@@ -50,8 +50,10 @@ if __name__ == "__main__":
         ]
         filename=os.path.basename(el)
         cfgname=filename.split('.')[0]
+        cfg_txt ="\n            ".join(cfg) + "\n"
+
         txt = f'''static CFG cfg_{cfgname} = {{
-            {"\n            ".join(cfg)}\n}};'''
+            {cfg_txt}}};'''
         cfgs.append(txt)
     txt_all=template+'\n'.join(cfgs)
     with open(f'{args.output_dir}/asm_moe_2stage_configs.hpp','w') as f:

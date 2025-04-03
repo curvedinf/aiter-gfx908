@@ -417,6 +417,11 @@ def fused_moe_2stages(
         a2 = a2.view(token_num, -1)
     a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
     a2 = a2.view(token_num, topk, inter_dim)
+    if quant_type == aiter.QuantType.No:
+        @functools.lru_cache()
+        def get1tensor(device):
+            return torch.tensor(1.0, dtype=torch.float, device=device)
+        a2_scale = get1tensor(device)
     stage2(
         a2,
         w1,

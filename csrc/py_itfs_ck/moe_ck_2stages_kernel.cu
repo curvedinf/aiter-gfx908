@@ -190,7 +190,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     int tokens = hidden_states.size(0);
     int sorted_size = sorted_token_ids.size(0);
     int E = w1.size(0);
-    int N = (ActOP == 2 ? w1.size(1) / 2 : w1.size(1));
+    int N = w1.size(1) / 2;
     int K = hidden_states.size(-1);
     // int max_num_tokens_padded = sorted_token_ids.size(0);
     // int agvtokens_per_expert = max_num_tokens_padded / E;

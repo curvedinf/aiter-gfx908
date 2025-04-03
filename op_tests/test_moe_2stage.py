@@ -116,7 +116,8 @@ def ck_moe_stage1(hidden_states,
                   num_valid_ids,  # [1]
                   w1_scale, a1_scale, dtype,
                   topk,
-                  block_size=32
+                  block_size=32,
+                  act_op=2
                   ):
     token_num = hidden_states.shape[0]
     D = w1.shape[1] // 2
@@ -130,7 +131,7 @@ def ck_moe_stage1(hidden_states,
         device=hidden_states.device,
     )
     aiter.ck_moe_stage1(hidden_states, w1, w2, sorted_token_ids,
-                        sorted_expert_ids, num_valid_ids, out, topk, w1_scale, a1_scale, block_size)
+                        sorted_expert_ids, num_valid_ids, out, topk, w1_scale, a1_scale, block_size, act_op)
     return out
 
 
@@ -194,6 +195,11 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                      dtype=dtype, device="cuda")
     score = torch.randn((token, E), device="cuda", dtype=dtype)
     topk_weights, topk_ids = fused_topk(input, score, topk, True)
+
+    if activation == ActivationType.Silu:
+        act_op = 2
+    else:
+        act_op = 0
 
     E, model_dim, inter_dim = w2.shape
     M, topk = topk_ids.shape
@@ -270,7 +276,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                 sorted_expert_ids,
                                 num_valid_ids,
                                 w1_scale, a1_scale,
-                                dtype, topk, BLOCK_SIZE_M)
+                                dtype, topk, BLOCK_SIZE_M, act_op)
     checkAllclose(out1_ref, out1_qt,
                   msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
 
@@ -285,6 +291,18 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     #         input2 = F.silu(out1_qt)
     #     else:
     #         input2 = F.gelu(out1_qt)
+    # print(torch.max(torch.abs(out1_ref - out1_qt)))
+    # print(torch.mean(out1_ref - out1_qt))
+    # print(torch.max(torch.abs(out1_ref - out1_qt) / torch.abs(out1_ref)))
+    # print(out1_ref-out1_qt)
+
+    # a2_qt, a2_scale = aiter.per_tensor_quant(out1_qt,  quant_dtype=quant_dtype)
+    # a2_qt_ref, a2_scale_ref = aiter.per_tensor_quant(out1_ref,  quant_dtype=quant_dtype)
+    # print("scale")
+    # print(a2_qt)
+    # print(a2_qt_ref)
+    # print(torch.max(a2_qt.float()-a2_qt_ref.float()))
+    # print()
     input2 = out1_qt
     if "perTensorQuant" in quant:
         a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
@@ -342,4 +360,4 @@ for dtype in [torch.float16]:
             for inter_dim in [4096]:
                 expert, topk = 8, 2
                 test_fmoe(dtype, m, dim, inter_dim, expert, topk,
-                          quant='fp8perTokenQuant', use_g1u1=True, activation=ActivationType.Silu)
+                          quant='perTensorQuant', use_g1u1=True, activation=ActivationType.Gelu)

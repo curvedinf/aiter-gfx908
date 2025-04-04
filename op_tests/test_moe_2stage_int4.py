@@ -316,8 +316,13 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     #         input2 = F.gelu(out1_ref)
 
     #print("#######CK Stage 2##########")      
-    # a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
-    
+    input2 = out1_qt
+    if "perTensorQuant" in quant:
+        a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
+    else:
+        a2_qt, a2_scale = aiter.pertoken_quant(input2.view(M, -1),  quant_dtype=quant_dtype)
+        # a2_qt, a2_scale = aiter.per_token_dynamic_quant_fp8_hip(input2.view(M, -1))
+        a2_qt = a2_qt.view(M, topk, -1)
     #print("aiter1 input2 for CK:",a2_qt[0,0])
     #print("aiter1 w2_qt for CK:",unpack_int4(w2b)[0])
     #print("aiter1 dtype for CK:",dtype)
@@ -351,18 +356,18 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     #checkAllclose(out_ref, out2_ref,msg=f'Torch fused stage(FP16):{us_fuse:.2f} us, {token*model_dim*inter_dim*topk*2/us_fuse/1000/1000:.2f} tflops......(quant:{quant_dtype})')
     
     #print("######CK 2 stage merge run ##########")
-    # out_ck_qt, us = ck_moe_fused_2stages(input,
-    #                                     w1b,
-    #                                     w2b,
-    #                                     topk_weights, topk_ids,
-    #                                     w1_scale, w2_scale,
-    #                                     block_size=BLOCK_SIZE_M,
-    #                                     activation=activation
-    #                                      )
+    out_ck_qt, us = ck_moe_fused_2stages(input,
+                                        w1b,
+                                        w2b,
+                                        topk_weights, topk_ids,
+                                        w1_scale, w2_scale,
+                                        block_size=BLOCK_SIZE_M,
+                                        activation=activation
+                                         )
     
     #print("CK 2 stage out merge:",out_ck_qt)
-    # checkAllclose(out2_ref, out_ck_qt,
-    #               msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})', printNum=10000)
+    checkAllclose(out2_ref, out_ck_qt,
+                  msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})', printNum=10000)
 
 
 

@@ -358,4 +358,4 @@ for dtype in [torch.float16]:
             for inter_dim in [4096]:
                 expert, topk = 8, 2
                 test_fmoe(dtype, m, dim, inter_dim, expert, topk,
-                          quant='fp8perTensorQuant', use_g1u1=True, activation=ActivationType.Gelu)
+                          quant='fp8perTokenQuant', use_g1u1=True, activation=ActivationType.Gelu)

@@ -8,6 +8,21 @@ import functools
 import pandas as pd
 from ..jit.core import compile_ops, CK_DIR, AITER_CSRC_DIR, AITER_ROOT_DIR, AITER_CORE_DIR
 
+if torch.__version__ >= "2.4.0":
+    _torch_custom_op_wrapper = torch.library.custom_op
+    _torch_register_fake_wrapper = torch.library.register_fake
+else:
+    def _torch_custom_op_wrapper(name, fn=None, /, *, mutates_args, device_types=None, schema=None):
+        """No-op fallback for older PyTorch versions"""
+        def decorator(func):
+            return func
+        return decorator if fn is None else fn
+
+    def _torch_register_fake_wrapper(op, fn=None, /, *, lib=None, _stacklevel=1):
+        """No-op fallback for older PyTorch versions"""
+        def decorator(func):
+            return func
+        return decorator if fn is None else fn
 
 @compile_ops("module_gemm_a8w8", fc_name="gemm_a8w8")
 def gemm_a8w8(
@@ -142,15 +157,17 @@ def gemm_a8w8_ASM(
     return None
 
 
+@_torch_custom_op_wrapper("aiter::gemm_a8w8_CK", mutates_args=(), device_types="cuda")
 def gemm_a8w8_CK(
     XQ: Tensor,
     WQ: Tensor,
     x_scale: Tensor,
     w_scale: Tensor,
     bias: Optional[Tensor] = None,
-    dtype=torch.bfloat16,
+    dtype: torch.dtype = torch.bfloat16,  # type annotation added
     splitK: Optional[int] = None
-):
+) -> Tensor:  # Added return type annotation
+    print("running real gemm_a8w8_CK kernel")
     assert dtype in [
         torch.bfloat16,
         torch.float16,
@@ -167,6 +184,26 @@ def gemm_a8w8_CK(
     Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
     return gemm_a8w8(XQ, WQ, x_scale, w_scale, Y, bias, splitK)
 
+
+@_torch_register_fake_wrapper("aiter::gemm_a8w8_CK")
+def gemm_a8w8_CK_fake(
+    XQ: torch.Tensor,
+    WQ: torch.Tensor,
+    x_scale: torch.Tensor,
+    w_scale: torch.Tensor,
+    bias: Optional[torch.Tensor] = None,
+    dtype: torch.dtype = torch.bfloat16,
+    splitK: Optional[int] = None
+) -> torch.Tensor:
+    r"""
+    Fake kernel that returns a meta-tensor of correct shape & dtype,
+    used for shape-inference / compilation.
+    """
+    print("RUNNING META (fake) gemm_a8w8_CK!")
+    m = XQ.shape[0]
+    n = WQ.shape[0]
+    # The meta device is used at compile time; just create a meta tensor:
+    return XQ.new_empty((m, n), dtype=dtype, device=XQ.device)
 
 def gemm_a8w8_blockscale_CK(
     XQ: Tensor,

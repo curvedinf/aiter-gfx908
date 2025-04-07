@@ -76,7 +76,7 @@ def model_benchmark_configs(args):
     x_vals_list = []
 
     for model_name, config in configs.items():
-        HQ = config["num_attention_heads"]
+        HQ = config["num_attention_heads"] // 8 # tp8 mode
         max_ctx_len = args.sk if args.max_ctx_len else 163840 # max positional embedding in deepseek-V3 model
         x_vals_list.append((model_name, max_ctx_len, batch_size, HQ, 512, 128, 64, 128, torch.bfloat16, torch.bfloat16, 1, 32))
 

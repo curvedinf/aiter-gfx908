@@ -147,10 +147,9 @@ def model_benchmark_configs(args):
     x_vals_list = []
 
     for model_name, config in configs.items():
-        HQ = config["num_attention_heads"]
-        # HK = HQ if config["num_key_value_heads"] is None else config["num_key_value_heads"]
-        prefix = args.prefix if args.prefix else 16324 # max positional embedding in deepseek-V3 model
-        extend = args.extend if args.extend else 8192 # max positional embedding in deepseek-V3 model
+        HQ = config["num_attention_heads"] // 8 # tp8 mode
+        prefix = args.prefix if args.prefix else 16324 
+        extend = args.extend if args.extend else 8192
         attn_impl = args.attn_impl if args.attn_impl else "non-absorb"
         x_vals_list.append((model_name, batch_size, HQ, prefix,  extend, 512, 64, 128, attn_impl))
 

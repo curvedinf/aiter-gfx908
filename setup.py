@@ -13,14 +13,14 @@ from packaging.version import parse, Version
 this_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, f'{this_dir}/aiter/')
 from jit import core
-import torch
-from torch.utils.cpp_extension import (
+from jit.cpp_extension import (
     BuildExtension,
     CppExtension,
     CUDAExtension,
     ROCM_HOME,
     IS_HIP_EXTENSION,
 )
+import torch
 
 
 ck_dir = os.environ.get("CK_DIR", f"{this_dir}/3rdparty/composable_kernel")
@@ -52,12 +52,9 @@ if IS_ROCM:
         torch._C._GLIBCXX_USE_CXX11_ABI = True
 
     if int(os.environ.get("PREBUILD_KERNELS", 0)) == 1:
-        exclude_ops=["module_mha_fwd",
-                     "module_mha_varlen_fwd",
-                     "module_mha_bwd",
-                     "module_mha_varlen_bwd",
-                     "module_fmha_v3_bwd",
-                     "module_fmha_v3_varlen_bwd"]
+        exclude_ops=["module_bench_mha_fwd",
+                     "module_bench_mha_fwd_splitkv",
+                     "module_bench_mha_bwd"]
         all_opts_args_build = core.get_args_of_build("all", exclue=exclude_ops)
         # remove pybind, because there are already duplicates in rocm_opt
         new_list=[el for el in all_opts_args_build["srcs"] if "pybind.cu" not in el]
@@ -103,7 +100,6 @@ class NinjaBuildExtension(BuildExtension):
             os.environ["MAX_JOBS"] = str(max_jobs)
 
         super().__init__(*args, **kwargs)
-
 
 setup(
     name=PACKAGE_NAME,

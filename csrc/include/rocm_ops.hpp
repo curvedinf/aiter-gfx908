@@ -19,15 +19,26 @@
       m.def("sigmoid", &aiter_sigmoid, "apply for sigmoid.");                     \
       m.def("tanh", &aiter_tanh, "apply for tanh.");
 
-#define ATTENTION_ASM_MLA_PYBIND                                             \
-      m.def("mla_stage1_asm_fwd", &mla_stage1_asm_fwd, "mla_stage1_asm_fwd", \
-            py::arg("Q"),                                                    \
-            py::arg("KV"),                                                   \
-            py::arg("kv_indptr"),                                            \
-            py::arg("kv_page_indices"),                                      \
-            py::arg("kv_last_page_lens"),                                    \
-            py::arg("softmax_scale"),                                        \
-            py::arg("splitData"),                                            \
+#define ATTENTION_ASM_MLA_PYBIND                                                \
+      m.def("mla_stage1_asm_fwd", &mla_stage1_asm_fwd, "mla_stage1_asm_fwd",    \
+            py::arg("Q"),                                                       \
+            py::arg("KV"),                                                      \
+            py::arg("kv_indptr"),                                               \
+            py::arg("kv_page_indices"),                                         \
+            py::arg("kv_last_page_lens"),                                       \
+            py::arg("softmax_scale"),                                           \
+            py::arg("splitData"),                                               \
+            py::arg("splitLse"));                                               \
+      m.def("mla_prefill_asm_fwd", &mla_prefill_asm_fwd, "mla_prefill_asm_fwd", \
+            py::arg("Q"),                                                       \
+            py::arg("KV"),                                                      \
+            py::arg("qo_indptr"),                                               \
+            py::arg("kv_indptr"),                                               \
+            py::arg("kv_page_indices"),                                         \
+            py::arg("kv_last_page_lens"),                                       \
+            py::arg("max_seqlen_q"),                                            \
+            py::arg("softmax_scale"),                                           \
+            py::arg("splitData"),                                               \
             py::arg("splitLse"));
 
 #define ATTENTION_ASM_PYBIND                    \
@@ -203,34 +214,34 @@
             py::arg("rng_state") = std::nullopt,            \
             py::arg("gen") = std::nullopt);
 
-#define MHA_VARLEN_BWD_ASM_PYBIND                                   \
-      m.def("fmha_v3_varlen_bwd", &aiter::torch_itfs::fmha_v3_varlen_bwd,\
-            py::arg("dout"),                                        \
-            py::arg("q"), py::arg("k"), py::arg("v"),               \
-            py::arg("out"),                                         \
-            py::arg("softmax_lse"),                                 \
-            py::arg("cu_seqlens_q"),                                \
-            py::arg("cu_seqlens_k"),                                \
-            py::arg("max_seqlen_q"),                                \
-            py::arg("max_seqlen_k"),                                \
-            py::arg("dropout_p"),                                   \
-            py::arg("softmax_scale"),                               \
-            py::arg("zero_tensors"),                                \
-            py::arg("is_causal"),                                   \
-            py::arg("window_size_left"),                            \
-            py::arg("window_size_right"),                           \
-            py::arg("deterministic"),                               \
-            py::arg("is_v3_atomic_fp32"),                           \
-            py::arg("how_v3_bf16_cvt"),                             \
-            py::arg("dq") = std::nullopt,                           \
-            py::arg("dk") = std::nullopt,                           \
-            py::arg("dv") = std::nullopt,                           \
-            py::arg("alibi_slopes") = std::nullopt,                 \
-            py::arg("rng_state") = std::nullopt,                    \
+#define MHA_VARLEN_BWD_ASM_PYBIND                                         \
+      m.def("fmha_v3_varlen_bwd", &aiter::torch_itfs::fmha_v3_varlen_bwd, \
+            py::arg("dout"),                                              \
+            py::arg("q"), py::arg("k"), py::arg("v"),                     \
+            py::arg("out"),                                               \
+            py::arg("softmax_lse"),                                       \
+            py::arg("cu_seqlens_q"),                                      \
+            py::arg("cu_seqlens_k"),                                      \
+            py::arg("max_seqlen_q"),                                      \
+            py::arg("max_seqlen_k"),                                      \
+            py::arg("dropout_p"),                                         \
+            py::arg("softmax_scale"),                                     \
+            py::arg("zero_tensors"),                                      \
+            py::arg("is_causal"),                                         \
+            py::arg("window_size_left"),                                  \
+            py::arg("window_size_right"),                                 \
+            py::arg("deterministic"),                                     \
+            py::arg("is_v3_atomic_fp32"),                                 \
+            py::arg("how_v3_bf16_cvt"),                                   \
+            py::arg("dq") = std::nullopt,                                 \
+            py::arg("dk") = std::nullopt,                                 \
+            py::arg("dv") = std::nullopt,                                 \
+            py::arg("alibi_slopes") = std::nullopt,                       \
+            py::arg("rng_state") = std::nullopt,                          \
             py::arg("gen") = std::nullopt);
 
 #define MHA_BWD_PYBIND                                \
-      m.def("mha_bwd", &aiter::torch_itfs::mha_bwd,        \
+      m.def("mha_bwd", &aiter::torch_itfs::mha_bwd,   \
             py::arg("dout"),                          \
             py::arg("q"), py::arg("k"), py::arg("v"), \
             py::arg("out"),                           \
@@ -251,7 +262,7 @@
             py::arg("gen") = std::nullopt);
 
 #define MHA_FWD_PYBIND                                \
-      m.def("mha_fwd", &aiter::torch_itfs::mha_fwd,        \
+      m.def("mha_fwd", &aiter::torch_itfs::mha_fwd,   \
             py::arg("q"), py::arg("k"), py::arg("v"), \
             py::arg("dropout_p"),                     \
             py::arg("softmax_scale"),                 \
@@ -265,49 +276,49 @@
             py::arg("alibi_slopes") = std::nullopt,   \
             py::arg("gen") = std::nullopt);
 
-#define MHA_VARLEN_BWD_PYBIND                                \
+#define MHA_VARLEN_BWD_PYBIND                                     \
       m.def("mha_varlen_bwd", &aiter::torch_itfs::mha_varlen_bwd, \
-            py::arg("dout"),                                 \
-            py::arg("q"), py::arg("k"), py::arg("v"),        \
-            py::arg("out"),                                  \
-            py::arg("softmax_lse"),                          \
-            py::arg("cu_seqlens_q"),                         \
-            py::arg("cu_seqlens_k"),                         \
-            py::arg("max_seqlen_q"),                         \
-            py::arg("max_seqlen_k"),                         \
-            py::arg("dropout_p"),                            \
-            py::arg("softmax_scale"),                        \
-            py::arg("zero_tensors"),                         \
-            py::arg("is_causal"),                            \
-            py::arg("window_size_left"),                     \
-            py::arg("window_size_right"),                    \
-            py::arg("deterministic"),                        \
-            py::arg("dq") = std::nullopt,                    \
-            py::arg("dk") = std::nullopt,                    \
-            py::arg("dv") = std::nullopt,                    \
-            py::arg("alibi_slopes") = std::nullopt,          \
-            py::arg("rng_state") = std::nullopt,             \
+            py::arg("dout"),                                      \
+            py::arg("q"), py::arg("k"), py::arg("v"),             \
+            py::arg("out"),                                       \
+            py::arg("softmax_lse"),                               \
+            py::arg("cu_seqlens_q"),                              \
+            py::arg("cu_seqlens_k"),                              \
+            py::arg("max_seqlen_q"),                              \
+            py::arg("max_seqlen_k"),                              \
+            py::arg("dropout_p"),                                 \
+            py::arg("softmax_scale"),                             \
+            py::arg("zero_tensors"),                              \
+            py::arg("is_causal"),                                 \
+            py::arg("window_size_left"),                          \
+            py::arg("window_size_right"),                         \
+            py::arg("deterministic"),                             \
+            py::arg("dq") = std::nullopt,                         \
+            py::arg("dk") = std::nullopt,                         \
+            py::arg("dv") = std::nullopt,                         \
+            py::arg("alibi_slopes") = std::nullopt,               \
+            py::arg("rng_state") = std::nullopt,                  \
             py::arg("gen") = std::nullopt);
 
-#define MHA_VARLEN_FWD_PYBIND                                \
+#define MHA_VARLEN_FWD_PYBIND                                     \
       m.def("mha_varlen_fwd", &aiter::torch_itfs::mha_varlen_fwd, \
-            py::arg("q"), py::arg("k"), py::arg("v"),        \
-            py::arg("cu_seqlens_q"),                         \
-            py::arg("cu_seqlens_k"),                         \
-            py::arg("max_seqlen_q"),                         \
-            py::arg("max_seqlen_k"),                         \
-            py::arg("dropout_p"),                            \
-            py::arg("softmax_scale"),                        \
-            py::arg("zero_tensors"),                         \
-            py::arg("is_causal"),                            \
-            py::arg("window_size_left"),                     \
-            py::arg("window_size_right"),                    \
-            py::arg("return_softmax_lse"),                   \
-            py::arg("return_dropout_randval"),               \
-            py::arg("out") = std::nullopt,                   \
-            py::arg("block_table") = std::nullopt,           \
-            py::arg("bias") = std::nullopt,                  \
-            py::arg("alibi_slopes") = std::nullopt,          \
+            py::arg("q"), py::arg("k"), py::arg("v"),             \
+            py::arg("cu_seqlens_q"),                              \
+            py::arg("cu_seqlens_k"),                              \
+            py::arg("max_seqlen_q"),                              \
+            py::arg("max_seqlen_k"),                              \
+            py::arg("dropout_p"),                                 \
+            py::arg("softmax_scale"),                             \
+            py::arg("zero_tensors"),                              \
+            py::arg("is_causal"),                                 \
+            py::arg("window_size_left"),                          \
+            py::arg("window_size_right"),                         \
+            py::arg("return_softmax_lse"),                        \
+            py::arg("return_dropout_randval"),                    \
+            py::arg("out") = std::nullopt,                        \
+            py::arg("block_table") = std::nullopt,                \
+            py::arg("bias") = std::nullopt,                       \
+            py::arg("alibi_slopes") = std::nullopt,               \
             py::arg("gen") = std::nullopt);
 
 #define MOE_CK_2STAGES_PYBIND                   \
@@ -378,6 +389,15 @@
             py::arg("fc2_smooth_scale") = std::nullopt,                          \
             py::arg("activation") = ActivationType::Silu);                       \
       m.def("fmoe_g1u1", &fmoe_g1u1,                                             \
+            py::arg("out"), py::arg("input"),                                    \
+            py::arg("gate"), py::arg("down"),                                    \
+            py::arg("sorted_token_ids"), py::arg("sorted_weight_buf"),           \
+            py::arg("sorted_expert_ids"), py::arg("num_valid_ids"),              \
+            py::arg("topk"), py::arg("input_scale"),                             \
+            py::arg("fc1_scale"), py::arg("fc2_scale"),                          \
+            py::arg("fc2_smooth_scale") = std::nullopt,                          \
+            py::arg("activation") = ActivationType::Silu);                       \
+      m.def("fmoe_g1u1_tkw1", &fmoe_g1u1_tkw1,                                   \
             py::arg("out"), py::arg("input"),                                    \
             py::arg("gate"), py::arg("down"),                                    \
             py::arg("sorted_token_ids"), py::arg("sorted_weight_buf"),           \
@@ -494,10 +514,10 @@
       m.def("rope_thd_bwd_impl", &rope_thd_bwd_impl);             \
       m.def("rope_2d_bwd_impl", &rope_2d_bwd_impl);
 
-#define ROPE_POS_FWD_PYBIND                                                                           \
-      m.def("rope_cached_positions_fwd_impl", &rope_cached_positions_fwd_impl);                       \
-      m.def("rope_cached_positions_2c_fwd_impl", &rope_cached_positions_2c_fwd_impl);                 \
-      m.def("rope_cached_positions_offsets_fwd_impl", &rope_cached_positions_offsets_fwd_impl);       \
+#define ROPE_POS_FWD_PYBIND                                                                     \
+      m.def("rope_cached_positions_fwd_impl", &rope_cached_positions_fwd_impl);                 \
+      m.def("rope_cached_positions_2c_fwd_impl", &rope_cached_positions_2c_fwd_impl);           \
+      m.def("rope_cached_positions_offsets_fwd_impl", &rope_cached_positions_offsets_fwd_impl); \
       m.def("rope_cached_positions_offsets_2c_fwd_impl", &rope_cached_positions_offsets_2c_fwd_impl);
 
 #define SMOOTHQUANT_PYBIND                        \

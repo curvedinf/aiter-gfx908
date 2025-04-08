@@ -5,12 +5,13 @@ import os
 import sys
 import shutil
 import time
+import types
 import importlib
 import functools
 import traceback
 from typing import List, Optional
+from . import cpp_extension
 import torch
-from torch.utils import cpp_extension
 from torch.utils.file_baton import FileBaton
 import logging
 import json
@@ -250,15 +251,17 @@ def build_module(
             sources = exec_blob(blob_gen_cmd, op_dir, src_dir, sources)
 
         # TODO: Move all torch api into torch folder
-        old_bd_include_dir = f'{op_dir}/build/include'
+        old_bd_include_dir = f"{op_dir}/build/include"
         os.makedirs(old_bd_include_dir, exist_ok=True)
-        rename_cpp_to_cu([f"{AITER_CSRC_DIR}/include"] + extra_include,
-                         old_bd_include_dir)
+        rename_cpp_to_cu(
+            [f"{AITER_CSRC_DIR}/include"] + extra_include, old_bd_include_dir
+        )
 
-        bd_include_dir = f'{op_dir}/build/include/torch'
+        bd_include_dir = f"{op_dir}/build/include/torch"
         os.makedirs(bd_include_dir, exist_ok=True)
-        rename_cpp_to_cu([f"{AITER_CSRC_DIR}/include/torch"] + extra_include,
-                         bd_include_dir)
+        rename_cpp_to_cu(
+            [f"{AITER_CSRC_DIR}/include/torch"] + extra_include, bd_include_dir
+        )
 
         extra_include_paths = [
             f"{CK_DIR}/include",
@@ -266,19 +269,50 @@ def build_module(
             f"{old_bd_include_dir}",
         ]
 
-        module = cpp_extension.load(
-            md_name,
-            sources,
-            extra_cflags=flags_cc,
-            extra_cuda_cflags=flags_hip,
-            extra_ldflags=extra_ldflags,
-            extra_include_paths=extra_include_paths,
-            build_directory=opbd_dir,
-            verbose=verbose or AITER_LOG_MORE > 0,
-            with_cuda=True,
-            is_python_module=True,
-        )
-        shutil.copy(f"{opbd_dir}/{md_name}.so", f"{get_user_jit_dir()}")
+        if md_name in [
+            "module_bench_mha_fwd",
+            "module_bench_mha_fwd_splitkv",
+            "module_bench_mha_bwd",
+        ]:
+            module = cpp_extension.load(
+                md_name,
+                sources,
+                extra_cflags=flags_cc,
+                extra_cuda_cflags=flags_hip,
+                extra_ldflags=extra_ldflags,
+                extra_include_paths=extra_include_paths,
+                build_directory=opbd_dir,
+                verbose=verbose or AITER_LOG_MORE > 0,
+                with_cuda=True,
+                is_python_module=False,
+                is_standalone=True,
+            )
+            shutil.copy(f"{opbd_dir}/{md_name}", f"{get_user_jit_dir()}")
+        else:
+            module = cpp_extension.load(
+                md_name,
+                sources,
+                extra_cflags=flags_cc,
+                extra_cuda_cflags=flags_hip,
+                extra_ldflags=extra_ldflags,
+                extra_include_paths=extra_include_paths,
+                build_directory=opbd_dir,
+                verbose=verbose or AITER_LOG_MORE > 0,
+                with_cuda=True,
+                is_python_module=True,
+            )
+            shutil.copy(f"{opbd_dir}/{md_name}.so", f"{get_user_jit_dir()}")
+
+        # setup(
+        #     name=md_name,
+        #     ext_modules=[
+        #         CppExtension(
+        #             name=md_name,
+        #             sources=sources,
+        #             ex
+        #         )
+        #     ]
+        # )
     except Exception as e:
         logger.error(
             "failed build jit [{}]\n-->[History]: {}".format(
@@ -352,7 +386,11 @@ def get_args_of_build(ops_name: str, exclue=[]):
                 return d_all_ops
             # no find opt_name in json.
             elif data.get(ops_name) == None:
-                logger.warning("Not found this operator in 'optCompilerConfig.json'. ")
+                logger.warning(
+                    "Not found this operator ("
+                    + ops_name
+                    + ") in 'optCompilerConfig.json'. "
+                )
                 return d_opt_build_args
             # parser single opt
             else:
@@ -403,7 +441,11 @@ def compile_ops(_md_name: str, fc_name: Optional[str] = None):
                     extra_ldflags,
                     verbose,
                 )
-            op = getattr(module, loadName)
+
+            if isinstance(module, types.ModuleType):
+                op = getattr(module, loadName)
+            else:
+                return None
 
             if AITER_LOG_MORE == 2:
                 from ..test_common import log_args

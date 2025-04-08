@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import List
 
 import triton
-from triton.compiler.code_generator import kernel_suffix
 from triton.backends.amd.driver import ty_to_cpp
 
 desc = """
@@ -104,7 +103,14 @@ def compile_kernel(path, kernel_name:str, signature:str, grid:str, num_warps:int
             arg_types += [signature[i]]
 
     # dump C stub code
-    suffix = kernel_suffix(signature.values(), attrs)
+    suffix = ''
+    for i, ty in enumerate(signature.values()):
+        suffix += str(i)
+        if hints.get((i, ), None) == 1:
+            suffix += 'c'
+        if hints.get((i, ), None) == 16:
+            suffix += 'd'
+
     func_name = '_'.join([out_name, sig_hash, suffix])
 
     hex_ = binascii.hexlify(ccinfo.asm["hsaco"]).decode('utf-8')

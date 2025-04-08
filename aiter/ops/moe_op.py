@@ -177,7 +177,8 @@ def ck_moe_stage1(
     topk: int,
     w1_scale: Optional[Tensor] = None,
     a1_scale: Optional[Tensor] = None,
-    block_m: Optional[int] = 32
+    block_m: Optional[int] = 32,
+    ActOP: Optional[int] = 2
 ): ...
 
 

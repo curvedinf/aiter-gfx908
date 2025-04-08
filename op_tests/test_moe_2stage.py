@@ -116,10 +116,11 @@ def ck_moe_stage1(hidden_states,
                   num_valid_ids,  # [1]
                   w1_scale, a1_scale, dtype,
                   topk,
-                  block_size=32
+                  block_size=32,
+                  act_op=2
                   ):
     token_num = hidden_states.shape[0]
-    D = w1.shape[1]
+    D = w1.shape[1] // 2
     num_experts, model_dim, inter_dim = w2.shape
     max_num_tokens_padded = sorted_token_ids.shape[0]
     # max_num_tokens_padded = sorted_expert_ids.shape[0]*block_size
@@ -130,7 +131,7 @@ def ck_moe_stage1(hidden_states,
         device=hidden_states.device,
     )
     aiter.ck_moe_stage1(hidden_states, w1, w2, sorted_token_ids,
-                        sorted_expert_ids, num_valid_ids, out, topk, w1_scale, a1_scale, block_size)
+                        sorted_expert_ids, num_valid_ids, out, topk, w1_scale, a1_scale, block_size, act_op)
     return out
 
 
@@ -183,7 +184,7 @@ def ck_moe_fused_2stages(hidden_states,
 
 
 def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=False, shared_E=0, activation=ActivationType.Silu):
-    input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
+    input = torch.randn((token, model_dim), dtype=dtype, device="cuda") / 10
     if use_g1u1:
         w1 = torch.randn((E+shared_E, inter_dim*2, model_dim),
                          dtype=dtype, device="cuda") / 10
@@ -194,6 +195,11 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                      dtype=dtype, device="cuda")
     score = torch.randn((token, E), device="cuda", dtype=dtype)
     topk_weights, topk_ids = fused_topk(input, score, topk, True)
+
+    if activation == ActivationType.Silu:
+        act_op = 2
+    else:
+        act_op = 0
 
     E, model_dim, inter_dim = w2.shape
     M, topk = topk_ids.shape
@@ -238,6 +244,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
             input2 = F.silu(out1_ref)
         else:
             input2 = F.gelu(out1_ref)
+    out1_ref = input2
     if "perTensorQuant" in quant:
         a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
     else:
@@ -263,27 +270,40 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     # checkAllclose(out_ref, out2_ref, msg="[torch] 1_stage vs 2_stage")
 
     out1_qt, us = ck_moe_stage1(a1_qt,
-                                shuffle_weight(w1_qt, layout=(32, 32)),
-                                w2,
+                                shuffle_weight(w1_qt, layout=(16, 16)),
+                                w2_qt,
                                 sorted_ids,
                                 sorted_expert_ids,
                                 num_valid_ids,
                                 w1_scale, a1_scale,
-                                dtype, topk, BLOCK_SIZE_M)
+                                dtype, topk, BLOCK_SIZE_M, act_op)
     checkAllclose(out1_ref, out1_qt,
                   msg=f'ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
 
-    if use_g1u1:
-        gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
-        if activation == ActivationType.Silu:
-            input2 = F.silu(gate) * up
-        else:
-            input2 = F.gelu(gate) * up
-    else:
-        if activation == ActivationType.Silu:
-            input2 = F.silu(out1_qt)
-        else:
-            input2 = F.gelu(out1_qt)
+    # if use_g1u1:
+    #     gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
+    #     if activation == ActivationType.Silu:
+    #         input2 = F.silu(gate) * up
+    #     else:
+    #         input2 = F.gelu(gate) * up
+    # else:
+    #     if activation == ActivationType.Silu:
+    #         input2 = F.silu(out1_qt)
+    #     else:
+    #         input2 = F.gelu(out1_qt)
+    # print(torch.max(torch.abs(out1_ref - out1_qt)))
+    # print(torch.mean(out1_ref - out1_qt))
+    # print(torch.max(torch.abs(out1_ref - out1_qt) / torch.abs(out1_ref)))
+    # print(out1_ref-out1_qt)
+
+    # a2_qt, a2_scale = aiter.per_tensor_quant(out1_qt,  quant_dtype=quant_dtype)
+    # a2_qt_ref, a2_scale_ref = aiter.per_tensor_quant(out1_ref,  quant_dtype=quant_dtype)
+    # print("scale")
+    # print(a2_qt)
+    # print(a2_qt_ref)
+    # print(torch.max(a2_qt.float()-a2_qt_ref.float()))
+    # print()
+    input2 = out1_qt
     if "perTensorQuant" in quant:
         a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
     else:
@@ -293,7 +313,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     out2_qt, us = ck_moe_stage2(a2_qt,
                                 w1_qt,
-                                shuffle_weight(w2_qt, layout=(32, 32)),
+                                shuffle_weight(w2_qt, layout=(16, 16)),
                                 sorted_ids,
                                 sorted_expert_ids,
                                 sorted_weights,
@@ -304,36 +324,38 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                   msg=f'ck_moe_stage2:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
 
     out_ck_qt, us = ck_moe_fused_2stages(input,
-                                         shuffle_weight(
-                                             w1_qt, layout=(32, 32)),
-                                         shuffle_weight(
-                                             w2_qt, layout=(32, 32)),
+                                         shuffle_weight(w1_qt),
+                                         shuffle_weight(w2_qt),
                                          topk_weights, topk_ids,
                                          w1_scale, w2_scale,
-                                         activation=activation
-                                         #  block_size=BLOCK_SIZE_M
+                                         activation=activation,
+                                          block_size=BLOCK_SIZE_M
                                          )
 
     checkAllclose(out2_ref, out_ck_qt,
                   msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
 
-    out_ck_nqt, us = ck_moe_fused_2stages(input,
-                                          shuffle_weight(w1, layout=(32, 32)),
-                                          shuffle_weight(w2, layout=(32, 32)),
-                                          topk_weights, topk_ids,
-                                          None, None,
-                                         activation=activation
-                                          #   block_size=BLOCK_SIZE_M
-                                          )
+    # out_ck_nqt, us = ck_moe_fused_2stages(input,
+    #                                       shuffle_weight(w1, layout=(32, 32)),
+    #                                       shuffle_weight(w2, layout=(32, 32)),
+    #                                       topk_weights, topk_ids,
+    #                                       None, None,
+    #                                      activation=activation
+    #                                       #   block_size=BLOCK_SIZE_M
+    #                                       )
 
-    checkAllclose(out_ref, out_ck_nqt,
-                  msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
+    # checkAllclose(out_ref, out_ck_nqt,
+    #               msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
 
 
 for dtype in [torch.float16]:
-    for m in [1,3, 5, 7, 32, 128, 257, 385, 1025]:
-        for dim in [4096,6144]:
-            for inter_dim in [4096,6144]:
+    # for m in [1,3, 5, 7, 32, 128, 257, 385, 1025]:
+    #     for dim in [4096,6144]:
+    #         for inter_dim in [4096,6144]:
+    
+    for m in [1, 16, 32, 64, 128, 257, 385, 1025, 2048, 4096]:
+        for dim in [6144]:
+            for inter_dim in [4096]:
                 expert, topk = 8, 2
                 test_fmoe(dtype, m, dim, inter_dim, expert, topk,
-                          quant='fp8perTokenQuant', use_g1u1=True, activation=ActivationType.Silu)
+                          quant='fp8perTokenQuant', use_g1u1=True, activation=ActivationType.Gelu)

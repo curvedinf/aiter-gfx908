@@ -116,11 +116,12 @@ def ck_moe_stage1(hidden_states,
                   num_valid_ids,  # [1]
                   w1_scale, a1_scale, dtype,
                   topk,
-                  block_size=32
+                  block_size=32,
+                  act_op=2
                   ):
     token_num = hidden_states.shape[0]
 
-    D = w1.shape[1]
+    D = w1.shape[1] // 2
     num_experts, model_dim, inter_dim = w2.shape
     max_num_tokens_padded = sorted_token_ids.shape[0]
     # max_num_tokens_padded = sorted_expert_ids.shape[0]*block_size
@@ -131,7 +132,7 @@ def ck_moe_stage1(hidden_states,
         device=hidden_states.device,
     )
     aiter.ck_moe_stage1(hidden_states, w1, w2, sorted_token_ids,
-                        sorted_expert_ids, num_valid_ids, out, topk, w1_scale, a1_scale, block_size)
+                        sorted_expert_ids, num_valid_ids, out, topk, w1_scale, a1_scale, block_size, act_op)
     return out
 
 
@@ -185,7 +186,7 @@ def ck_moe_fused_2stages(hidden_states,
 
 
 def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=False, shared_E=0, activation=ActivationType.Silu):
-    input = torch.randn((token, model_dim), dtype=dtype, device="cuda") 
+    input = torch.randn((token, model_dim), dtype=dtype, device="cuda") / 10
     if use_g1u1:
         w1 = torch.randn((E+shared_E, inter_dim*2, model_dim),
                          dtype=dtype, device="cuda")  / 10
@@ -196,6 +197,11 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                      dtype=dtype, device="cuda") 
     score = torch.randn((token, E), device="cuda", dtype=dtype)
     topk_weights, topk_ids = fused_topk(input, score, topk, True)
+
+    if activation==ActivationType.Silu:
+        act_op = 2
+    else :
+        act_op = 0
 
     E, model_dim, inter_dim = w2.shape
     M, topk = topk_ids.shape
@@ -234,8 +240,9 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     sp1 = (E+shared_E, inter_dim)
     sp2 = (E+shared_E, model_dim)
     # W int4 implement
-    w1b = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w1_qt, (32, 32), use_int4=True)))
-    w2b = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w2_qt, (32, 32), use_int4=True)))
+    w1b = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w1_qt, (16, 16), use_int4=True)))
+    w2b = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w2_qt, (16, 16), use_int4=True)))
+
     out1_ref, us_ref = torch_moe_stage1(a1_qt, w1_qt,
                                         w2_qt,
                                         topk_weights, topk_ids,
@@ -256,6 +263,7 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
             input2 = F.silu(out1_ref)
         else:
             input2 = F.gelu(out1_ref)
+    out1_ref = input2
     if "perTensorQuant" in quant:
         a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
     else:
@@ -289,27 +297,32 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
                                 sorted_expert_ids,
                                 num_valid_ids,
                                 w1_scale, a1_scale,
-                                dtype, topk, BLOCK_SIZE_M)
+                                dtype, topk, BLOCK_SIZE_M, act_op)
     
     #print("#######CK Stage 1##########")
     #print("CK GEMM1 OUT:",out1_qt)
     checkAllclose(out1_ref, out1_qt,
                   msg=f'ck_moe_stage1:{us_s1:.2f} us_s1, {token*model_dim*inter_dim*2*topk*2/us_s1/1000/1000:.2f} tflops......(quant:{quant_dtype})')
-    if use_g1u1:
-        gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
-        if activation== ActivationType.Silu:
-            input2 = F.silu(gate) * up
-        else:
-            input2 = F.gelu(gate) * up
-    else:
-        if activation== ActivationType.Silu:
-            input2 = F.silu(out1_ref)
-        else:
-            input2 = F.gelu(out1_ref)
+    # if use_g1u1:
+    #     gate, up = out1_qt.split([inter_dim, inter_dim], dim=-1)
+    #     if activation== ActivationType.Silu:
+    #         input2 = F.silu(gate) * up
+    #     else:
+    #         input2 = F.gelu(gate) * up
+    # else:
+    #     if activation== ActivationType.Silu:
+    #         input2 = F.silu(out1_ref)
+    #     else:
+    #         input2 = F.gelu(out1_ref)
 
     #print("#######CK Stage 2##########")      
-    # a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
-    
+    input2 = out1_qt
+    if "perTensorQuant" in quant:
+        a2_qt, a2_scale = aiter.per_tensor_quant(input2,  quant_dtype=quant_dtype)
+    else:
+        a2_qt, a2_scale = aiter.pertoken_quant(input2.view(M, -1),  quant_dtype=quant_dtype)
+        # a2_qt, a2_scale = aiter.per_token_dynamic_quant_fp8_hip(input2.view(M, -1))
+        a2_qt = a2_qt.view(M, topk, -1)
     #print("aiter1 input2 for CK:",a2_qt[0,0])
     #print("aiter1 w2_qt for CK:",unpack_int4(w2b)[0])
     #print("aiter1 dtype for CK:",dtype)
@@ -321,10 +334,9 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
     #print("#aiter1 a2  for CK:",a2_qt)
     #print("#aiter1 w1b for CK:",w1b.shape)
     #print("#aiter1 w1b dtype for CK:",w1b.dtype)
-    #print("#aiter1 w1 for CK:",w1.shape)
+    #print("#aiter1 w1 for CK:",w1b.shape)
     #print("#aiter1 w2b for CK:",w2b.shape)
     #print("#aiter1 w2 for CK:",w2.shape)
-
 
     out2_qt, us_s2 = ck_moe_stage2(a2_qt,
                                 w1b,

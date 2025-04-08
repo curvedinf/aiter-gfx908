@@ -242,8 +242,13 @@ def ck_moe_2stages(a1,
     else:
         a1_scale = None
 
+    if activation == ActivationType.Silu:
+        act_op = 2
+    else:
+        act_op = 0
+
     a2 = torch.empty(
-        (M, topk, w1.shape[1]),
+        (M, topk, w1.shape[1] // 2),
         dtype=dtype,
         device=device,
     )
@@ -251,22 +256,22 @@ def ck_moe_2stages(a1,
     aiter.ck_moe_stage1(a1, w1, w2,
                         sorted_ids, sorted_expert_ids, num_valid_ids,
                         a2, topk,
-                        fc1_scale, a1_scale, block_size)
+                        fc1_scale, a1_scale, block_size, act_op)
 
     # g1u0
-    if w2.shape[2] == w1.shape[1]:
-        if activation == ActivationType.Gelu:
-            a2 = F.gelu(a2)
-        else:
-            a2 = F.silu(a2)
-    # g1u1
-    else:
-        tmp = torch.empty((M, topk, inter_dim), dtype=dtype, device=device)
-        if activation == ActivationType.Gelu:
-            aiter.gelu_and_mul(tmp, a2)
-        else:
-            aiter.silu_and_mul(tmp, a2)
-        a2 = tmp
+    # if w2.shape[2] == w1.shape[1]:
+    #     if activation == ActivationType.Gelu:
+    #         a2 = F.gelu(a2)
+    #     else:
+    #         a2 = F.silu(a2)
+    # # g1u1
+    # else:
+    #     tmp = torch.empty((M, topk, inter_dim), dtype=dtype, device=device)
+    #     if activation == ActivationType.Gelu:
+    #         aiter.gelu_and_mul(tmp, a2)
+    #     else:
+    #         aiter.silu_and_mul(tmp, a2)
+    #     a2 = tmp
     if w2.dtype == torch.float8_e4m3fnuz:
         if quantType == "per_tensor":
             a2, a2_scale = aiter.per_tensor_quant_fp8_hip(a2, a2_scale)
@@ -331,7 +336,7 @@ def ck_moe_2stages_win4(a1,
         a1_scale = None
 
     a2 = torch.empty(
-        (M, topk, w1.shape[1]),
+        (M, topk, w1.shape[1] // 2),
         dtype=dtype,
         device=device,
     )
@@ -339,22 +344,22 @@ def ck_moe_2stages_win4(a1,
     aiter.ck_moe_stage1(a1, w1, w2,
                         sorted_ids, sorted_expert_ids, num_valid_ids,
                         a2, topk,
-                        fc1_scale, a1_scale, block_size)
+                        fc1_scale, a1_scale, block_size, 2)
     #print("a2 shape:",a2.shape)
     # g1u0
-    if w2.shape[2] == w1.shape[1]:
-        if activation == ActivationType.Gelu:
-            a2 = F.gelu(a2)
-        else:
-            a2 = F.silu(a2)
-    # g1u1
-    else:
-        tmp = torch.empty((M, topk, inter_dim), dtype=dtype, device=device)
-        if activation == ActivationType.Gelu:
-            aiter.gelu_and_mul(tmp, a2)
-        else:
-            aiter.silu_and_mul(tmp, a2)
-        a2 = tmp
+    # if w2.shape[2] == w1.shape[1]:
+    #     if activation == ActivationType.Gelu:
+    #         a2 = F.gelu(a2)
+    #     else:
+    #         a2 = F.silu(a2)
+    # # g1u1
+    # else:
+    #     tmp = torch.empty((M, topk, inter_dim), dtype=dtype, device=device)
+    #     if activation == ActivationType.Gelu:
+    #         aiter.gelu_and_mul(tmp, a2)
+    #     else:
+    #         aiter.silu_and_mul(tmp, a2)
+    #     a2 = tmp
     if w2.dtype == torch.uint32:
         if quantType == "per_tensor":
             a2, a2_scale = aiter.per_tensor_quant_fp8_hip(a2)

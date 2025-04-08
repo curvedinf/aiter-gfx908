@@ -334,7 +334,12 @@ def ck_moe_2stages_win4(a1,
             # a1, a1_scale = aiter.pertoken_quant(a1, quant_dtype = torch.float8_e4m3fnuz)
     else:
         a1_scale = None
-
+        
+    if activation == ActivationType.Silu:
+        act_op = 2
+    else:
+        act_op = 0
+        
     a2 = torch.empty(
         (M, topk, w1.shape[1] // 2),
         dtype=dtype,
@@ -344,7 +349,7 @@ def ck_moe_2stages_win4(a1,
     aiter.ck_moe_stage1(a1, w1, w2,
                         sorted_ids, sorted_expert_ids, num_valid_ids,
                         a2, topk,
-                        fc1_scale, a1_scale, block_size, 2)
+                        fc1_scale, a1_scale, block_size, act_op)
     #print("a2 shape:",a2.shape)
     # g1u0
     # if w2.shape[2] == w1.shape[1]:

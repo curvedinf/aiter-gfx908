@@ -620,9 +620,22 @@ def torch_moe_stage1(
     inter_dim = get_inter_dim(w1.shape, w2.shape)
 
     if w1_scale is not None:
-        w1 = w1 * w1_scale.view(w1_scale.shape[0], -1, 1)
+        if w1_scale.numel() == w1.shape[0] or w1_scale.numel() == w1.shape[0]*w1.shape[1]:
+            w1 = w1 * w1_scale.view(w1_scale.shape[0], -1, 1)
+        # per_128x128
+        else:
+            w1_shape = w1.shape
+            w1 = w1.view(w1.shape[0], w1.shape[1]//128, 128, w1.shape[2]//128, 128) * \
+                w1_scale.view(w1_scale.shape[0], w1.shape[1]//128, 1, w1.shape[2]//128, 1)
+            w1 = w1.view(w1_shape)
+
     if a1_scale is not None and w1_scale is not None:
-        hidden_states = hidden_states * a1_scale
+        if a1_scale.numel() == hidden_states.shape[0] or a1_scale.numel() == 1:
+            hidden_states = hidden_states * a1_scale
+        else:
+            a1_scale = a1_scale.view(hidden_states.shape[0], -1, 1)
+            a1_scale = a1_scale.repeat(1, 1, hidden_states.shape[-1] // a1_scale.shape[1]).view(hidden_states.shape[0], -1)
+            hidden_states = hidden_states * a1_scale
 
     hidden_states = hidden_states.view(B, -1, D).repeat(1, topk, 1)
 

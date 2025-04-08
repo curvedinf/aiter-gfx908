@@ -51,6 +51,22 @@ struct TypeCast
     {
         e = ck::type_convert<B16>(c);
     }
+
+    template <>
+    __host__ __device__ constexpr void operator()<F16, int, float, float>(F16 &e, const int &c,
+                                                                            const float &d0,
+                                                                            const float &d1) const
+    {
+        e = ck::type_convert<F16>(c);
+    }
+
+    template <>
+    __host__ __device__ constexpr void operator()<B16, int, float, float>(B16 &e, const int &c,
+                                                                            const float &d0,
+                                                                            const float &d1) const
+    {
+        e = ck::type_convert<B16>(c);
+    }
 };
 
 // for gate, a_scale, b_scale

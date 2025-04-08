@@ -57,17 +57,43 @@ struct __attribute__((packed)) KernelArgs
     p3 _p21;
 };
 
-static CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1)
+static CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1, std::optional<torch::Tensor>&w1_scale)
 {
+    int E = w1.size(0);
+    int dim1 = w1.size(1);
+    std::string quant_type;
+    if (!w1_scale.has_value())
+        quant_type = "no";
+    else if (w1_scale.value().numel() == E)
+        quant_type = "per_Tensor";
+    else if (w1_scale.value().numel() == E * dim1)
+        quant_type = "per_Token";
+    else
+        quant_type = "per_Block";
     if (inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
         w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
-        out.scalar_type() == at::ScalarType::BFloat16)
+        out.scalar_type() == at::ScalarType::BFloat16 &&
+        quant_type == "per_Token")
     {
         return &cfg_fmoe_stage1_bf16_pertokenFp8_g1u1;
     }
+    else if (inp.scalar_type() == at::ScalarType::Char &&
+             w1.scalar_type() == at::ScalarType::Char &&
+             out.scalar_type() == at::ScalarType::BFloat16 &&
+             quant_type == "per_Token")
+    {
+        return &cfg_fmoe_stage1_bf16_pertokenInt8_g1u1;
+    }
+    else if (inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
+             w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
+             out.scalar_type() == at::ScalarType::BFloat16 &&
+             quant_type == "per_Block")
+    {
+        return &cfg_fmoe_stage1_bf16_pertokenFp8_blockscale_g1u1;
+    }
     else
     {
-        TORCH_CHECK(false, "Unsupported input_type:", inp.scalar_type(), " weight_type:", w1.scalar_type(), ", out_type:", out.scalar_type());
+        TORCH_CHECK(false, "Unsupported input_type:", inp.scalar_type(), " weight_type:", w1.scalar_type(), ", out_type:", out.scalar_type(), ", quant_type:", quant_type);
     }
 };
 
@@ -131,7 +157,7 @@ void moe_stage1_g1u1(
     const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    CFG *config_map = get_cfg(input, out, w1);
+    CFG *config_map = get_cfg(input, out, w1, w1_scale);
     static std::unordered_map<std::string, std::unique_ptr<AiterAsmKernel>> impl_ptr_map;
     int model_dim = input.size(1);
     int hidden_dim = inter_dim;

@@ -7,6 +7,7 @@ import aiter
 import pandas as pd
 import argparse
 import time
+import json
 from aiter import ActivationType, QuantType
 from aiter.fused_moe import (
     fused_topk,
@@ -24,69 +25,95 @@ from aiter.int4_utils import *
 torch.set_default_device("cuda")
 torch.int4 = torch.uint32
 
+def weight_quant(
+    weight,
+    qType,
+    quant_dtype,
+):
+    E, dim1, dim2 = weight.shape
+    if qType == aiter.QuantType.per_Tensor and quant_dtype != torch.int4:
+        weight_qt, weight_scale = aiter.pertoken_quant(weight.view(E, -1), quant_dtype=quant_dtype)
+    elif qType == QuantType.per_128x128:
+        weight_qt = weight.view(E, dim1//128, 128, dim2//128, 128).permute(0, 1, 3, 2, 4).contiguous().view(E, -1, 128*128)
+        weight_qt, weight_scale = aiter.pertoken_quant(weight_qt, quant_dtype=quant_dtype)
+        weight_qt = weight_qt.view(E, -1)
+        weight_qt = weight_qt.view(E, dim1//128,  dim2//128, 128, 128).permute(0, 1, 3, 2, 4).contiguous().view(E, dim1, dim2)
+    elif qType == aiter.QuantType.per_Tensor and quant_dtype == torch.int4:  # int4 w quant
+        weight_qt, weight_scale = aiter.pertoken_quant(weight.view(E, -1), quant_dtype=torch.int8, dtypeMax=7)
+    elif qType == aiter.QuantType.per_Token and quant_dtype == torch.int4:  # int4 w quant
+        weight_qt, weight_scale = aiter.pertoken_quant(weight, quant_dtype=torch.int8, dtypeMax=7)
+    else:
+        torch_quant = aiter.get_torch_quant(qType)
+        weight_qt, weight_scale = torch_quant(weight, quant_dtype=quant_dtype)
+    return weight_qt, weight_scale
+
 def go(
     untunedf,
     tunedf,
 ):
     startTS = time.perf_counter()
     blockMs = [16, 32, 48, 64, 80, 96, 112, 128, 144, 160]
-    asm_kernels = {
-        16: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x128_4tg_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x128_4tg_pf3",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x256_2tg_pf3",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x256_3tg_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x512_2tg_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_16x512_pf3",
-        ],
-        32: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_3tg_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x128_3tg_pf3",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x256_2tg_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x256_2tg_pf3",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x512_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_32x512_pf3",
-        ],
-        48: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x128_2tg_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x128_2tg_pf3",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x256_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x256_pf3",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x512_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_48x512_pf3",
-        ],
-        64: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_64x128_2tg_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_64x128_2tg_pf3",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_64x256_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_64x256_pf3",
-        ],
-        80: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_80x128_2tg_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_80x128_pf3",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_80x256_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_80x256_pf3",
-        ],
-        96: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_96x128_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_96x128_pf3",
-        ],
-        112: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_112x128_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_112x128_pf3",
-        ],
-        128: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2",
-        ],
-        144: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_144x128_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_144x128_pf3",
-        ],
-        160: [
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_160x128_pf2",
-            "fmoe_stage1_bf16_pertokenFp8_g1u1_160x128_pf3",
-        ],
-    }
+    
+    asm_kernels_template = \
+    """
+{{
+    16: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x128_4tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x128_4tg_pf3",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x256_2tg_pf3",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x256_3tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x512_2tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x512_pf3",
+    ],
+    32: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x128_3tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x128_3tg_pf3",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x256_2tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x256_2tg_pf3",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x512_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x512_pf3",
+    ],
+    48: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x128_2tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x128_2tg_pf3",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x256_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x256_pf3",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x512_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x512_pf3",
+    ],
+    64: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x128_2tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x128_2tg_pf3",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x256_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x256_pf3",
+    ],
+    80: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x128_2tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x128_pf3",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x256_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x256_pf3",
+    ],
+    96: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_96x128_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_96x128_pf3",
+    ],
+    112: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_112x128_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_112x128_pf3",
+    ],
+    128: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_128x128_pf2",
+    ],
+    144: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_144x128_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_144x128_pf3",
+    ],
+    160: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_160x128_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_160x128_pf3",
+    ],
+}}
+"""
     args = [
         "token",
         "model_dim",
@@ -120,34 +147,30 @@ def go(
         dtype = eval(dtype)
         q_dtype_a = eval(q_dtype_a)
         q_dtype_w = eval(q_dtype_w)
-        if q_dtype_a == torch.int8:
+        q_type = eval(q_type)
+        if q_dtype_a == torch.int8 and q_type == QuantType.per_Tensor:
             print(f'no moe solution for ', line)
             continue
-        q_type = eval(q_type)
         act_type = eval(act_type)
-        torch_quant = aiter.get_torch_quant(q_type)
         input = torch.randn((token, model_dim), dtype=dtype)
-        if q_dtype_w == torch.int4:
-            if use_g1u1:
-                w1 = torch.randn((expert, inter_dim * 2, model_dim), dtype=dtype) / 10
-            else:
-                w1 = torch.randn((expert, inter_dim, model_dim), dtype=dtype)
-            w2 = torch.randn((expert, model_dim, inter_dim), dtype=dtype)
-            w1_qt, w1_scale = torch_quant(w1, quant_dtype=torch.int8, dtypeMax=7)
-            w2_qt, w2_scale = torch_quant(w2, quant_dtype=torch.int8, dtypeMax=7)
+        if use_g1u1:
+            w1 = torch.randn((expert, inter_dim * 2, model_dim), dtype=dtype) / 10
         else:
-            if use_g1u1:
-                w1 = torch.randn((expert, inter_dim * 2, model_dim), dtype=dtype) / 10
-            else:
-                w1 = torch.randn((expert, inter_dim, model_dim), dtype=dtype)
-            w2 = torch.randn((expert, model_dim, inter_dim), dtype=dtype)
-            w1_qt, w1_scale = torch_quant(w1, quant_dtype=q_dtype_w)
-            w2_qt, w2_scale = torch_quant(w2, quant_dtype=q_dtype_w)
+            w1 = torch.randn((expert, inter_dim, model_dim), dtype=dtype)
+        w2 = torch.randn((expert, model_dim, inter_dim), dtype=dtype)
+        w1_qt, w1_scale = weight_quant(w1, q_type, quant_dtype=q_dtype_w)
+        w2_qt, w2_scale = weight_quant(w2, q_type, quant_dtype=q_dtype_w)
         w1_qt = w1_qt.view(w1.shape)
         w2_qt = w2_qt.view(w2.shape)
         score = torch.randn((token, expert), dtype=dtype)
         topk_weights, topk_ids = fused_topk(input, score, topk, True)
-        a1_qt, a1_scale = torch_quant(input, quant_dtype=q_dtype_a)
+        if q_type == QuantType.per_128x128:
+            a1_qt, a1_scale = aiter.pertoken_quant(input.view(token, -1, 128), quant_dtype=q_dtype_a)
+            a1_qt = a1_qt.view(token, model_dim)
+            a1_scale = a1_scale.squeeze(-1)
+        else:
+            torch_quant = aiter.get_torch_quant(q_type)
+            a1_qt, a1_scale = torch_quant(input, quant_dtype=q_dtype_a)
 
         ref = torch_moe_stage1(
             a1_qt,
@@ -163,6 +186,19 @@ def go(
 
         tasks = []
         tasks_ck = []
+        extraInfo = "_blockscale" if q_type == QuantType.per_128x128 else ""
+        if q_dtype_a == torch.int8:
+            quantDtype = "Int8"
+        elif q_dtype_a == torch.float8_e4m3fnuz:
+            quantDtype = "Fp8"
+        else:
+            quantDtype = ""
+        asm_kernels = eval(
+            asm_kernels_template.format( 
+                quantDtype=quantDtype,
+                extraInfo=extraInfo,
+            )
+        )
         for blockM in blockMs:
             sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
                 moe_sorting(topk_ids, topk_weights, expert, model_dim, dtype, blockM)
@@ -172,7 +208,8 @@ def go(
                 dtype=dtype,
             )
             if use_g1u1 and dtype == torch.bfloat16 and \
-                act_type == ActivationType.Silu and q_dtype_w == torch.float8_e4m3fnuz:
+                act_type == ActivationType.Silu and \
+                q_dtype_w != torch.int4 and q_type != QuantType.per_Tensor:
                 for el in asm_kernels.get(blockM, []):
                     tasks.append(
                         (
@@ -190,13 +227,13 @@ def go(
                                 el,
                                 0,
                                 act_type,
-                                a1_scale,
+                                a1_scale.t().contiguous() if q_type == QuantType.per_128x128 else a1_scale,
                                 w1_scale,
                             ),
                         )
                     )
 
-            if blockM in [32, 64, 128]:
+            if blockM in [32, 64, 128] and q_type != QuantType.per_128x128:
                 if q_dtype_w == torch.int4:
                     w1_qt_shffle = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w1_qt, (32, 32), use_int4=True)))
                 else:

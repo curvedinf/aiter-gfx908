@@ -152,26 +152,27 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
             CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock);
         }
     }
-    // // I8
-    // else if (hidden_states.dtype() == at::ScalarType::Char)
-    // {
-    //     using A0DataType = I8;
-    //     using B0DataType = I8;
-    //     TORCH_CHECK(a1_scale.has_value() && w1_scale.has_value(),
-    //                 "MoE Quant must input scale!");
-    //     TORCH_CHECK(a1_scale.value().dtype() == at::ScalarType::Float,
-    //                 "Scales must be Float dtype!");
-    //     using AccDataType = I32;
-    //     using CDEElementOp = MulABScale;
-    //     if (out.dtype() == at::ScalarType::Half)
-    //     {
-    //         CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, MPerBlock);
-    //     }
-    //     else if (out.dtype() == at::ScalarType::BFloat16)
-    //     {
-    //         CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, MPerBlock);
-    //     }
-    // }
+    // I8
+    else if (hidden_states.dtype() == at::ScalarType::Char)
+    {
+        using A0DataType = I8;
+        using B0DataType = I8;
+        TORCH_CHECK(a1_scale.has_value() && w1_scale.has_value(),
+                    "MoE Quant must input scale!");
+        TORCH_CHECK(a1_scale.value().dtype() == at::ScalarType::Float,
+                    "Scales must be Float dtype!");
+        using AccDataType = I32;
+        using CDEElementOp = MulABScale;
+        const bool Nswizzle = false;
+        if (out.dtype() == at::ScalarType::Half)
+        {
+            CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock);
+        }
+        else if (out.dtype() == at::ScalarType::BFloat16)
+        {
+            CK_MOE_STAGE1_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock);
+        }
+    }
 }
 
 #define CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock)                                                                                                                                                                                                                                                       \
@@ -319,24 +320,25 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
             CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock);
         }
     }
-    // // I8
-    // else if (inter_states.dtype() == at::ScalarType::Char)
-    // {
-    //     using A0DataType = I8;
-    //     using B0DataType = I8;
-    //     TORCH_CHECK(a2_scale.has_value() && w2_scale.has_value(),
-    //                 "MoE Quant must input scale!");
-    //     TORCH_CHECK(a2_scale.value().dtype() == at::ScalarType::Float,
-    //                 "Scales must be Float dtype!");
-    //     using AccDataType = I32;
-    //     using CDEElementOp = MulABScaleExpertWeight;
-    //     if (out.dtype() == at::ScalarType::Half)
-    //     {
-    //         CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, MPerBlock);
-    //     }
-    //     else if (out.dtype() == at::ScalarType::BFloat16)
-    //     {
-    //         CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, MPerBlock);
-    //     }
-    // }
+    // I8
+    else if (inter_states.dtype() == at::ScalarType::Char)
+    {
+        using A0DataType = I8;
+        using B0DataType = I8;
+        TORCH_CHECK(a2_scale.has_value() && w2_scale.has_value(),
+                    "MoE Quant must input scale!");
+        TORCH_CHECK(a2_scale.value().dtype() == at::ScalarType::Float,
+                    "Scales must be Float dtype!");
+        using AccDataType = I32;
+        using CDEElementOp = MulABScaleExpertWeight;
+        const bool Nswizzle = false;
+        if (out.dtype() == at::ScalarType::Half)
+        {
+            CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, F16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock);
+        }
+        else if (out.dtype() == at::ScalarType::BFloat16)
+        {
+            CK_MOE_STAGE2_GEMM_IMPL(A0DataType, B0DataType, AccDataType, B16, CDEElementOp, Nswizzle, isPerTensorQuant, MPerBlock);
+        }
+    }
 }

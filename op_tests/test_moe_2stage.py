@@ -16,7 +16,7 @@ from aiter.test_common import (
     tensor_dump,
     run_perftest,
 )
-from op_tests.int4_utils import *
+from aiter.int4_utils import *
 
 from aiter.fused_moe import (
     fused_topk,

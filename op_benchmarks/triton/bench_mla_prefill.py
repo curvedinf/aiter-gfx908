@@ -29,7 +29,7 @@ is_hip_ = is_hip()
 
 
 
-def input_helper(B, H, prefix_length, extend_length, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, device,  equal_seqlens=False, requires_grad=False,):
+def input_helper(B, H, prefix_length, extend_length, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, device, attn_impl="absorb", equal_seqlens=False, requires_grad=False):
     torch.manual_seed(0)
     
     if not equal_seqlens:
@@ -59,79 +59,69 @@ def input_helper(B, H, prefix_length, extend_length, kv_lora_rank, qk_rope_head_
     total_extend = cu_seqlens_extend[-1].item()
     total_prefix = cu_seqlens_prefix[-1].item()
     
-    q_extend = torch.randn(total_extend, H, v_head_dim + qk_rope_head_dim, dtype=dtype, device=device).requires_grad_(requires_grad)
+
+
+    if attn_impl == "absorb":
+        Lq = kv_lora_rank + qk_rope_head_dim
+        Lk = kv_lora_rank + qk_rope_head_dim
+        Lv = kv_lora_rank
+    else:
+        Lq = v_head_dim + qk_rope_head_dim
+        Lk = v_head_dim + qk_rope_head_dim
+        Lv = v_head_dim
+    
+    q_extend = torch.randn(total_extend, H, Lq, dtype=dtype, device=device).requires_grad_(requires_grad)
 
     # extend parts
-    k_extend = torch.randn(total_extend, 1, kv_lora_rank + qk_rope_head_dim, dtype=dtype, device=device).requires_grad_(requires_grad)
-    v_extend = k_extend[..., :kv_lora_rank]
+    k_extend = torch.randn(total_extend, 1, Lk, dtype=dtype, device=device).requires_grad_(requires_grad)
+    v_extend = k_extend[..., :Lv]
 
     # extend indexing
     qo_indptr = cu_seqlens_extend # torch.arange(B + 1, device=device) * (extend_length) # 0, extend_length, extend_length*2
     
     # prefix parts
-    k_buffer = torch.randn(total_prefix, 1, kv_lora_rank + qk_rope_head_dim, dtype=dtype, device=device).requires_grad_(requires_grad)
-    v_buffer = k_buffer[..., :kv_lora_rank]
+    k_buffer = torch.randn(total_prefix, 1, Lk, dtype=dtype, device=device).requires_grad_(requires_grad)
+    v_buffer = k_buffer[..., :Lv]
+
+    if attn_impl != "absorb":
+        # simulate v = kv_latent * w_vc which changes the values compared to k
+        v_extend = torch.randn_like(v_extend)
+        v_buffer = torch.randn_like(v_buffer)
 
     # prefix indexing
     kv_indptr = cu_seqlens_prefix # torch.arange(B + 1, device=device) * prefix_length # 0, prefix_length, prefix_length*2
     kv_indices = torch.arange(total_prefix, device=device)
 
-    B_Loc = torch.arange(total_prefix, device=device).unsqueeze(-1) # [num_blocks, block_size]
+    max_prefix = seqlens_prefix.max().item()
+    B_Loc = torch.full((B, max_prefix), -1, dtype=torch.int32, device=device)
+    for b in range(B):
+        start = cu_seqlens_prefix[b].item()
+        end = cu_seqlens_prefix[b+1].item()
+        B_Loc[b, :seqlens_prefix[b]] = torch.arange(start, end, device=device)
+    B_Loc = B_Loc.unsqueeze(-1)  # [B, max_prefix, 1]
 
     custom_mask = None
     mask_indptr = None
     max_len_extend = extend_length
 
-    w_kc = torch.randn(H, kv_lora_rank, v_head_dim, dtype=dtype, device=device).requires_grad_(requires_grad)
-    w_vc = torch.randn(H, kv_lora_rank, v_head_dim, dtype=dtype, device=device).requires_grad_(requires_grad)
-
-    return q_extend, k_extend, v_extend, k_buffer, v_buffer, kv_indptr, kv_indices, qo_indptr, custom_mask, mask_indptr, max_len_extend, w_kc, w_vc, B_Start_Loc, B_Loc, B_Seqlen
+    return q_extend, k_extend, v_extend, k_buffer, v_buffer, kv_indptr, kv_indices, qo_indptr, custom_mask, mask_indptr, max_len_extend, B_Start_Loc, B_Loc, B_Seqlen
 
 
-def mla_forward(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, device, sm_scale=1.0, logit_cap=0.0, attn_impl="non-absorb", kernel_name="paged"):
-    torch.manual_seed(0)
-    
-    q_extend, k_extend, v_extend, k_buffer, v_buffer, kv_indptr, kv_indices, qo_indptr, custom_mask, mask_indptr, max_len_extend, w_kc, w_vc, B_Start_Loc, B_Loc, B_Seqlen = \
-        input_helper(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, device)
-    
-    if attn_impl == "absorb":
-        q_input = torch.empty((*q_extend.shape[:-1],kv_lora_rank+qk_rope_head_dim), dtype=q_extend.dtype, device=q_extend.device)
-        q_input[..., kv_lora_rank:] = q_extend[..., v_head_dim:]
-        q_nope = q_extend[..., :v_head_dim]
-        q_nope = torch.bmm(q_nope.transpose(0, 1), w_kc.transpose(1, 2))
-        q_input[..., :kv_lora_rank] = q_nope.transpose(0, 1)
-        tmp_out = torch.empty((*q_extend.shape[:-1], kv_lora_rank), dtype=q_extend.dtype, device=q_extend.device)
-    else: # non-absorbed
-        q_input = q_extend
-        k_extend_c = torch.einsum('zic,hcd->zhd', k_extend[..., :kv_lora_rank], w_kc) 
-        k_extend_r = k_extend[..., kv_lora_rank:].repeat(1, H, 1)
-        k_extend = torch.cat((k_extend_c, k_extend_r), dim=-1)
-        k_buffer_c = torch.einsum('zic,hcd->zhd', k_buffer[..., :kv_lora_rank], w_kc)
-        k_buffer_r = k_buffer[..., kv_lora_rank:].repeat(1, H, 1)
-        k_buffer = torch.cat((k_buffer_c, k_buffer_r), dim=-1)
-        v_extend = torch.einsum('zic,hcd->zhd', v_extend, w_vc)
-        v_buffer = torch.einsum('zic,hcd->zhd', v_buffer, w_vc)
-        tmp_out = torch.empty((*q_extend.shape[:-1], v_head_dim), dtype=q_extend.dtype, device=q_extend.device)
- 
-    if kernel_name == "extend_attention_fwd":        
-        triton_kernel = lambda: mla_prefill.extend_attention_fwd(q_input, k_extend, v_extend, tmp_out, k_buffer, v_buffer, qo_indptr, kv_indptr, kv_indices, custom_mask, mask_indptr, max_len_extend, sm_scale=sm_scale, logit_cap=logit_cap)
-    else:
-        # for us num_block = num of tokens and block_size = 1
-        k_buffer = k_buffer.unsqueeze(-1).unsqueeze(-1)  # -> [..., block_size, x] (in [num_blocks, num_kv_heads, head_size/x, block_size, x])
-        v_buffer = v_buffer.unsqueeze(-1) # -> [..., block_size] (in [num_blocks, num_kv_heads, head_size, block_size])
-        B_Loc = B_Loc.unsqueeze(-1) # [num_blocks, block_size]
-        triton_kernel = lambda: pa_prefill.context_attention_fwd(q_input, k_extend, v_extend, tmp_out, "auto", k_buffer, v_buffer, B_Loc, B_Start_Loc, B_Seqlen, max_len_extend, 1.0, 1.0, sm_scale=sm_scale)
+# def mla_forward(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, device, sm_scale=1.0, logit_cap=0.0, attn_impl="non-absorb", kernel_name="extend_attention_fwd"):
 
-    triton_kernel()
-    
-    if attn_impl == "absorb":
-        attn_bmm_output = torch.bmm(tmp_out.transpose(0, 1), w_vc)
-        attn_output = attn_bmm_output.transpose(0, 1)
-        ref_out = attn_output
-    else:
-        ref_out = tmp_out
+def extend_forward(q_extend, k_extend, v_extend, k_buffer, v_buffer, kv_indptr, kv_indices, qo_indptr, custom_mask, mask_indptr, max_len_extend, sm_scale=1.0, logit_cap=0.0):    
+    out = torch.empty((*q_extend.shape[:-1], v_extend.shape[-1]), dtype=q_extend.dtype, device=q_extend.device)
+    mla_prefill.extend_attention_fwd(q_extend, k_extend, v_extend, out, k_buffer, v_buffer, qo_indptr, kv_indptr, kv_indices, custom_mask, mask_indptr, max_len_extend, sm_scale=sm_scale, logit_cap=logit_cap)
+    return out
 
-    return ref_out, triton_kernel
+def paged_forward(q_extend, k_extend, v_extend, k_buffer, v_buffer, max_len_extend, B_Start_Loc, B_Loc, B_Seqlen, sm_scale=1.0):
+    out = torch.empty((*q_extend.shape[:-1], v_extend.shape[-1]), dtype=q_extend.dtype, device=q_extend.device)
+    # for us num_block = num of tokens and block_size = 1
+    k_buffer = k_buffer.unsqueeze(-1).unsqueeze(-1)  # -> [..., block_size, x] (in [num_blocks, num_kv_heads, head_size/x, block_size, x])
+    v_buffer = v_buffer.unsqueeze(-1) # -> [..., block_size] (in [num_blocks, num_kv_heads, head_size, block_size])
+    B_Loc = B_Loc.unsqueeze(-1) # [num_blocks, block_size]
+    pa_prefill.context_attention_fwd(q_extend, k_extend, v_extend, out, "auto", k_buffer, v_buffer, B_Loc, B_Start_Loc, B_Seqlen, max_len_extend, 1.0, 1.0, sm_scale=sm_scale)
+    return out
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA device not available")
@@ -139,40 +129,41 @@ def mla_forward(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim
     (8, 16, 4096, 4096),
 ])
 def test_op(B, H, prefix, extend):
-    kv_lora_rank = 128
-    qk_rope_head_dim = 0
+    kv_lora_rank = 512
+    qk_rope_head_dim = 64
     v_head_dim = 128
     dtype = torch.float32
     sm_scale = 1.0
     logit_cap = 0.0
     device = "cuda"
 
-    # Call with the 'paged' (default) kernel implementation.
-    out_paged, _ = mla_forward(
-        B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim,
-        v_head_dim, dtype, device, sm_scale, logit_cap,
-        attn_impl="non-absorb", kernel_name="context_attention_fwd"
-    )
+    q_extend, k_extend, v_extend, k_buffer, v_buffer, kv_indptr, kv_indices, qo_indptr, custom_mask, mask_indptr, max_len_extend, B_Start_Loc, B_Loc, B_Seqlen = \
+            input_helper(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, device)
 
+    # Call with the 'paged' (default) kernel implementation.
+    out_paged = paged_forward(
+        q_extend, k_extend, v_extend, k_buffer, v_buffer, max_len_extend,
+        B_Start_Loc, B_Loc, B_Seqlen, sm_scale
+    )
     # Call with the 'extend' kernel implementation.
-    out_extend, _ = mla_forward(
-        B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim,
-        v_head_dim, dtype, device, sm_scale, logit_cap,
-        attn_impl="non-absorb", kernel_name="extend_attention_fwd"
+    out_extend = extend_forward(
+        q_extend, k_extend, v_extend, k_buffer, v_buffer, kv_indptr,
+        kv_indices, qo_indptr, custom_mask, mask_indptr, max_len_extend,
+        sm_scale, logit_cap
     )
 
     # Check that the outputs are close enough.
     print("Paged Output", out_paged)
     print("Extend Output", out_extend)
 
-    assert torch.testing.assert_close(out_paged, out_extend, atol=2e-2, rtol=2e-2)
+    torch.testing.assert_close(out_paged, out_extend, atol=2e-2, rtol=2e-2)
 
 
 
 def get_benchmark_configs():
     x_names = ["B", "H", "prefix", "extend", "kv_lora_rank", "qk_rope_head_dim", "v_head_dim", "attn_impl"]
     x_vals_list = [
-                    (2, 16, 1024, 1024, 128, 0, 128, "non-absorb"),
+                    (2, 16, 1024, 1024, 256, 0, 128, "non-absorb"),
                     # (2, 16, 4096, 4096, 512, 64, 128, "non-absorb"),
                     # (2, 16, 8192, 4096, 512, 64, 128, "non-absorb"),
                     # (2, 16, 8192, 4096, 512, 64, 128, "absorb"),
@@ -227,31 +218,28 @@ def benchmark(args):
 
     @triton.testing.perf_report(configs)
     def bench_MLA(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, attn_impl, sm_scale, logit_cap, device,
-                  provider=None, model=None):
-                
+                  provider=None, model=None):                
         warmup = 25
         rep = 100
+
+        q_extend, k_extend, v_extend, k_buffer, v_buffer, kv_indptr, kv_indices, qo_indptr, custom_mask, mask_indptr, max_len_extend, B_Start_Loc, B_Loc, B_Seqlen = \
+            input_helper(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, device)
        
         if provider == "extend_attention_fwd":
-            if args.include_gemms:
-                # measure also the w_kc and w_vc projection gemms (bmms)
-                fn = lambda: mla_forward(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, kernel_name="extend_attention_fwd")
-                ms = triton.testing.do_bench_cudagraph(fn, rep=rep)
-            else:
-                # only measure the triton kernel call time
-                _, fn = mla_forward(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, device, kernel_name="extend_attention_fwd")
-                ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+            fn = lambda: extend_forward(
+                q_extend, k_extend, v_extend, k_buffer, v_buffer, kv_indptr,
+                kv_indices, qo_indptr, custom_mask, mask_indptr, max_len_extend,
+                sm_scale, logit_cap
+            )
         elif provider == "context_attention_fwd":
-            if args.include_gemms:
-                # measure also the w_kc and w_vc projection gemms (bmms)
-                fn = lambda: mla_forward(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, device, kernel_name="context_attention_fwd")
-                ms = triton.testing.do_bench_cudagraph(fn, rep=rep)
-            else:
-                # only measure the triton kernel call time
-                _, fn = mla_forward(B, H, prefix, extend, kv_lora_rank, qk_rope_head_dim, v_head_dim, dtype, device, kernel_name="context_attention_fwd")
-                ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+            fn = lambda: paged_forward(
+                q_extend, k_extend, v_extend, k_buffer, v_buffer, max_len_extend,
+                B_Start_Loc, B_Loc, B_Seqlen, sm_scale
+            )
         else:
             raise ValueError(f"Unknown provider: {provider}")
+
+        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
 
         return ms
 

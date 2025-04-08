@@ -8,7 +8,7 @@ import torch
 import triton
 import triton.language as tl
 
-BASE_BLOCK = 64
+BASE_BLOCK = 16
 NUM_WARPS = 4
 
 if triton.__version__ >= "2.1.0":
@@ -57,6 +57,8 @@ if triton.__version__ >= "2.1.0":
         BLOCK_M: tl.constexpr,
         BLOCK_DMODEL: tl.constexpr,  # head size
         BLOCK_DMODEL_PADDED: tl.constexpr,  # head size padded to a power of 2
+        BLOCK_VMODEL: tl.constexpr,  # value head size
+        BLOCK_VMODEL_PADDED: tl.constexpr,  # value head size padded to a power of 2
         BLOCK_N: tl.constexpr,
         SLIDING_WINDOW: tl.constexpr,
     ):
@@ -81,10 +83,17 @@ if triton.__version__ >= "2.1.0":
         block_start_loc = BLOCK_M * start_m
 
         # initialize offsets
+        # D == Lq == Lk
+
         # [N]; starts at 0
         offs_n = tl.arange(0, BLOCK_N)
         # [D]; starts at 0
         offs_d = tl.arange(0, BLOCK_DMODEL_PADDED)
+
+        offs_v = tl.arange(0, BLOCK_VMODEL_PADDED)
+
+        
+
         # [M]; starts at current position in query
         offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
         # [M,D]
@@ -98,6 +107,10 @@ if triton.__version__ >= "2.1.0":
             tl.int1
         )  # [D]
 
+        vdim_mask = tl.where(tl.arange(0, BLOCK_VMODEL_PADDED) < BLOCK_VMODEL, 1, 0).to(
+            tl.int1
+        )  # [Lv]
+
         q = tl.load(
             Q + off_q,
             mask=dim_mask[None, :] & (offs_m[:, None] < cur_batch_query_len),
@@ -107,7 +120,7 @@ if triton.__version__ >= "2.1.0":
         # initialize pointer to m and l
         m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")  # [M]
         l_i = tl.zeros([BLOCK_M], dtype=tl.float32)  # [M]
-        acc = tl.zeros([BLOCK_M, BLOCK_DMODEL_PADDED], dtype=tl.float32)  # [M,D]
+        acc = tl.zeros([BLOCK_M, BLOCK_VMODEL_PADDED], dtype=tl.float32)  # [M,D]
 
         # compute query against context (no causal mask here)
         for start_n in range(0, cur_batch_ctx_len, BLOCK_N):
@@ -132,7 +145,7 @@ if triton.__version__ >= "2.1.0":
             off_v = (
                 bn[:, None] * stride_v_cache_bs
                 + cur_kv_head * stride_v_cache_h
-                + offs_d[None, :] * stride_v_cache_d
+                + offs_v[None, :] * stride_v_cache_d
                 + (start_n + offs_n[:, None]) % block_size * stride_v_cache_bl
             )
             k_load = tl.load(
@@ -192,7 +205,7 @@ if triton.__version__ >= "2.1.0":
             # update acc
             v_load = tl.load(
                 V_cache + off_v,
-                mask=dim_mask[None, :]
+                mask=vdim_mask[None, :]
                 & ((start_n + offs_n[:, None]) < cur_batch_ctx_len),
                 other=0.0,
             )  # [N,D]
@@ -215,7 +228,7 @@ if triton.__version__ >= "2.1.0":
         off_v = (
             offs_n[:, None] * stride_vbs
             + cur_kv_head * stride_vh
-            + offs_d[None, :] * stride_vd
+            + offs_v[None, :] * stride_vd
         )
         k_ptrs = K + off_k
         v_ptrs = V + off_v
@@ -267,7 +280,7 @@ if triton.__version__ >= "2.1.0":
             # update acc
             v = tl.load(
                 v_ptrs + (cur_batch_in_all_start_index + start_n) * stride_vbs,
-                mask=dim_mask[None, :]
+                mask=vdim_mask[None, :]
                 & ((start_n + offs_n[:, None]) < cur_batch_query_len),
                 other=0.0,
             )
@@ -281,13 +294,13 @@ if triton.__version__ >= "2.1.0":
         off_o = (
             (cur_batch_in_all_start_index + offs_m[:, None]) * stride_obs
             + cur_head * stride_oh
-            + offs_d[None, :] * stride_od
+            + offs_v[None, :] * stride_od
         )
         out_ptrs = Out + off_o
         tl.store(
             out_ptrs,
             acc,
-            mask=dim_mask[None, :] & (offs_m[:, None] < cur_batch_query_len),
+            mask=vdim_mask[None, :] & (offs_m[:, None] < cur_batch_query_len),
         )
         return
 
@@ -635,9 +648,14 @@ if triton.__version__ >= "2.1.0":
 
         # shape constraints
         Lq, Lk, Lv = q.shape[-1], k.shape[-1], v.shape[-1]
-        assert Lq == Lk and Lk == Lv
+        assert Lq == Lk #  and Lk == Lv
         # round up Lk to a power of 2 - this is required for Triton block size
         Lk_padded = triton.next_power_of_2(Lk)
+        Lv_padded = triton.next_power_of_2(Lv)
+
+
+
+
 
         if sm_scale is None:
             sm_scale = 1.0 / (Lq**0.5)
@@ -747,6 +765,8 @@ if triton.__version__ >= "2.1.0":
             BLOCK_M=BLOCK,
             BLOCK_DMODEL=Lk,
             BLOCK_DMODEL_PADDED=Lk_padded,
+            BLOCK_VMODEL=Lv,
+            BLOCK_VMODEL_PADDED=Lv_padded,
             BLOCK_N=BLOCK,
             SLIDING_WINDOW=sliding_window,
             num_warps=NUM_WARPS,

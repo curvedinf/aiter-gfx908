@@ -333,10 +333,7 @@ def extend_attention_fwd(
     BLOCK_DV = triton.next_power_of_2(Lv)
 
     if is_hip_:
-        if Lq <= 256:
-            BLOCK_M, BLOCK_N = (64, 64)
-        else:
-            BLOCK_M, BLOCK_N = (16, 32)
+        BLOCK_M, BLOCK_N = (16, 16)
         num_warps = 4
 
     else:

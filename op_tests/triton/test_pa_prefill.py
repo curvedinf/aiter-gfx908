@@ -3,6 +3,16 @@ import random
 import time
 import pytest
 import torch
+
+import os
+import sys
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(parent_dir)
+
+
+
 from aiter.ops.triton.pa_prefill import context_attention_fwd
 
 STR_DTYPE_TO_TORCH_DTYPE = {
@@ -140,6 +150,21 @@ def test_contexted_kv_attention(
 
     # Warm up the Triton kernel by calling it once before actually measuring
     # generation time
+    print("query shape:", query.shape)
+    print("key shape:", k.shape)
+    print("value shape:", v.shape)
+    print("output shape:", output.shape)
+    print("k_cache shape:", k_cache.shape)
+    print("v_cache shape:", v_cache.shape)
+    print("block_table shape:", block_table.shape)
+    print("b_start_loc shape:", b_start_loc.shape)
+    print("b_seq_len shape:", b_seq_len.shape)
+
+    print("block_table:", block_table)
+    print("b_start_loc:", b_start_loc)
+    print("b_seq_len:", b_seq_len)
+
+
     context_attention_fwd(
         query,
         k,
@@ -177,6 +202,7 @@ def test_contexted_kv_attention(
     torch.cuda.synchronize()
     end_time = time.time()
     print(f"triton Time: {(end_time - start_time)*1000:.2f} ms")
+    assert False, "asdsadkl"
 
 
 # TODO: Implement a test reference and compare it to the Triton output

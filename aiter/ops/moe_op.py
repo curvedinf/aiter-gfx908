@@ -91,6 +91,7 @@ def fmoe_g1u1(
     activation: Optional[Enum] = ActivationType.Silu,
 ): ...
 
+
 @compile_ops("module_moe_asm")
 def fmoe_g1u1_tkw1(
     out: Tensor,
@@ -106,8 +107,9 @@ def fmoe_g1u1_tkw1(
     fc1_scale: Tensor,
     fc2_scale: Tensor,
     fc2_smooth_scale: Optional[Tensor] = None,
-    activation: Optional[_ActivationType] = ActivationType.Silu,
+    activation: Optional[Enum] = ActivationType.Silu,
 ): ...
+
 
 @compile_ops("module_moe_asm")
 def fmoe_int8_g1u0_a16(

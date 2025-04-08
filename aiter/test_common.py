@@ -61,8 +61,11 @@ def perftest(num_iters=101, num_warmup=5, testGraph=False, num_rotate_args=3):
 def benchmark():
     def decorator(func):
         def wrapper(*args, **kwargs):
-            log_args(func, *args, **kwargs)
-            return func(*args, **kwargs)
+            callargs=log_args(func, *args, **kwargs)
+            ret = func(*args, **kwargs)
+            if ret is not None:
+                callargs.update(ret)
+            return callargs
         return wrapper
     return decorator
 
@@ -106,9 +109,10 @@ def log_args(func, *args, **kwargs):
                 el = list(el[:viewNum])+['...']
             return f'\n{" "*(len(prefix)+31)}'.join(['(']+[f" {getTensorInfo(e)}" for e in el]+[')'])
         return el
-    callargs = [f"{el:<28} = {getTensorInfo(callargs[el])}" for el in callargs]
-    callargs = f',\n{blanks}'.join(callargs)
-    logger.info(f"\n{prefix}{callargs})")
+    info = [f"{el:<28} = {getTensorInfo(callargs[el])}" for el in callargs]
+    info = f",\n{blanks}".join(info)
+    logger.info(f"\n{prefix}{info})")
+    return callargs
 
 
 def get_trace_perf(prof, num_iters):
@@ -152,7 +156,7 @@ def get_trace_perf(prof, num_iters):
     for el in timerList:
         df.at[avg_name, el] = df[el].sum()/num_iters
     if int(os.environ.get('AITER_LOG_MORE', 0)):
-        pd.set_option('display.max_colwidth', 120)
+        pd.set_option('display.max_colwidth', 90)
         logger.info(f'{df}')
     return df.at[avg_name, 'device_time_total']
 
@@ -167,20 +171,24 @@ def checkAllclose(a, b, rtol=1e-2, atol=1e-2, msg='', printNum=8):
         num = mask.sum()
         printNum = min(printNum, num)
         percent = num/a.numel()
-        delta = (a-b)[mask]
+        a_msked = a[mask]
+        b_msked = b[mask]
+        delta = (a_msked - b_msked).abs()
         if percent > 0.01:
-            logger.info(f'''{msg}[checkAllclose {atol=} {rtol=} failed!]
+            logger.info(
+                f"""{msg}[checkAllclose {atol=} {rtol=} failed!]
     a    : {a.shape}
-           {a[mask][:printNum]}
+           {a_msked[:printNum]}
     b    : {b.shape}
-           {b[mask][:printNum]}
+           {b_msked[:printNum]}
     delta:
-           {delta[:printNum]}''')
+           {delta[:printNum]}"""
+            )
         else:
             logger.info(
                 f'''{msg}[checkAllclose {atol=} {rtol=} waring!] a and b results are not all close''')
         logger.info(
-            f'-->max delta:{delta.max()}, delta details: {percent:.1%} ({num} of {a.numel()}) elements')
+            f'-->max abs delta:{delta.max()}, delta details: {percent:.1%} ({num} of {a.numel()}) elements')
         return False
 
 

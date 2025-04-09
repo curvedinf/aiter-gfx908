@@ -252,7 +252,17 @@ def test_mha_backward(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEADS: int
     else:
         dropout_mask = None
 
+    # warmup (compilation)
+    # triton_dq, triton_dk, triton_dv = torch.autograd.grad(triton_out, (q, k, v), do.clone())
+
+    torch.cuda.synchronize()
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
     triton_dq, triton_dk, triton_dv = torch.autograd.grad(triton_out, (q, k, v), do.clone())
+    end_event.record()
+    torch.cuda.synchronize()
+    print(f"Backward pass took for Triton: {start_event.elapsed_time(end_event)} ms")
 
     if DEBUG_MODE:
         print(f"triton_out={triton_out}")
@@ -272,8 +282,17 @@ def test_mha_backward(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEADS: int
         torch_out = attention_ref(q, k, v, dropout_p=DROPOUT, dropout_mask=dropout_mask, causal=CAUSAL)
     torch_out, attention_scores = torch_out
 
+    
+    torch.cuda.synchronize()
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+    start_event.record()
     torch_dq, torch_dk, torch_dv = torch.autograd.grad(torch_out, (q, k, v), do)
-
+    end_event.record()
+    torch.cuda.synchronize()
+    print(f"Backward pass took for Torch: {start_event.elapsed_time(end_event)} ms")
+    
+    
     if DEBUG_MODE:
         print(f"torch_out={torch_out}")
         print(f"torch_attn_scores={attention_scores}")
@@ -287,9 +306,11 @@ def test_mha_backward(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEADS: int
         fp8_assert_close(triton_dv, torch_dv.to(triton_dv.dtype),atol=ATOL_fp8, rtol=RTOL_fp8)  
     else:
         torch.testing.assert_close(triton_dv, torch_dv.to(triton_out.dtype),atol=1e-2, rtol=1e-2)  
+        print("Gradient matches for dv!")
         torch.testing.assert_close(triton_dk, torch_dk.to(triton_out.dtype),atol=1e-2, rtol=1e-2)  
+        print("Gradient matches for dk!")
         torch.testing.assert_close(triton_dq, torch_dq.to(triton_out.dtype),atol=1e-2, rtol=1e-2)  
-
+        print("Gradient matches for dq!")
 
 
 @pytest.mark.parametrize('BATCH', [1,4,57,128])
@@ -396,3 +417,8 @@ def test_mha_backward_varlen(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEA
     torch.testing.assert_close(triton_dv, torch_dv.to(triton_out.dtype),atol=1e-2, rtol=1e-2)  
     torch.testing.assert_close(triton_dk, torch_dk.to(triton_out.dtype),atol=1e-2, rtol=1e-2)  
     torch.testing.assert_close(triton_dq, torch_dq.to(triton_out.dtype),atol=1e-2, rtol=1e-2)  
+
+
+if __name__ == "__main__":
+    # Run the tests
+    test_mha_backward(8, 1024, 4096, 16, 16, 128, 0.0, False, False, torch.float16)

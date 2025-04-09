@@ -654,9 +654,6 @@ if triton.__version__ >= "2.1.0":
         Lv_padded = triton.next_power_of_2(Lv)
 
 
-
-
-
         if sm_scale is None:
             sm_scale = 1.0 / (Lq**0.5)
         batch, head = b_seq_len.shape[0], q.shape[1]

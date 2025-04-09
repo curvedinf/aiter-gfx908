@@ -18,7 +18,7 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
-setup_seed(0)
+# setup_seed(0)
 
 def get_mla_metadata(cache_seqlens, num_heads_per_head_k, num_heads_k):
     batch_size = cache_seqlens.size(0)
@@ -74,13 +74,13 @@ def get_mla_metadata(cache_seqlens, num_heads_per_head_k, num_heads_k):
     return tile_scheduler_metadata, num_splits
 
 
-def scaled_dot_product_attention(query, key, value, h_q, h_kv, is_causal=False):
+def scaled_dot_product_attention(query, key, value, h_q, h_kv, batch_id=0, partition_begin=0, partition_end=0, is_causal=False, out_flash=None, lse_flash=None):
     query = query.float()
     key = key.float()
     value = value.float()
     key = key.repeat_interleave(h_q // h_kv, dim=0)
     value = value.repeat_interleave(h_q // h_kv, dim=0)
-    attn_weight = query @ key.transpose(-2, -1)# / math.sqrt(query.size(-1))
+    attn_weight = query @ key.transpose(-2, -1) / math.sqrt(query.size(-1))
 
     scale = 1 / math.sqrt(query.size(-1))
     scale_log2 = scale * math.log2(math.e)
@@ -93,28 +93,74 @@ def scaled_dot_product_attention(query, key, value, h_q, h_kv, is_causal=False):
         attn_bias.to(query.dtype)
         attn_weight += attn_bias
 
-        bq = query[:, 0]
-        print("bq", bq)
-        bk = key[0][-16:]
-        print("bk", bk)
-        block_tmp = bq @ bk.transpose(0, 1)
-        print("block_tmp", block_tmp)
+        if partition_end == 0:
+            partition_end = s_k
+        def flash_attention():
+            bq = query[:, 0]
+            out_flash
+            lse_flash
+            n_block_num = (partition_end - partition_begin) // Block_N 
+            # print("bq", bq)
 
-        import pdb; pdb.set_trace()
-        block_tmp_masked = block_tmp + attn_bias[0, 0:16]
-        m = block_tmp_masked.max(-1).values
-        print("m", m) 
-        p_compute = 2 ** (scale_log2 * block_tmp_masked - scale_log2 * m.unsqueeze(-1)) 
-        print("p_compute", p_compute)
-        row_sum = p_compute.sum(-1).values
-        l = row_sum
-        print("l", l)
-        bv= value[0][-16:]
-        print("bv", bv)
-        oacc = p_compute @ bv 
-        print("oacc", oacc)
+            m = torch.zeros([Block_M]).cuda()
+            l = torch.zeros([Block_M]).cuda()
+            oacc = torch.zeros([Block_M, 512]).cuda()
 
+            m_log2 = torch.zeros([Block_M]).cuda()
+            l_log2 = torch.zeros([Block_M]).cuda()
+            oacc_log2 = torch.zeros([Block_M, 512]).cuda()
 
+            i_block_n = n_block_num
+            for i in range(n_block_num):
+                if i == 0:
+                    bk = key[0][i_block_n * Block_N - Block_N + partition_begin]
+                else:
+                    bk = key[0][i_block_n * Block_N - Block_N + partition_begin: i_block_n * Block_N + partition_begin]
+
+                block_tmp = bq @ bk.transpose(0, 1) * scale
+                block_tmp_log2 = bq @ bk.transpose(0, 1)
+
+                block_tmp_masked = block_tmp
+                block_tmp_masked_log2 = block_tmp_log2
+
+                m_local = block_tmp_masked.max(-1).values
+                m_local_log2 = block_tmp_masked_log2.max(-1).values
+
+                m_old = m
+                m_old_log2 = m_log2
+                if i == 0:
+                    m = m_local
+                    m_log2 = m_local_log2
+                else:
+                    m = torch.max(m, m_local)
+                    m_log2 = torch.max(m_log2, m_local_log2)
+
+                
+                p_compute = torch.exp(block_tmp_masked - m.unsqueeze(-1)) 
+                p_compute_log2 = 2 ** (scale_log2 * block_tmp_masked_log2 - scale_log2 * m_log2.unsqueeze(-1)) 
+
+                # print("p_compute", p_compute)
+                row_sum = p_compute.sum(-1)
+                row_sum_log2 = p_compute_log2.sum(-1)
+
+                scale_o = torch.exp(m_old - m)
+                scale_o_log2 = 2 ** (scale_log2 * m_old_log2 - scale_log2 * m_log2)
+
+                l = l * scale_o + row_sum
+                l_log2 = l_log2 * scale_o_log2 + row_sum_log2
+
+                bv = value[0][i_block_n * Block_N - Block_N : i_block_n * Block_N]
+
+                oacc = p_compute @ bv + oacc * scale_o.unsqueeze(-1)
+                oacc_log2 = p_compute_log2 @ bv + oacc_log2 * scale_o_log2.unsqueeze(-1)
+                i_block_n -= 1
+
+                # if batch_id == 0:
+                #     import pdb; pdb.set_trace()
+            return oacc / l.unsqueeze(-1)
+
+        # out = flash_attention()
+        # import pdb; pdb.set_trace()
     lse = attn_weight.logsumexp(dim=-1)
     attn_weight = torch.softmax(attn_weight, dim=-1, dtype=torch.float32)
     return attn_weight @ value, lse
@@ -149,7 +195,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
 
     q = torch.randn(b, s_q, h_q, d, device="cuda", dtype=dtype)
 
-    block_size = 64
+    block_size = 16
 
     block_table = torch.arange(
         b * max_seqlen_pad // block_size, dtype=torch.int32, device="cuda"
@@ -181,7 +227,43 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
             causal=causal,
         )
 
-    def ref_mla():
+    def ref_mla_cu_partition(out_flash=None, lse_flash=None):
+        out_acc = torch.empty(len(num_splits), s_q, h_q, dv, dtype=torch.float32)
+        lse_acc = torch.empty(len(num_splits), h_q, s_q, dtype=torch.float32)
+        for i in range(len(num_splits)):
+            batch_begin = tile_scheduler_metadata[i][0]
+            batch_end = tile_scheduler_metadata[i][2]
+
+            for j in range(batch_begin, batch_end + 1):
+                print("i, j", i, j)
+                partition_begin = tile_scheduler_metadata[i][1]
+                partition_end = tile_scheduler_metadata[i][3]
+                if j != batch_begin:
+                    partition_begin = 0 
+                if j != batch_end:
+                    partition_end = max_seqlen_pad
+
+                begin = j * max_seqlen_pad
+                end = begin + cache_seqlens[j]
+                import pdb; pdb.set_trace()
+                O, LSE = scaled_dot_product_attention(
+                    q[j].transpose(0, 1),
+                    blocked_k.view(-1, h_kv, d)[begin:end].transpose(0, 1),
+                    blocked_v.view(-1, h_kv, dv)[begin:end].transpose(0, 1),
+                    h_q=h_q,
+                    h_kv=h_kv,
+                    partition_begin=partition_begin,
+                    partition_end=partition_end,
+                    batch_id=i,
+                    is_causal=causal,
+                    out_flash=out_flash,
+                    lse_flash=lse_flash
+                )
+                out_acc[i] = O.transpose(0, 1)
+                lse_acc[i] = LSE
+        return out_acc, lse_acc
+
+    def ref_mla(out_flash=None, lse_flash=None):
         out = torch.empty(b, s_q, h_q, dv, dtype=torch.float32)
         lse = torch.empty(b, h_q, s_q, dtype=torch.float32)
         for i in range(b):
@@ -193,24 +275,55 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
                 blocked_v.view(-1, h_kv, dv)[begin:end].transpose(0, 1),
                 h_q=h_q,
                 h_kv=h_kv,
+                batch_id=i,
                 is_causal=causal,
+                out_flash=out_flash,
+                lse_flash=lse_flash
             )
             out[i] = O.transpose(0, 1)
             lse[i] = LSE
         return out, lse
 
     out_flash, lse_flash = flash_mla()
+    # out_torch, lse_torch = ref_mla_cu_partition(out_acc, lse_acc)
+    # import pdb; pdb.set_trace()
     out_torch, lse_torch = ref_mla()
+
+    import pdb; pdb.set_trace()
+    out_flash_torch = out_flash
+    lse_flash_torch = lse_flash
+
+    # def ref_mla_combine():
+    #     for i in range(b):
+    #         split_offset = num_splits[i]
+    #         actual_num_splits = num_splits[i + 1] - split_offset
+    #         if actual_num_splits == 1:
+    #             continue
+    #         # import pdb; pdb.set_trace()
+    #         lse_actual = lse_acc[split_offset : split_offset + actual_num_splits]
+    #         lse_max = lse_actual.max(dim = 0).values
+    #         lse_sum = torch.exp(lse_actual - lse_max).sum(dim = 0)
+    #         global_lse = torch.log(lse_sum) + lse_max
+    #
+    #         lse_torch
+    #
+    #         # import pdb; pdb.set_trace()
+    #         lse_flash_torch[i] = global_lse
+    #
+    #         # for j in range(actual_num_splits):
+    #         #     out_flash_torch[i] += out_acc[split_offset + j][0] * (torch.exp(lse_actual[j] - global_lse)[0].unsqueeze(-1))
+
+    # ref_mla_combine()
+    # import pdb; pdb.set_trace()
 
     # query = q[0][0]
     # key = blocked_k[63][48:64]
     #
     # s_acc = query @ key.transpose(0, 1)
 
-    import pdb; pdb.set_trace()
 
-    print(out_flash, lse_flash)
-    print(out_torch, lse_torch)
+    # print(out_flash, lse_flash)
+    # print(out_torch, lse_torch)
 
     cal_diff(out_flash, out_torch.cuda(), "out")
     cal_diff(lse_flash, lse_torch.cuda(), "lse")
@@ -231,12 +344,12 @@ if __name__ == "__main__":
     causal = True
 
     for (dtype, b, s, h_q, s_q, causal, varlen) in itertools.product(
-        (torch.float16, torch.bfloat16),
+        (torch.float16, ),
         (128,),
         (4096, 8192),
-        (64, 128),
+        (16, 32, 64, 128),
         (1, 2),
         (True, False),
-        (False, True)
+        (True, False)
     ):
         test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen)

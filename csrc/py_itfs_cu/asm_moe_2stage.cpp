@@ -61,39 +61,39 @@ static CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1, s
 {
     int E = w1.size(0);
     int dim1 = w1.size(1);
-    std::string quant_type;
+    QuantType quant_type;
     if (!w1_scale.has_value())
-        quant_type = "no";
+        quant_type = QuantType::No;
     else if (w1_scale.value().numel() == E)
-        quant_type = "per_Tensor";
+        quant_type = QuantType::per_Tensor;
     else if (w1_scale.value().numel() == E * dim1)
-        quant_type = "per_Token";
+        quant_type = QuantType::per_Token;
     else
-        quant_type = "per_Block";
+        quant_type = QuantType::per_128x128;
     if (inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
         w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
         out.scalar_type() == at::ScalarType::BFloat16 &&
-        quant_type == "per_Token")
+        quant_type == QuantType::per_Token)
     {
         return &cfg_fmoe_stage1_bf16_pertokenFp8_g1u1;
     }
     else if (inp.scalar_type() == at::ScalarType::Char &&
              w1.scalar_type() == at::ScalarType::Char &&
              out.scalar_type() == at::ScalarType::BFloat16 &&
-             quant_type == "per_Token")
+             quant_type == QuantType::per_Token)
     {
         return &cfg_fmoe_stage1_bf16_pertokenInt8_g1u1;
     }
     else if (inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
              w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
              out.scalar_type() == at::ScalarType::BFloat16 &&
-             quant_type == "per_Block")
+             quant_type == QuantType::per_128x128)
     {
         return &cfg_fmoe_stage1_bf16_pertokenFp8_blockscale_g1u1;
     }
     else
     {
-        TORCH_CHECK(false, "Unsupported input_type:", inp.scalar_type(), " weight_type:", w1.scalar_type(), ", out_type:", out.scalar_type(), ", quant_type:", quant_type);
+        TORCH_CHECK(false, "Unsupported input_type:", inp.scalar_type(), " weight_type:", w1.scalar_type(), ", out_type:", out.scalar_type(), ", quant_type:", static_cast<int>(quant_type));
     }
 };
 

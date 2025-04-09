@@ -319,6 +319,8 @@ def get_2stage_cfgs(
     if q_dtype_w in [torch.bfloat16, torch.float16, torch.uint32]:
         tag = "ck"
 
+    logger.info(keys, ", find config " + "failed, " if cfg is None else "successed, ", tag)
+
     if "ck" in tag:
         return (
             ck_stage1,
@@ -468,6 +470,11 @@ def asm_stage1(
     token_num, topk, _ = out.shape
     inter_dim = get_inter_dim(w1.shape, w2.shape)
 
+    if a1_scale is not None:
+        if a1_scale.numel() == 1:
+            a1_scale = a1_scale.view(1).repeat(token_num)
+            w1_scale = w1_scale.view(w1.shape[0], 1).repeat(1, w1.shape[1])
+
     tmp_out = out
     if ksplit > 0:
         tmp_out = torch.zeros(
@@ -493,7 +500,10 @@ def asm_stage1(
         w1_scale=w1_scale,
     )
     if ksplit > 0:
-        aiter.silu_and_mul(out, tmp_out.view(torch.float).to(dtype))
+        if activation == ActivationType.Silu:
+            aiter.silu_and_mul(out, tmp_out.view(torch.float).to(dtype))
+        else:
+            aiter.gelu_and_mul(out, tmp_out.view(torch.float).to(dtype))
     return out
 
 
@@ -530,7 +540,10 @@ def ck_stage1(
         a1_scale,
         block_m,
     )
-    aiter.silu_and_mul(out, tmp)
+    if activation == ActivationType.Silu:
+        aiter.silu_and_mul(out, tmp)
+    else:
+        aiter.gelu_and_mul(out, tmp)
     return out
 
 
@@ -606,6 +619,7 @@ def torch_moe_stage1(
     topk_ids,
     dtype=torch.float16,
     activation=ActivationType.Silu,
+    quant_type=QuantType.No,
     # following for quant
     a1_scale=None,  # [token, 1]
     w1_scale=None,  # [expert, inter_dim, 1]
@@ -620,7 +634,7 @@ def torch_moe_stage1(
     inter_dim = get_inter_dim(w1.shape, w2.shape)
 
     if w1_scale is not None:
-        if w1_scale.numel() == w1.shape[0] or w1_scale.numel() == w1.shape[0]*w1.shape[1]:
+        if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
             w1 = w1 * w1_scale.view(w1_scale.shape[0], -1, 1)
         # per_128x128
         else:
@@ -630,7 +644,7 @@ def torch_moe_stage1(
             w1 = w1.view(w1_shape)
 
     if a1_scale is not None and w1_scale is not None:
-        if a1_scale.numel() == hidden_states.shape[0] or a1_scale.numel() == 1:
+        if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
             hidden_states = hidden_states * a1_scale
         else:
             a1_scale = a1_scale.view(hidden_states.shape[0], -1, 1)
@@ -669,6 +683,7 @@ def torch_moe_stage2(
     topk_weights,
     topk_ids,
     dtype=torch.float16,
+    quant_type=QuantType.No,
     w2_scale=None,  # [1]
     a2_scale=None,  # [expert]]
 ):
@@ -680,10 +695,23 @@ def torch_moe_stage2(
     num_experts, model_dim, inter_dim = w2.shape
     hidden_states = hidden_states.view(token_num, topk, inter_dim)
 
-    if a2_scale is not None:
-        hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
     if w2_scale is not None:
-        w2 = w2 * w2_scale.view(num_experts, -1, 1)
+        if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
+            w2 = w2 * w2_scale.view(w2_scale.shape[0], -1, 1)
+        # per_128x128
+        else:
+            w2_shape = w2.shape
+            w2 = w2.view(w2.shape[0], w2.shape[1]//128, 128, w2.shape[2]//128, 128) * \
+                w2_scale.view(w2_scale.shape[0], w2.shape[1]//128, 1, w2.shape[2]//128, 1)
+            w2 = w2.view(w2_shape)
+
+    if a2_scale is not None and w2_scale is not None:
+        if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
+            hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
+        else:
+            a2_scale = a2_scale.view(hidden_states.shape[0], -1, 1)
+            a2_scale = a2_scale.repeat(1, 1, hidden_states.shape[-1] // a2_scale.shape[1]).view(hidden_states.shape[0], -1)
+            hidden_states = hidden_states * a2_scale
 
     out = torch.zeros(
         (token_num, topk, model_dim),

@@ -148,9 +148,10 @@ def go(
         q_dtype_a = eval(q_dtype_a)
         q_dtype_w = eval(q_dtype_w)
         q_type = eval(q_type)
-        if q_dtype_a == torch.int8 and q_type == QuantType.per_Tensor:
-            print(f'no moe solution for ', line)
-            continue
+        print("\nStart tuning", line)
+        # if q_dtype_a == torch.int8 and q_type == QuantType.per_Tensor:
+        #     print(f'no moe solution for ', line)
+        #     continue
         act_type = eval(act_type)
         input = torch.randn((token, model_dim), dtype=dtype)
         if use_g1u1:
@@ -179,6 +180,7 @@ def go(
             topk_weights,
             topk_ids,
             activation=act_type,
+            quant_type=q_type,
             dtype=dtype,
             a1_scale=a1_scale,
             w1_scale=w1_scale,
@@ -208,8 +210,7 @@ def go(
                 dtype=dtype,
             )
             if use_g1u1 and dtype == torch.bfloat16 and \
-                act_type == ActivationType.Silu and \
-                q_dtype_w != torch.int4 and q_type != QuantType.per_Tensor:
+                q_dtype_w != torch.int4:
                 for el in asm_kernels.get(blockM, []):
                     tasks.append(
                         (
@@ -237,7 +238,7 @@ def go(
                 if q_dtype_w == torch.int4:
                     w1_qt_shffle = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w1_qt, (32, 32), use_int4=True)))
                 else:
-                    w1_qt_shffle = shuffle_weight(w1_qt, layout=(32, 32))
+                    w1_qt_shffle = shuffle_weight(w1_qt, layout=(16, 16))
                 
                 tasks_ck.append(
                     (

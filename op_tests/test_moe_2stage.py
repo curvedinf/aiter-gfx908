@@ -4,7 +4,6 @@
 import torch
 import torch.nn.functional as F
 import triton.language as tl
-import numpy as np
 import sys
 import os
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -146,10 +145,7 @@ def test_fmoe(
         w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(32, 32))
         w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(32, 32))
     else:
-        if qType == aiter.QuantType.No:
-            w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(16, 16))
-        else:
-            w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(16, 16))
+        w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(16, 16))
         w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(16, 16))
 
     # out1_ck = torch.empty((token, topk, inter_dim), dtype=dtype)

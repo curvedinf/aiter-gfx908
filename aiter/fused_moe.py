@@ -286,6 +286,7 @@ def get_2stage_cfgs(
                 "inter_dim",
                 "expert",
                 "topk",
+                "act_type",
                 "dtype",
                 "q_dtype_a",
                 "q_dtype_w",
@@ -299,6 +300,7 @@ def get_2stage_cfgs(
         inter_dim,
         expert,
         topk,
+        str(activation),
         str(dtype),
         str(q_dtype_a),
         str(q_dtype_w),
@@ -319,7 +321,7 @@ def get_2stage_cfgs(
     if q_dtype_w in [torch.bfloat16, torch.float16, torch.uint32]:
         tag = "ck"
 
-    logger.info(keys, ", find config " + "failed, " if cfg is None else "successed, ", tag)
+    logger.info(f"[fused_moe] using {'default' if cfg is None else tag} for {keys} ")
 
     if "ck" in tag:
         return (
@@ -420,9 +422,11 @@ def fused_moe_2stages(
     a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
     a2 = a2.view(token_num, topk, inter_dim)
     if quant_type == aiter.QuantType.No:
+
         @functools.lru_cache()
         def get1tensor(device):
             return torch.tensor(1.0, dtype=torch.float, device=device)
+
         a2_scale = get1tensor(device)
     stage2(
         a2,
@@ -470,10 +474,10 @@ def asm_stage1(
     token_num, topk, _ = out.shape
     inter_dim = get_inter_dim(w1.shape, w2.shape)
 
-    if a1_scale is not None:
-        if a1_scale.numel() == 1:
-            a1_scale = a1_scale.view(1).repeat(token_num)
-            w1_scale = w1_scale.view(w1.shape[0], 1).repeat(1, w1.shape[1])
+    # if a1_scale is not None:
+    #     if a1_scale.numel() == 1:
+    #         a1_scale = a1_scale.view(1).repeat(token_num)
+    #         w1_scale = w1_scale.view(w1.shape[0], 1).repeat(1, w1.shape[1])
 
     tmp_out = out
     if ksplit > 0:
@@ -639,8 +643,11 @@ def torch_moe_stage1(
         # per_128x128
         else:
             w1_shape = w1.shape
-            w1 = w1.view(w1.shape[0], w1.shape[1]//128, 128, w1.shape[2]//128, 128) * \
-                w1_scale.view(w1_scale.shape[0], w1.shape[1]//128, 1, w1.shape[2]//128, 1)
+            w1 = w1.view(
+                w1.shape[0], w1.shape[1] // 128, 128, w1.shape[2] // 128, 128
+            ) * w1_scale.view(
+                w1_scale.shape[0], w1.shape[1] // 128, 1, w1.shape[2] // 128, 1
+            )
             w1 = w1.view(w1_shape)
 
     if a1_scale is not None and w1_scale is not None:
@@ -648,7 +655,9 @@ def torch_moe_stage1(
             hidden_states = hidden_states * a1_scale
         else:
             a1_scale = a1_scale.view(hidden_states.shape[0], -1, 1)
-            a1_scale = a1_scale.repeat(1, 1, hidden_states.shape[-1] // a1_scale.shape[1]).view(hidden_states.shape[0], -1)
+            a1_scale = a1_scale.repeat(
+                1, 1, hidden_states.shape[-1] // a1_scale.shape[1]
+            ).view(hidden_states.shape[0], -1)
             hidden_states = hidden_states * a1_scale
 
     hidden_states = hidden_states.view(B, -1, D).repeat(1, topk, 1)
@@ -701,8 +710,11 @@ def torch_moe_stage2(
         # per_128x128
         else:
             w2_shape = w2.shape
-            w2 = w2.view(w2.shape[0], w2.shape[1]//128, 128, w2.shape[2]//128, 128) * \
-                w2_scale.view(w2_scale.shape[0], w2.shape[1]//128, 1, w2.shape[2]//128, 1)
+            w2 = w2.view(
+                w2.shape[0], w2.shape[1] // 128, 128, w2.shape[2] // 128, 128
+            ) * w2_scale.view(
+                w2_scale.shape[0], w2.shape[1] // 128, 1, w2.shape[2] // 128, 1
+            )
             w2 = w2.view(w2_shape)
 
     if a2_scale is not None and w2_scale is not None:
@@ -710,7 +722,9 @@ def torch_moe_stage2(
             hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
         else:
             a2_scale = a2_scale.view(hidden_states.shape[0], -1, 1)
-            a2_scale = a2_scale.repeat(1, 1, hidden_states.shape[-1] // a2_scale.shape[1]).view(hidden_states.shape[0], -1)
+            a2_scale = a2_scale.repeat(
+                1, 1, hidden_states.shape[-1] // a2_scale.shape[1]
+            ).view(hidden_states.shape[0], -1)
             hidden_states = hidden_states * a2_scale
 
     out = torch.zeros(

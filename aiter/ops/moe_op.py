@@ -11,7 +11,7 @@ from ..jit.core import (
     AITER_CORE_DIR,
 )
 import torch.nn.functional as F
-from .enum import ActivationType, Enum
+from .enum import ActivationType, Enum, QuantType
 
 
 @compile_ops("module_moe_asm")
@@ -181,6 +181,7 @@ def moe_stage1_g1u1(
     block_m: int,
     ksplit: int = 0,
     activation: Enum = ActivationType.Silu,
+    quant_type: Enum = QuantType.No,
     a1_scale: Optional[Tensor] = None,
     w1_scale: Optional[Tensor] = None,
 ): ...

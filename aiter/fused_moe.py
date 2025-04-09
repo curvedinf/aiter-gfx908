@@ -342,6 +342,7 @@ def get_2stage_cfgs(
             asm_stage1,
             kernelName=tag,
             activation=activation,
+            quant_type=q_type,
         ),
         aiter.ck_moe_stage2,
         block_m,
@@ -396,14 +397,19 @@ def fused_moe_2stages(
     )
 
     a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a)
-    if quant_type == QuantType.per_Tensor:
-        a1_scale = a1_scale.view(1).repeat(token_num)
-        w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[1])
-    a2 = torch.empty(
-        (token_num, topk, inter_dim),
-        dtype=dtype,
-        device=device,
-    )
+    if quant_type != QuantType.per_128x128:
+        a2 = torch.empty(
+            (token_num, topk, inter_dim),
+            dtype=dtype,
+            device=device,
+        )
+    else:
+        ratio = a1_scale.element_size() // a1.element_size()
+        a2 = torch.empty(
+            (token_num + (token_num + 128 * ratio -1 ) // (128 * ratio), topk, inter_dim),
+            dtype=q_dtype_a,
+            device=device,
+        )
     stage1(
         a1,
         w1,
@@ -417,10 +423,16 @@ def fused_moe_2stages(
         w1_scale=w1_scale,
     )
 
-    if quant_type == QuantType.per_Token:
-        a2 = a2.view(token_num, -1)
-    a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
-    a2 = a2.view(token_num, topk, inter_dim)
+    if quant_type != QuantType.per_128x128:
+        if quant_type == QuantType.per_Token:
+            a2 = a2.view(token_num, -1)
+        a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
+        a2 = a2.view(token_num, topk, inter_dim)
+    else:
+        a2_v = a2[:token_num, :, :]
+        a2_scale = a2[token_num:, ...].view(-1)[:token_num * topk * inter_dim // 128 * ratio].view(torch.float).view(token_num, -1)
+        a2 = a2_v
+
     if quant_type == aiter.QuantType.No:
 
         @functools.lru_cache()
@@ -466,6 +478,7 @@ def asm_stage1(
     kernelName: str = "",
     ksplit: int = 0,
     activation=ActivationType.Silu,
+    quant_type=QuantType.No,
     a1_scale=None,
     w1_scale=None,
 ):
@@ -474,10 +487,10 @@ def asm_stage1(
     token_num, topk, _ = out.shape
     inter_dim = get_inter_dim(w1.shape, w2.shape)
 
-    # if a1_scale is not None:
-    #     if a1_scale.numel() == 1:
-    #         a1_scale = a1_scale.view(1).repeat(token_num)
-    #         w1_scale = w1_scale.view(w1.shape[0], 1).repeat(1, w1.shape[1])
+    if quant_type == QuantType.per_Tensor:
+        a1_scale = a1_scale.view(1).repeat(token_num)
+        w1_scale = w1_scale.view(w1.shape[0], 1).repeat(1, w1.shape[1])
+        quant_type = QuantType.per_Token
 
     tmp_out = out
     if ksplit > 0:
@@ -500,6 +513,7 @@ def asm_stage1(
         block_m,
         ksplit=ksplit,
         activation=activation,
+        quant_type=quant_type,
         a1_scale=a1_scale,
         w1_scale=w1_scale,
     )
@@ -681,7 +695,6 @@ def torch_moe_stage1(
         out = torch_act(gate) * up
     else:
         out = torch_act(out)
-
     return out.to(dtype)
 
 

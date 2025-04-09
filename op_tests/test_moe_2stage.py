@@ -190,6 +190,7 @@ def test_fmoe(
     #         w1_scale=w1_scale,
     #         a1_scale=a1_scale,
     #         activation=actType,
+    #         quant_type=qType,
     #         block_m=BLOCK_SIZE_M,
     #     )
     #     checkAllclose(

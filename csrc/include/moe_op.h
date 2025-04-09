@@ -149,6 +149,7 @@ void moe_stage1_g1u1(torch::Tensor &input,             // [token_cnt, model_dim]
                      int block_m,
                      int ksplit,
                      ActivationType activation,
+                     QuantType quant_type,
                      std::optional<torch::Tensor> a1_scale, // [token_cnt, 1], token scale
                      std::optional<torch::Tensor> w1_scale  // [expert, 1, inter_dim], gate(up) scale
 );

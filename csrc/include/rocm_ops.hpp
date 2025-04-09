@@ -430,6 +430,7 @@
             py::arg("block_m"),                                                  \
             py::arg("ksplit") = 0,                                               \
             py::arg("activation") = ActivationType::Silu,                        \
+            py::arg("quant_type") = QuantType::No,                               \
             py::arg("a1_scale") = std::nullopt,                                  \
             py::arg("w1_scale") = std::nullopt);                                 \
       m.def("moe_sum", &moe_sum, "moe_sum(Tensor! input, Tensor output) -> ()");

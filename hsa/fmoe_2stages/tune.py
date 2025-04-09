@@ -185,6 +185,9 @@ def go(
             a1_scale=a1_scale,
             w1_scale=w1_scale,
         )
+        if q_type == QuantType.per_128x128:
+            ref, scale = aiter.pertoken_quant(ref.view(ref.shape[0], -1, 128), quant_dtype=q_dtype_a) 
+            ref = ref.view(ref.shape[0], topk, -1).to(torch.float32)
 
         tasks = []
         tasks_ck = []
@@ -205,10 +208,18 @@ def go(
             sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
                 moe_sorting(topk_ids, topk_weights, expert, model_dim, dtype, blockM)
             )
-            out = torch.empty(
-                (token, topk, inter_dim),
-                dtype=dtype,
-            )
+            if q_type != QuantType.per_128x128:
+                out = torch.empty(
+                    (token, topk, inter_dim),
+                    dtype=dtype,
+                )
+            else:
+                ratio = a1_scale.element_size() // a1_qt.element_size()
+                out = torch.empty(
+                    (token + (token + 128 * ratio -1 ) // (128 * ratio), topk, inter_dim),
+                    dtype=q_dtype_a,
+                )
+
             if use_g1u1 and dtype == torch.bfloat16 and \
                 q_dtype_w != torch.int4:
                 for el in asm_kernels.get(blockM, []):
@@ -228,6 +239,7 @@ def go(
                                 el,
                                 0,
                                 act_type,
+                                q_type,
                                 a1_scale.t().contiguous() if q_type == QuantType.per_128x128 else a1_scale,
                                 w1_scale,
                             ),
@@ -265,6 +277,8 @@ def go(
 
         profileDF = []
         for (tag, block_m), us, _ in rets:
+            if q_type == QuantType.per_128x128:
+                _ = _[:token, :, :].to(torch.float32)
             err = checkAllclose(
                 ref.to("cpu"), _, msg=f"[{tag:<50}]: {us:.2f}us ......      "
             )

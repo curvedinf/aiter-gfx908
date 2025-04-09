@@ -309,38 +309,38 @@ def test_mla(
     )
 
     # Triton implementation
-    # if mtp == 1:
-    #     if qk_head_dim != v_head_dim:
-    #         out_triton = q.new_empty((total_q, nhead, v_head_dim)).fill_(-1)
-    #     else:
-    #         out_triton = torch.empty_like(q)
+    if mtp == 1:
+        if qk_head_dim != v_head_dim:
+            out_triton = q.new_empty((total_q, nhead, v_head_dim)).fill_(-1)
+        else:
+            out_triton = torch.empty_like(q)
 
-    #     num_kv_splits = 16
-    #     attn_logits = torch.empty(
-    #         (total_q, nhead, num_kv_splits, v_head_dim + 1),
-    #         dtype=dtypes.fp32,
-    #     )
-    #     _, us_ref = run_perftest(
-    #         mla_decode_ref.decode_attention_fwd,
-    #         q,
-    #         kv_buffer,
-    #         kv_buffer[..., :kv_lora_rank],
-    #         out_triton,
-    #         kv_indptr,
-    #         kv_indices,
-    #         attn_logits,
-    #         num_kv_splits,
-    #         sm_scale,
-    #         num_iters=5,
-    #     )
-    #     # logits_ref, lse_ref = attn_logits.split([v_head_dim, 1], dim=-1)
-    #     # logits_ref = rearrange(logits_ref, "bs h sp d -> bs sp h d")
-    #     # lse_ref = rearrange(lse_ref, "bs h sp d -> bs sp h d")
-    #     checkAllclose(
-    #         out_ref,
-    #         out_triton,
-    #         msg=f"mla_decode-absorb    [golden vs    triton]:{us_torch_decode:>8.2f} us vs {us_ref:>8.2f} us......",
-    #     )
+        num_kv_splits = 16
+        attn_logits = torch.empty(
+            (total_q, nhead, num_kv_splits, v_head_dim + 1),
+            dtype=dtypes.fp32,
+        )
+        _, us_ref = run_perftest(
+            mla_decode_ref.decode_attention_fwd,
+            q,
+            kv_buffer,
+            kv_buffer[..., :kv_lora_rank],
+            out_triton,
+            kv_indptr,
+            kv_indices,
+            attn_logits,
+            num_kv_splits,
+            sm_scale,
+            num_iters=5,
+        )
+        # logits_ref, lse_ref = attn_logits.split([v_head_dim, 1], dim=-1)
+        # logits_ref = rearrange(logits_ref, "bs h sp d -> bs sp h d")
+        # lse_ref = rearrange(lse_ref, "bs h sp d -> bs sp h d")
+        checkAllclose(
+            out_ref,
+            out_triton,
+            msg=f"mla_decode-absorb    [golden vs    triton]:{us_torch_decode:>8.2f} us vs {us_ref:>8.2f} us......",
+        )
 
     # aiter implementation
     kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
@@ -356,6 +356,25 @@ def test_mla(
         kv_last_page_lens,
         max_seqlen_qo,
         sm_scale,
+    )
+
+    # hip implementation
+    if mtp == 1:
+        out_hip = torch.empty((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
+        _, us_hip = run_perftest(
+            aiter.mla_decode_fwd_hip,
+            q,
+            kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
+            out_hip,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            sm_scale
+        )
+        checkAllclose(
+            out_ref,
+            out_hip,
+            msg=f"mla_decode-absorb    [golden vs aiter_hip]:{us_torch_decode:>8.2f} us vs {us_hip:>8.2f} us......",
     )
 
     # print(f"{out_ref.view(total_q, -1)=}")
@@ -374,13 +393,20 @@ def test_mla(
         out_asm,
         msg=f"mla_decode-absorb    [golden vs aiter_asm]:{us_torch_decode:>8.2f} us vs {us_asm_decode:>8.2f} us......",
     )
-    return {
+
+    results = {
         "prefill:ck_192": us_aiter,
         "prefill:asm_576": us_asm,
         "decode:flops": flops,
         "decode:bytes": bytes,
         "decode:asm_576": us_asm_decode,
     }
+
+    if mtp == 1:
+        results["decode:triton_576"] = us_ref
+        results["decode:hip_576"] = us_hip
+
+    return results
 
 
 kv_lora_rank = 512
@@ -415,5 +441,6 @@ for nhead, mtp in list_nhead:
         )
         df.append(ret)
     df = pd.DataFrame(df)
-    # df.to_csv(f"mla_mtp{mtp}.csv")
+    df.to_csv(f"mla_mtp{mtp}.csv", float_format="%.2f")
+    pd.set_option("display.float_format", lambda x: f"{x:.2f}")
     aiter.logger.info(f"summary:\n{df}")

@@ -228,7 +228,7 @@ def checkAllclose(a, b, rtol=1e-2, atol=1e-2, msg="", printNum=8):
     else:
         num = mask.sum()
         printNum = min(printNum, num)
-        percent = num / a.numel()
+        percent = (num / a.numel()).item()
         a_msked = a[mask]
         b_msked = b[mask]
         delta = (a_msked - b_msked).abs()
@@ -249,7 +249,7 @@ def checkAllclose(a, b, rtol=1e-2, atol=1e-2, msg="", printNum=8):
         logger.info(
             f"-->max abs delta:{delta.max()}, delta details: {percent:.1%} ({num} of {a.numel()}) elements"
         )
-        return False
+        return percent
 
 
 def tensor_dump(x: torch.tensor, name: str, dir="./"):

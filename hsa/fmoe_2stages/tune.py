@@ -9,6 +9,7 @@ import argparse
 import time
 import json
 from aiter import ActivationType, QuantType
+from aiter.jit.core import AITER_ASM_DIR
 from aiter.fused_moe import (
     fused_topk,
     moe_sorting,
@@ -114,6 +115,52 @@ def go(
     ],
 }}
 """
+
+    asm_kernels_subGU64_template = \
+    """
+{{
+    16: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x64_5tg_pf3",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x64_6tg_pf2",
+    ],
+    32: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x64_4tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x64_4tg_pf3",
+    ],
+    48: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x64_3tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x64_3tg_pf3",
+    ],
+    64: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x64_2tg_pf3",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x64_3tg_pf2",
+    ],
+    80: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x64_2tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x64_2tg_pf3",
+    ],
+    96: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_96x64_2tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_96x64_pf3",
+    ],
+    112: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_112x64_2tg_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_112x64_pf3",
+    ],
+    128: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_128x64_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_128x64_pf3",
+    ],
+    144: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_144x64_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_144x64_pf3",
+    ],
+    160: [
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_160x64_pf2",
+        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_160x64_pf3",
+    ],
+}}
+"""
     args = [
         "token",
         "model_dim",
@@ -186,11 +233,20 @@ def go(
             w1_scale=w1_scale,
         )
         if q_type == QuantType.per_128x128:
-            ref, scale = aiter.pertoken_quant(ref.view(ref.shape[0], -1, 128), quant_dtype=q_dtype_a) 
+            ref, ref_scale = aiter.pertoken_quant(ref.view(ref.shape[0], -1, 128), quant_dtype=q_dtype_a) 
             ref = ref.view(ref.shape[0], topk, -1).to(torch.float32)
+            ref_scale = ref_scale.view(token, -1)
 
         tasks = []
         tasks_ck = []
+        
+        kernels_list_csv = f"{AITER_ASM_DIR}/fmoe_2stages/fmoe_stage1_bf16_pertoken{{quantDtype}}{{extraInfo}}_g1u1.csv"
+
+        def get_kernels_dict(file):
+            df = pd.read_csv(file)
+            kernel_dict = df.groupby("tile_m")["knl_name"].apply(list).to_dict()
+            return kernel_dict
+        
         extraInfo = "_blockscale" if q_type == QuantType.per_128x128 else ""
         if q_dtype_a == torch.int8:
             quantDtype = "Int8"
@@ -198,12 +254,9 @@ def go(
             quantDtype = "Fp8"
         else:
             quantDtype = ""
-        asm_kernels = eval(
-            asm_kernels_template.format( 
-                quantDtype=quantDtype,
-                extraInfo=extraInfo,
-            )
-        )
+        
+        asm_kernels = get_kernels_dict(kernels_list_csv.format(quantDtype=quantDtype, extraInfo=extraInfo))
+        
         for blockM in blockMs:
             sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
                 moe_sorting(topk_ids, topk_weights, expert, model_dim, dtype, blockM)
@@ -216,7 +269,7 @@ def go(
             else:
                 ratio = a1_scale.element_size() // a1_qt.element_size()
                 out = torch.empty(
-                    (token + (token + 128 * ratio -1 ) // (128 * ratio), topk, inter_dim),
+                    (token+ (token * ratio + 127) // 128, topk, inter_dim),
                     dtype=q_dtype_a,
                 )
 
@@ -278,6 +331,7 @@ def go(
         profileDF = []
         for (tag, block_m), us, _ in rets:
             if q_type == QuantType.per_128x128:
+                scale = _[token:, ...].view(-1)[:(token * topk * inter_dim * 4 // 128)].view(torch.float).view(token, -1)
                 _ = _[:token, :, :].to(torch.float32)
             err = checkAllclose(
                 ref.to("cpu"), _, msg=f"[{tag:<50}]: {us:.2f}us ......      "

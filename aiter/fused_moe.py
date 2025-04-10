@@ -406,7 +406,7 @@ def fused_moe_2stages(
     else:
         ratio = a1_scale.element_size() // a1.element_size()
         a2 = torch.empty(
-            (token_num + (token_num + 128 * ratio -1 ) // (128 * ratio), topk, inter_dim),
+            (token_num + (token_num * ratio + 127) // 128, topk, inter_dim),
             dtype=q_dtype_a,
             device=device,
         )
@@ -430,7 +430,7 @@ def fused_moe_2stages(
         a2 = a2.view(token_num, topk, inter_dim)
     else:
         a2_v = a2[:token_num, :, :]
-        a2_scale = a2[token_num:, ...].view(-1)[:token_num * topk * inter_dim // 128 * ratio].view(torch.float).view(token_num, -1)
+        a2_scale = a2[token_num:, ...].view(-1)[:token_num * topk * inter_dim * ratio // 128].view(torch.float).view(token_num, -1)
         a2 = a2_v
 
     if quant_type == aiter.QuantType.No:
@@ -651,28 +651,26 @@ def torch_moe_stage1(
     N = w1.shape[1]
     inter_dim = get_inter_dim(w1.shape, w2.shape)
 
-    if w1_scale is not None:
-        if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
-            w1 = w1 * w1_scale.view(w1_scale.shape[0], -1, 1)
-        # per_128x128
-        else:
-            w1_shape = w1.shape
-            w1 = w1.view(
-                w1.shape[0], w1.shape[1] // 128, 128, w1.shape[2] // 128, 128
-            ) * w1_scale.view(
-                w1_scale.shape[0], w1.shape[1] // 128, 1, w1.shape[2] // 128, 1
-            )
-            w1 = w1.view(w1_shape)
+    if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
+        w1 = w1 * w1_scale.view(w1_scale.shape[0], -1, 1)
+    # per_128x128
+    elif quant_type == QuantType.per_128x128:
+        w1_shape = w1.shape
+        w1 = w1.view(
+            w1.shape[0], w1.shape[1] // 128, 128, w1.shape[2] // 128, 128
+        ) * w1_scale.view(
+            w1_scale.shape[0], w1.shape[1] // 128, 1, w1.shape[2] // 128, 1
+        )
+        w1 = w1.view(w1_shape)
 
-    if a1_scale is not None and w1_scale is not None:
-        if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
-            hidden_states = hidden_states * a1_scale
-        else:
-            a1_scale = a1_scale.view(hidden_states.shape[0], -1, 1)
-            a1_scale = a1_scale.repeat(
-                1, 1, hidden_states.shape[-1] // a1_scale.shape[1]
-            ).view(hidden_states.shape[0], -1)
-            hidden_states = hidden_states * a1_scale
+    if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
+        hidden_states = hidden_states * a1_scale
+    elif quant_type == QuantType.per_128x128:
+        a1_scale = a1_scale.view(hidden_states.shape[0], -1, 1)
+        a1_scale = a1_scale.repeat(
+            1, 1, hidden_states.shape[-1] // a1_scale.shape[1]
+        ).view(hidden_states.shape[0], -1)
+        hidden_states = hidden_states * a1_scale
 
     hidden_states = hidden_states.view(B, -1, D).repeat(1, topk, 1)
 
@@ -717,28 +715,26 @@ def torch_moe_stage2(
     num_experts, model_dim, inter_dim = w2.shape
     hidden_states = hidden_states.view(token_num, topk, inter_dim)
 
-    if w2_scale is not None:
-        if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
-            w2 = w2 * w2_scale.view(w2_scale.shape[0], -1, 1)
-        # per_128x128
-        else:
-            w2_shape = w2.shape
-            w2 = w2.view(
-                w2.shape[0], w2.shape[1] // 128, 128, w2.shape[2] // 128, 128
-            ) * w2_scale.view(
-                w2_scale.shape[0], w2.shape[1] // 128, 1, w2.shape[2] // 128, 1
-            )
-            w2 = w2.view(w2_shape)
+    if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
+        w2 = w2 * w2_scale.view(w2_scale.shape[0], -1, 1)
+    # per_128x128
+    elif quant_type == QuantType.per_128x128:
+        w2_shape = w2.shape
+        w2 = w2.view(
+            w2.shape[0], w2.shape[1] // 128, 128, w2.shape[2] // 128, 128
+        ) * w2_scale.view(
+            w2_scale.shape[0], w2.shape[1] // 128, 1, w2.shape[2] // 128, 1
+        )
+        w2 = w2.view(w2_shape)
 
-    if a2_scale is not None and w2_scale is not None:
-        if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
-            hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
-        else:
-            a2_scale = a2_scale.view(hidden_states.shape[0], -1, 1)
-            a2_scale = a2_scale.repeat(
-                1, 1, hidden_states.shape[-1] // a2_scale.shape[1]
-            ).view(hidden_states.shape[0], -1)
-            hidden_states = hidden_states * a2_scale
+    if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
+        hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
+    elif quant_type == QuantType.per_128x128:
+        a2_scale = a2_scale.view(hidden_states.shape[0], -1, 1)
+        a2_scale = a2_scale.repeat(
+            1, 1, hidden_states.shape[-1] // a2_scale.shape[1]
+        ).view(hidden_states.shape[0], -1)
+        hidden_states = hidden_states * a2_scale
 
     out = torch.zeros(
         (token_num, topk, model_dim),

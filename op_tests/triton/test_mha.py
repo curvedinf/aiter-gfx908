@@ -421,4 +421,4 @@ def test_mha_backward_varlen(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEA
 
 if __name__ == "__main__":
     # Run the tests
-    test_mha_backward(8, 1024, 4096, 16, 16, 128, 0.0, False, False, torch.float16)
+    test_mha_backward(8, 1024, 4096, 16, 16, 128, 0.0, True, False, torch.float16)

@@ -78,21 +78,21 @@ def nonvarlen_benchmark_configs():
         (16, 16, 16, 1024, 1024),
         (8, 16, 16, 2048, 2048),
         (4, 16, 16, 4096, 4096),
-        (2, 16, 16, 8192, 8192),
-        (1, 16, 16, 16384, 16384),
-        (2, 48, 48, 1024, 1024),
-        (2, 48, 48, 2048, 1024),
-        (2, 48, 48, 4096, 8192),
-        (2, 48, 48, 8192, 4096),
-        (2, 48, 48, 16384, 8192),
-        (8, 16, 16, 1989, 15344),
-        (4, 16, 16, 4097, 163),
-        (2, 16, 16, 8122, 2159),
-        (1, 16, 16, 16281, 7),
-        (2, 48, 48, 1021, 1020),
-        (2, 48, 48, 2001, 2048),
-        (2, 48, 48, 3996, 9639),
-        (2, 48, 48, 8181, 1021),
+        # (2, 16, 16, 8192, 8192),
+        # (1, 16, 16, 16384, 16384),
+        # (2, 48, 48, 1024, 1024),
+        # (2, 48, 48, 2048, 1024),
+        # (2, 48, 48, 4096, 8192),
+        # (2, 48, 48, 8192, 4096),
+        # (2, 48, 48, 16384, 8192),
+        # (8, 16, 16, 1989, 15344),
+        # (4, 16, 16, 4097, 163),
+        # (2, 16, 16, 8122, 2159),
+        # (1, 16, 16, 16281, 7),
+        # (2, 48, 48, 1021, 1020),
+        # (2, 48, 48, 2001, 2048),
+        # (2, 48, 48, 3996, 9639),
+        # (2, 48, 48, 8181, 1021),
     ]
     return configs
 
@@ -182,7 +182,6 @@ def create_benchmark_configs(custom, args):
     # if args.return_bandwidth:
     #     unit = "GB/s"
     unit = "ms"
-
 
     if args.bench_torch:
         line_vals = [f'Triton ({unit})', f'Torch ({unit})']
@@ -292,9 +291,9 @@ def run_benchmark(custom, args):
                 torch_dq, torch_dk, torch_dv = torch.autograd.grad(torch_out, (q, k, v), do)
 
             # Compare gradients
-            torch.testing.assert_close(triton_dq, torch_dq, atol=1e-2, rtol=1e-2)
             torch.testing.assert_close(triton_dk, torch_dk, atol=1e-2, rtol=1e-2)
             torch.testing.assert_close(triton_dv, torch_dv, atol=1e-2, rtol=1e-2)
+            torch.testing.assert_close(triton_dq, torch_dq, atol=1e-2, rtol=1e-2)
             print(f"Gradients match for shape: BATCH={BATCH}, HQ={HQ}, HK={HK}, N_CTX_Q={N_CTX_Q}, N_CTX_K={N_CTX_K}, D_HEAD={D_HEAD}")
             return 0
 

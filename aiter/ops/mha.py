@@ -684,7 +684,7 @@ def _flash_attn_varlen_forward(
         causal = False
 
     md_name = 'mha_varlen_fwd'
-    if block_table is None:
+    if True:
         filter_fwd = '*'            # get_fwd_blobs()
         if q.dtype == torch.float16:
             md_name += '_fp16'

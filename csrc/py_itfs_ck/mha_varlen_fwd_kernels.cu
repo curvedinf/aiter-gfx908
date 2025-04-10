@@ -69,6 +69,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                                           at::Tensor dropout_randval,
                                           float softmax_scale,
                                           float p_dropout,
+                                          std::optional<const at::Tensor> &block_table_,
                                           std::pair<uint64_t*, uint64_t*> drop_seed_offset)
 {
     // q: (total_q, nheads, d)
@@ -125,6 +126,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          seqlens_q.data_ptr(), // seqstart_q
                          seqlens_k.data_ptr(), // seqstart_k
                          nullptr,              // seqlen_kpads
+                         block_table_->data_ptr(), // page idx
                          total_q,
                          total_k,
                          b,
@@ -334,7 +336,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
     CHECK_DEVICE(cu_seqlens_k);
 
     at::Tensor block_table;
-    const bool paged_KV = block_table_.has_value();
+    const bool paged_KV = false;//block_table_.has_value();
     if (paged_KV) {
         block_table = block_table_.value();
         CHECK_DEVICE(block_table);
@@ -557,8 +559,10 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                     p,
                     softmax_scale,
                     p_dropout,
+                    block_table_,
                     drop_seed_offset);
-
+            printf("11111\n");
+            stream_config.log_level_ = 1;
             float t = fmha_fwd(traits, args, stream_config);
             TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
         }

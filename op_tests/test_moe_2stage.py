@@ -334,21 +334,23 @@ def test_fmoe(dtype, token, model_dim, inter_dim, E, topk, quant='No', use_g1u1=
 
     checkAllclose(out2_ref, out_ck_qt,
                   msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{quant_dtype})')
+    
 
-    # out_ck_nqt, us = ck_moe_fused_2stages(input,
-    #                                       shuffle_weight(w1, layout=(32, 32)),
-    #                                       shuffle_weight(w2, layout=(32, 32)),
-    #                                       topk_weights, topk_ids,
-    #                                       None, None,
-    #                                      activation=activation
-    #                                       #   block_size=BLOCK_SIZE_M
-    #                                       )
+    out_ck_nqt, us = ck_moe_fused_2stages(input,
+                                          shuffle_weight(w1, layout=(16, 16)),
+                                          shuffle_weight(w2, layout=(16, 16)),
+                                          topk_weights, topk_ids,
+                                          None, None,
+                                          activation=activation
+                                          #   block_size=BLOCK_SIZE_M
+                                          )
 
-    # checkAllclose(out_ref, out_ck_nqt,
-    #               msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
+    checkAllclose(out_ref, out_ck_nqt,
+                  msg=f'ck_moe_fused_2stages:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(No quant)')
 
 
-for dtype in [torch.float16]:
+
+for dtype in [torch.float16, torch.bfloat16]:
     # for m in [1,3, 5, 7, 32, 128, 257, 385, 1025]:
     #     for dim in [4096,6144]:
     #         for inter_dim in [4096,6144]:
@@ -359,3 +361,7 @@ for dtype in [torch.float16]:
                 expert, topk = 8, 2
                 test_fmoe(dtype, m, dim, inter_dim, expert, topk,
                           quant='fp8perTokenQuant', use_g1u1=True, activation=ActivationType.Gelu)
+            for inter_dim in [4096]:
+                expert, topk = 8, 2
+                test_fmoe(dtype, m, dim, inter_dim, expert, topk,
+                        quant='NoQuant', use_g1u1=True, activation=ActivationType.Silu)

@@ -116,6 +116,7 @@ def parse_vgpr_usage(file_path, table_start="result-table-name"):
     print("\n".join(vgpr_info))
 
     table = PrettyTable()
+    print("names: ", table_lines[0].split())
     table.field_names = table_lines[0].split()
     [table.add_row(line.split()[1:]) for line in table_lines[1:]]
     

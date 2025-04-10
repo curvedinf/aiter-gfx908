@@ -1154,7 +1154,7 @@ def _bwd_dkdvdq_inner(
     # Use a simple hash-like function to spread out the starting points
     start_idx = (workgroup_id * 17) % num_steps  # 17 is an arbitrary prime to spread indices
     # Ensure step is coprime with num_steps to visit all indices exactly once
-    step = 1 # 3 if num_steps > 1 else 1 # coprime with num_steps
+    step = 1 # 3 if num_steps > 1 or num_steps==3 else 1 # coprime with num_steps
 
     qT_ptrs = qT_ptrs_start
     dq_ptrs = dq_ptrs_start
@@ -1162,7 +1162,7 @@ def _bwd_dkdvdq_inner(
 
     for iter in range(num_steps):
         # Compute the permuted block index
-        blk_idx = iter # (start_idx + iter * step) % num_steps
+        blk_idx = (start_idx + iter * step) % num_steps
 
         curr_m = start_m + blk_idx * step_m
         qT_ptrs = qT_ptrs_start + blk_idx * step_m * stride_q_m
@@ -1295,10 +1295,10 @@ def _bwd_kernel_dkdvdq_causal(
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
 ):
-    #seq block, batch, head_k
-    seq_k_blk_idx = tl.program_id(0)
-    batch_idx = tl.program_id(1)
-    head_k_idx = tl.program_id(2)
+    # batch, head_k, seq block
+    batch_idx = tl.program_id(0)
+    head_k_idx = tl.program_id(1)
+    seq_k_blk_idx = tl.program_id(2)
 
     #Determine q and k start along with seqlen_q and seqlen_k
     q_start = 0
@@ -1878,9 +1878,11 @@ def _bwd_kernel_dkdvdq_noncausal(
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
 ):
-    pid = tl.program_id(0)
-    bid = tl.program_id(1)
-    hkid = tl.program_id(2)
+
+    # batch, head_k, seq block
+    bid = tl.program_id(0)
+    hkid = tl.program_id(1)
+    pid = tl.program_id(2)
 
     q_start = 0
     k_start = 0
@@ -2263,7 +2265,7 @@ def _flash_attn_backward(
     descale_do: Optional[torch.Tensor] = None,
     fused: bool = False,
 ):
-
+    # print("Running backward in fused mode:", fused)
 
     IS_FP8 = is_fp8(q)
     if IS_FP8:
@@ -2361,6 +2363,9 @@ def _flash_attn_backward(
     grid_dq = ((max_seqlen_q + BLOCK_M2 - 1) // BLOCK_M2, batch, num_k_heads)
     
     if fused:
+        BLOCK_M1, BLOCK_N1 = 64, 64
+        # change the launch order of blocks to first go over in batch dim, then in head dim, and only then in seqlen dim (where we have contention in dq atomic updates)
+        grid_dkdv = (batch, num_k_heads, (max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1) 
         if causal:
             _bwd_kernel_dkdvdq_causal[grid_dkdv](
                 q, k, v, sm_scale, do, dk, dv, dq,
@@ -2576,7 +2581,8 @@ class FlashAttnFunc(torch.autograd.Function):
         deterministic,
         return_lse,
         return_softmax,
-        is_grad_enabled, 
+        is_grad_enabled,
+        fused_backward,
     ):
         is_grad = is_grad_enabled and any(
             x.requires_grad for x in [q,k,v]
@@ -2614,6 +2620,8 @@ class FlashAttnFunc(torch.autograd.Function):
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
             ctx.deterministic = deterministic
+            ctx.fused_backward = fused_backward
+
 
         out = out_padded[..., :head_size_og]
         result = [out]
@@ -2626,8 +2634,6 @@ class FlashAttnFunc(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, do, *args):
-
-        
         q, k, v, out, softmax_lse = ctx.saved_tensors
         dq, dk, dv = torch.zeros_like(q), torch.empty_like(k), torch.empty_like(v)
         head_size_v_og = do.size(3)
@@ -2653,12 +2659,13 @@ class FlashAttnFunc(torch.autograd.Function):
             max_seqlen_k=k.shape[1],
             dropout_p=ctx.dropout_p,
             philox_seed=ctx.philox_seed,
-            philox_offset=ctx.philox_offset
+            philox_offset=ctx.philox_offset,
+            fused=ctx.fused_backward,
         )
         dq = dq[..., : q.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : k.shape[-1]]
         dv = dv[..., : v.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
 def flash_attn_func(
     q,
@@ -2672,6 +2679,7 @@ def flash_attn_func(
     deterministic=True,
     return_lse=False,
     return_attn_probs=False,
+    fused_backward=False,
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in KV with fewer heads
@@ -2733,7 +2741,8 @@ def flash_attn_func(
         deterministic,
         return_lse,
         return_attn_probs,
-        torch.is_grad_enabled()
+        torch.is_grad_enabled(),
+        fused_backward,
     )
 
 
@@ -2901,6 +2910,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         return_softmax,
         block_table,
         is_grad_enabled,
+        fused_backward,
     ):
         is_grad = is_grad_enabled and any(
             x.requires_grad for x in [q, k, v]
@@ -2940,6 +2950,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             ctx.causal = causal
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
+            ctx.fused_backward = fused_backward
         out = out_padded[..., :head_size_og]
 
         result = [out]
@@ -2977,12 +2988,13 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             max_seqlen_k=ctx.max_seqlen_k,
             dropout_p=ctx.dropout_p,
             philox_seed=ctx.philox_seed,
-            philox_offset=ctx.philox_offset
+            philox_offset=ctx.philox_offset,
+            fused=ctx.fused_backward,
         )
         dq = dq[..., : q.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : k.shape[-1]]
         dv = dv[..., : v.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
 
 def flash_attn_varlen_func(
@@ -3002,6 +3014,7 @@ def flash_attn_varlen_func(
     return_lse=False,
     return_attn_probs=False,
     block_table=None,
+    fused_backward=False,
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in K, V with fewer heads
@@ -3075,6 +3088,7 @@ def flash_attn_varlen_func(
         return_attn_probs,
         block_table,
         torch.is_grad_enabled(),
+        fused_backward,
     )
 
 

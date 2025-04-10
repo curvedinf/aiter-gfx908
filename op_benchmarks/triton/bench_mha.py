@@ -74,12 +74,12 @@ def mha_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, requires_grad=T
 
 def nonvarlen_benchmark_configs():
     configs = [
-        (8, 16, 16, 1024, 4096),
         (16, 16, 16, 1024, 1024),
         (8, 16, 16, 2048, 2048),
         (4, 16, 16, 4096, 4096),
-        # (2, 16, 16, 8192, 8192),
-        # (1, 16, 16, 16384, 16384),
+        (2, 16, 16, 8192, 8192),
+        (8, 16, 16, 1024, 4096),
+        (1, 16, 16, 4096, 16384),
         # (2, 48, 48, 1024, 1024),
         # (2, 48, 48, 2048, 1024),
         # (2, 48, 48, 4096, 8192),
@@ -176,17 +176,28 @@ def create_benchmark_configs(custom, args):
         else:
             x_vals_list = nonvarlen_benchmark_configs()  # Assume this exists
 
-    # unit = "TFLOPS"
-    # if args.return_time:
-    #     unit = "ms"
-    # if args.return_bandwidth:
-    #     unit = "GB/s"
-    unit = "ms"
+        if args.model:
+            x_vals_list = model_benchmark_configs(args)
+            x_names = ['model', 'BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K', 'D_HEAD']
+            plot_name = f'fused-attention-{mode}-layout-{args.layout}-fp8-{args.fp8}-causal-{causal}'
+            extra_args = {'dtype': dtype, 'causal': causal, 'mode': mode}
+
+
+
+    unit = "TFLOPS"
+    if args.return_time:
+        unit = "ms"
+    if args.return_bandwidth:
+        unit = "GB/s"
+    # unit = "ms"
 
     if args.bench_torch:
-        line_vals = [f'Triton ({unit})', f'Torch ({unit})']
+        line_vals = [f'Triton({unit})', f'Torch({unit})']
     else:
         line_vals = [unit]
+
+
+    line_vals = [f'fused-bwd({unit})', f'bwd({unit})']
 
     configs.append(
         triton.testing.Benchmark(
@@ -207,7 +218,7 @@ def run_benchmark(custom, args):
     torch.manual_seed(20)
 
     @triton.testing.perf_report(create_benchmark_configs(custom, args))
-    def bench_mha_backward(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, causal, mode, provider, dropout=0.0, sm_scale=None, device="cuda"):
+    def bench_mha_backward(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, causal, mode, provider, dropout=0.0, model=None, sm_scale=None, device="cuda"):
         """
         Benchmark or test function for multi-head attention backward pass.
         In test_mode, verifies output matching with non-varlen inputs.
@@ -219,6 +230,8 @@ def run_benchmark(custom, args):
         warmup = 25
         rep = 100
         varlen = args.layout == 'thd' if not (hasattr(args, 'test_mode') and args.test_mode) else False  # Force non-varlen in test mode
+
+        fused_backward = args.fused_bwd or ("fused" in provider)
 
         # Default softmax scale to match standard attention
         if sm_scale is None:
@@ -275,10 +288,17 @@ def run_benchmark(custom, args):
         # Test mode: Verify outputs match
         if hasattr(args, 'test_mode') and args.test_mode:
             # Triton
-            triton_fn = lambda: flash_attn_func(
-                q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                return_lse=return_lse, return_attn_probs=return_attn_probs
-            )
+            if varlen:
+                triton_fn = lambda: flash_attn_varlen_func(
+                    q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
+                    dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                )
+            else:
+                triton_fn = lambda: flash_attn_func(
+                    q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward 
+                )
             with torch.enable_grad():
                 triton_out, _, sd_mask = triton_fn()
                 dropout_mask = sd_mask >= 0 if dropout > 0.0 else None
@@ -308,12 +328,12 @@ def run_benchmark(custom, args):
                 fn = lambda: flash_attn_varlen_func(
                     q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
                     dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                    return_lse=return_lse, return_attn_probs=return_attn_probs
+                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
                 )
             else:
                 fn = lambda: flash_attn_func(
                     q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                    return_lse=return_lse, return_attn_probs=return_attn_probs
+                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward 
                 )
             with torch.enable_grad():
                 triton_out, _, _ = fn()
@@ -336,14 +356,14 @@ def run_benchmark(custom, args):
                2 * total_num_tokens_k * HK * D_HEAD * input_bytes +
                total_num_tokens_q * HQ * D_HEAD * output_bytes)
 
-        return ms
+        # return ms
         
-        # if "ms" in provider:
-        #     return ms
-        # elif "TFLOPS" in provider:
-        #     return total_flops / ms * 1e-9
-        # else:  # GB/s
-        #     return mem / ms * 1e-3
+        if "ms" in provider:
+            return ms
+        elif "TFLOPS" in provider:
+            return total_flops / ms * 1e-9
+        else:  # GB/s
+            return mem / ms * 1e-3
 
     bench_mha_backward.run(save_path=".", print_data=True, show_plots=True)
 
@@ -391,6 +411,7 @@ def parse_args():
     parser.add_argument("-quantize_p", action='store_true', default=False)
     parser.add_argument("-dtype", default='fp16')
     parser.add_argument("-bench_torch", action='store_true', default=False)
+    parser.add_argument("-fused_bwd", action='store_true', default=False)
     parser.add_argument("-print_vgpr", action='store_true', default=False)
     parser.add_argument("-return_all", action='store_true', default=False, help="Prints TFLOPS, walltime, bandwidth.")
     parser.add_argument("-test_mode", action='store_true', default=False, help="Tests correctness of the Triton provider comparing the output to the Torch sdpa.")
@@ -432,6 +453,7 @@ def main():
            "Equal sequence lengths arg must be used with the thd layout or a model config."
     if args.hq or args.hk or args.d:
         custom_config = True
+        assert args.hq >= args.hk, "hq must be greater than or equal to hk."
         assert args.b and args.hq and args.sq and args.d, \
                "If custom config is specified, please provide \
                 all of batch, number of Q heads, Q sequence length \

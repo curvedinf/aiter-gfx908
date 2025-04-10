@@ -561,8 +561,6 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                     p_dropout,
                     block_table_,
                     drop_seed_offset);
-            printf("11111\n");
-            stream_config.log_level_ = 1;
             float t = fmha_fwd(traits, args, stream_config);
             TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
         }

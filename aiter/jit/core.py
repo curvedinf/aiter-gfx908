@@ -16,7 +16,7 @@ import logging
 import json
 import multiprocessing
 from packaging.version import parse, Version
-from ..utility.mp_lock import mp_lock
+from aiter.utility.mp_lock import mp_lock
 
 PREBUILD_KERNELS = False
 if os.path.exists(os.path.dirname(os.path.abspath(__file__)) + "/aiter_.so"):

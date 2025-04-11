@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 import aiter
 from aiter.test_common import checkAllclose, run_perftest
-from aiter.fused_moe import asm_moe, torch_moe, moe_sorting, fused_topk
+from aiter.fused_moe import torch_moe, moe_sorting, fused_topk
 from aiter.ops.shuffle import shuffle_weight
 from aiter import pertoken_quant, ck_moe
 from einops import rearrange
@@ -123,9 +123,9 @@ def asm_moe_test(hidden_states, w1, w2, topk_weights, topk_ids,
                                    sorted_expert_ids,
                                    num_valid_ids,
                                    topk,
+                                   a1_scale,
                                    fc1_scale,
                                    fc2_scale,
-                                   a1_scale,
                                    scale_blk_n,
                                    scale_blk_k,
                                    None)

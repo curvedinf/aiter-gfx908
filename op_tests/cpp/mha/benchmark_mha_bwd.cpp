@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
-#include "bench_mha_bwd.h"
+#include "mha_bwd.h"
 #include "ck_tile/host.hpp"
 #include "utils.hpp"
 
@@ -574,12 +574,13 @@ bool run(const ck_tile::ArgParser& arg_parser)
 
     float ave_time = aiter::mha_bwd(fmha_args,
                                     stream_config,
-                                    mask,
                                     data_type,
                                     mode == mode_enum::group,
+                                    mask,
                                     bias.type,
-                                    deterministic,
                                     use_dbias,
+                                    s_randval,
+                                    deterministic,
                                     bwd_v3,
                                     v3_atomic_fp32,
                                     v3_bf16_cvt);
@@ -821,12 +822,13 @@ bool run(const ck_tile::ArgParser& arg_parser)
         nullptr, true, 0, 0, 1, arg_parser.get_str("timer") == std::string("gpu")};
     aiter::mha_bwd(fmha_args,
                    stream_config_v,
-                   mask,
                    data_type,
                    mode == mode_enum::group,
+                   mask,
                    bias.type,
-                   deterministic,
                    use_dbias,
+                   s_randval,
+                   deterministic,
                    bwd_v3,
                    v3_atomic_fp32,
                    v3_bf16_cvt);
@@ -999,24 +1001,6 @@ bool run(const ck_tile::ArgParser& arg_parser)
 
     return pass;
 }
-
-int bench_mha_bwd(int argc, std::vector<std::string> argv)
-{
-    std::vector<char*> argv_;
-    for (auto arg: argv) {
-        argv_.push_back(const_cast<char*>(arg.c_str()));
-    }
-    argv_.push_back(nullptr);
-
-    char** argv_ptr = argv_.data();
-
-    auto [result, arg_parser] = create_args(argc, argv_ptr);
-    if(!result)
-        return -1;
-
-    return run<FmhaBwdBf16>(arg_parser) ? 0 : -2;
-}
-
 
 int main(int argc, char* argv[])
 {

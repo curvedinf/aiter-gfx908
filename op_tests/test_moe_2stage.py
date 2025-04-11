@@ -266,6 +266,7 @@ def test_fmoe(
         w1_scale=w1_scale,
         w2_scale=w2_scale,
         quant_type=qType,
+        activation=actType,
     )
 
     checkAllclose(

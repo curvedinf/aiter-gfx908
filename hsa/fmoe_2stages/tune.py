@@ -55,112 +55,6 @@ def go(
     startTS = time.perf_counter()
     blockMs = [16, 32, 48, 64, 80, 96, 112, 128, 144, 160]
     
-    asm_kernels_template = \
-    """
-{{
-    16: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x128_4tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x128_4tg_pf3",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x256_2tg_pf3",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x256_3tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x512_2tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x512_pf3",
-    ],
-    32: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x128_3tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x128_3tg_pf3",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x256_2tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x256_2tg_pf3",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x512_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x512_pf3",
-    ],
-    48: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x128_2tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x128_2tg_pf3",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x256_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x256_pf3",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x512_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x512_pf3",
-    ],
-    64: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x128_2tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x128_2tg_pf3",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x256_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x256_pf3",
-    ],
-    80: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x128_2tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x128_pf3",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x256_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x256_pf3",
-    ],
-    96: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_96x128_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_96x128_pf3",
-    ],
-    112: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_112x128_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_112x128_pf3",
-    ],
-    128: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_128x128_pf2",
-    ],
-    144: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_144x128_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_144x128_pf3",
-    ],
-    160: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_160x128_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_160x128_pf3",
-    ],
-}}
-"""
-
-    asm_kernels_subGU64_template = \
-    """
-{{
-    16: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x64_5tg_pf3",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_16x64_6tg_pf2",
-    ],
-    32: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x64_4tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_32x64_4tg_pf3",
-    ],
-    48: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x64_3tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_48x64_3tg_pf3",
-    ],
-    64: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x64_2tg_pf3",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_64x64_3tg_pf2",
-    ],
-    80: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x64_2tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_80x64_2tg_pf3",
-    ],
-    96: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_96x64_2tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_96x64_pf3",
-    ],
-    112: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_112x64_2tg_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_112x64_pf3",
-    ],
-    128: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_128x64_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_128x64_pf3",
-    ],
-    144: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_144x64_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_144x64_pf3",
-    ],
-    160: [
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_160x64_pf2",
-        "fmoe_stage1_bf16_pertoken{quantDtype}{extraInfo}_g1u1_160x64_pf3",
-    ],
-}}
-"""
     args = [
         "token",
         "model_dim",
@@ -256,7 +150,7 @@ def go(
             quantDtype = ""
         
         asm_kernels = get_kernels_dict(kernels_list_csv.format(quantDtype=quantDtype, extraInfo=extraInfo))
-        
+
         for blockM in blockMs:
             sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
                 moe_sorting(topk_ids, topk_weights, expert, model_dim, dtype, blockM)

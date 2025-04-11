@@ -730,10 +730,9 @@ def torch_moe_stage2(
     if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
         hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
     elif quant_type == QuantType.per_128x128:
-        a2_scale = a2_scale.view(hidden_states.shape[0], -1, 1)
+        a2_scale = a2_scale.view(hidden_states.shape[0], topk, -1, 1)
         a2_scale = a2_scale.repeat(
-            1, 1, hidden_states.shape[-1] // a2_scale.shape[1]
-        ).view(hidden_states.shape[0], -1)
+            1, 1, 1, 128).view(hidden_states.shape[0], topk, -1)
         hidden_states = hidden_states * a2_scale
 
     out = torch.zeros(

@@ -27,8 +27,8 @@ void paged_attention_ragged_torch(
   std::string kv_dtype;
   if (kv_cache_dtype == "auto") {
     if (query.dtype() == at::ScalarType::Half) {
-      dtype = "_Float16";
-      kv_dtype = "_Float16";
+      dtype = "__half";
+      kv_dtype = "__half";
     } else if (query.dtype() == at::ScalarType::BFloat16) {
       dtype = "__hip_bfloat16";
       kv_dtype = "__hip_bfloat16";
@@ -37,7 +37,7 @@ void paged_attention_ragged_torch(
     }
   } else if (kv_cache_dtype == "fp8" || kv_cache_dtype == "fp8_e4m3") {
     if (query.dtype() == at::ScalarType::Half) {
-      dtype = "_Float16";
+      dtype = "__half";
       kv_dtype = "uint8_t";
     } else if (query.dtype() == at::ScalarType::BFloat16) {
       dtype = "__hip_bfloat16";

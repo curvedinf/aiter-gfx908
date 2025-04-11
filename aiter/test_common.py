@@ -18,8 +18,8 @@ def perftest(
             num = num_rotate_args
             if num < 1:
                 gpu_id = torch.cuda.current_device()
-                inputSize = sum(
-                    [el.nbytes for el in args if isinstance(el, torch.Tensor)]
+                inputSize = (
+                    sum([el.nbytes for el in args if isinstance(el, torch.Tensor)]) + 1
                 )
                 properties = torch.cuda.get_device_properties(gpu_id)
                 cache_size = min(

@@ -16,7 +16,7 @@ import logging
 import json
 import multiprocessing
 from packaging.version import parse, Version
-from aiter.utility.mp_lock import mp_lock
+from ..utility.mp_lock import mp_lock
 
 PREBUILD_KERNELS = False
 if os.path.exists(os.path.dirname(os.path.abspath(__file__)) + "/aiter_.so"):
@@ -73,10 +73,10 @@ def get_user_jit_dir():
 
 bd_dir = f"{get_user_jit_dir()}/build"
 # copy ck to build, thus hippify under bd_dir
-if multiprocessing.current_process().name == 'MainProcess':
-    shutil.copytree(CK_DIR, f'{bd_dir}/ck', dirs_exist_ok=True)
-    if os.path.exists(f'{bd_dir}/ck/library'):
-        shutil.rmtree(f'{bd_dir}/ck/library')
+if multiprocessing.current_process().name == "MainProcess":
+    shutil.copytree(CK_DIR, f"{bd_dir}/ck", dirs_exist_ok=True)
+    if os.path.exists(f"{bd_dir}/ck/library"):
+        shutil.rmtree(f"{bd_dir}/ck/library")
 CK_DIR = f"{bd_dir}/ck"
 
 

@@ -564,7 +564,7 @@ def _fused_moe_kernel(
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
     NUM_XCDS: tl.constexpr = 8
-    pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
+    # pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
     pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
     # ----------------------------------------------------------
@@ -756,35 +756,33 @@ def _fused_moe_persistent_kernel(
     """
     # -----------------------------------------------------------
     # Simply compute how many iterations each persistent block needs to do
-    start_pid = tl.program_id(axis=0)
+    pid = tl.program_id(axis=0)
     NUM_XCDS: tl.constexpr = 8
-    start_pid = remap_xcd(start_pid, GRID_MN, NUM_XCDS)
+    pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
     num_pid_m = tl.cdiv(EM, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    # num_tiles = num_pid_m * num_pid_n
-    tile_id = start_pid
 
     offs_k = tl.arange(0, BLOCK_SIZE_K)
-    # offs_token = tl.zeros((BLOCK_SIZE_M,), dtype=tl.int32)
-    # token_mask = tl.zeros((BLOCK_SIZE_M,), dtype=tl.int1)
-
-    # Load tile-invariant runtime constant
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
+    total_tiles = tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M) * num_pid_n
 
-    # Compute how many tiles are outside the padding region
-    num_pid_in_group = GROUP_SIZE_M * num_pid_n
-    pid_m = 0
-    tile_id2 = start_pid - NUM_SMS
-    num_valid_tiles = -1
-    while pid_m * BLOCK_SIZE_M < num_tokens_post_padded:
-        num_valid_tiles += 1
-        tile_id2 += NUM_SMS
-        group_id = tile_id2 // num_pid_in_group
-        first_pid_m = group_id * GROUP_SIZE_M
-        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-        pid_m = first_pid_m + ((tile_id2 % num_pid_in_group) % group_size_m)
+    tiles_per_pid = tl.cdiv(total_tiles, NUM_SMS)
+    tall_pids = total_tiles % NUM_SMS
 
-    for _ in range(0, num_valid_tiles):
+    if total_tiles < NUM_SMS:
+        tall_pids = total_tiles
+    else:
+        tall_pids = NUM_SMS if tall_pids == 0 else tall_pids
+    # Compute current XCD and local pid within the XCD
+
+    if pid < tall_pids:
+        start_tile = pid * tiles_per_pid
+        num_tiles = tiles_per_pid
+    else:
+        start_tile = tall_pids * tiles_per_pid + (pid - tall_pids) * (tiles_per_pid - 1)
+        num_tiles = tiles_per_pid - 1
+
+    for tile_id in range(start_tile, start_tile + num_tiles):
         pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
         # Compute the mask
         offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
@@ -876,8 +874,6 @@ def _fused_moe_persistent_kernel(
         c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
         tl.store(c_ptrs, accumulator, mask=c_mask)
 
-        # advance tile_id
-        tile_id += NUM_SMS
 
 
 def fused_moe(A: torch.Tensor,

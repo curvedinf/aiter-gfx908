@@ -86,7 +86,7 @@ def select_hsaco(input_dtype:str, gate_fusion:str, gate_dtype:str, activation:st
             return "fmoe_kernel_func", "fmoe_int8_g1u0_smf.co", "uint8_t", "uint16_t", "true"
     else:
         if gate_fusion == "g1u0": 
-            if input_dtype == "_Float16":
+            if input_dtype == "__half":
                 return "fmoe_kernel_func", "fmoe_f16.co", "uint16_t", "uint16_t", "false"
             elif input_dtype == "__hip_bfloat16":
                 return "fmoe_kernel_func", "fmoe_b16.co", "uint16_t", "uint16_t", "false"

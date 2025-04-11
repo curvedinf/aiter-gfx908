@@ -39,8 +39,8 @@ def paged_attention_rocm(out,
             dtype = "__hip_bfloat16"
             kv_dtype = "__hip_bfloat16"
         elif query.dtype == torch.float16:
-            dtype = "_Float16"
-            kv_dtype = "_Float16"
+            dtype = "__half"
+            kv_dtype = "__half"
         else:
             raise ValueError(f"Unsupported data type: {query.dtype}")
     elif kv_cache_dtype == "fp8" or kv_cache_dtype == "fp8_e4m3":
@@ -48,7 +48,7 @@ def paged_attention_rocm(out,
             dtype = "__hip_bfloat16"
             kv_dtype = "uint8_t"
         elif query.dtype == torch.float16:
-            dtype = "_Float16"
+            dtype = "__half"
             kv_dtype = "uint8_t"
         else:
             raise ValueError(f"Unsupported data type: {query.dtype}")
@@ -58,7 +58,7 @@ def paged_attention_rocm(out,
     if out.dtype == torch.bfloat16:
         out_dtype = "__hip_bfloat16"
     elif out.dtype == torch.float16:
-        out_dtype = "_Float16"
+        out_dtype = "__half"
     else:
         raise ValueError(f"Unsupported data type: {out.dtype}")
     

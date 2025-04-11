@@ -1285,6 +1285,8 @@ def _bwd_kernel_dkdvdq_causal(
     descale_q_ptr, descale_k_ptr, descale_v_ptr, descale_do_ptr,
     NUM_Q_HEADS: tl.constexpr,
     NUM_K_HEADS: tl.constexpr,
+    BATCH,
+    NUM_K_PIDS, 
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLK_SLICE_FACTOR: tl.constexpr,
@@ -1295,11 +1297,18 @@ def _bwd_kernel_dkdvdq_causal(
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
 ):
-    # batch, head_k, seq block
-    batch_idx = tl.program_id(0)
-    head_k_idx = tl.program_id(1)
-    seq_k_blk_idx = tl.program_id(2)
+    wid = tl.program_id(0) # workgoup id: 0, ..., NUM_K_PIDS * BATCH * NUM_K_HEADS - 1
 
+    # workgroups get launched first along batch dim, then in head_k dim, and then in seq k block dim
+    batch_idx = wid % BATCH 
+    head_k_idx = wid // BATCH % NUM_K_HEADS 
+    seq_k_blk_idx = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS
+
+    # reverse order
+    # seq_k_blk_idx = wid % NUM_K_PIDS
+    # head_k_idx = wid // NUM_K_PIDS % NUM_K_HEADS 
+    # batch_idx = wid // (NUM_K_PIDS * NUM_K_HEADS) % BATCH 
+    
     #Determine q and k start along with seqlen_q and seqlen_k
     q_start = 0
     k_start = 0
@@ -1868,6 +1877,8 @@ def _bwd_kernel_dkdvdq_noncausal(
     descale_q_ptr, descale_k_ptr, descale_v_ptr, descale_do_ptr,
     NUM_Q_HEADS: tl.constexpr,
     NUM_K_HEADS: tl.constexpr,
+    BATCH,
+    NUM_K_PIDS,
     BLOCK_M: tl.constexpr,
     BLOCK_N: tl.constexpr,
     BLK_SLICE_FACTOR: tl.constexpr,
@@ -1878,11 +1889,19 @@ def _bwd_kernel_dkdvdq_noncausal(
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
 ):
+    # workgroup id
+    wid = tl.program_id(0) # 0, ..., NUM_K_PIDS * BATCH * NUM_K_HEADS - 1
 
-    # batch, head_k, seq block
-    bid = tl.program_id(0)
-    hkid = tl.program_id(1)
-    pid = tl.program_id(2)
+    # workgroups get launched first along batch dim, then in head_k dim, and then in seq k block dim
+    bid = wid % BATCH 
+    hkid = wid // BATCH % NUM_K_HEADS 
+    pid = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS 
+
+    # reverse order
+    # pid = wid % NUM_K_PIDS
+    # hkid = wid // NUM_K_PIDS % NUM_K_HEADS 
+    # bid = wid // (NUM_K_PIDS * NUM_K_HEADS) % BATCH 
+
 
     q_start = 0
     k_start = 0
@@ -2365,7 +2384,11 @@ def _flash_attn_backward(
     if fused:
         BLOCK_M1, BLOCK_N1 = 64, 64
         # change the launch order of blocks to first go over in batch dim, then in head dim, and only then in seqlen dim (where we have contention in dq atomic updates)
-        grid_dkdv = (batch, num_k_heads, (max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1) 
+        # grid_dkdv = (batch, num_k_heads, (max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1) 
+        num_k_pids = (max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1
+        
+        grid_dkdv = (batch * num_k_heads * num_k_pids,) 
+        
         if causal:
             _bwd_kernel_dkdvdq_causal[grid_dkdv](
                 q, k, v, sm_scale, do, dk, dv, dq,
@@ -2385,6 +2408,8 @@ def _flash_attn_backward(
                 descale_q, descale_k, descale_v, descale_do,
                 NUM_Q_HEADS=num_q_heads,
                 NUM_K_HEADS=num_k_heads,
+                BATCH=batch,
+                NUM_K_PIDS=num_k_pids, 
                 BLOCK_M=BLOCK_M1,
                 BLOCK_N=BLOCK_N1,
                 BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,
@@ -2417,6 +2442,8 @@ def _flash_attn_backward(
                 descale_q, descale_k, descale_v, descale_do,
                 NUM_Q_HEADS=num_q_heads,
                 NUM_K_HEADS=num_k_heads,
+                BATCH=batch,
+                NUM_K_PIDS=num_k_pids,
                 BLOCK_M=BLOCK_M1,
                 BLOCK_N=BLOCK_N1,
                 BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,

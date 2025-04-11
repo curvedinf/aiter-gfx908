@@ -76,7 +76,8 @@ def go(
     tunedf,
 ):
     startTS = time.perf_counter()
-    blockMs = [16, 32, 48, 64, 80, 96, 112, 128, 144, 160]
+    # blockMs = [16, 32, 48, 64, 80, 96, 112, 128, 144, 160]
+    blockMs = [32, 64, 128]
 
     args = [
         "token",

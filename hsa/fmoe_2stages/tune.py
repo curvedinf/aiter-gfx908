@@ -164,6 +164,9 @@ def go(
         kernels_list_csv = f"{AITER_ASM_DIR}/fmoe_2stages/fmoe_stage1_bf16_pertoken{{quantDtype}}{{extraInfo}}_g1u1.csv"
 
         def get_kernels_dict(file):
+            if not os.path.exists(file):
+                print(f"ASM kernel list file not exist: {file}")
+                return {}
             df = pd.read_csv(file)
             kernel_dict = df.groupby("tile_m")["knl_name"].apply(list).to_dict()
             return kernel_dict

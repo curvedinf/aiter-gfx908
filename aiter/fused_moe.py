@@ -4,7 +4,7 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-import sys
+import time
 import os
 from typing import Any, Callable, Dict, Optional, Tuple
 import functools
@@ -12,7 +12,8 @@ import aiter
 from aiter import logger
 from aiter import ActivationType, QuantType
 from aiter import get_hip_quant, get_torch_quant
-from aiter.jit.core import AITER_ROOT_DIR
+from aiter.jit.core import AITER_ROOT_DIR, PY, AITER_ASM_DIR, bd_dir
+from aiter.utility.mp_lock import mp_lock
 
 BLOCK_SIZE_M = 32
 
@@ -274,11 +275,10 @@ def get_2stage_cfgs(
     use_g1u1,
     activation,
 ):
-    global cfg_2stages
-    if cfg_2stages is None:
+    def get_cfg_2stages(tune_file):
         import pandas as pd
 
-        cfg_2stages = pd.read_csv(f"{AITER_ROOT_DIR}/aiter/configs/tuned_fmoe.csv")
+        cfg_2stages = pd.read_csv(tune_file)
         cfg_2stages = cfg_2stages.set_index(
             [
                 "token",
@@ -294,6 +294,14 @@ def get_2stage_cfgs(
                 "use_g1u1",
             ]
         ).to_dict("index")
+        return cfg_2stages
+
+    global cfg_2stages
+    config_path = f"{AITER_ROOT_DIR}/aiter/configs/"
+    tune_file = os.path.join(config_path, "tuned_fmoe.csv")
+    untune_file = os.path.join(config_path, "untuned_fmoe.csv")
+    if cfg_2stages is None:
+        cfg_2stages = get_cfg_2stages(tune_file)
     keys = (
         token,
         model_dim,
@@ -307,7 +315,30 @@ def get_2stage_cfgs(
         str(q_type),
         use_g1u1,
     )
+
+    def MainFunc():
+        with open(untune_file, "a") as f:
+            q_dtype_ws = q_dtype_w if q_dtype_w != torch.uint32 else "torch.int4"
+            f.write(
+                f"\n{token},{model_dim},{inter_dim},{expert},{topk},{activation},{dtype},{q_dtype_a},{q_dtype_ws},{q_type},{int(use_g1u1)}"
+            )
+        logger.info("\033[34m Start tuning fmoe")
+        os.system(
+            f"{PY} {AITER_ASM_DIR}/fmoe_2stages/tune.py -i {untune_file} -o {tune_file}"
+        )
+
+    def FinalFunc():
+        logger.info("\033[0m")
+
     cfg = cfg_2stages.get(keys, None)
+    if cfg is None and os.environ.get("AITER_ONLINE_TUNE", "0") == "1":
+        lock_path = os.path.join(bd_dir, f"lock_fmoe_tune_{keys}")
+        mp_lock(lock_path, MainFunc=MainFunc, FinalFunc=FinalFunc)
+        cfg_2stages = get_cfg_2stages(tune_file)
+        cfg = cfg_2stages.get(keys, None)
+        if cfg is None:
+            logger.warning(f"Fmoe tuning not support for {keys}")
+
     if cfg is None:
         block_m = get_block_size_M(token, topk, expert, inter_dim)
         ksplit = 0
@@ -430,7 +461,12 @@ def fused_moe_2stages(
         a2 = a2.view(token_num, topk, inter_dim)
     else:
         a2_v = a2[:token_num, :, :]
-        a2_scale = a2[token_num:, ...].view(-1)[:token_num * topk * inter_dim * ratio // 128].view(torch.float).view(token_num, -1)
+        a2_scale = (
+            a2[token_num:, ...]
+            .view(-1)[: token_num * topk * inter_dim * ratio // 128]
+            .view(torch.float)
+            .view(token_num, -1)
+        )
         a2 = a2_v
 
     if quant_type == aiter.QuantType.No:
@@ -653,6 +689,7 @@ def torch_moe_stage1(
 
     if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
         w1 = w1 * w1_scale.view(w1_scale.shape[0], -1, 1)
+        hidden_states = hidden_states * a1_scale
     # per_128x128
     elif quant_type == QuantType.per_128x128:
         w1_shape = w1.shape
@@ -663,14 +700,15 @@ def torch_moe_stage1(
         )
         w1 = w1.view(w1_shape)
 
-    if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
-        hidden_states = hidden_states * a1_scale
-    elif quant_type == QuantType.per_128x128:
         a1_scale = a1_scale.view(hidden_states.shape[0], -1, 1)
         a1_scale = a1_scale.repeat(
             1, 1, hidden_states.shape[-1] // a1_scale.shape[1]
         ).view(hidden_states.shape[0], -1)
         hidden_states = hidden_states * a1_scale
+    elif quant_type == QuantType.No:
+        pass
+    else:
+        assert False, f"Unsupported quant_type: {quant_type}"
 
     hidden_states = hidden_states.view(B, -1, D).repeat(1, topk, 1)
 
@@ -731,8 +769,7 @@ def torch_moe_stage2(
         hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
     elif quant_type == QuantType.per_128x128:
         a2_scale = a2_scale.view(hidden_states.shape[0], topk, -1, 1)
-        a2_scale = a2_scale.repeat(
-            1, 1, 1, 128).view(hidden_states.shape[0], topk, -1)
+        a2_scale = a2_scale.repeat(1, 1, 1, 128).view(hidden_states.shape[0], topk, -1)
         hidden_states = hidden_states * a2_scale
 
     out = torch.zeros(

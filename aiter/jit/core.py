@@ -12,11 +12,11 @@ import traceback
 from typing import List, Optional
 from . import cpp_extension
 import torch
-from torch.utils.file_baton import FileBaton
 import logging
 import json
 import multiprocessing
 from packaging.version import parse, Version
+from aiter.utility.mp_lock import mp_lock
 
 PREBUILD_KERNELS = False
 if os.path.exists(os.path.dirname(os.path.abspath(__file__)) + "/aiter_.so"):
@@ -73,10 +73,15 @@ def get_user_jit_dir():
 
 bd_dir = f"{get_user_jit_dir()}/build"
 # copy ck to build, thus hippify under bd_dir
-if multiprocessing.current_process().name == "MainProcess":
-    shutil.copytree(CK_DIR, f"{bd_dir}/ck", dirs_exist_ok=True)
-    if os.path.exists(f"{bd_dir}/ck/library"):
+shutil.copytree(CK_DIR, f"{bd_dir}/ck", dirs_exist_ok=True)
+mp_lock(
+    lockPath=f"{bd_dir}/lock_ck_clear",
+    MainFunc=lambda: (
         shutil.rmtree(f"{bd_dir}/ck/library")
+        if os.path.exists(f"{bd_dir}/ck/library")
+        else None
+    ),
+)
 CK_DIR = f"{bd_dir}/ck"
 
 
@@ -171,157 +176,146 @@ def build_module(
     extra_ldflags,
     verbose,
 ):
-    baton = FileBaton(os.path.join(bd_dir, 'lock'))
-    if baton.try_acquire():
-        startTS = time.perf_counter()
-        try:
-            op_dir = f"{bd_dir}/{md_name}"
-            logger.info(f"start build [{md_name}] under {op_dir}")
+    lock_path = f"{bd_dir}/lock_{md_name}"
+    startTS = time.perf_counter()
 
-            opbd_dir = f"{op_dir}/build"
-            src_dir = f"{op_dir}/build/srcs"
-            os.makedirs(src_dir, exist_ok=True)
-            if os.path.exists(f"{get_user_jit_dir()}/{md_name}.so"):
-                os.remove(f"{get_user_jit_dir()}/{md_name}.so")
+    def MainFunc():
+        op_dir = f"{bd_dir}/{md_name}"
+        logger.info(f"start build [{md_name}] under {op_dir}")
 
-            sources = rename_cpp_to_cu(srcs, src_dir)
+        opbd_dir = f"{op_dir}/build"
+        src_dir = f"{op_dir}/build/srcs"
+        os.makedirs(src_dir, exist_ok=True)
+        if os.path.exists(f"{get_user_jit_dir()}/{md_name}.so"):
+            os.remove(f"{get_user_jit_dir()}/{md_name}.so")
 
-            flags_cc = ["-O3", "-std=c++17"]
-            flags_hip = [
-                "-DLEGACY_HIPBLAS_DIRECT",
-                "-DUSE_PROF_API=1",
-                "-D__HIP_PLATFORM_HCC__=1",
-                "-D__HIP_PLATFORM_AMD__=1",
-                "-U__HIP_NO_HALF_CONVERSIONS__",
-                "-U__HIP_NO_HALF_OPERATORS__",
+        sources = rename_cpp_to_cu(srcs, src_dir)
+
+        flags_cc = ["-O3", "-std=c++17"]
+        flags_hip = [
+            "-DLEGACY_HIPBLAS_DIRECT",
+            "-DUSE_PROF_API=1",
+            "-D__HIP_PLATFORM_HCC__=1",
+            "-D__HIP_PLATFORM_AMD__=1",
+            "-U__HIP_NO_HALF_CONVERSIONS__",
+            "-U__HIP_NO_HALF_OPERATORS__",
+            "-mllvm",
+            "--amdgpu-kernarg-preload-count=16",
+            # "-v", "--save-temps",
+            "-Wno-unused-result",
+            "-Wno-switch-bool",
+            "-Wno-vla-cxx-extension",
+            "-Wno-undefined-func-template",
+            "-Wno-macro-redefined",
+            "-fgpu-flush-denormals-to-zero",
+        ]
+
+        # Imitate https://github.com/ROCm/composable_kernel/blob/c8b6b64240e840a7decf76dfaa13c37da5294c4a/CMakeLists.txt#L190-L214
+        hip_version = get_hip_version()
+        if hip_version > Version("5.7.23302"):
+            flags_hip += ["-fno-offload-uniform-block"]
+        if hip_version > Version("6.1.40090"):
+            flags_hip += ["-mllvm", "-enable-post-misched=0"]
+        if hip_version > Version("6.2.41132"):
+            flags_hip += [
                 "-mllvm",
-                "--amdgpu-kernarg-preload-count=16",
-                # "-v", "--save-temps",
-                "-Wno-unused-result",
-                "-Wno-switch-bool",
-                "-Wno-vla-cxx-extension",
-                "-Wno-undefined-func-template",
-                "-Wno-macro-redefined",
-                "-fgpu-flush-denormals-to-zero",
+                "-amdgpu-early-inline-all=true",
+                "-mllvm",
+                "-amdgpu-function-calls=false",
             ]
+        if hip_version > Version("6.2.41133"):
+            flags_hip += ["-mllvm", "-amdgpu-coerce-illegal-types=1"]
 
-            # Imitate https://github.com/ROCm/composable_kernel/blob/c8b6b64240e840a7decf76dfaa13c37da5294c4a/CMakeLists.txt#L190-L214
-            hip_version = get_hip_version()
-            if hip_version > Version("5.7.23302"):
-                flags_hip += ["-fno-offload-uniform-block"]
-            if hip_version > Version("6.1.40090"):
-                flags_hip += ["-mllvm", "-enable-post-misched=0"]
-            if hip_version > Version("6.2.41132"):
-                flags_hip += [
-                    "-mllvm",
-                    "-amdgpu-early-inline-all=true",
-                    "-mllvm",
-                    "-amdgpu-function-calls=false",
-                ]
-            if hip_version > Version("6.2.41133"):
-                flags_hip += ["-mllvm", "-amdgpu-coerce-illegal-types=1"]
+        flags_cc += flags_extra_cc
+        flags_hip += flags_extra_hip
+        archs = validate_and_update_archs()
+        flags_hip += [f"--offload-arch={arch}" for arch in archs]
+        check_and_set_ninja_worker()
 
-            flags_cc += flags_extra_cc
-            flags_hip += flags_extra_hip
-            archs = validate_and_update_archs()
-            flags_hip += [f"--offload-arch={arch}" for arch in archs]
-            check_and_set_ninja_worker()
+        def exec_blob(blob_gen_cmd, op_dir, src_dir, sources):
+            if blob_gen_cmd:
+                blob_dir = f"{op_dir}/blob"
+                os.makedirs(blob_dir, exist_ok=True)
+                if AITER_LOG_MORE:
+                    logger.info(f"exec_blob ---> {PY} {blob_gen_cmd.format(blob_dir)}")
+                os.system(f"{PY} {blob_gen_cmd.format(blob_dir)}")
+                sources += rename_cpp_to_cu([blob_dir], src_dir, recurisve=True)
+            return sources
 
-            def exec_blob(blob_gen_cmd, op_dir, src_dir, sources):
-                if blob_gen_cmd:
-                    blob_dir = f"{op_dir}/blob"
-                    os.makedirs(blob_dir, exist_ok=True)
-                    if AITER_LOG_MORE:
-                        logger.info(
-                            f"exec_blob ---> {PY} {blob_gen_cmd.format(blob_dir)}"
-                        )
-                    os.system(f"{PY} {blob_gen_cmd.format(blob_dir)}")
-                    sources += rename_cpp_to_cu([blob_dir], src_dir, recurisve=True)
-                return sources
+        if isinstance(blob_gen_cmd, list):
+            for s_blob_gen_cmd in blob_gen_cmd:
+                sources = exec_blob(s_blob_gen_cmd, op_dir, src_dir, sources)
+        else:
+            sources = exec_blob(blob_gen_cmd, op_dir, src_dir, sources)
 
-            if isinstance(blob_gen_cmd, list):
-                for s_blob_gen_cmd in blob_gen_cmd:
-                    sources = exec_blob(s_blob_gen_cmd, op_dir, src_dir, sources)
-            else:
-                sources = exec_blob(blob_gen_cmd, op_dir, src_dir, sources)
+        # TODO: Move all torch api into torch folder
+        old_bd_include_dir = f"{op_dir}/build/include"
+        os.makedirs(old_bd_include_dir, exist_ok=True)
+        rename_cpp_to_cu(
+            [f"{AITER_CSRC_DIR}/include"] + extra_include, old_bd_include_dir
+        )
 
-            # TODO: Move all torch api into torch folder
-            old_bd_include_dir = f"{op_dir}/build/include"
-            os.makedirs(old_bd_include_dir, exist_ok=True)
-            rename_cpp_to_cu(
-                [f"{AITER_CSRC_DIR}/include"] + extra_include, old_bd_include_dir
+        bd_include_dir = f"{op_dir}/build/include/torch"
+        os.makedirs(bd_include_dir, exist_ok=True)
+        rename_cpp_to_cu(
+            [f"{AITER_CSRC_DIR}/include/torch"] + extra_include, bd_include_dir
+        )
+
+        extra_include_paths = [
+            f"{CK_DIR}/include",
+            f"{CK_DIR}/library/include",
+            f"{old_bd_include_dir}",
+        ]
+
+        if md_name in [
+            "module_bench_mha_fwd",
+            "module_bench_mha_fwd_splitkv",
+            "module_bench_mha_bwd",
+        ]:
+            module = cpp_extension.load(
+                md_name,
+                sources,
+                extra_cflags=flags_cc,
+                extra_cuda_cflags=flags_hip,
+                extra_ldflags=extra_ldflags,
+                extra_include_paths=extra_include_paths,
+                build_directory=opbd_dir,
+                verbose=verbose or AITER_LOG_MORE > 0,
+                with_cuda=True,
+                is_python_module=False,
+                is_standalone=True,
             )
-
-            bd_include_dir = f"{op_dir}/build/include/torch"
-            os.makedirs(bd_include_dir, exist_ok=True)
-            rename_cpp_to_cu(
-                [f"{AITER_CSRC_DIR}/include/torch"] + extra_include, bd_include_dir
+            shutil.copy(f"{opbd_dir}/{md_name}", f"{get_user_jit_dir()}")
+        else:
+            module = cpp_extension.load(
+                md_name,
+                sources,
+                extra_cflags=flags_cc,
+                extra_cuda_cflags=flags_hip,
+                extra_ldflags=extra_ldflags,
+                extra_include_paths=extra_include_paths,
+                build_directory=opbd_dir,
+                verbose=verbose or AITER_LOG_MORE > 0,
+                with_cuda=True,
+                is_python_module=True,
             )
+            shutil.copy(f"{opbd_dir}/{md_name}.so", f"{get_user_jit_dir()}")
+            time.sleep(1)
+        return module
 
-            extra_include_paths = [
-                f"{CK_DIR}/include",
-                f"{CK_DIR}/library/include",
-                f"{old_bd_include_dir}",
-            ]
+    def FinalFunc():
+        logger.info(
+            f"finish build [{md_name}], cost {time.perf_counter()-startTS:.8f}s"
+        )
 
-            if md_name in [
-                "module_bench_mha_fwd",
-                "module_bench_mha_fwd_splitkv",
-                "module_bench_mha_bwd",
-            ]:
-                module = cpp_extension.load(
-                    md_name,
-                    sources,
-                    extra_cflags=flags_cc,
-                    extra_cuda_cflags=flags_hip,
-                    extra_ldflags=extra_ldflags,
-                    extra_include_paths=extra_include_paths,
-                    build_directory=opbd_dir,
-                    verbose=verbose or AITER_LOG_MORE > 0,
-                    with_cuda=True,
-                    is_python_module=False,
-                    is_standalone=True,
-                )
-                shutil.copy(f"{opbd_dir}/{md_name}", f"{get_user_jit_dir()}")
-            else:
-                module = cpp_extension.load(
-                    md_name,
-                    sources,
-                    extra_cflags=flags_cc,
-                    extra_cuda_cflags=flags_hip,
-                    extra_ldflags=extra_ldflags,
-                    extra_include_paths=extra_include_paths,
-                    build_directory=opbd_dir,
-                    verbose=verbose or AITER_LOG_MORE > 0,
-                    with_cuda=True,
-                    is_python_module=True,
-                )
-                shutil.copy(f"{opbd_dir}/{md_name}.so", f"{get_user_jit_dir()}")
-                time.sleep(1)
-
-            # setup(
-            #     name=md_name,
-            #     ext_modules=[
-            #         CppExtension(
-            #             name=md_name,
-            #             sources=sources,
-            #             ex
-            #         )
-            #     ]
-            # )
-        except Exception as e:
-            logger.error(
-                "failed build jit [{}]\n-->[History]: {}".format(
-                    md_name, "-->".join(traceback.format_exception(*sys.exc_info()))
-                )
-            )
-            raise Exception(f"failed build jit [{md_name}]...")
-        finally:
-            logger.info(f"finish build [{md_name}], cost {time.perf_counter()-startTS:.8f}s")
-            baton.release()
-    else:
-        baton.wait()
+    def WaitFunc():
         module = get_module(md_name)
+        return module
+
+    module = mp_lock(
+        lockPath=lock_path, MainFunc=MainFunc, FinalFunc=FinalFunc, WaitFunc=WaitFunc
+    )
+
     if md_name not in __mds:
         __mds[md_name] = module
     return module

@@ -26,6 +26,7 @@ from aiter.int4_utils import *
 torch.set_default_device("cuda")
 torch.int4 = torch.uint32
 
+
 def weight_quant(
     weight,
     qType,

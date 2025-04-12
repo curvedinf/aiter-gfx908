@@ -234,10 +234,10 @@ def test_fmoe(
     else:
         dtypeMax = 7 if use_int4 else None
         w1, fc1_scale = pertoken_quant(
-            w1, torch.float, quant_dtype=quant_dtype, dtypeMax=dtypeMax
+            w1, quant_dtype=quant_dtype, dtypeMax=dtypeMax
         )
         w2, fc2_scale = pertoken_quant(
-            w2, torch.float, quant_dtype=quant_dtype, dtypeMax=dtypeMax
+            w2, quant_dtype=quant_dtype, dtypeMax=dtypeMax
         )
 
         sp1 = (E + shared_E, inter_dim)

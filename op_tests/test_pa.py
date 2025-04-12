@@ -198,9 +198,9 @@ def pertoken_quant_kvcache_symm(
         num_blocks, num_heads, block_size, -1).contiguous()
 
     k_quant, k_scale_asm = pertoken_quant(
-        k_cache_permute, scale_dtype, quant_dtype=quant_dtype)
+        k_cache_permute, quant_dtype=quant_dtype)
     v_quant, v_scale_asm = pertoken_quant(
-        v_cache_permute, scale_dtype, quant_dtype=quant_dtype)
+        v_cache_permute, quant_dtype=quant_dtype)
 
     # NOTE: quant_x and original x could be different
     quant_x = 16 // quant_dtype.itemsize

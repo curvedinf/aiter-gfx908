@@ -29,7 +29,6 @@ def moe_sorting(
 ):
     device = topk_ids.device
     M, topk = topk_ids.shape
-    topk = topk_ids.shape[1]
     max_num_tokens_padded = topk_ids.numel() + num_experts * block_size - topk
     max_num_m_blocks = int((max_num_tokens_padded + block_size - 1) // block_size)
     sorted_ids = torch.empty((max_num_tokens_padded,), dtype=torch.int32, device=device)
@@ -64,7 +63,7 @@ def get_inter_dim(w1_shape, w2_shape):
 
     int4_war = model_dim // w1_shape[-1]
     inter_dim *= int4_war
-    return inter_dim
+    return E, model_dim, inter_dim
 
 
 def fused_moe(
@@ -85,9 +84,8 @@ def fused_moe(
     block_size_M=None,
 ):
     """user API"""
-    E, model_dim, inter_dim = w2.shape
     M, topk = topk_ids.shape
-    inter_dim = get_inter_dim(w1.shape, w2.shape)
+    E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
 
     assert w1.shape[1] in [
         inter_dim,
@@ -407,9 +405,8 @@ def fused_moe_2stages(
     quant_func = get_hip_quant(quant_type)
     # quant_func = get_torch_quant(quant_type)
 
-    E, model_dim, inter_dim = w2.shape
     token_num, _ = hidden_states.shape
-    inter_dim = get_inter_dim(w1.shape, w2.shape)
+    E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
     dtype = hidden_states.dtype
     device = hidden_states.device
 
@@ -518,14 +515,14 @@ def asm_stage1(
     a1_scale=None,
     w1_scale=None,
 ):
-    dtype = input.dtype
-    device = input.device
+    dtype = out.dtype
+    device = out.device
     token_num, topk, _ = out.shape
-    inter_dim = get_inter_dim(w1.shape, w2.shape)
+    E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
 
     if quant_type == QuantType.per_Tensor:
         a1_scale = a1_scale.view(1).repeat(token_num)
-        w1_scale = w1_scale.view(w1.shape[0], 1).repeat(1, w1.shape[1])
+        w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[1])
         quant_type = QuantType.per_Token
 
     tmp_out = out
@@ -685,7 +682,7 @@ def torch_moe_stage1(
     B, D = hidden_states.shape
     topk = topk_weight.shape[1]
     N = w1.shape[1]
-    inter_dim = get_inter_dim(w1.shape, w2.shape)
+    E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
 
     if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
         w1 = w1 * w1_scale.view(w1_scale.shape[0], -1, 1)

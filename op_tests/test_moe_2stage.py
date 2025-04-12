@@ -7,6 +7,7 @@ import triton.language as tl
 import sys
 import os
 from typing import Any, Callable, Dict, Optional, Tuple
+import itertools
 import aiter
 from aiter.test_common import (
     checkAllclose,
@@ -31,7 +32,7 @@ from aiter.fused_moe import (
 from aiter.ops.shuffle import shuffle_weight
 from aiter import ActivationType
 
-torch.int4 = torch.uint32
+torch.int4 = getattr(torch, "int4", torch.uint32)
 torch.set_default_device("cuda")
 
 
@@ -90,7 +91,6 @@ def test_fmoe(
     qType,
     AQDType,
     WQDType,
-    BLOCK_SIZE_M,
     use_g1u1=False,
 ):
     torch_quant = aiter.get_torch_quant(qType)
@@ -105,9 +105,10 @@ def test_fmoe(
     score = torch.randn((token, E), dtype=dtype)
     topk_weights, topk_ids = fused_topk(input, score, topk, True)
 
-    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
-        topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M
-    )
+    # BLOCK_SIZE_M = 128
+    # sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
+    #     topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M
+    # )
     if qType == aiter.QuantType.per_Tensor:
         w1_qt, w1_scale = aiter.pertoken_quant(w1.view(E, -1), quant_dtype=WQDType)
         w2_qt, w2_scale = aiter.pertoken_quant(w2.view(E, -1), quant_dtype=WQDType)
@@ -269,93 +270,86 @@ def test_fmoe(
         activation=actType,
     )
 
-    checkAllclose(
+    err = checkAllclose(
         out2_ref,
         out2_aiter,
-        msg=f"aiter_all_stages:{us_fuse:.2f} us......(quant:{AQDType})",
+        msg=f"aiter_all_stages:{us_fuse:.2f} us......",
     )
+    return {"us": us_fuse, "err": err}
 
 
-# None quant
-for dtype in [torch.bfloat16]:
-    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096][:1]:
-        for dim in [6144]:
-            for inter_dim in [4096]:
-                expert, topk = 8, 2
-                test_fmoe(
-                    dtype,
-                    m,
-                    dim,
-                    inter_dim,
-                    expert,
-                    topk,
-                    aiter.ActivationType.Silu,
-                    aiter.QuantType.No,
-                    None,
-                    None,
-                    BLOCK_SIZE_M=128,
-                    use_g1u1=True,
-                )
+list_dtype = [torch.bfloat16]
+list_dim = [(6144, 4096)]
+list_tokenNum = [
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    256,
+    512,
+    1024,
+    1536,
+    2048,
+    3072,
+    4096,
+    163840,
+]
+list_quant = [
+    (aiter.QuantType.No, None, None),  # a16w16
+    (aiter.QuantType.per_Tensor, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),  # a8w8
+    (aiter.QuantType.per_Token, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),  # a8w8
+    # (aiter.QuantType.per_Token, torch.float8_e4m3fnuz, torch.int4),  # a8w4
+]
+list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu]
+expert, topk = 8, 2
 
-# per Token quant/a8w8
-for dtype in [torch.bfloat16]:
-    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
-        for dim in [6144]:
-            for inter_dim in [4096]:
-                expert, topk = 8, 2
-                test_fmoe(
-                    dtype,
-                    m,
-                    dim,
-                    inter_dim,
-                    expert,
-                    topk,
-                    aiter.ActivationType.Silu,
-                    aiter.QuantType.per_Token,
-                    torch.float8_e4m3fnuz,
-                    torch.float8_e4m3fnuz,
-                    BLOCK_SIZE_M=128,
-                    use_g1u1=True,
-                )
+import pandas as pd
 
-# per Tensor quant/a8w8
-for dtype in [torch.bfloat16]:
-    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
-        for dim in [6144]:
-            for inter_dim in [4096]:
-                expert, topk = 8, 2
-                test_fmoe(
-                    dtype,
-                    m,
-                    dim,
-                    inter_dim,
-                    expert,
-                    topk,
-                    aiter.ActivationType.Silu,
-                    aiter.QuantType.per_Tensor,
-                    torch.float8_e4m3fnuz,
-                    torch.float8_e4m3fnuz,
-                    BLOCK_SIZE_M=32,
-                    use_g1u1=True,
-                )
+for (
+    dtype,
+    act_type,
+    (quant_type, aq_dtype, wq_dtype),
+    (model_dim, inter_dim),
+) in itertools.product(list_dtype, list_act, list_quant, list_dim):
+    df = []
+    for m in list_tokenNum:
+        ret = test_fmoe(
+            dtype,
+            m,
+            model_dim,
+            inter_dim,
+            expert,
+            topk,
+            act_type,
+            quant_type,
+            aq_dtype,
+            wq_dtype,
+            use_g1u1=True,
+        )
+        df.append(ret)
+    df = pd.DataFrame(df)
+    print(df)
 
-# per Tensor quant/a8w4
-for dtype in [torch.bfloat16]:
-    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096][-1:]:
-        for dim in [6144]:
-            for inter_dim in [4096]:
-                expert, topk = 8, 2
-                test_fmoe(
-                    dtype,
-                    m,
-                    dim,
-                    inter_dim,
-                    expert,
-                    topk,
-                    aiter.ActivationType.Silu,
-                    aiter.QuantType.per_Token,
-                    torch.float8_e4m3fnuz,
-                    torch.int4,
-                    BLOCK_SIZE_M=32,
-                    use_g1u1=True,
-                )
+# # per Tensor quant/a8w4
+# for dtype in [torch.bfloat16]:
+#     for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096][-1:]:
+#         for dim in [6144]:
+#             for inter_dim in [4096]:
+#                 expert, topk = 8, 2
+#                 test_fmoe(
+#                     dtype,
+#                     m,
+#                     dim,
+#                     inter_dim,
+#                     expert,
+#                     topk,
+#                     aiter.ActivationType.Silu,
+#                     aiter.QuantType.per_Token,
+#                     torch.float8_e4m3fnuz,
+#                     torch.int4,
+#                     use_g1u1=True,
+#                 )

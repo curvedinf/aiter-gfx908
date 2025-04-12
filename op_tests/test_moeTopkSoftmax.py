@@ -55,7 +55,7 @@ def test_fuse(hidden_states: torch.Tensor,
               gating_output: torch.Tensor,
               topk: int,
               renormalize: bool):
-    from aiter.fused_moe_gelu import fused_topk
+    from aiter.fused_moe import fused_topk
     return fused_topk(hidden_states, gating_output, topk, renormalize)
 
 

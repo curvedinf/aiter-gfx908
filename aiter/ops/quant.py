@@ -9,7 +9,6 @@ from ..jit.core import compile_ops, CK_DIR, AITER_CSRC_DIR
 import torch.nn.functional as F
 import functools
 from .enum import *
-from . import triton
 
 
 @compile_ops("module_smoothquant")
@@ -63,7 +62,9 @@ def pertoken_quant(
     return y, y_scale
 
 
-def per_tensor_quant(x, scale=None, scale_dtype=torch.float, quant_dtype=torch.int8, dtypeMax=None):
+def per_tensor_quant(
+    x, scale=None, scale_dtype=torch.float, quant_dtype=torch.int8, dtypeMax=None
+):
     x = x.to(torch.float)
     if scale is None:
         if dtypeMax is None:
@@ -97,6 +98,8 @@ def get_hip_quant(qType):
 
 @functools.lru_cache()
 def get_triton_quant(qType):
+    from . import triton
+
     tmp = {
         QuantType.No: lambda *a, **k: (a[0], None),
         QuantType.per_Tensor: per_tensor_quant_fp8_triton,

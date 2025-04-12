@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
+import re
 import os
 import sys
 import shutil
@@ -265,25 +266,39 @@ def build_module(
             f"{old_bd_include_dir}",
         ]
 
-        module = cpp_extension.load(
-            md_name,
-            sources,
-            extra_cflags=flags_cc,
-            extra_cuda_cflags=flags_hip,
-            extra_ldflags=extra_ldflags,
-            extra_include_paths=extra_include_paths,
-            build_directory=opbd_dir,
-            verbose=verbose or AITER_LOG_MORE > 0,
-            with_cuda=True,
-            is_python_module=is_python_module,
-            is_standalone=is_standalone,
-        )
-        if is_python_module and not is_standalone:
-            shutil.copy(f"{opbd_dir}/{target_name}", f"{get_user_jit_dir()}")
-        else:
-            shutil.copy(
-                f"{opbd_dir}/{target_name}", f"{AITER_CORE_DIR}/op_tests/cpp/mha"
+        try:
+            module = cpp_extension.load(
+                md_name,
+                sources,
+                extra_cflags=flags_cc,
+                extra_cuda_cflags=flags_hip,
+                extra_ldflags=extra_ldflags,
+                extra_include_paths=extra_include_paths,
+                build_directory=opbd_dir,
+                verbose=verbose or AITER_LOG_MORE > 0,
+                with_cuda=True,
+                is_python_module=is_python_module,
+                is_standalone=is_standalone,
             )
+            if is_python_module and not is_standalone:
+                shutil.copy(f"{opbd_dir}/{target_name}", f"{get_user_jit_dir()}")
+            else:
+                shutil.copy(
+                    f"{opbd_dir}/{target_name}", f"{AITER_CORE_DIR}/op_tests/cpp/mha"
+                )
+        except:
+            tag = f"\033[31mfailed build jit [{md_name}]\033[0m"
+            logger.error(
+                f"{tag}↓↓↓↓↓↓↓↓↓↓\n-->[History]: {{}}{tag}↑↑↑↑↑↑↑↑↑↑".format(
+                    re.sub(
+                        "error:",
+                        "\033[31merror:\033[0m",
+                        "-->".join(traceback.format_exception(*sys.exc_info())),
+                        flags=re.I,
+                    ),
+                )
+            )
+            raise
         return module
 
     def FinalFunc():

@@ -13,7 +13,7 @@ from aiter.fused_moe_bf16_asm import asm_moe_tkw1, torch_moe_tkw1, moe_sorting_c
 from aiter.fused_moe import fused_topk
 from aiter.ops.shuffle import shuffle_weight
 from aiter import pertoken_quant, ck_moe
-from int4_utils import *
+from aiter.int4_utils import *
 from aiter import ActivationType
 
 BLOCK_SIZE_M = 32

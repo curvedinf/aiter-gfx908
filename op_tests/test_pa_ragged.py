@@ -612,7 +612,7 @@ def test_paged_attention(
             context_lengths = [fixed_context_length] * num_seqs
             num_blocks_list = [get_num_blocks(context_length) for context_length in context_lengths]
             last_page_lens = [get_last_page_len(context_length) for context_length in context_lengths]
-    
+
             return torch.tensor([0] + num_blocks_list).cumsum(dim=0, dtype=torch.int), \
                 torch.tensor(last_page_lens, dtype=torch.int)
 
@@ -695,7 +695,7 @@ def test_paged_attention(
                 v_scale,
             )
             assert checkAllclose(out_golden, out_aiter,
-                                msg=f'golden vs aiter:{time_aiter}')
+                                msg=f'golden vs aiter:{time_aiter}')<0.01
             if DUMP_OUTPUT:
                 tensor_dump(out_aiter, 'out_aiter')
         elif pa_variant == PAVariant.Asm:
@@ -712,8 +712,14 @@ def test_paged_attention(
                 alibi_slopes,
                 max_num_blocks_per_seq
             )
-            assert checkAllclose(out_golden, out_aiter_asm,
-                                msg=f'golden vs aiter_asm:{time_aiter_asm}')
+            assert (
+                checkAllclose(
+                    out_golden,
+                    out_aiter_asm,
+                    msg=f"golden vs aiter_asm:{time_aiter_asm}",
+                )
+                < 0.01
+            )
             if DUMP_OUTPUT:
                 tensor_dump(out_aiter, 'out_aiter_asm')
         else:
@@ -737,8 +743,14 @@ def test_paged_attention(
                 v_scale,
                 block_size,
             )
-            assert checkAllclose(out_golden, out_aiter_naive,
-                                msg=f'golden vs ck_naive:{time_aiter_naive}')
+            assert (
+                checkAllclose(
+                    out_golden,
+                    out_aiter_naive,
+                    msg=f"golden vs ck_naive:{time_aiter_naive}",
+                )
+                < 0.01
+            )
 
             if DUMP_OUTPUT:
                 tensor_dump(out_aiter, 'out_aiter_asm')
@@ -767,8 +779,14 @@ def test_paged_attention(
                 block_size,
                 quant_algo
             )
-            assert checkAllclose(out_golden, out_aiter_naive,
-                                msg=f'golden vs ck_naive(quant:{quant_algo}, kvcache:{quant_cache_dtype}):{time_aiter_naive}')
+            assert (
+                checkAllclose(
+                    out_golden,
+                    out_aiter_naive,
+                    msg=f"golden vs ck_naive(quant:{quant_algo}, kvcache:{quant_cache_dtype}):{time_aiter_naive}",
+                )
+                < 0.01
+            )
         elif pa_variant == PAVariant.Asm:
             out_aiter_asm, time_aiter_asm = run_aiter_asm(
                 query,
@@ -785,8 +803,14 @@ def test_paged_attention(
                 k_scale_,
                 v_scale_,
             )
-            assert checkAllclose(out_golden, out_aiter_asm,
-                                msg=f'golden vs aiter_asm(quant:{quant_algo}, kvcache:{quant_cache_dtype}):{time_aiter_asm}')
+            assert (
+                checkAllclose(
+                    out_golden,
+                    out_aiter_asm,
+                    msg=f"golden vs aiter_asm(quant:{quant_algo}, kvcache:{quant_cache_dtype}):{time_aiter_asm}",
+                )
+                < 0.01
+            )
 
     if DUMP_INPUTS:
         dump_input(query,

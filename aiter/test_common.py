@@ -143,7 +143,7 @@ def log_args(func, *args, **kwargs):
     callargs = inspect.getcallargs(func, *args, **kwargs)
 
     prefix = f"calling {func.__name__}("
-    blanks = " " * (len(prefix) + 8)
+    blanks = " " * (len(prefix))
 
     def getTensorInfo(el):
         if isinstance(el, torch.Tensor):
@@ -152,14 +152,14 @@ def log_args(func, *args, **kwargs):
             viewNum = 5
             if len(el) > viewNum:
                 el = list(el[:viewNum]) + ["..."]
-            return f'\n{" "*(len(prefix)+39)}'.join(
+            return f'\n{" "*(len(prefix)+31)}'.join(
                 ["("] + [f" {getTensorInfo(e)}" for e in el] + [")"]
             )
         return el
 
     info = [f"{el:<28} = {getTensorInfo(callargs[el])}" for el in callargs]
     info = f",\n{blanks}".join(info)
-    logger.info(f"{prefix}{info})")
+    logger.info(f"\n{prefix}{info})")
     return callargs
 
 

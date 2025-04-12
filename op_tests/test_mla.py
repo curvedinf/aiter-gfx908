@@ -141,51 +141,49 @@ def test_mla(
     us_triton = None
     us_asm = None
     # for none absorb (mha)
-    if batch_size * ctx_lens < 128 * 8192:
-        # attention_ref will OOO for big input...
-        qk_head_dim = qk_nope_head_dim + qk_rope_head_dim
-        sm_scale = 1.0 / (qk_head_dim**0.5)
-        # ############################## normal: prefill
-        q = torch.randn((total_qo, nhead, qk_head_dim), dtype=dtype)
-        k = torch.randn((total_kv, nhead, qk_head_dim), dtype=dtype)
-        v = torch.randn((total_kv, nhead, v_head_dim), dtype=dtype)
+    qk_head_dim = qk_nope_head_dim + qk_rope_head_dim
+    sm_scale = 1.0 / (qk_head_dim**0.5)
+    # ############################## normal: prefill
+    q = torch.randn((total_qo, nhead, qk_head_dim), dtype=dtype)
+    k = torch.randn((total_kv, nhead, qk_head_dim), dtype=dtype)
+    v = torch.randn((total_kv, nhead, v_head_dim), dtype=dtype)
 
-        out_ref, us_ref = run_perftest(
-            torch_mha_extend,
-            q,
-            k,
-            v,
-            qo_indptr,
-            kv_indptr,
-            kv_indices,
-            sm_scale,
-            dtype=dtype,
-            num_iters=3,
-            num_warmup=1,
-        )
-        out_aiter, us_aiter = run_perftest(
-            aiter.flash_attn_varlen_func,
-            q,
-            k,
-            v,
-            qo_indptr,
-            kv_indptr,
-            max_seqlen_qo,
-            max_seqlen_kv,
-            softmax_scale=sm_scale,
-            causal=True,
-        )
-        flop = (
-            batch_size
-            * nhead
-            * 2
-            * (ctx_lens * qk_head_dim * ctx_lens + ctx_lens * ctx_lens * v_head_dim)
-        )
-        checkAllclose(
-            out_ref,
-            out_aiter,
-            msg=f"mla_prefill-normal    [torch vs  aiter_ck]:{us_ref:.2f} us vs {us_aiter:>8.2f} us...... {flop/us_aiter/1000/1000:.2f} TFlops",
-        )
+    out_ref, us_ref = run_perftest(
+        torch_mha_extend,
+        q,
+        k,
+        v,
+        qo_indptr,
+        kv_indptr,
+        kv_indices,
+        sm_scale,
+        dtype=dtype,
+        num_iters=2,
+        num_warmup=0,
+    )
+    out_aiter, us_aiter = run_perftest(
+        aiter.flash_attn_varlen_func,
+        q,
+        k,
+        v,
+        qo_indptr,
+        kv_indptr,
+        max_seqlen_qo,
+        max_seqlen_kv,
+        softmax_scale=sm_scale,
+        causal=True,
+    )
+    flop = (
+        batch_size
+        * nhead
+        * 2
+        * (ctx_lens * qk_head_dim * ctx_lens + ctx_lens * ctx_lens * v_head_dim)
+    )
+    checkAllclose(
+        out_ref,
+        out_aiter,
+        msg=f"mla_prefill-normal    [torch vs  aiter_ck]:{us_ref:.2f} us vs {us_aiter:>8.2f} us...... {flop/us_aiter/1000/1000:.2f} TFlops",
+    )
 
     # absorb init
     qk_head_dim = kv_lora_rank + qk_rope_head_dim

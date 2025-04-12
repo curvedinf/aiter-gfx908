@@ -118,6 +118,7 @@ def run_perftest(
     *args,
     num_iters=101,
     num_warmup=10,
+    testGraph=False,
     num_rotate_args=0,
     needTrace=False,
     **kwargs,
@@ -126,6 +127,7 @@ def run_perftest(
     @perftest(
         num_iters=num_iters,
         num_warmup=num_warmup,
+        testGraph=testGraph,
         num_rotate_args=num_rotate_args,
         needTrace=needTrace,
     )
@@ -221,7 +223,7 @@ def get_trace_perf(prof, num_iters):
 
 def checkAllclose(a, b, rtol=1e-2, atol=1e-2, msg="", printNum=8):
     isClose = torch.isclose(a, b, rtol=rtol, atol=atol)
-    mask = ~isClose
+    mask = (~isClose).to('cpu')
     if isClose.all():
         logger.info(f"{msg}[checkAllclose {atol=} {rtol=} passed~]")
         return 0

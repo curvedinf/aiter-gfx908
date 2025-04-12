@@ -1735,13 +1735,21 @@ def _jit_compile(name,
                         hipify_result = hipify_python.hipify(
                             project_directory=build_directory,
                             output_directory=build_directory,
-                            header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
+                            header_include_dirs=(
+                                extra_include_paths
+                                if extra_include_paths is not None
+                                else []
+                            ),
                             extra_files=[os.path.abspath(s) for s in sources],
-                            ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
+                            ignores=[
+                                _join_rocm_home("*"),
+                                os.path.join(_TORCH_PATH, "*"),
+                            ],  # no need to hipify ROCm or PyTorch headers
                             show_detailed=verbose,
                             show_progress=verbose,
                             is_pytorch_extension=True,
-                            clean_ctx=clean_ctx
+                            hipify_extra_files_only=True,  # don't hipify everything in includes path
+                            clean_ctx=clean_ctx,
                         )
 
                         hipified_sources = set()

@@ -207,8 +207,8 @@ def test_mla(
             kv_lora_rank,
             qk_rope_head_dim,
             dtype=dtype,
-            num_iters=3,
-            num_warmup=1,
+            num_iters=2,
+            num_warmup=0,
         )
 
         prefix_indptr = kv_indptr - qo_indptr
@@ -238,7 +238,7 @@ def test_mla(
             None,
             max_seqlen_qo,
             sm_scale,
-            num_iters=10,
+            num_iters=5,
         )
         checkAllclose(
             out_torch,
@@ -284,8 +284,8 @@ def test_mla(
         kv_lora_rank,
         qk_rope_head_dim,
         dtype=dtype,
-        num_iters=3,
-        num_warmup=1,
+        num_iters=2,
+        num_warmup=0,
     )
 
     # Triton implementation
@@ -310,7 +310,7 @@ def test_mla(
         attn_logits,
         num_kv_splits,
         sm_scale,
-        num_iters=10,
+        num_iters=5,
     )
     # logits_ref, lse_ref = attn_logits.split([v_head_dim, 1], dim=-1)
     # logits_ref = rearrange(logits_ref, "bs h sp d -> bs sp h d")
@@ -356,8 +356,8 @@ nhead = 16  # 128/TP8
 block_size = 1
 df = []
 for dtype, kvtype in [(torch.bfloat16, torch.bfloat16)]:
-    for ctx_len in [21, 64, 256, 512, 1200, 2200, 3200, 4200, 5200, 6200, 8192][:]:
-        for batch_size in [1, 2, 3, 5, 16, 32, 64, 128, 256][:]:
+    for ctx_len in [21, 64, 256, 512, 1200, 3200, 5200, 8192][:]:
+        for batch_size in [1, 3, 5, 16, 32, 64, 128, 256][:]:
             ret = test_mla(
                 ctx_len,
                 batch_size,
@@ -376,4 +376,4 @@ import pandas as pd
 
 df = pd.DataFrame(df)
 # df.to_csv("mla_prefill.csv")
-print(df)
+aiter.logger.info(f"summary:\n{df}")

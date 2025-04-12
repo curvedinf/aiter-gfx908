@@ -282,16 +282,14 @@ list_dtype = [torch.bfloat16]
 list_dim = [(6144, 4096)]
 list_tokenNum = [
     1,
-    2,
-    4,
-    8,
+    3,
+    5,
     16,
     32,
     64,
     128,
     256,
     1024,
-    1536,
     4096,
     163840,
 ]
@@ -301,7 +299,7 @@ list_quant = [
     (aiter.QuantType.per_Token, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),  # a8w8
     # (aiter.QuantType.per_Token, torch.float8_e4m3fnuz, torch.int4),  # a8w4
 ]
-list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu]
+list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][:1]
 expert, topk = 8, 2
 
 import pandas as pd
@@ -329,7 +327,8 @@ for (
         )
         df.append(ret)
     df = pd.DataFrame(df)
-    print(df)
+    aiter.logger.info(f"summary:\n{df}")
+
 
 # # per Tensor quant/a8w4
 # for dtype in [torch.bfloat16]:

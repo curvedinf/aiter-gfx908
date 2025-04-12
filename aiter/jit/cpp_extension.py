@@ -2099,6 +2099,13 @@ def _get_num_workers(verbose: bool) -> Optional[int]:
             print(f'Using envvar MAX_JOBS ({max_jobs}) as the number of workers...',
                   file=sys.stderr)
         return int(max_jobs)
+    else:
+        max_jobs = int(max(1, os.cpu_count() * 0.8))
+        print(
+            f"Using 0.8*cpu_cnt MAX_JOBS ({max_jobs}) as the number of workers...",
+            file=sys.stderr,
+        )
+        return max_jobs
     if verbose:
         print('Allowing ninja to set a default number of workers... '
               '(overridable by setting the environment variable MAX_JOBS=N)',

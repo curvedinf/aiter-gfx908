@@ -98,7 +98,7 @@ def test_allreduce_custom(tp_size, pp_size, shape, dtype, withGraph=False):
     pool.join()
     rets = [el.get() for el in rets]
     for out, us in rets:
-        msg = f"test_allreduce_custom: {shape=} {dtype=} {withGraph=} {us:.2f}"
+        msg = f"test_allreduce_custom: {shape=} {dtype=} {withGraph=} {us:>8.2f}"
         checkAllclose(ref, out.to(ref), msg=msg)
 
 

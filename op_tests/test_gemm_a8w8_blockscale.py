@@ -14,7 +14,7 @@ from einops import repeat as eirp
 block_shape = (128, 128)
 
 
-@perftest()
+@perftest(num_iters=5)
 def run_torch(x, weight, x_scale, w_scale, dtype=torch.bfloat16):
     block_shape_n, block_shape_k = block_shape
     m, k = x.shape
@@ -66,7 +66,7 @@ def test_gemm(dtype, m, n, k):
     checkAllclose(a, b, msg="a,b: " + msg, rtol=1e-2, atol=0.01)
 
 
-@perftest()
+@perftest(num_iters=5)
 def run_torch2(x, weight, x_scale, w_scale, dtype=torch.bfloat16):
     block_shape_n, block_shape_k = block_shape
     m, k = x.shape

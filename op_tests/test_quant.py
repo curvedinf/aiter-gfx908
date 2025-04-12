@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
-from aiter.test_common import checkAllclose, perftest, tensor_dump
+from aiter.test_common import checkAllclose, perftest, tensor_dump, benchmark
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -59,6 +59,7 @@ def test_triton_perTokenQuantFp8(input):
 #     return out, scale
 
 
+@benchmark()
 def test_quant(m, n, dtype=torch.bfloat16):
     dim = (m, n)
     input = torch.randn(dim, dtype=dtype, device="cuda")

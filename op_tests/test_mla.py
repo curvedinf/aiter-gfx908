@@ -182,7 +182,7 @@ def test_mla(
     checkAllclose(
         out_ref,
         out_aiter,
-        msg=f"mla_prefill-normal    [torch vs  aiter_ck]:{us_ref:.2f} us vs {us_aiter:>8.2f} us...... {flop/us_aiter/1000/1000:.2f} TFlops",
+        msg=f"mla_prefill-normal    [torch vs  aiter_ck]:{us_ref:>8.2f} us vs {us_aiter:>8.2f} us...... {flop/us_aiter/1000/1000:>8.2f} TFlops",
     )
 
     # absorb init
@@ -238,11 +238,12 @@ def test_mla(
             None,
             max_seqlen_qo,
             sm_scale,
+            num_iters=10,
         )
         checkAllclose(
             out_torch,
             out_triton,
-            msg=f"mla_prefill-absorb    [torch vs    triton]:{us_torch:.2f} us vs {us_triton:>8.2f} us......",
+            msg=f"mla_prefill-absorb    [torch vs    triton]:{us_torch:>8.2f} us vs {us_triton:>8.2f} us......",
         )
 
         out_asm = torch.empty((total_qo, nhead, v_head_dim), dtype=dtype).fill_(-1)
@@ -262,7 +263,7 @@ def test_mla(
         checkAllclose(
             out_torch,
             attn_logits,
-            msg=f"mla_prefill-absorb    [torch vs aiter_asm]:{us_torch:.2f} us vs {us_asm:>8.2f} us......",
+            msg=f"mla_prefill-absorb    [torch vs aiter_asm]:{us_torch:>8.2f} us vs {us_asm:>8.2f} us......",
         )
 
     # ############################## absorb: decode
@@ -309,6 +310,7 @@ def test_mla(
         attn_logits,
         num_kv_splits,
         sm_scale,
+        num_iters=10,
     )
     # logits_ref, lse_ref = attn_logits.split([v_head_dim, 1], dim=-1)
     # logits_ref = rearrange(logits_ref, "bs h sp d -> bs sp h d")
@@ -316,7 +318,7 @@ def test_mla(
     checkAllclose(
         out_torch_decode,
         out_ref,
-        msg=f"mla_decode-absorb    [golden vs    triton]:{us_torch_decode:.2f} us vs {us_ref:.2f} us......",
+        msg=f"mla_decode-absorb    [golden vs    triton]:{us_torch_decode:>8.2f} us vs {us_ref:>8.2f} us......",
     )
 
     # aiter implementation
@@ -341,7 +343,7 @@ def test_mla(
     checkAllclose(
         out_torch_decode,
         out_asm,
-        msg=f"mla_decode-absorb    [golden vs aiter_asm]:{us_torch_decode:.2f} us vs {us_asm:.2f} us......",
+        msg=f"mla_decode-absorb    [golden vs aiter_asm]:{us_torch_decode:>8.2f} us vs {us_asm:>8.2f} us......",
     )
     return {"ck_576": us_aiter, "triton_576": us_triton, "asm_576": us_asm}
 

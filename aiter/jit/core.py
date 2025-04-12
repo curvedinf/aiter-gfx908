@@ -13,15 +13,36 @@ import traceback
 from typing import List, Optional
 from . import cpp_extension
 import torch
+from torch.utils.file_baton import FileBaton
 import logging
 import json
 import multiprocessing
 from packaging.version import parse, Version
 
-try:
-    from ..utility.mp_lock import mp_lock
-except:
-    from aiter.utility.mp_lock import mp_lock
+
+def mp_lock(
+    lockPath: str,
+    MainFunc: callable,
+    FinalFunc: callable = None,
+    WaitFunc: callable = None,
+):
+    """
+    Using FileBaton for multiprocessing.
+    """
+    baton = FileBaton(lockPath)
+    if baton.try_acquire():
+        try:
+            ret = MainFunc()
+        finally:
+            if FinalFunc is not None:
+                FinalFunc()
+            baton.release()
+    else:
+        baton.wait()
+        if WaitFunc is not None:
+            ret = WaitFunc()
+        ret = None
+    return ret
 
 
 PREBUILD_KERNELS = False

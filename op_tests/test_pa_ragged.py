@@ -349,7 +349,7 @@ def run_aiter(query,
     # will use single workspace buffer to accommodate following 3 intermediate tensors:
     #   1. tmp_output (shape=(num_seqs, num_heads, max_num_partitions, head_size), dtype=output.dtype)
     #   2. exp_sums (shape=(num_seqs, num_heads, max_num_partitions), dtype=float32)
-    #   3. max_logits (shape=(num_seqs, num_heads, max_num_partitions), dtype=float32) 
+    #   3. max_logits (shape=(num_seqs, num_heads, max_num_partitions), dtype=float32)
     nbyes_per_qo_elem = torch.finfo(output.dtype).bits // 8
     workspace_buffer = torch.empty((num_seqs * num_heads * max_num_partitions * head_size) * nbyes_per_qo_elem
                                     + 2 * (num_seqs * num_heads * max_num_partitions) * 4,
@@ -386,7 +386,8 @@ def run_aiter(query,
     else:
         return output
 
-@perftest()
+
+@perftest(num_iters=2)
 def run_aiter_naive(query,
                    key_cache,
                    value_cache,

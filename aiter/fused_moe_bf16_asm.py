@@ -134,7 +134,7 @@ def asm_moe(hidden_states,
             else:
                 logger.warning(f'FMOE fall into pure torch quant...')
                 a8, a8_scale = aiter.pertoken_quant(
-                    hidden_states, torch.float, quant_dtype=w1.dtype)
+                    hidden_states, quant_dtype=w1.dtype)
         if w2.shape[2] * lastdim_mul == w1.shape[1]:
             fmoe_func = aiter.fmoe_int8_g1u0
         elif w2.shape[2] * 2 * lastdim_mul == w1.shape[1]:
@@ -246,7 +246,7 @@ def asm_moe_tkw1(hidden_states,
             else:
                 logger.warning(f'FMOE fall into pure torch quant...')
                 a8, a8_scale = aiter.pertoken_quant(
-                    hidden_states, torch.float, quant_dtype=w1.dtype)
+                    hidden_states, quant_dtype=w1.dtype)
         if w2.shape[2] * 2 * lastdim_mul == w1.shape[1]:
             fmoe_func = aiter.fmoe_g1u1_tkw1
 
@@ -495,7 +495,7 @@ def torch_moe_tkw1(hidden_states, w1, w2, topk_weight, topk_ids,
             if fc2_smooth_scale is not None:
                 act_out = act_out * (fc2_smooth_scale[E_id])
             act_out, act_out_scale =  pertoken_quant(
-                 act_out, torch.float, quant_dtype = torch.float8_e4m3fnuz, dtypeMax=None)
+                 act_out, quant_dtype = torch.float8_e4m3fnuz, dtypeMax=None)
             out[mask] = act_out.to(computeType) @ (w2[E_id].transpose(0, 1))*act_out_scale.view(-1, 1)
 
     return out.sum(dim=1).to(dtype) 

@@ -12,8 +12,7 @@ import aiter
 from aiter import logger
 from aiter import ActivationType, QuantType
 from aiter import get_hip_quant, get_torch_quant
-from aiter.jit.core import AITER_ROOT_DIR, PY, AITER_ASM_DIR, bd_dir
-from aiter.utility.mp_lock import mp_lock
+from aiter.jit.core import AITER_ROOT_DIR, PY, AITER_ASM_DIR, bd_dir, mp_lock
 
 BLOCK_SIZE_M = 32
 

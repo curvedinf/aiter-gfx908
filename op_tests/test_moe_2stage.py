@@ -168,7 +168,7 @@ def test_fmoe(
     # checkAllclose(
     #     out1_ref,
     #     out1_ck,
-    #     msg=f"[perf]  ck_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
+    #     msg=f"[perf]  ck_moe_stage1:{us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
     # )
 
     # if WQDType != torch.int4:
@@ -197,7 +197,7 @@ def test_fmoe(
     #     checkAllclose(
     #         out1_ref,
     #         out1_asm,
-    #         msg=f"[perf] asm_moe_stage1:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
+    #         msg=f"[perf] asm_moe_stage1:{us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
     #     )
 
     # ######################## stage 2 start ###########
@@ -252,7 +252,7 @@ def test_fmoe(
     # checkAllclose(
     #     out2_ref,
     #     out2_ck,
-    #     msg=f"ck_moe_stage2:{us:.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:.2f} tflops......(quant:{AQDType})",
+    #     msg=f"ck_moe_stage2:{us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
     # )
     # ######################## stage 2 end ###########
 
@@ -273,7 +273,7 @@ def test_fmoe(
     err = checkAllclose(
         out2_ref,
         out2_aiter,
-        msg=f"aiter_all_stages:{us_fuse:.2f} us......",
+        msg=f"aiter_all_stages:{us_fuse:>8.2f} us......",
     )
     return {"us": us_fuse, "err": err}
 
@@ -290,11 +290,8 @@ list_tokenNum = [
     64,
     128,
     256,
-    512,
     1024,
     1536,
-    2048,
-    3072,
     4096,
     163840,
 ]

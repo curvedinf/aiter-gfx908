@@ -34,8 +34,8 @@ def get_dtype_max(dtype):
 
 def pertoken_quant(
     x,
-    x_scale=None,
     scale=None,
+    x_scale=None,  # smooth_scale
     scale_dtype=torch.float,
     quant_dtype=torch.int8,
     dtypeMax=None,

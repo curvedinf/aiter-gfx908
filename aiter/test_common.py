@@ -11,7 +11,7 @@ from aiter import logger
 
 
 def perftest(
-    num_iters=101, num_warmup=3, testGraph=False, num_rotate_args=0, needTrace=False
+    num_iters=101, num_warmup=2, testGraph=False, num_rotate_args=0, needTrace=False
 ):
     def decorator(func):
         def wrapper(*args, **kwargs):
@@ -117,7 +117,7 @@ def run_perftest(
     func,
     *args,
     num_iters=101,
-    num_warmup=3,
+    num_warmup=2,
     testGraph=False,
     num_rotate_args=0,
     needTrace=False,

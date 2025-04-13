@@ -181,6 +181,12 @@ def get_torch_act(aType):
     }
     return tmp.get(aType, NotImplementedError)
 
+def per_token_dynamic_quant_fp8_hip(x):
+    y = torch.empty(x.shape, dtype=torch.float8_e4m3fnuz, device=x.device)
+    scale = torch.empty(x.shape[:-1], dtype=torch.float, device=x.device).unsqueeze(-1)
+    dynamic_per_token_scaled_fp8_quant(y, x, scale)
+    return y, scale
+
 
 @compile_ops("module_quant")
 def static_scaled_fp8_quant(out: Tensor, input: Tensor, scale: Tensor): ...

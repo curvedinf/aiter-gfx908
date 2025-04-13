@@ -333,7 +333,8 @@
             py::arg("topk"),                    \
             py::arg("w1_scale") = std::nullopt, \
             py::arg("a1_scale") = std::nullopt, \
-            py::arg("block_m") = 32);           \
+            py::arg("block_m") = 32,            \
+            py::arg("ActOP")  = 2);             \
                                                 \
       m.def("ck_moe_stage2", &ck_moe_stage2,    \
             py::arg("inter_states"),            \
@@ -356,7 +357,8 @@
             py::arg("w1_scale") = std::nullopt, py::arg("w2_scale") = std::nullopt, \
             py::arg("a1_scale") = std::nullopt, py::arg("a2_scale") = std::nullopt, \
             py::arg("block_m") = 32,                                                \
-            py::arg("expert_mask") = std::nullopt);
+            py::arg("expert_mask") = std::nullopt,                                  \
+            py::arg("acitvation") = std::nullopt);
 
 #define MOE_OP_PYBIND                                                            \
       m.def("topk_softmax", &topk_softmax,                                       \

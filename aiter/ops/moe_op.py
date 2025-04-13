@@ -200,6 +200,7 @@ def ck_moe(
     fc2_smooth_scale: Optional[Tensor] = None,
     block_m: Optional[int] = 32,
     expert_mask: Optional[Tensor] = None,
+    activation: Optional[str] = None,
 ): ...
 
 
@@ -216,6 +217,7 @@ def ck_moe_stage1(
     w1_scale: Optional[Tensor] = None,
     a1_scale: Optional[Tensor] = None,
     block_m: Optional[int] = 32,
+    ActOP: Optional[int] = 0
 ): ...
 
 

@@ -346,7 +346,7 @@ def get_2stage_cfgs(
         tag = cfg["tag"]
 
     # war
-    if q_dtype_w in [torch.bfloat16, torch.float16, torch.uint32]:
+    if q_dtype_w in [torch.bfloat16, torch.float16, torch.uint32, torch.float8_e4m3fnuz]:
         tag = "ck"
 
     logger.info(f"[fused_moe] using {'default' if cfg is None else tag} for {keys} ")
@@ -576,7 +576,7 @@ def ck_stage1(
     # tmp = torch.empty_like(out)
     dtype = out.dtype
     device = out.device
-    tmp = torch.empty((expert, topk, w1.shape[1]), dtype=dtype, device=device)
+    out = torch.empty((expert, topk, w1.shape[1]), dtype=dtype, device=device)
     aiter.ck_moe_stage1(
         input,
         w1,
@@ -584,16 +584,16 @@ def ck_stage1(
         sorted_ids,
         sorted_expert_ids,
         num_valid_ids,
-        tmp,
+        out,
         topk,
         w1_scale,
         a1_scale,
         block_m,
     )
-    if activation == ActivationType.Silu:
-        aiter.silu_and_mul(out, tmp)
-    else:
-        aiter.gelu_and_mul(out, tmp)
+    # if activation == ActivationType.Silu:
+    #     aiter.silu_and_mul(out, tmp)
+    # else:
+    #     aiter.gelu_and_mul(out, tmp)
     return out
 
 

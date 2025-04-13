@@ -9,6 +9,7 @@ from aiter.fused_moe import torch_moe, moe_sorting, fused_topk
 from aiter.ops.shuffle import shuffle_weight
 from aiter import pertoken_quant, ck_moe
 from einops import rearrange
+from aiter.fused_moe_api import aiter_moe
 
 BLOCK_SIZE_M = 32
 
@@ -283,6 +284,8 @@ def test_fmoe(
     )
     msg = f"[perf] a8w8 asm: {us_ref:>8.2f} us ...... {m=}, {model_dim=}, {inter_dim=}, {E=}, {shared_E=}, {topk=}, dtype: {dtype}"
     checkAllclose(out_ref, out_asm, rtol=0.05, atol=0.05, msg=msg)
+    checkAllclose(out_ref, out_asm2, rtol=0.05,
+                  atol=0.05, msg="aiter moe api check")
 
 
 for dtype in [torch.bfloat16]:

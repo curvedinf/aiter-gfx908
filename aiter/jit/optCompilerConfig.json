@@ -1,4 +1,17 @@
 {
+    "module_aiter_enum": {
+        "srcs": [
+            "f'{AITER_CSRC_DIR}/pybind/aiter_enum_pybind.cu'"
+        ],
+        "flags_extra_cc": [],
+        "flags_extra_hip": [],
+        "extra_ldflags": "None",
+        "extra_include": [],
+        "verbose": "False",
+        "is_python_module": "True",
+        "is_standalone": "False",
+        "blob_gen_cmd": "''"
+    },
     "module_activation": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/pybind/activation_pybind.cu'",
@@ -227,7 +240,8 @@
             "f'{AITER_CSRC_DIR}/kernels/topk_softmax_kernels.cu'",
             "f'{AITER_CSRC_DIR}/kernels/topk_softmax_kernels_group.cu'",
             "f'{AITER_CSRC_DIR}/kernels/moe_align_block_size_kernels.cu'",
-            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_fmoe.cpp'"
+            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_fmoe.cpp'",
+            "f'{AITER_CSRC_DIR}/py_itfs_cu/asm_moe_2stage.cpp'"
         ],
         "flags_extra_cc": [],
         "flags_extra_hip": [],
@@ -236,7 +250,7 @@
         "verbose": "False",
         "is_python_module": "True",
         "is_standalone": "False",
-        "blob_gen_cmd": "''"
+        "blob_gen_cmd": "f'{AITER_ASM_DIR}/fmoe_2stages/codegen.py --output_dir {{}}'"
     },
     "module_moe": {
         "srcs": [
@@ -278,7 +292,9 @@
             "f'{CK_DIR}/example/ck_tile/13_moe_sorting/'"
         ],
         "flags_extra_cc": [],
-        "flags_extra_hip": ["'-DCK_TILE_WA_ISSUE_2028=0'"],
+        "flags_extra_hip": [
+            "'-DCK_TILE_WA_ISSUE_2028=0'"
+        ],
         "extra_ldflags": "None",
         "extra_include": [
             "f'{CK_DIR}/example/ck_tile/13_moe_sorting/'"
@@ -626,7 +642,7 @@
         "blob_gen_cmd": [
             "f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d bwd --receipt 600 --output_dir {{}}'",
             "f'{AITER_CSRC_DIR}/cpp_itfs/mha_bwd_generate.py --receipt 3 --output_dir {{}}'"
-            ]
+        ]
     },
     "bench_mha_fwd": {
         "srcs": [

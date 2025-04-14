@@ -1376,8 +1376,6 @@ def _bwd_kernel_dkdvdq_causal(
             # steps with masked operation to get out of it
             residue_m = max(start_n + delta_qk - start_m, 0)
             len_m = BLOCK_N + residue_m
-            start_m = start_n - delta_qk
-            len_m = BLOCK_N
 
         # offset input and output tensor by batch and Q/K heads
         adj_q = batch_idx * stride_q_b + head_q_idx * stride_q_h + q_start * stride_q_m

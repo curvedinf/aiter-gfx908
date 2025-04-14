@@ -18,7 +18,7 @@ from aiter.ops.triton.mha import flash_attn_func, flash_attn_fp8_func, flash_att
 from aiter.test_mha_common import attention_ref, generate_random_padding_mask, generate_qkv, pad_rearrange_dropout_mask_hts_to_bhss 
 import sys
 
-
+# thd layout
 def mha_varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlens=False, requires_grad=True):
     torch.manual_seed(20)
 
@@ -52,12 +52,11 @@ def mha_varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_se
     sm_scale = D_HEAD**-0.5
     return q, k, v, cu_seqlens_q, cu_seqlens_k, sm_scale
 
-
+# bshd layout
 def mha_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, requires_grad=True):
     torch.manual_seed(20)
 
     # Initialize q, k, v
-    # bshd layout supported
     q_tensor_shape = (Z, N_CTX_Q, HQ, D_HEAD)
     k_tensor_shape = (Z, N_CTX_K, HK, D_HEAD)
 
@@ -66,8 +65,6 @@ def mha_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, requires_grad=T
     v = torch.randn(k_tensor_shape, dtype=dtype, device="cuda", requires_grad=requires_grad)
 
     sm_scale = D_HEAD**-0.5
-    # max_seqlens_q = N_CTX_Q
-    # max_seqlens_k = N_CTX_K
 
     return q, k, v, sm_scale
 
@@ -80,19 +77,19 @@ def nonvarlen_benchmark_configs():
         (2, 16, 16, 8192, 8192),
         (8, 16, 16, 1024, 4096),
         (1, 16, 16, 4096, 16384),
-        # (2, 48, 48, 1024, 1024),
-        # (2, 48, 48, 2048, 1024),
-        # (2, 48, 48, 4096, 8192),
-        # (2, 48, 48, 8192, 4096),
-        # (2, 48, 48, 16384, 8192),
-        # (8, 16, 16, 1989, 15344),
-        # (4, 16, 16, 4097, 163),
-        # (2, 16, 16, 8122, 2159),
-        # (1, 16, 16, 16281, 7),
-        # (2, 48, 48, 1021, 1020),
-        # (2, 48, 48, 2001, 2048),
-        # (2, 48, 48, 3996, 9639),
-        # (2, 48, 48, 8181, 1021),
+        (2, 48, 48, 1024, 1024),
+        (2, 48, 48, 2048, 1024),
+        (2, 48, 48, 4096, 8192),
+        (2, 48, 48, 8192, 4096),
+        (2, 48, 48, 16384, 8192),
+        (8, 16, 16, 1989, 15344),
+        (4, 16, 16, 4097, 163),
+        (2, 16, 16, 8122, 2159),
+        (1, 16, 16, 16281, 7),
+        (2, 48, 48, 1021, 1020),
+        (2, 48, 48, 2001, 2048),
+        (2, 48, 48, 3996, 9639),
+        (2, 48, 48, 8181, 1021),
     ]
     return configs
 
@@ -181,7 +178,6 @@ def create_benchmark_configs(custom, args):
             x_names = ['model', 'BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K', 'D_HEAD']
             plot_name = f'fused-attention-{mode}-layout-{args.layout}-fp8-{args.fp8}-causal-{causal}'
             extra_args = {'dtype': dtype, 'causal': causal, 'mode': mode}
-
 
 
     unit = "TFLOPS"
@@ -304,6 +300,10 @@ def run_benchmark(custom, args):
                 dropout_mask = sd_mask >= 0 if dropout > 0.0 else None
                 triton_dq, triton_dk, triton_dv = torch.autograd.grad(triton_out, (q_input, k_input, v_input), do.clone())
 
+            triton_dq = dq_pad_fn(triton_dq)
+            triton_dk = dk_pad_fn(triton_dk)
+            triton_dv = dk_pad_fn(triton_dv)
+
             # Torch
             torch_fn = lambda: attention_ref(q, k, v, dropout_p=dropout, dropout_mask=dropout_mask, causal=causal)
             with torch.enable_grad():
@@ -418,6 +418,7 @@ def parse_args():
     # prints TFLOPS without setting the following
     parser.add_argument("-return_time", action='store_true', default=False, help="Prints only walltime.")
     parser.add_argument("-return_bandwidth", action='store_true', default=False, help="Prints only memory bandwidth.")
+    
     parser.add_argument("-layout", type=str, default=None, help=supported_layouts())
     
 
@@ -438,7 +439,7 @@ def main():
             args.causal = True
         if args.layout is None:  # User didn’t specify -layout
             args.layout = 'thd'
-        print(f"Note: using -model config defaults: causal={args.causal}, layout={args.layout}. This is the most common real life scenario, but can be overridden with -causal and -layout flags.")
+        print(f"Note: using -model config defaults: causal={True}, layout={'thd'}. This is the most common real life scenario, but can be overridden with -causal and -layout flags.")
     else:
         # the defaults for causal and varlen when not using the -model
         if args.causal is None:  # User didn’t specify -causal
@@ -448,12 +449,10 @@ def main():
     
     custom_config = False
 
-
     assert args.layout == 'thd' or not args.equal_seqlens or args.model, \
            "Equal sequence lengths arg must be used with the thd layout or a model config."
     if args.hq or args.hk or args.d:
         custom_config = True
-        assert args.hq >= args.hk, "hq must be greater than or equal to hk."
         assert args.b and args.hq and args.sq and args.d, \
                "If custom config is specified, please provide \
                 all of batch, number of Q heads, Q sequence length \

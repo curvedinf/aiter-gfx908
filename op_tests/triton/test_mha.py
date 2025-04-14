@@ -242,7 +242,7 @@ def test_mha_backward(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEADS: int
         if FP8:
             triton_out = flash_attn_fp8_func(q, k, v, dropout_p=DROPOUT, causal=CAUSAL, return_lse=True, return_attn_probs=True)
         else:
-            triton_out = flash_attn_func(q, k, v, dropout_p=DROPOUT, causal=CAUSAL, return_lse=True, return_attn_probs=True)
+            triton_out = flash_attn_func(q, k, v, dropout_p=DROPOUT, causal=CAUSAL, return_lse=True, return_attn_probs=True, fused_backward=True)
 
     assert len(triton_out) == 3
     triton_out, lse, sd_mask= triton_out[0], triton_out[1], triton_out[2]
@@ -421,4 +421,5 @@ def test_mha_backward_varlen(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEA
 
 if __name__ == "__main__":
     # Run the tests
+    # TODO: fails for causal=True
     test_mha_backward(8, 1024, 4096, 16, 16, 128, 0.0, True, False, torch.float16)

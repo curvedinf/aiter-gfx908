@@ -1126,7 +1126,6 @@ def _bwd_dkdvdq_inner(
     qT_ptrs_start = Q + offs_m[None, :] * stride_q_m + offs_k[:, None] * stride_q_k #[BLOCK_D_MODEL_POW2, BLOCK_M]
     dq_ptrs_start = DQ + offs_m[:, None] * stride_q_m + offs_k[None,:] * stride_q_k #[BLOCK_M, BLOCK_D_MODEL_POW2]
     
-    
     do_ptrs_start = DO + offs_m[:, None] * stride_do_m + offs_k[None,: ] * stride_do_k
     curr_m = start_m
     step_m = BLOCK_M
@@ -1156,9 +1155,6 @@ def _bwd_dkdvdq_inner(
     # Ensure step is coprime with num_steps to visit all indices exactly once
     step = 1 # 3 if num_steps > 1 or num_steps==3 else 1 # coprime with num_steps
 
-    qT_ptrs = qT_ptrs_start
-    dq_ptrs = dq_ptrs_start
-    do_ptrs = do_ptrs_start
 
     for iter in range(num_steps):
         # Compute the permuted block index
@@ -1174,8 +1170,6 @@ def _bwd_dkdvdq_inner(
         mask_qT = mask_m[None, :]
         mask_do = mask_m[:, None]
         mask_nm = mask_n[:, None] & (offs_m[None, :] < seqlen_q)
-        
-        assert not PADDED_HEAD, "Padded head not supported in this kernel"
         
         if PADDED_HEAD:
             mask_qT &= offs_k[:, None] < BLOCK_D_MODEL
@@ -1207,7 +1201,7 @@ def _bwd_dkdvdq_inner(
         pT = tl.math.exp(qkT * sm_scale - m[None, :])
 
         if MASK:
-            causal_mask = (offs_m[None, :] - delta_qk) >= offs_n[:, None]
+            causal_mask = (offs_m[None, :] - delta_qk) >= (offs_n[:, None])
             mask = causal_mask & mask_nm
             pT = tl.where(mask, pT, 0.0)
 
@@ -1252,14 +1246,16 @@ def _bwd_dkdvdq_inner(
             dk += tl.dot(dsT.to(qT.type.element_ty), tl.trans(qT)) 
 
 
-        # We can compute the dq_partial here and do a atomic add to a memory location
-        # But this is probably a bad idea: possibly a lot of contention, atomic adds in a loop have proven to be problematic.
-        # Maybe swizzling the loop ordering could help with contention?
-        # But lets check the perf anyways...
-        dq_partial = tl.dot(dsT.to(k.dtype).T, k) * sm_scale # (BLOCK_M, BLOCK_N) x (BLOCK_N, D)
+        # We can compute the dq_partial here and do a atomic add to the correct memory location
+        # NOTE: Possible problems with the atomic add: contention, is inside a loop which has achieved bad perf before
+        # (BLOCK_M, BLOCK_N) x (BLOCK_N, D)
+        if IS_FP8:
+            dq_partial = tl.dot((dsT * scale_dsT).to(k.dtype).T, k) * descale_dsT * descale_k
+        else:
+            dq_partial = tl.dot(dsT.to(k.dtype).T, k) 
         tl.atomic_add(
             dq_ptrs,
-            dq_partial,
+            dq_partial * sm_scale,
             mask=mask_m[:, None],
             sem="relaxed",
         )
@@ -1304,11 +1300,6 @@ def _bwd_kernel_dkdvdq_causal(
     head_k_idx = wid // BATCH % NUM_K_HEADS 
     seq_k_blk_idx = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS
 
-    # reverse order
-    # seq_k_blk_idx = wid % NUM_K_PIDS
-    # head_k_idx = wid // NUM_K_PIDS % NUM_K_HEADS 
-    # batch_idx = wid // (NUM_K_PIDS * NUM_K_HEADS) % BATCH 
-    
     #Determine q and k start along with seqlen_q and seqlen_k
     q_start = 0
     k_start = 0
@@ -1348,7 +1339,7 @@ def _bwd_kernel_dkdvdq_causal(
     else:
         start_delta = start_delta_q_lt_k
     
-    start_n =  seq_k_blk_idx *BLOCK_N
+    start_n =  seq_k_blk_idx * BLOCK_N
 
     offs_k = tl.arange(0, BLOCK_D_MODEL_POW2)
     offs_n = start_n + tl.arange(0, BLOCK_N)
@@ -1379,21 +1370,20 @@ def _bwd_kernel_dkdvdq_causal(
             len_m = BLOCK_N
         else:
             start_m = max(start_n + delta_qk, 0)
-            start_m = start_m // BLOCK_M * BLOCK_M
+            start_m = (start_m // BLOCK_M) * BLOCK_M
             # because we might shift the masked blocks up, we are deeper into
             # the masked out region, so we would potentially increase the total
             # steps with masked operation to get out of it
             residue_m = max(start_n + delta_qk - start_m, 0)
             len_m = BLOCK_N + residue_m
+            start_m = start_n - delta_qk
+            len_m = BLOCK_N
 
         # offset input and output tensor by batch and Q/K heads
         adj_q = batch_idx * stride_q_b + head_q_idx * stride_q_h + q_start * stride_q_m
         
-        
         q_ptr_adj = q_ptr + adj_q
         dq_ptr_adj = dq_ptr + adj_q
-        
-        
         
         adj_do = batch_idx * stride_do_b + head_q_idx * stride_do_h + q_start * stride_do_m
         do_ptr_adj = do_ptr + adj_do
@@ -1892,16 +1882,11 @@ def _bwd_kernel_dkdvdq_noncausal(
     # workgroup id
     wid = tl.program_id(0) # 0, ..., NUM_K_PIDS * BATCH * NUM_K_HEADS - 1
 
-    # workgroups get launched first along batch dim, then in head_k dim, and then in seq k block dim
+    # Workgroups get launched first along batch dim, then in head_k dim, and then in seq k block dim
+    # This is in order to avoid contention for the tl.atomic_add (inside _bwd_dkdvdq_inner) that happens between workgroups that share the same batch and head_k. 
     bid = wid % BATCH 
     hkid = wid // BATCH % NUM_K_HEADS 
     pid = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS 
-
-    # reverse order
-    # pid = wid % NUM_K_PIDS
-    # hkid = wid // NUM_K_PIDS % NUM_K_HEADS 
-    # bid = wid // (NUM_K_PIDS * NUM_K_HEADS) % BATCH 
-
 
     q_start = 0
     k_start = 0
@@ -1947,10 +1932,8 @@ def _bwd_kernel_dkdvdq_noncausal(
     for hqid in range(hkid * GROUP_SIZE, hkid * GROUP_SIZE + GROUP_SIZE):
         adj_q = (bid * stride_qb + hqid * stride_qh + q_start * stride_qm)
         
-        
         Q_ptr = Q + adj_q
         DQ_ptr = DQ  + adj_q
-        
         
         adj_do = (bid * stride_dob + hqid * stride_doh + q_start * stride_dom)
         DO_ptr = DO + adj_do

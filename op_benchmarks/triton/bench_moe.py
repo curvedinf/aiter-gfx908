@@ -46,7 +46,7 @@ def fused_moe(M, N, K, top_k, E, routed_weight=False, dtype=torch.float16, int4_
             "BLOCK_SIZE_M": 256,
             "BLOCK_SIZE_N": 256,
             "BLOCK_SIZE_K": 64,
-            "GROUP_SIZE_M": 1,
+            "GROUP_SIZE_M": 8,
             "num_warps": 8,
             "num_stages": 2,
             "waves_per_eu": 0,

@@ -2265,8 +2265,6 @@ def _flash_attn_backward(
     descale_do: Optional[torch.Tensor] = None,
     fused: bool = False,
 ):
-    # print("Running backward in fused mode:", fused)
-
     IS_FP8 = is_fp8(q)
     if IS_FP8:
         FP8_MAX = torch.finfo(q.dtype).max
@@ -2362,16 +2360,13 @@ def _flash_attn_backward(
     grid_dkdv = ((max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1, batch, num_k_heads)
     grid_dq = ((max_seqlen_q + BLOCK_M2 - 1) // BLOCK_M2, batch, num_k_heads)
     
-    if fused:
+    if fused: # fuses dk, dv, dq computations into one kernel by computing the dq using atomic adds between workgroups
         BLOCK_M1, BLOCK_N1 = 64, 64
-        # change the launch order of blocks to first go over in batch dim, then in head dim, and only then in seqlen dim (where we have contention in dq atomic updates)
-        # grid_dkdv = (batch, num_k_heads, (max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1) 
         num_k_pids = (max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1
-        
-        grid_dkdv = (batch * num_k_heads * num_k_pids,) 
+        grid_dkdvdq = (batch * num_k_heads * num_k_pids,) 
         
         if causal:
-            _bwd_kernel_dkdvdq_causal[grid_dkdv](
+            _bwd_kernel_dkdvdq_causal[grid_dkdvdq](
                 q, k, v, sm_scale, do, dk, dv, dq,
                 softmax_lse, delta,
                 *q_strides,
@@ -2405,7 +2400,7 @@ def _flash_attn_backward(
                 waves_per_eu=WAVES_PER_EU,
             )
         else:
-            _bwd_kernel_dkdvdq_noncausal[grid_dkdv](
+            _bwd_kernel_dkdvdq_noncausal[grid_dkdvdq](
                 q, k, v, sm_scale, do, dk, dv, dq,
                 softmax_lse, delta,
                 *q_strides,
@@ -2439,11 +2434,10 @@ def _flash_attn_backward(
                 waves_per_eu=WAVES_PER_EU,
             )
         
-        
         return delta
     
-    
-    
+    # split kernels solution: one kernel computes dk, dv and the other computes dq
+
     if causal:
         _bwd_kernel_dkdv_causal[grid_dkdv](
             q, k, v, sm_scale, do, dk, dv,

@@ -115,7 +115,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
         alibi_slopes_ptr = alibi_slopes.data_ptr();
         stride_alibi_slopes = alibi_slopes.dim() == 2 ? alibi_slopes.stride(0) : 0;
     }
-
+    printf("table size %d\n", block_table_->size(0));
     return fmha_fwd_args{q.data_ptr(),
                          k.data_ptr(),
                          v.data_ptr(),
@@ -127,6 +127,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          seqlens_k.data_ptr(), // seqstart_k
                          nullptr,              // seqlen_kpads
                          block_table_->data_ptr(), // page idx
+                         static_cast<ck_tile::index_t>(block_table_->size(0)),
                          total_q,
                          total_k,
                          b,

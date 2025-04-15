@@ -1639,15 +1639,6 @@ __global__ void flash_fwd_splitkv_mla_kernel(
     const int32_t end_seqlen_idx    = metadata.core.end_seqlen_idx;
     const int32_t begin_n_split_idx = metadata.core.begin_n_split_idx;
 
-    if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && threadIdx.x == 0)
-    {
-       PRINT_INT(begin_batch_idx);
-       PRINT_INT(begin_seqlen_idx);
-       PRINT_INT(end_batch_idx);
-       PRINT_INT(end_seqlen_idx);
-       PRINT_INT(begin_n_split_idx);
-    }
-
     for (int32_t i_batch = begin_batch_idx; i_batch <= end_batch_idx; ++i_batch)
     {
         const int32_t i_split = i_batch == begin_batch_idx ? begin_n_split_idx : 0;

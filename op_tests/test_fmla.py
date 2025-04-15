@@ -9,8 +9,10 @@ import argparse
 import random
 import math
 
+import triton
+
 Block_M = 64
-Block_N = 16 
+Block_N = 64
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -18,7 +20,7 @@ def setup_seed(seed):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
-# setup_seed(0)
+setup_seed(0)
 
 def get_mla_metadata(cache_seqlens, num_heads_per_head_k, num_heads_k):
     batch_size = cache_seqlens.size(0)
@@ -99,21 +101,21 @@ def scaled_dot_product_attention(query, key, value, h_q, h_kv, batch_id=0, parti
             bq = query[:, 0]
             out_flash
             lse_flash
-            n_block_num = (partition_end - partition_begin) // Block_N 
+            n_block_num = (partition_end - partition_begin + Block_N - 1) // Block_N 
             # print("bq", bq)
 
             m = torch.zeros([Block_M]).cuda()
             l = torch.zeros([Block_M]).cuda()
-            oacc = torch.zeros([Block_M, 512]).cuda()
+            oacc = torch.zeros([Block_M, key.shape[-1] - 64]).cuda()
 
             m_log2 = torch.zeros([Block_M]).cuda()
             l_log2 = torch.zeros([Block_M]).cuda()
-            oacc_log2 = torch.zeros([Block_M, 512]).cuda()
+            oacc_log2 = torch.zeros([Block_M, key.shape[-1] - 64]).cuda()
 
             i_block_n = n_block_num
             for i in range(n_block_num):
                 if i == 0:
-                    bk = key[0][i_block_n * Block_N - Block_N + partition_begin]
+                    bk = key[0][i_block_n * Block_N - Block_N + partition_begin:]
                 else:
                     bk = key[0][i_block_n * Block_N - Block_N + partition_begin: i_block_n * Block_N + partition_begin]
 
@@ -151,12 +153,12 @@ def scaled_dot_product_attention(query, key, value, h_q, h_kv, batch_id=0, parti
 
                 bv = value[0][i_block_n * Block_N - Block_N : i_block_n * Block_N]
 
+                if batch_id == 0 and i <= 1:
+                    import pdb; pdb.set_trace()
                 oacc = p_compute @ bv + oacc * scale_o.unsqueeze(-1)
                 oacc_log2 = p_compute_log2 @ bv + oacc_log2 * scale_o_log2.unsqueeze(-1)
                 i_block_n -= 1
 
-                # if batch_id == 0:
-                #     import pdb; pdb.set_trace()
             return oacc / l.unsqueeze(-1)
 
         # out = flash_attention()
@@ -195,7 +197,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
 
     q = torch.randn(b, s_q, h_q, d, device="cuda", dtype=dtype)
 
-    block_size = 16
+    block_size = 64
 
     block_table = torch.arange(
         b * max_seqlen_pad // block_size, dtype=torch.int32, device="cuda"
@@ -204,6 +206,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     for i in range(b):
         blocked_k.view(b, max_seqlen_pad, h_kv, d)[i, cache_seqlens[i].item():] = (
             float("nan")
+            # float(0)
         )
     blocked_v = blocked_k[..., :dv]
 
@@ -211,10 +214,11 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
         cache_seqlens, s_q * h_q // h_kv, h_kv
     )
 
-    tile_scheduler_metadata_torch, num_splits_torch = get_mla_metadata(
-        cache_seqlens, s_q * h_q // h_kv, h_kv
-    )
+    # tile_scheduler_metadata_torch, num_splits_torch = get_mla_metadata(
+    #     cache_seqlens, s_q * h_q // h_kv, h_kv
+    # )
 
+    # @perftest(num_iters=3)
     def flash_mla():
         return aiter.flash_mla_fwd_with_kvcache(
             q,
@@ -284,14 +288,18 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
             lse[i] = LSE
         return out, lse
 
-    out_flash, lse_flash = flash_mla()
-    # out_torch, lse_torch = ref_mla_cu_partition(out_acc, lse_acc)
-    # import pdb; pdb.set_trace()
-    out_torch, lse_torch = ref_mla()
+    # out, us = flash_mla()
+    # # out_flash, lse_flash = out
 
-    import pdb; pdb.set_trace()
-    out_flash_torch = out_flash
-    lse_flash_torch = lse_flash
+    # out_torch, lse_torch = ref_mla_cu_partition(out_acc, lse_acc)
+    out_flash, lse_flash, debug_m, debug_p, debug_v, debug_o = flash_mla()
+    bk =  blocked_k[4096//64-1, :, 0]
+    bv = bk[:, :512]
+    bvt =bv.transpose(0,1)
+
+    # import pdb; pdb.set_trace()
+    out_torch, lse_torch = ref_mla(debug_p, debug_v)
+    # import pdb; pdb.set_trace()
 
     # def ref_mla_combine():
     #     for i in range(b):
@@ -314,42 +322,47 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     #         #     out_flash_torch[i] += out_acc[split_offset + j][0] * (torch.exp(lse_actual[j] - global_lse)[0].unsqueeze(-1))
 
     # ref_mla_combine()
-    # import pdb; pdb.set_trace()
-
-    # query = q[0][0]
-    # key = blocked_k[63][48:64]
-    #
-    # s_acc = query @ key.transpose(0, 1)
-
 
     # print(out_flash, lse_flash)
     # print(out_torch, lse_torch)
 
-    cal_diff(out_flash, out_torch.cuda(), "out")
-    cal_diff(lse_flash, lse_torch.cuda(), "lse")
+    # cal_diff(out_flash, out_torch.cuda(), "out")
+    # cal_diff(lse_flash, lse_torch.cuda(), "lse")
 
-    # t = triton.testing.do_bench(flash_mla)
-    # FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2
-    # bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d + b * s_q * h_q * dv) * (
-    #     torch.finfo(q.dtype).bits // 8
-    # )
-    # print(
-    #     f"{t:.3f} ms, {FLOPS / 10 ** 9 / t:.0f} TFLOPS, {bytes / 10 ** 6 / t:.0f} GB/s"
-    # )
+    # t = us / 1000
+    t = triton.testing.do_bench(flash_mla)
+
+    FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2
+    bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d + b * s_q * h_q * dv) * (
+        torch.finfo(q.dtype).bits // 8
+    )
+    print(
+        f"{t:.3f} ms, {FLOPS / 10 ** 9 / t:.2f} TFLOPS, {bytes / 10 ** 6 / t:.2f} GB/s"
+    )
 
 
 if __name__ == "__main__":
     h_kv = 1
-    d, dv = 576, 512
+    d, dv = 192, 128
+    # d, dv = 576, 512 
     causal = True
 
+    # for (dtype, b, s, h_q, s_q, causal, varlen) in itertools.product(
+    #     (torch.float16, ),
+    #     (128,),
+    #     (4096, 8192),
+    #     (16, 32, 64, 128),
+    #     (1, 2),
+    #     (True,),
+    #     (True, False)
+    # ):
     for (dtype, b, s, h_q, s_q, causal, varlen) in itertools.product(
         (torch.float16, ),
         (128,),
-        (4096, 8192),
-        (16, 32, 64, 128),
-        (1, 2),
-        (True, False),
-        (True, False)
+        (8192,),
+        (64,),
+        (1,),
+        (True,),
+        (True,)
     ):
         test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen)

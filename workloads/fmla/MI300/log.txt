@@ -1,0 +1,613 @@
+Rocprofiler-Compute version: 3.0.0
+Profiler choice: rocprofv1
+Path: /workspace/code/aiter/workloads/fmla/MI300
+Target: MI300
+Command: /usr/bin/python3.12 op_tests/test_fmla.py --device MI308
+Kernel Selection: None
+Dispatch Selection: None
+Hardware Blocks: All
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Collecting Performance Counters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/SQ_IFETCH_LEVEL.txt
+   |-> [rocprof] RPL: on '250409_115442' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/SQ_IFETCH_LEVEL.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115442_440523'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115442_440523/input0_results_250409_115442'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115442_440523/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 69 metrics
+   |-> [rocprof] SQ_WAVES, SQ_IFETCH, SQ_IFETCH_LEVEL, SQ_ACCUM_PREV_HIRES, SQ_INSTS_VALU_MUL_F64, SQ_INSTS_VALU_FMA_F64, SQ_INSTS_VALU_TRANS_F64, SQ_INSTS_VALU_INT32, TA_ADDR_STALLED_BY_TC_CYCLES_sum, TA_TOTAL_WAVEFRONTS_sum, TCP_UTCL1_TRANSLATION_MISS_sum, TCP_UTCL1_TRANSLATION_HIT_sum, TCP_UTCL1_PERMISSION_MISS_sum, TCP_UTCL1_REQUEST_sum, TCC_TAG_STALL[0], TCC_BUBBLE[0], TCC_TOO_MANY_EA_WRREQS_STALL[0], TCC_TAG_STALL[1], TCC_BUBBLE[1], TCC_TOO_MANY_EA_WRREQS_STALL[1], TCC_TAG_STALL[2], TCC_BUBBLE[2], TCC_TOO_MANY_EA_WRREQS_STALL[2], TCC_TAG_STALL[3], TCC_BUBBLE[3], TCC_TOO_MANY_EA_WRREQS_STALL[3], TCC_TAG_STALL[4], TCC_BUBBLE[4], TCC_TOO_MANY_EA_WRREQS_STALL[4], TCC_TAG_STALL[5], TCC_BUBBLE[5], TCC_TOO_MANY_EA_WRREQS_STALL[5], TCC_TAG_STALL[6], TCC_BUBBLE[6], TCC_TOO_MANY_EA_WRREQS_STALL[6], TCC_TAG_STALL[7], TCC_BUBBLE[7], TCC_TOO_MANY_EA_WRREQS_STALL[7], TCC_TAG_STALL[8], TCC_BUBBLE[8], TCC_TOO_MANY_EA_WRREQS_STALL[8], TCC_TAG_STALL[9], TCC_BUBBLE[9], TCC_TOO_MANY_EA_WRREQS_STALL[9], TCC_TAG_STALL[10], TCC_BUBBLE[10], TCC_TOO_MANY_EA_WRREQS_STALL[10], TCC_TAG_STALL[11], TCC_BUBBLE[11], TCC_TOO_MANY_EA_WRREQS_STALL[11], TCC_TAG_STALL[12], TCC_BUBBLE[12], TCC_TOO_MANY_EA_WRREQS_STALL[12], TCC_TAG_STALL[13], TCC_BUBBLE[13], TCC_TOO_MANY_EA_WRREQS_STALL[13], TCC_TAG_STALL[14], TCC_BUBBLE[14], TCC_TOO_MANY_EA_WRREQS_STALL[14], TCC_TAG_STALL[15], TCC_BUBBLE[15], TCC_TOO_MANY_EA_WRREQS_STALL[15], TCC_CYCLE_sum, CPC_CPC_UTCL2IU_IDLE, CPC_CPC_UTCL2IU_STALL, SPI_RA_WAVE_SIMD_FULL_CSN, SPI_RA_VGPR_SIMD_FULL_CSN, GRBM_COUNT, GRBM_GUI_ACTIVE
+   |-> [rocprof] [W409 11:54:48.623174093 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=527581, mean_seqlens=4121, max_seqlen=9295
+   |-> [rocprof] 15.960 ms, 1.15 TFLOPS, 38.36 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115442_440523/input0_results_250409_115442
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/SQ_IFETCH_LEVEL.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/SQ_INST_LEVEL_LDS.txt
+   |-> [rocprof] RPL: on '250409_115450' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/SQ_INST_LEVEL_LDS.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115450_440780'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115450_440780/input0_results_250409_115450'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115450_440780/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 87 metrics
+   |-> [rocprof] SQ_INSTS_LDS, SQ_INST_LEVEL_LDS, SQ_ACCUM_PREV_HIRES, SQ_INSTS_VMEM_WR, SQ_INSTS_VMEM_RD, SQ_INSTS_SALU, SQ_INSTS_VSKIPPED, SQ_INSTS, TA_BUFFER_READ_WAVEFRONTS_sum, TA_BUFFER_WRITE_WAVEFRONTS_sum, TD_SPI_STALL_sum, TD_LOAD_WAVEFRONT_sum, TCP_READ_TAGCONFLICT_STALL_CYCLES_sum, TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum, TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum, TCP_TA_TCP_STATE_READ_sum, TCC_REQ[0], TCC_READ[0], TCC_WRITE[0], TCC_ATOMIC[0], TCC_REQ[1], TCC_READ[1], TCC_WRITE[1], TCC_ATOMIC[1], TCC_REQ[2], TCC_READ[2], TCC_WRITE[2], TCC_ATOMIC[2], TCC_REQ[3], TCC_READ[3], TCC_WRITE[3], TCC_ATOMIC[3], TCC_REQ[4], TCC_READ[4], TCC_WRITE[4], TCC_ATOMIC[4], TCC_REQ[5], TCC_READ[5], TCC_WRITE[5], TCC_ATOMIC[5], TCC_REQ[6], TCC_READ[6], TCC_WRITE[6], TCC_ATOMIC[6], TCC_REQ[7], TCC_READ[7], TCC_WRITE[7], TCC_ATOMIC[7], TCC_REQ[8], TCC_READ[8], TCC_WRITE[8], TCC_ATOMIC[8], TCC_REQ[9], TCC_READ[9], TCC_WRITE[9], TCC_ATOMIC[9], TCC_REQ[10], TCC_READ[10], TCC_WRITE[10], TCC_ATOMIC[10], TCC_REQ[11], TCC_READ[11], TCC_WRITE[11], TCC_ATOMIC[11], TCC_REQ[12], TCC_READ[12], TCC_WRITE[12], TCC_ATOMIC[12], TCC_REQ[13], TCC_READ[13], TCC_WRITE[13], TCC_ATOMIC[13], TCC_REQ[14], TCC_READ[14], TCC_WRITE[14], TCC_ATOMIC[14], TCC_REQ[15], TCC_READ[15], TCC_WRITE[15], TCC_ATOMIC[15], CPC_CPC_STAT_IDLE, CPC_CPC_TCIU_BUSY, CPF_CPF_TCIU_BUSY, CPF_CPF_TCIU_STALL, SPI_CSN_NUM_THREADGROUPS, SPI_CSN_WAVE, GRBM_SPI_BUSY
+   |-> [rocprof] [W409 11:54:56.748938279 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=511076, mean_seqlens=3992, max_seqlen=8468
+   |-> [rocprof] 15.521 ms, 1.15 TFLOPS, 38.22 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115450_440780/input0_results_250409_115450
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/SQ_INST_LEVEL_LDS.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/SQ_INST_LEVEL_SMEM.txt
+   |-> [rocprof] RPL: on '250409_115458' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/SQ_INST_LEVEL_SMEM.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115458_441037'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115458_441037/input0_results_250409_115458'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115458_441037/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 84 metrics
+   |-> [rocprof] SQ_INSTS_SMEM, SQ_INST_LEVEL_SMEM, SQ_ACCUM_PREV_HIRES, SQ_INSTS_VALU_ADD_F32, SQ_INSTS_VALU_MUL_F32, SQ_INSTS_VALU_FMA_F32, SQ_INSTS_VALU_TRANS_F32, SQ_INSTS_VALU_ADD_F64, TA_BUFFER_COALESCED_READ_CYCLES_sum, TA_BUFFER_COALESCED_WRITE_CYCLES_sum, TD_COALESCABLE_WAVEFRONT_sum, TCP_TOTAL_ATOMIC_WITH_RET_sum, TCP_TOTAL_ATOMIC_WITHOUT_RET_sum, TCP_TOTAL_WRITEBACK_INVALIDATES_sum, TCP_TOTAL_CACHE_ACCESSES_sum, TCC_EA0_ATOMIC[0], TCC_EA0_RDREQ_LEVEL[0], TCC_EA0_WRREQ_LEVEL[0], TCC_EA0_ATOMIC_LEVEL[0], TCC_EA0_ATOMIC[1], TCC_EA0_RDREQ_LEVEL[1], TCC_EA0_WRREQ_LEVEL[1], TCC_EA0_ATOMIC_LEVEL[1], TCC_EA0_ATOMIC[2], TCC_EA0_RDREQ_LEVEL[2], TCC_EA0_WRREQ_LEVEL[2], TCC_EA0_ATOMIC_LEVEL[2], TCC_EA0_ATOMIC[3], TCC_EA0_RDREQ_LEVEL[3], TCC_EA0_WRREQ_LEVEL[3], TCC_EA0_ATOMIC_LEVEL[3], TCC_EA0_ATOMIC[4], TCC_EA0_RDREQ_LEVEL[4], TCC_EA0_WRREQ_LEVEL[4], TCC_EA0_ATOMIC_LEVEL[4], TCC_EA0_ATOMIC[5], TCC_EA0_RDREQ_LEVEL[5], TCC_EA0_WRREQ_LEVEL[5], TCC_EA0_ATOMIC_LEVEL[5], TCC_EA0_ATOMIC[6], TCC_EA0_RDREQ_LEVEL[6], TCC_EA0_WRREQ_LEVEL[6], TCC_EA0_ATOMIC_LEVEL[6], TCC_EA0_ATOMIC[7], TCC_EA0_RDREQ_LEVEL[7], TCC_EA0_WRREQ_LEVEL[7], TCC_EA0_ATOMIC_LEVEL[7], TCC_EA0_ATOMIC[8], TCC_EA0_RDREQ_LEVEL[8], TCC_EA0_WRREQ_LEVEL[8], TCC_EA0_ATOMIC_LEVEL[8], TCC_EA0_ATOMIC[9], TCC_EA0_RDREQ_LEVEL[9], TCC_EA0_WRREQ_LEVEL[9], TCC_EA0_ATOMIC_LEVEL[9], TCC_EA0_ATOMIC[10], TCC_EA0_RDREQ_LEVEL[10], TCC_EA0_WRREQ_LEVEL[10], TCC_EA0_ATOMIC_LEVEL[10], TCC_EA0_ATOMIC[11], TCC_EA0_RDREQ_LEVEL[11], TCC_EA0_WRREQ_LEVEL[11], TCC_EA0_ATOMIC_LEVEL[11], TCC_EA0_ATOMIC[12], TCC_EA0_RDREQ_LEVEL[12], TCC_EA0_WRREQ_LEVEL[12], TCC_EA0_ATOMIC_LEVEL[12], TCC_EA0_ATOMIC[13], TCC_EA0_RDREQ_LEVEL[13], TCC_EA0_WRREQ_LEVEL[13], TCC_EA0_ATOMIC_LEVEL[13], TCC_EA0_ATOMIC[14], TCC_EA0_RDREQ_LEVEL[14], TCC_EA0_WRREQ_LEVEL[14], TCC_EA0_ATOMIC_LEVEL[14], TCC_EA0_ATOMIC[15], TCC_EA0_RDREQ_LEVEL[15], TCC_EA0_WRREQ_LEVEL[15], TCC_EA0_ATOMIC_LEVEL[15], CPC_UTCL1_STALL_ON_TRANSLATION, CPC_CPC_UTCL2IU_BUSY, CPF_CMP_UTCL1_STALL_ON_TRANSLATION, SPI_RA_RES_STALL_CSN, SPI_RA_TMP_STALL_CSN
+   |-> [rocprof] [W409 11:55:04.826754868 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=488114, mean_seqlens=3813, max_seqlen=8649
+   |-> [rocprof] 14.846 ms, 1.14 TFLOPS, 38.18 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115458_441037/input0_results_250409_115458
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/SQ_INST_LEVEL_SMEM.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/SQ_INST_LEVEL_VMEM.txt
+   |-> [rocprof] RPL: on '250409_115506' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/SQ_INST_LEVEL_VMEM.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115506_441294'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115506_441294/input0_results_250409_115506'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115506_441294/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 86 metrics
+   |-> [rocprof] SQ_INSTS_VMEM, SQ_INST_LEVEL_VMEM, SQ_ACCUM_PREV_HIRES, SQ_INSTS_VALU, SQ_INSTS_VALU_ADD_F16, SQ_INSTS_VALU_MUL_F16, SQ_INSTS_VALU_FMA_F16, SQ_INSTS_VALU_TRANS_F16, TA_BUFFER_ATOMIC_WAVEFRONTS_sum, TA_BUFFER_TOTAL_CYCLES_sum, TD_ATOMIC_WAVEFRONT_sum, TD_STORE_WAVEFRONT_sum, TCP_VOLATILE_sum, TCP_TOTAL_ACCESSES_sum, TCP_TOTAL_READ_sum, TCP_TOTAL_WRITE_sum, TCC_EA0_RDREQ[0], TCC_EA0_RDREQ_32B[0], TCC_EA0_WRREQ[0], TCC_EA0_WRREQ_64B[0], TCC_EA0_RDREQ[1], TCC_EA0_RDREQ_32B[1], TCC_EA0_WRREQ[1], TCC_EA0_WRREQ_64B[1], TCC_EA0_RDREQ[2], TCC_EA0_RDREQ_32B[2], TCC_EA0_WRREQ[2], TCC_EA0_WRREQ_64B[2], TCC_EA0_RDREQ[3], TCC_EA0_RDREQ_32B[3], TCC_EA0_WRREQ[3], TCC_EA0_WRREQ_64B[3], TCC_EA0_RDREQ[4], TCC_EA0_RDREQ_32B[4], TCC_EA0_WRREQ[4], TCC_EA0_WRREQ_64B[4], TCC_EA0_RDREQ[5], TCC_EA0_RDREQ_32B[5], TCC_EA0_WRREQ[5], TCC_EA0_WRREQ_64B[5], TCC_EA0_RDREQ[6], TCC_EA0_RDREQ_32B[6], TCC_EA0_WRREQ[6], TCC_EA0_WRREQ_64B[6], TCC_EA0_RDREQ[7], TCC_EA0_RDREQ_32B[7], TCC_EA0_WRREQ[7], TCC_EA0_WRREQ_64B[7], TCC_EA0_RDREQ[8], TCC_EA0_RDREQ_32B[8], TCC_EA0_WRREQ[8], TCC_EA0_WRREQ_64B[8], TCC_EA0_RDREQ[9], TCC_EA0_RDREQ_32B[9], TCC_EA0_WRREQ[9], TCC_EA0_WRREQ_64B[9], TCC_EA0_RDREQ[10], TCC_EA0_RDREQ_32B[10], TCC_EA0_WRREQ[10], TCC_EA0_WRREQ_64B[10], TCC_EA0_RDREQ[11], TCC_EA0_RDREQ_32B[11], TCC_EA0_WRREQ[11], TCC_EA0_WRREQ_64B[11], TCC_EA0_RDREQ[12], TCC_EA0_RDREQ_32B[12], TCC_EA0_WRREQ[12], TCC_EA0_WRREQ_64B[12], TCC_EA0_RDREQ[13], TCC_EA0_RDREQ_32B[13], TCC_EA0_WRREQ[13], TCC_EA0_WRREQ_64B[13], TCC_EA0_RDREQ[14], TCC_EA0_RDREQ_32B[14], TCC_EA0_WRREQ[14], TCC_EA0_WRREQ_64B[14], TCC_EA0_RDREQ[15], TCC_EA0_RDREQ_32B[15], TCC_EA0_WRREQ[15], TCC_EA0_WRREQ_64B[15], CPC_CPC_TCIU_IDLE, CPC_CPC_STAT_STALL, CPF_CPF_STAT_IDLE, CPF_CPF_TCIU_IDLE, SPI_RA_REQ_NO_ALLOC, SPI_RA_REQ_NO_ALLOC_CSN
+   |-> [rocprof] [W409 11:55:12.995869673 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=539907, mean_seqlens=4218, max_seqlen=9292
+   |-> [rocprof] 16.389 ms, 1.15 TFLOPS, 38.22 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115506_441294/input0_results_250409_115506
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/SQ_INST_LEVEL_VMEM.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/SQ_LEVEL_WAVES.txt
+   |-> [rocprof] RPL: on '250409_115514' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/SQ_LEVEL_WAVES.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115514_441551'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115514_441551/input0_results_250409_115514'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115514_441551/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 88 metrics
+   |-> [rocprof] SQ_CYCLES, SQ_WAVES, SQ_WAVE_CYCLES, SQ_BUSY_CYCLES, SQ_LEVEL_WAVES, SQ_ACCUM_PREV_HIRES, SQ_BUSY_CU_CYCLES, SQ_INSTS_VALU_CVT, TA_TA_BUSY_sum, TA_BUFFER_WAVEFRONTS_sum, TD_TD_BUSY_sum, TD_TC_STALL_sum, TCP_GATE_EN1_sum, TCP_GATE_EN2_sum, TCP_TD_TCP_STALL_CYCLES_sum, TCP_TCR_TCP_STALL_CYCLES_sum, TCC_CYCLE[0], TCC_RW_REQ[0], TCC_HIT[0], TCC_MISS[0], TCC_CYCLE[1], TCC_RW_REQ[1], TCC_HIT[1], TCC_MISS[1], TCC_CYCLE[2], TCC_RW_REQ[2], TCC_HIT[2], TCC_MISS[2], TCC_CYCLE[3], TCC_RW_REQ[3], TCC_HIT[3], TCC_MISS[3], TCC_CYCLE[4], TCC_RW_REQ[4], TCC_HIT[4], TCC_MISS[4], TCC_CYCLE[5], TCC_RW_REQ[5], TCC_HIT[5], TCC_MISS[5], TCC_CYCLE[6], TCC_RW_REQ[6], TCC_HIT[6], TCC_MISS[6], TCC_CYCLE[7], TCC_RW_REQ[7], TCC_HIT[7], TCC_MISS[7], TCC_CYCLE[8], TCC_RW_REQ[8], TCC_HIT[8], TCC_MISS[8], TCC_CYCLE[9], TCC_RW_REQ[9], TCC_HIT[9], TCC_MISS[9], TCC_CYCLE[10], TCC_RW_REQ[10], TCC_HIT[10], TCC_MISS[10], TCC_CYCLE[11], TCC_RW_REQ[11], TCC_HIT[11], TCC_MISS[11], TCC_CYCLE[12], TCC_RW_REQ[12], TCC_HIT[12], TCC_MISS[12], TCC_CYCLE[13], TCC_RW_REQ[13], TCC_HIT[13], TCC_MISS[13], TCC_CYCLE[14], TCC_RW_REQ[14], TCC_HIT[14], TCC_MISS[14], TCC_CYCLE[15], TCC_RW_REQ[15], TCC_HIT[15], TCC_MISS[15], CPC_ME1_BUSY_FOR_PACKET_DECODE, CPC_CPC_STAT_BUSY, CPF_CPF_STAT_BUSY, CPF_CPF_STAT_STALL, SPI_CSN_WINDOW_VALID, SPI_CSN_BUSY, GRBM_COUNT, GRBM_GUI_ACTIVE
+   |-> [rocprof] [W409 11:55:20.125591937 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=550836, mean_seqlens=4303, max_seqlen=11909
+   |-> [rocprof] 16.681 ms, 1.15 TFLOPS, 38.31 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115514_441551/input0_results_250409_115514
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/SQ_LEVEL_WAVES.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_0.txt
+   |-> [rocprof] RPL: on '250409_115522' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_0.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115522_441808'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115522_441808/input0_results_250409_115522'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115522_441808/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 21 metrics
+   |-> [rocprof] SQ_INSTS_VALU_INT64, SQ_INSTS_FLAT, SQ_INSTS_GDS, SQ_INSTS_EXP_GDS, SQ_INSTS_BRANCH, SQ_INSTS_SENDMSG, SQ_WAIT_ANY, SQ_WAIT_INST_ANY, TA_ADDR_STALLED_BY_TD_CYCLES_sum, TA_DATA_STALLED_BY_TC_CYCLES_sum, TCP_TCC_READ_REQ_sum, TCP_TCC_WRITE_REQ_sum, TCP_TCC_ATOMIC_WITH_RET_REQ_sum, TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum, TCC_BUSY_sum, TCC_PROBE_sum, TCC_PROBE_ALL_sum, TCC_NC_REQ_sum, CPC_ME1_DC0_SPI_BUSY, SPI_RA_SGPR_SIMD_FULL_CSN, SPI_RA_LDS_CU_FULL_CSN
+   |-> [rocprof] [W409 11:55:29.203506043 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=511383, mean_seqlens=3995, max_seqlen=8793
+   |-> [rocprof] 15.542 ms, 1.15 TFLOPS, 38.19 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115522_441808/input0_results_250409_115522
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/pmc_perf_0.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_1.txt
+   |-> [rocprof] RPL: on '250409_115531' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_1.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115531_442065'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115531_442065/input0_results_250409_115531'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115531_442065/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 20 metrics
+   |-> [rocprof] SQ_ACTIVE_INST_ANY, SQ_ACTIVE_INST_VMEM, SQ_ACTIVE_INST_LDS, SQ_ACTIVE_INST_VALU, SQ_ACTIVE_INST_SCA, SQ_ACTIVE_INST_EXP_GDS, SQ_ACTIVE_INST_MISC, SQ_ACTIVE_INST_FLAT, TA_FLAT_WAVEFRONTS_sum, TA_FLAT_READ_WAVEFRONTS_sum, TCP_TCC_NC_READ_REQ_sum, TCP_TCC_NC_WRITE_REQ_sum, TCP_TCC_NC_ATOMIC_REQ_sum, TCP_TCC_UC_READ_REQ_sum, TCC_UC_REQ_sum, TCC_CC_REQ_sum, TCC_RW_REQ_sum, TCC_REQ_sum, SPI_RA_BAR_CU_FULL_CSN, SPI_RA_TGLIM_CU_FULL_CSN
+   |-> [rocprof] [W409 11:55:37.350800373 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=525708, mean_seqlens=4107, max_seqlen=9736
+   |-> [rocprof] 15.927 ms, 1.15 TFLOPS, 38.30 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115531_442065/input0_results_250409_115531
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/pmc_perf_1.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_2.txt
+   |-> [rocprof] RPL: on '250409_115539' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_2.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115539_442322'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115539_442322/input0_results_250409_115539'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115539_442322/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 20 metrics
+   |-> [rocprof] SQ_INST_CYCLES_VMEM_WR, SQ_INST_CYCLES_VMEM_RD, SQ_INST_CYCLES_SMEM, SQ_INST_CYCLES_SALU, SQ_THREAD_CYCLES_VALU, SQ_LDS_BANK_CONFLICT, SQ_LDS_ADDR_CONFLICT, SQ_LDS_UNALIGNED_STALL, TA_FLAT_WRITE_WAVEFRONTS_sum, TA_FLAT_ATOMIC_WAVEFRONTS_sum, TCP_TCC_UC_WRITE_REQ_sum, TCP_TCC_UC_ATOMIC_REQ_sum, TCP_TCC_CC_READ_REQ_sum, TCP_TCC_CC_WRITE_REQ_sum, TCC_STREAMING_REQ_sum, TCC_HIT_sum, TCC_MISS_sum, TCC_READ_sum, SPI_RA_WVLIM_STALL_CSN, SPI_SWC_CSC_WR
+   |-> [rocprof] [W409 11:55:45.421112224 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=534555, mean_seqlens=4176, max_seqlen=8439
+   |-> [rocprof] 16.157 ms, 1.15 TFLOPS, 38.39 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115539_442322/input0_results_250409_115539
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/pmc_perf_2.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_3.txt
+   |-> [rocprof] RPL: on '250409_115547' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_3.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115547_442579'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115547_442579/input0_results_250409_115547'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115547_442579/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 18 metrics
+   |-> [rocprof] SQ_WAVES_EQ_64, SQ_WAVES_LT_64, SQ_WAVES_LT_48, SQ_WAVES_LT_32, SQ_WAVES_LT_16, SQ_ITEMS, SQ_LDS_MEM_VIOLATIONS, SQ_LDS_ATOMIC_RETURN, TCP_TCC_CC_ATOMIC_REQ_sum, TCP_TCC_RW_READ_REQ_sum, TCP_TCC_RW_WRITE_REQ_sum, TCP_TCC_RW_ATOMIC_REQ_sum, TCC_WRITE_sum, TCC_ATOMIC_sum, TCC_WRITEBACK_sum, TCC_EA0_WRREQ_sum, SPI_VWC_CSC_WR, SPI_RA_BULKY_CU_FULL_CSN
+   |-> [rocprof] [W409 11:55:53.521100429 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=505684, mean_seqlens=3950, max_seqlen=8752
+   |-> [rocprof] 15.448 ms, 1.14 TFLOPS, 38.00 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115547_442579/input0_results_250409_115547
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/pmc_perf_3.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_4.txt
+   |-> [rocprof] RPL: on '250409_115555' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_4.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115555_442836'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115555_442836/input0_results_250409_115555'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115555_442836/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 13 metrics
+   |-> [rocprof] SQ_LDS_IDX_ACTIVE, SQ_WAVES_RESTORED, SQ_WAVES_SAVED, SQ_INSTS_SMEM_NORM, SQ_INSTS_MFMA, SQ_INSTS_VALU_MFMA_I8, SQ_INSTS_VALU_MFMA_F16, SQ_INSTS_VALU_MFMA_BF16, TCP_PENDING_STALL_CYCLES_sum, TCC_EA0_WRREQ_64B_sum, TCC_EA0_WR_UNCACHED_32B_sum, TCC_EA0_WRREQ_DRAM_sum, TCC_EA0_RDREQ_sum
+   |-> [rocprof] [W409 11:56:01.492694826 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=563027, mean_seqlens=4398, max_seqlen=10095
+   |-> [rocprof] 16.980 ms, 1.15 TFLOPS, 38.46 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115555_442836/input0_results_250409_115555
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/pmc_perf_4.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_5.txt
+   |-> [rocprof] RPL: on '250409_115603' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_5.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115603_443093'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115603_443093/input0_results_250409_115603'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115603_443093/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 12 metrics
+   |-> [rocprof] SQ_INSTS_VALU_MFMA_F32, SQ_INSTS_VALU_MFMA_F64, SQ_VALU_MFMA_BUSY_CYCLES, SQ_INSTS_VALU_MFMA_MOPS_I8, SQ_INSTS_VALU_MFMA_MOPS_F16, SQ_INSTS_VALU_MFMA_MOPS_BF16, SQ_INSTS_VALU_MFMA_MOPS_F32, SQ_INSTS_VALU_MFMA_MOPS_F64, TCC_EA0_RDREQ_32B_sum, TCC_BUBBLE_sum, TCC_EA0_RD_UNCACHED_32B_sum, TCC_EA0_RDREQ_DRAM_sum
+   |-> [rocprof] [W409 11:56:09.491387865 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=531937, mean_seqlens=4155, max_seqlen=10751
+   |-> [rocprof] 16.190 ms, 1.14 TFLOPS, 38.13 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115603_443093/input0_results_250409_115603
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/pmc_perf_5.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_6.txt
+   |-> [rocprof] RPL: on '250409_115611' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_6.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115611_443350'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115611_443350/input0_results_250409_115611'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115611_443350/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 12 metrics
+   |-> [rocprof] SQC_TC_INST_REQ, SQC_TC_DATA_READ_REQ, SQC_TC_DATA_WRITE_REQ, SQC_TC_DATA_ATOMIC_REQ, SQC_TC_STALL, SQC_TC_REQ, SQC_DCACHE_REQ_READ_16, SQC_ICACHE_REQ, TCC_TAG_STALL_sum, TCC_NORMAL_WRITEBACK_sum, TCC_ALL_TC_OP_WB_WRITEBACK_sum, TCC_NORMAL_EVICT_sum
+   |-> [rocprof] [W409 11:56:17.467376905 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=531517, mean_seqlens=4152, max_seqlen=9719
+   |-> [rocprof] 16.145 ms, 1.15 TFLOPS, 38.20 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115611_443350/input0_results_250409_115611
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/pmc_perf_6.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_7.txt
+   |-> [rocprof] RPL: on '250409_115619' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_7.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115619_443607'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115619_443607/input0_results_250409_115619'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115619_443607/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 12 metrics
+   |-> [rocprof] SQC_ICACHE_HITS, SQC_ICACHE_MISSES, SQC_ICACHE_MISSES_DUPLICATE, SQC_DCACHE_INPUT_VALID_READYB, SQC_DCACHE_ATOMIC, SQC_DCACHE_REQ_READ_8, SQC_DCACHE_REQ, SQC_DCACHE_HITS, TCC_ALL_TC_OP_INV_EVICT_sum, TCC_TOO_MANY_EA_WRREQS_STALL_sum, TCC_EA0_ATOMIC_sum, TCC_EA0_RDREQ_LEVEL_sum
+   |-> [rocprof] [W409 11:56:25.435039983 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=531088, mean_seqlens=4149, max_seqlen=9131
+   |-> [rocprof] 16.132 ms, 1.15 TFLOPS, 38.20 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115619_443607/input0_results_250409_115619
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/pmc_perf_7.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_8.txt
+   |-> [rocprof] RPL: on '250409_115627' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/pmc_perf_8.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115627_443864'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115627_443864/input0_results_250409_115627'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115627_443864/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 8 metrics
+   |-> [rocprof] SQC_DCACHE_MISSES, SQC_DCACHE_MISSES_DUPLICATE, SQC_DCACHE_REQ_READ_1, SQC_DCACHE_REQ_READ_2, SQC_DCACHE_REQ_READ_4, TCC_EA0_WRREQ_LEVEL_sum, TCC_EA0_ATOMIC_LEVEL_sum, TCC_EA0_WRREQ_STALL_sum
+   |-> [rocprof] [W409 11:56:33.330885066 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=503729, mean_seqlens=3935, max_seqlen=10779
+   |-> [rocprof] 15.215 ms, 1.15 TFLOPS, 38.43 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115627_443864/input0_results_250409_115627
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/pmc_perf_8.csv' is generating
+   |-> [rocprof] 
+[profiling] Current input file: /workspace/code/aiter/workloads/fmla/MI300/perfmon/timestamps.txt
+   |-> [rocprof] RPL: on '250409_115635' from '/opt/rocm-6.3.1' in '/app/aiter'
+   |-> [rocprof] RPL: profiling '""/usr/bin/python3.12 op_tests/test_fmla.py --device MI308""'
+   |-> [rocprof] RPL: input file '/workspace/code/aiter/workloads/fmla/MI300/perfmon/timestamps.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_250409_115635_444121'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_250409_115635_444121/input0_results_250409_115635'
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] WARNING: NUMA balancing is enabled, which may cause errors. It is recommended to disable NUMA balancing by running 'sudo sh -c echo 0 > /proc/sys/kernel/numa_balancing' for more details: https://rocm.docs.amd.com/en/latest/how-to/system-optimization/mi300x.html#disable-numa-auto-balancing
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_250409_115635_444121/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 0 metrics
+   |-> [rocprof] [W409 11:56:40.138746633 collection.cpp:1100] Warning: ROCTracer produced duplicate flow start: 1 (function operator())
+   |-> [rocprof] b=128, s_q=1, mean_sk=4096, h_q=16, h_kv=1, d=576, dv=512, causal=True, varlen=True
+   |-> [rocprof] total_seqlens=527777, mean_seqlens=4123, max_seqlen=9748
+   |-> [rocprof] 15.960 ms, 1.15 TFLOPS, 38.37 GB/s
+   |-> [rocprof] 
+   |-> [rocprof] ROCPRofiler: 187 contexts collected, output directory /tmp/rpl_data_250409_115635_444121/input0_results_250409_115635
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:134: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:135: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:136: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:140: SyntaxWarning: invalid escape sequence '\s'
+   |-> [rocprof] var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:141: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] pid_pattern = re.compile("pid\((\d*)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:419: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] ptrn1_field = re.compile(r"^.* " + field + "\(")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:432: SyntaxWarning: invalid escape sequence '\('
+   |-> [rocprof] field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:496: SyntaxWarning: invalid escape sequence '\w'
+   |-> [rocprof] prop_pattern = re.compile("([\w-]+)\((\w+)\)")
+   |-> [rocprof] /opt/rocm-6.3.1/libexec/rocprofiler/tblextr.py:497: SyntaxWarning: invalid escape sequence '\['
+   |-> [rocprof] beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+   |-> [rocprof] File '/workspace/code/aiter/workloads/fmla/MI300/timestamps.csv' is generating
+   |-> [rocprof] 
+[roofline] Roofline temporarily disabled in MI300

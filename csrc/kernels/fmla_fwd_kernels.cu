@@ -33,7 +33,8 @@ struct FlashMlaKernelTrait
     static_assert(kSizeD >= kSizeDV);
 };
 
-using FlashMlaKernelTraitsInstance = FlashMlaKernelTrait<576, 512, 64, 16, 4>;
+// using FlashMlaKernelTraitsInstance = FlashMlaKernelTrait<576, 512, 64, 64, 4>;
+using FlashMlaKernelTraitsInstance = FlashMlaKernelTrait<192, 128, 64, 64, 4>;
 
 union TileSchedulerMetaData
 {

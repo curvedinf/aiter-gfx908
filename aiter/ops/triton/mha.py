@@ -1789,7 +1789,7 @@ def _flash_attn_backward(
     #Configs
     #PRE_BLOCK, BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2
     #BLK_SLICE_FACTOR
-    NUM_WARPS, NUM_STAGES = 4, 1
+    NUM_WARPS, NUM_STAGES = 1, 1
     WAVES_PER_EU = 1
     PRE_BLOCK = 128
     #BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
@@ -2004,7 +2004,7 @@ class FlashAttnFunc(torch.autograd.Function):
             window_size_left=window_size[0],
             window_size_right=window_size[1],
             alibi_slopes=alibi_slopes,
-            return_lse=return_lse,
+            return_lse=return_lse or is_grad,
             return_softmax=return_softmax and dropout_p > 0,
             max_seqlen_q=q.shape[1],
             max_seqlen_k=k.shape[1],

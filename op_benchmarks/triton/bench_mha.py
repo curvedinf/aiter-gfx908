@@ -167,7 +167,7 @@ def test_correctness(custom, args):
                                                             equal_seqlens=args.equal_seqlens, requires_grad=requires_grad)
         else:
             q, k, v, sm_scale = mha_input_helper(BATCH, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, requires_grad=requires_grad)
-        
+
         if "Torch" in provider:
             assert not varlen or args.equal_seqlens, "Torch sdpa does not support variable sequence lengths."
             q = q.view(BATCH, N_CTX_Q, HQ, D_HEAD).transpose(1, 2)
@@ -243,11 +243,11 @@ def run_benchmark(custom, args):
     hk = args.hq if not args.hk else args.hk
     sk = args.sq if not args.sk else args.sk
     head_size = 128 if not args.d else args.d
-    mode = 'fwd'
+    mode = 'bwd'
     x_names = ['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
-    causal = args.causal 
+    causal = args.causal
     varlen = args.layout == 'thd'
-    
+
     configs = []
     plot_name = f'fused-attention-{mode}-D_HEAD-{head_size}-layout-{args.layout}-fp8-{args.fp8}-causal-{causal}'
     extra_args = {'D_HEAD': head_size, 'dtype': dtype, 'causal': causal, 'mode': mode}
@@ -280,7 +280,7 @@ def run_benchmark(custom, args):
         line_vals = [unit]
         if args.return_all:
             line_vals = ["ms", "TFLOPS", "GB/s"]
-    
+
     configs.append(
         triton.testing.Benchmark(x_names=x_names, x_vals=x_vals_list, line_arg='provider', line_vals=line_vals,
                                  line_names=line_vals, styles=[('red', '-'), ('green', '-'), ('blue', '-')]*2,
@@ -324,7 +324,7 @@ def run_benchmark(custom, args):
                 flops_per_matmul = 2.0 * BATCH * HQ * valid_out_elements * D_HEAD
             else:
                 flops_per_matmul = 2.0 * BATCH * HQ * N_CTX_Q * N_CTX_K * D_HEAD
-        
+
         if "Torch" in provider:
             assert not varlen or args.equal_seqlens, "Torch sdpa does not support variable sequence lengths. Hint: if you are using -layout thd, set -equal_seqlens aswell."
             # torch.sdpa assumes bhsd layout
@@ -356,7 +356,7 @@ def run_benchmark(custom, args):
                                                         causal=causal)
 
             if mode == 'bwd':
-                o, _ = fn()
+                o, = fn()
                 do = torch.randn_like(o)
                 fn = lambda: o.backward(do, retain_graph=True)
 
@@ -405,7 +405,7 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def parse_args():
-    
+
     parser = argparse.ArgumentParser(
         prog="Benchmark FlashAttention",
         allow_abbrev=False,
@@ -449,7 +449,7 @@ arg_to_torch_dtype = {'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp32': tor
 
 def main():
     args = parse_args()
-    
+
     if args.model:
         if args.causal is None:  # User didn’t specify -causal
             args.causal = True
@@ -462,7 +462,7 @@ def main():
             args.causal = False
         if args.layout is None:  # User didn’t specify -layout
             args.layout = 'bshd'
-    
+
     custom_config = False
     assert not args.test_correctness or (not args.layout=="thd") or args.equal_seqlens, \
         "Varlen not supported for -test_correctness, so use -equal_seqlens if using thd layout."
@@ -499,7 +499,7 @@ def main():
         assert not args.bench_torch, "Do not use -bench_torch with -print_vgpr."
         print("Retrieving VGPR usage for Triton kernels...")
         fun = lambda: run_benchmark(custom_config, args)
-        print_vgpr(fun, "fused-attention")        
+        print_vgpr(fun, "fused-attention")
         return 0
 
 

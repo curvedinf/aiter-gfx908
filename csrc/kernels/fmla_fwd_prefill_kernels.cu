@@ -495,7 +495,6 @@ public:
     CK_TILE_HOST_DEVICE static constexpr auto MakeVDramTileDistribution()
     {
         // Assuming layout of V is always row-major
-
         constexpr int32_t kBlockSize = Traits::kNumThreads;
         constexpr int32_t kNPerBlock = Traits::kBlockN1;
         constexpr int32_t kKPerBlock = Traits::kBlockK1;
@@ -517,9 +516,9 @@ public:
             static_assert(kKPerBlock == K0 * K1 * K2 * K3);
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<ck_tile::sequence<1>,
-                                                    ck_tile::tuple<sequence<N0, N1>, ck_tile::sequence<K0, K1, K2, K3>>,
-                                                    ck_tile::tuple<sequence<2>, ck_tile::sequence<2, 1, 2>>,
-                                                    ck_tile::tuple<sequence<0>, ck_tile::sequence<1, 0, 2>>,
+                                                    ck_tile::tuple<ck_tile::sequence<N0, N1>, ck_tile::sequence<K0, K1, K2, K3>>,
+                                                    ck_tile::tuple<ck_tile::sequence<2>, ck_tile::sequence<2, 1, 2>>,
+                                                    ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0, 2>>,
                                                     ck_tile::sequence<2, 1>,
                                                     ck_tile::sequence<3, 1>>{});
         }
@@ -531,11 +530,57 @@ public:
             static_assert(kKPerBlock == K0 * K1 * K2_m * K3);
             return ck_tile::make_static_tile_distribution(
                 ck_tile::tile_distribution_encoding<ck_tile::sequence<1>,
-                                                    ck_tile::tuple<sequence<N0, N1>, ck_tile::sequence<K0, K1, K2_m, K3>>,
-                                                    ck_tile::tuple<sequence<2, 2>, ck_tile::sequence<1, 2>>,
-                                                    ck_tile::tuple<sequence<0, 1>, ck_tile::sequence<0, 2>>,
+                                                    ck_tile::tuple<ck_tile::sequence<N0, N1>, ck_tile::sequence<K0, K1, K2_m, K3>>,
+                                                    ck_tile::tuple<ck_tile::sequence<2, 2>, ck_tile::sequence<1, 2>>,
+                                                    ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<0, 2>>,
                                                     ck_tile::sequence<2, 1>,
                                                     ck_tile::sequence<3, 1>>{});
+        }
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto MakeShuffledVRegBlockDescriptor()
+    {
+        // Only called when V is row-major
+        constexpr int32_t kBlockSize = Traits::kNumThreads;
+        constexpr int32_t kNPerBlock = Traits::kBlockN1;
+        constexpr int32_t kKPerBlock = Traits::kBlockK1;
+
+        constexpr int32_t N1 = GetAlignmentV();
+        constexpr int32_t N0 = kNPerBlock / N1;
+
+        constexpr int32_t ElemPerThread = kNPerBlock * kKPerBlock / kBlockSize;
+        static_assert(ElemPerThread % N1 == 0);
+        constexpr int32_t K3     = ElemPerThread / N1;
+        constexpr int32_t kKPack = 16 / sizeof(scalar_t);
+        static_assert(kKPack % K3 == 0);
+        constexpr int32_t K2 = kKPack / K3;
+
+        if constexpr(ck_tile::get_warp_size() % (K2 * N0) == 0)
+        {
+            constexpr int32_t K1 = ck_tile::get_warp_size() / (K2 * N0);
+            constexpr int32_t K0 = kBlockSize / ck_tile::get_warp_size();
+            static_assert(kKPerBlock == K0 * K1 * K2 * K3);
+            return ck_tile::make_static_tile_distribution(
+                ck_tile::tile_distribution_encoding<ck_tile::sequence<1>,
+                                                    ck_tile::tuple<ck_tile::sequence<N0, N1>, ck_tile::sequence<K0, K1, K2, K3>>,
+                                                    ck_tile::tuple<ck_tile::sequence<2>, ck_tile::sequence<2, 1, 2>>,
+                                                    ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1, 0, 2>>,
+                                                    ck_tile::sequence<1, 2>,
+                                                    ck_tile::sequence<1, 3>>{});
+        }
+        else
+        {
+            constexpr int32_t K1   = (K2 * N0) / ck_tile::get_warp_size();
+            constexpr int32_t K2_m = K2 / K1;
+            constexpr int32_t K0   = kBlockSize / ck_tile::get_warp_size() / K1;
+            static_assert(kKPerBlock == K0 * K1 * K2_m * K3);
+            return ck_tile::make_static_tile_distribution(
+                ck_tile::tile_distribution_encoding<ck_tile::sequence<1>,
+                                                    ck_tile::tuple<ck_tile::sequence<N0, N1>, ck_tile::sequence<K0, K1, K2_m, K3>>,
+                                                    ck_tile::tuple<ck_tile::sequence<2, 2>, ck_tile::sequence<1, 2>>,
+                                                    ck_tile::tuple<ck_tile::sequence<0, 1>, ck_tile::sequence<0, 2>>,
+                                                    ck_tile::sequence<1, 2>,
+                                                    ck_tile::sequence<1, 3>>{});
         }
     }
 }
@@ -574,7 +619,6 @@ struct FlashMlaPrefillFwdParams
     int64_t block_table_batch_stride;
     int32_t page_block_size;
     float   scale_softmax;
-    float   scale_softmax_log2;
 
     // Use int64_t if there is int32 overflow case. For now, just use int32 to save sgpr and prevent using
     // spill table.
@@ -808,6 +852,19 @@ CK_TILE_DEVICE static auto MakePageBlockNavigator(
         dram_last);
 }
 
+template <bool IsMasking, typename acc_t>
+CK_TILE_DEVICE static auto GetValidatedMax(acc_t raw_m)
+{
+    if constexpr (IsMasking)
+    {
+        return (raw_m == -ck_tile::numeric<acc_t>::infinity()) ? ck_tile::type_convert<acc_t>(0.f) : raw_m;
+    }
+    else
+    {
+        return raw_m;
+    }
+}
+
 template<typename Traits,
          typename scalar_t,
          typename acc_t,
@@ -826,7 +883,6 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
     int32_t                    split_id,
     Mask                       mask,
     float                      scale_s,
-    float                      scale_log2_s,
     uint8_t*                   p_smem)
 {
     using Policy = FlashMlaPrefillPolicy<Traits, kIsSameKV, scalar_t, acc_t>;
@@ -892,13 +948,15 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
     //
     const int32_t num_total_loop =
         ck_tile::integer_divide_ceil(seqlen_k_end - seqlen_k_start, Traits::kBlockN0);
-    /// TODO: Check wether it is required when mask is disabled.
-    if (num_total_loop <= 0)
+    if constexpr (Mask::IsMasking)
     {
-        auto lse_acc = ck_tile::make_static_distributed_tensor<acc_t>(m.get_tile_distribution());
-        ck_tile::set_tile(lse_acc, -ck_tile::numeric<acc_t>::infinity())
-        ck_tile::store_tile(lse_dram_window_, lse_acc);
-        return o_acc;
+        if (num_total_loop <= 0)
+        {
+            auto lse_acc = ck_tile::make_static_distributed_tensor<acc_t>(m.get_tile_distribution());
+            ck_tile::set_tile(lse_acc, -ck_tile::numeric<acc_t>::infinity())
+            ck_tile::store_tile(lse_dram_window_, lse_acc);
+            return o_acc;
+        }
     }
 
 
@@ -1041,6 +1099,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
 
         // II. scale_s, mask, softmax
         //
+
         // Masking
         if constexpr (Mask::IsMasking)
         {
@@ -1065,6 +1124,89 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
             }
         }
 
+        // Get max of row
+        auto m_local = ck_tile::block_tile_reduce<acc_t>(
+            s_acc, ck_tile::sequence<1>{}, f_max, -ck_tile::numeric<acc_t>::infinity());
+        ck_tile::block_tile_reduce_sync(m_local, f_max, ck_tile::bool_constant<false>{});
+        const auto m_old = m;
+        ck_tile::tile_elementwise_inout(
+            [](auto& e0, auto e1, auto e2) { e0 = ck_tile::max(e1, e2); }, m, m_old, m_local);
+
+        // Compute exp(x_i - m)
+        auto p_intermedia = ck_tile::make_static_distributed_tensor<acc_t>(s_acc.get_tile_distribution());
+        const auto p_spans = decltype(p_intermedia)::get_distributed_spans();
+        ck_tile::sweep_tile_span(
+            p_spans[ck_tile::number<0>{}],
+            [&](auto id0)
+            {
+                constexpr auto i = ck_tile::make_tuple(id0);
+                auto row_max  = scale_s * GetValidatedMax(m[i]);
+                ck_tile::sweep_tile_span(
+                    p_spans[number<1>{}],
+                    [&](auto id1)
+                    {
+                        constexpr auto ij = ck_tile::make_tuple(id0, id1);
+                        p_intermedia(ij) = ck_tile::exp2(scale_s * s_acc[ij] - row_max);
+                    });
+            });
+
+        // Compute row sum of exp(x_i - m)
+        auto rowsum_p = ck_tile::block_tile_reduce<acc_t>(p_intermedia, ck_tile::sequence<1>{}, f_sum, acc_t(0));
+        ck_tile::block_tile_reduce_sync(rowsum_p, f_sum, ck_tile::bool_constant<false>{});
+
+        // Calculate new l and adjust old output acc
+        constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
+        ck_tile::sweep_tile_span(
+            o_spans[ck_tile::number<0>{}],
+            [&](auto id0)
+            {
+                constexpr auto i = ck_tile::make_tuple(id0);
+                const auto row_max = scale_s * GetValidatedMax(m[i]);
+                const auto temp_i  = ck_tile::exp2(scale_s * m_old[i_idx] - row_max);
+                l(i) = temp_i * l[i] + rowsum_p[i];
+                ck_tile::sweep_tile_span(
+                    p_spans[number<1>{}],
+                    [&](auto id1)
+                    {
+                        constexpr auto ij = ck_tile::make_tuple(id0, id1);
+                        o_acc(ij) *= temp_i;
+                    });
+            });
+
+
+        // III. GEMM for PV
+        //
+
+        // Store V tile to LDS. V is expected as row-major so it needs to be shuffled before store.
+        ck_tile::block_sync_lds();
+        auto v_shuffled = ck_tile::make_static_distributed_tensor<scalar_t>(Policy::MakeShuffledVRegBlockDescriptor());
+        ck_tile::shuffle_tile(v_shuffled, v_prefetch);
+        ck_tile::store_tile(v_lds_window, v_shuffled);
+        page_block_v_id =
+            v_page_block_navigator.move_tile_window(page_block_v_id, v_dram_window, {0, Traits::kBlockK1});
+
+        if constexpr (k1_loops > 1)
+        {
+            ck_tile::static_for<0, k1_loops - 1, 1>{}([&,
+                                                       &i_page_block_v_ = i_page_block_v,
+                                                       &v_dram_window_  = v_dram_window](auto k1_id) {
+                const auto v = ck_tile::load_tile(v_dram_window_); // load next v
+                ck_tile::block_sync_lds();
+                gemm_1(o_acc,
+                        ck_tile::get_slice_tile(
+                            p_intermedia,
+                            ck_tile::sequence<0, k1_id * Traits::kBlockK1>{},
+                            ck_tile::sequence<Traits::kBlockM, (k1_id + 1) * Traits::kBlockK1>{}),
+                        v_lds_window);
+                ck_tile::block_sync_lds();
+                auto v_shuffled = ck_tile::make_static_distributed_tensor<scalar_t>(
+                    Policy::MakeShuffledVRegBlockDescriptor());
+                    ck_tile::shuffle_tile(v_shuffled, v);
+                    ck_tile::store_tile(v_lds_window, v_shuffled); // store the prefetch
+                page_block_v_id = v_page_block_navigator.move_tile_window(
+                    page_block_v_id, v_dram_window_, {0, Traits::kBlockK1});
+            });
+        }
 
         // Move K to next column
         page_block_k_id =
@@ -1072,9 +1214,45 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
 
         // Output tail
         ck_tile::block_sync_lds();
-        gemm_1(o_acc,);
+        gemm_1(o_acc,
+               ck_tile::get_slice_tile(
+                    p_intermedia,
+                    ck_tile::sequence<0, (k1_loops - 1) * Traits::kBlockK1>{},
+                    ck_tile::sequence<Traits::kBlockM, Traits::kBlockK1>),
+               v_lds_window);
         ck_tile::block_sync_lds();
     }
+
+    // 7. Store LSE
+    //
+    auto lse_acc = ck_tile::make_static_distributed_tensor<acc_t>(m.get_tile_distribution());
+    constexpr auto lse_acc_spans = decltype(lse_acc)::get_distributed_spans();
+    ck_tile::sweep_tile_span(lse_acc_spans[ck_tile::number<0>{}], [&, m_ = m, l_ = l](auto id0) {
+        constexpr auto i = make_tuple(id0);
+        lse_acc(i) = m_[i] * scale_s / C_LOG2E + log(l_[i]);
+    });
+    ck_tile::store_tile(lse_dram_window_, lse_acc);
+
+    // 8. Adjust output
+    //
+    constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
+    ck_tile::sweep_tile_span(o_spans[ck_tile::number<0>{}], [&](auto id0) {
+        constexpr auto i = ck_tile::make_tuple(id0);
+        const auto tmp   = [&]() {
+            if constexpr (Mask::IsMasking)
+            {
+                return l[i] == 0.f ? 0.f : 1 / l[i];
+            }
+            else
+                return 1 / l[i];
+        }();
+        ck_tile::sweep_tile_span(o_spans[ck_tile::number<1>{}], [&](auto id1) {
+            constexpr auto ij = ck_tile::make_tuple(id0, id1);
+            o_acc(ij) *= tmp;
+        });
+    });
+
+    return o_acc;
 }
 
 // =====================================================================================================================
@@ -1171,7 +1349,6 @@ __global__ kn_fmla_fwd_splictkv_prefill(
             split_id,
             mask,
             params.scale_softmax,
-            params.scale_softmax_log2,
             p_smem);
 
         ck_tile::store_tile(out_acc_dram_window, ck_tile::cast_tile<scalar_t>(o_acc_tile));
@@ -1208,7 +1385,6 @@ __global__ kn_fmla_fwd_splictkv_prefill(
             split_id,
             mask,
             params.scale_softmax,
-            params.scale_softmax_log2,
             p_smem);
 
         ck_tile::store_tile(out_dram_window, ck_tile::cast_tile<scalar_t>(o_acc_tile));
@@ -1421,7 +1597,6 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.block_table_batch_stride = block_table.stride(0);
     params.page_block_size          = page_block_size;
     params.scale_softmax            = softmax_scale;
-    params.scale_softmax_log2       = float(softmax_scale * M_LOG2E);
 
     params.stride_b_q = query.stride(0);
     params.stride_s_q = query.stride(1);

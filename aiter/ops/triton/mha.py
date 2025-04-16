@@ -2372,7 +2372,7 @@ def _flash_attn_backward(
     
     if fused: # fuses dk, dv, dq computations into one kernel by computing the dq using atomic adds between workgroups
         
-        BLOCK_N = 64
+        BLOCK_N = 128
         config = {
             "BLOCK_M": 32,
             "BLOCK_N": BLOCK_N,

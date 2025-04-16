@@ -2374,17 +2374,16 @@ def _flash_attn_backward(
         
         BLOCK_N = 64
         config = {
-            "BLOCK_M": 16,
+            "BLOCK_M": 32,
             "BLOCK_N": BLOCK_N,
             "num_warps": 4,
             "num_stages": 1,
-            "waves_per_eu": 2,
-            "BLK_SLICE_FACTOR": 1,
+            "waves_per_eu": 1,
+            "BLK_SLICE_FACTOR": 2,
         }
         
         num_k_pids = (max_seqlen_k + BLOCK_N - 1) // BLOCK_N
         grid_dkdvdq = (batch * num_k_heads * num_k_pids,) 
-
 
         if causal:
             _bwd_kernel_dkdvdq_causal[grid_dkdvdq](

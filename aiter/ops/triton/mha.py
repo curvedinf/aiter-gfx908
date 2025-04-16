@@ -549,7 +549,7 @@ def _attn_fwd(q_ptr: torch.Tensor,
                                         block_min, block_max, 0, 0, 0, alibi_slope, 
                                         descale_q, descale_k, descale_v,
                                         offs_m, offs_n, BLOCK_M, BLOCK_N, BLOCK_DMODEL,BLOCK_DMODEL_POW2,
-                                        sm_scale, IS_CAUSAL, MASK_STEPS=False, ENABLE_DROPOUT=ENABLE_DROPOUT, 
+                                        sm_scale, False, MASK_STEPS=False, ENABLE_DROPOUT=ENABLE_DROPOUT, 
                                         RETURN_SCORES=RETURN_SCORES, PADDED_HEAD=BLOCK_DMODEL!=BLOCK_DMODEL_POW2,
                                         IS_FP8=IS_FP8, FP8_MAX=FP8_MAX
                                         )
@@ -1403,9 +1403,11 @@ def _bwd_kernel_dkdvdq_causal(
         # bound the masked operation to q len so it does not have to wast cycles
         len_m = min(len_m, seqlen_q)
         num_steps = tl.cdiv(len_m, MASK_BLOCK_M)
+        
+        
         # when q < k, we may skip the initial masked op
-        if seq_k_blk_idx < num_blocks_skip:
-            num_steps = 0
+        # if seq_k_blk_idx < num_blocks_skip:
+        #     num_steps = 0
 
         if IS_FP8:
             descale_q = tl.load(descale_q_ptr + batch_idx * stride_descale_q_z + head_q_idx)
@@ -2316,7 +2318,7 @@ def _flash_attn_backward(
     PRE_BLOCK = 128
     #BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
     BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 16, 64, 64, 16 
-    BLK_SLICE_FACTOR = 2
+    BLK_SLICE_FACTOR = 1
 
     #init delta
     delta = torch.zeros_like(softmax_lse) 
@@ -2591,6 +2593,8 @@ class FlashAttnFunc(torch.autograd.Function):
         )
         if softmax_scale is None:
             softmax_scale = q.shape[-1] ** (-0.5)
+    
+        
         head_size_og = q.size(3)
         if head_size_og % 8 != 0:
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])

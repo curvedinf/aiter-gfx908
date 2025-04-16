@@ -310,6 +310,9 @@ def run_benchmark(custom, args):
                 torch_out, _ = torch_fn()
                 torch_dq, torch_dk, torch_dv = torch.autograd.grad(torch_out, (q, k, v), do)
 
+            # compare forward outputs
+            torch.testing.assert_close(triton_out, torch_out, atol=1e-2, rtol=1e-2)
+            print("Outputs match")
             # Compare gradients
             torch.testing.assert_close(triton_dk, torch_dk, atol=1e-2, rtol=1e-2)
             torch.testing.assert_close(triton_dv, torch_dv, atol=1e-2, rtol=1e-2)

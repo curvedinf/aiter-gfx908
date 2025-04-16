@@ -122,6 +122,10 @@ def test_mha(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEADS: int, NUM_K_H
         print(f"torch_out.shape={torch_out.shape}, torch_out={torch_out}")
         print(f"attention_scores.shape={attention_scores.shape}, attention_scores={attention_scores}")
 
+    print("tirotn out=",triton_out[0,...])
+    print("torch out=",torch_out[0,...])
+    
+    
     torch.testing.assert_close(triton_out, torch_out,atol=1e-2, rtol=1e-2)
 
 @pytest.mark.parametrize('BATCH', [1,4,57,128])
@@ -242,7 +246,7 @@ def test_mha_backward(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEADS: int
         if FP8:
             triton_out = flash_attn_fp8_func(q, k, v, dropout_p=DROPOUT, causal=CAUSAL, return_lse=True, return_attn_probs=True)
         else:
-            triton_out = flash_attn_func(q, k, v, dropout_p=DROPOUT, causal=CAUSAL, return_lse=True, return_attn_probs=True, fused_backward=True)
+            triton_out = flash_attn_func(q, k, v, dropout_p=DROPOUT, causal=CAUSAL, return_lse=True, return_attn_probs=True, fused_backward=False)
 
     assert len(triton_out) == 3
     triton_out, lse, sd_mask= triton_out[0], triton_out[1], triton_out[2]
@@ -282,6 +286,8 @@ def test_mha_backward(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEADS: int
         torch_out = attention_ref(q, k, v, dropout_p=DROPOUT, dropout_mask=dropout_mask, causal=CAUSAL)
     torch_out, attention_scores = torch_out
 
+    torch.testing.assert_close(triton_out, torch_out,atol=1e-2, rtol=1e-2)
+    print("Forward output matches!")
     
     torch.cuda.synchronize()
     start_event = torch.cuda.Event(enable_timing=True)
@@ -421,5 +427,9 @@ def test_mha_backward_varlen(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEA
 
 if __name__ == "__main__":
     # Run the tests
+    
+    test_mha(8, 1024, 4096, 16, 16, 128, 0.0, True, False, True, torch.float16)
+    print("test_mha passes!")
     # TODO: fails for causal=True
+
     test_mha_backward(8, 1024, 4096, 16, 16, 128, 0.0, True, False, torch.float16)

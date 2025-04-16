@@ -2318,7 +2318,7 @@ def _flash_attn_backward(
     PRE_BLOCK = 128
     #BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
     BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 16, 64, 64, 16 
-    BLK_SLICE_FACTOR = 1
+    BLK_SLICE_FACTOR = 2
 
     #init delta
     delta = torch.zeros_like(softmax_lse) 

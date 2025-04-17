@@ -332,9 +332,9 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
 
     const int batch_size = cu_seqlens_q.numel() - 1;
     int num_heads = sizes[1];
-    const int head_size_q = sizes[2];
-    const int head_size_v = v.size(2);
-    const int num_heads_k = paged_KV ? k.size(2) : k.size(1);
+    const int head_size_q = q.size(-1);
+    const int head_size_v = v.size(-1);
+    const int num_heads_k = k.size(-2);
 
     const int max_num_blocks_per_seq = !paged_KV ? 0 : block_table.size(1);
     const int num_blocks = !paged_KV ? 0 : k.size(0);
@@ -353,7 +353,6 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
 
 
     const int total_q = q.size(0);
-
     TORCH_CHECK(batch_size > 0, "batch size must be postive");
     TORCH_CHECK(head_size_q <= 256, "CK only supports head dimension at most 256");
     TORCH_CHECK(head_size_v <= 256, "CK only supports head dimension at most 256");

@@ -729,12 +729,13 @@ def _flash_attn_forward(
     # Best config from ROCm/triton/python/perf-kernels/flash_attention.py::attn_fwd autotuning is BLOCK_M: 128, BLOCK_N: 64, waves_per_eu: 2, num_warps: 4, num_ctas: 1, num_stages: 1
     # Tuned for MI300x
     config = {
+        #'BLOCK_M': 128,
         'BLOCK_M': 128,
         'BLOCK_N': 32, # BLOCK_N: 64 spills for _attn_fwd
         'waves_per_eu': 2,
         'num_warps': 4,
         'num_ctas': 1,
-        'num_stages': 1,
+        #'num_stages': 1, #TODO: This causes runtime abort for some varlen cases
     }
 
     grid = lambda META:(triton.cdiv(seqlen_q, META['BLOCK_M']), num_q_heads, batch)

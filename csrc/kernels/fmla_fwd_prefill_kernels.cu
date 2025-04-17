@@ -5,6 +5,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ck_tile/core.hpp>
 #include <ck_tile/host.hpp>
+#include <ck_tile/ops/fmha.hpp>
+#include <ck_tile/ops/gemm.hpp>
 
 // =====================================================================================================================
 // Definitions and helper structures
@@ -52,13 +54,13 @@ struct FlashMlaPrefillKernelTrait
     static_assert(kSizeD >= kSizeDV);
 };
 
-template<typename Traits_, bool kIsSameKV_, typename scalar_t, typename acc_t>
+template<typename Traits_, typename scalar_t, typename acc_t>
 struct FlashMlaPrefillPolicy
 {
 public:
     using Traits = Traits_;
-
-    static constexpr bool kIsSameKV = kIsSameKV_;
+    using InOutType = scalar_t;
+    using AccType   = acc_t;
 
 private:
     template <int32_t NumWarps, int32_t M, int32_t N, typename DataType>
@@ -85,7 +87,8 @@ private:
         constexpr int32_t ElemPerThread = (M * N) / (MaxNumWarps * ck_tile::get_warp_size());
 
         constexpr int32_t MaxNPerThread = 16 / sizeof(DataType);
-        return min(MaxNPerThread, ElemPerThread);
+
+        return ck_tile::min(MaxNPerThread, ElemPerThread);
     }
 
 public:
@@ -196,13 +199,13 @@ public:
         constexpr auto q_lds_block_desc_0 = ck_tile::make_naive_tensor_descriptor(
             ck_tile::make_tuple(ck_tile::number<kKPerBlock / kKPack>{}, ck_tile::number<kMPerBlock>{}, ck_tile::number<kKPack>{}),
             ck_tile::make_tuple(ck_tile::number<(kMPerBlock + 1) * kKPack>{}, ck_tile::number<kKPack>{}, ck_tile::number<1>{}),
-            number<8>{},
-            number<1>{});
+            ck_tile::number<8>{},
+            ck_tile::number<1>{});
 
         constexpr auto q_lds_block_desc = transform_tensor_descriptor(
             q_lds_block_desc_0,
             ck_tile::make_tuple(ck_tile::make_pass_through_transform(kMPerBlock),
-                                ck_tile::make_merge_transform(make_tuple(kKPerBlock / kKPack, kKPack))),
+                                ck_tile::make_merge_transform(ck_tile::make_tuple(kKPerBlock / kKPack, kKPack))),
             ck_tile::make_tuple(ck_tile::sequence<1>{}, ck_tile::sequence<0, 2>{}),
             ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
 
@@ -250,7 +253,7 @@ public:
                        ck_tile::number<kNPerBlock / NPerRow>{},
                        ck_tile::number<NPerRow>{},
                        ck_tile::number<kKPack>{}),
-            ck_tile::make_tuple(ck_tile::number<GetSingleSmemElementSpaceSize<Problem>()>{},
+            ck_tile::make_tuple(ck_tile::number<GetSmemSizeSingleKV()>{},
                        ck_tile::number<(kNPerBlock / NPerRow) * (PixelsPerRow + kKPack)>{},
                        ck_tile::number<PixelsPerRow + kKPack>{},
                        ck_tile::number<kKPack>{},
@@ -299,7 +302,7 @@ public:
             return (kKPerBlock / kKPack) * (kNPerBlock / NPerRow) * (PixelsPerRow + kKPack);
         }();
 
-        return ck_tile::max(SingleKSize, SingleVSize) * sizeof(scalar_t):
+        return ck_tile::max(SingleKSize, SingleVSize) * sizeof(scalar_t);
     }
 
     CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSize()
@@ -348,7 +351,7 @@ public:
             ck_tile::BlockGemmARegBSmemCRegV2CustomPolicy<scalar_t, scalar_t, acc_t, BlockWarps, decltype(warp_gemm)>;
 
         if constexpr (kNumWarps > 1)
-            return ck_tile::BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>;
+            return ck_tile::BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
         else
             return ck_tile::BlockGemmARegBSmemCRegOneWarpV1<GemmProblem, BlockGemmPolicy>{};
     }
@@ -393,7 +396,7 @@ public:
         using BlockGemmPolicy =
             ck_tile::BlockGemmARegBSmemCRegV2CustomPolicy<scalar_t, scalar_t, acc_t, BlockWarps, decltype(warp_gemm)>;
 
-        return ck_tile::BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>;
+        return ck_tile::BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto GetKVBlockGemm()
@@ -425,6 +428,8 @@ public:
             }
         }();
 
+        using WarpGemm = ck_tile::remove_cvref_t<decltype(warp_gemm)>;
+
         using BlockGemmPolicy =
             ck_tile::BlockGemmARegBSmemCRegV2CustomPolicy<scalar_t, scalar_t, acc_t, BlockWarps, WarpGemm>;
 
@@ -433,7 +438,7 @@ public:
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeQRegTileDistribution()
     {
-        using BlockGemm = ck_tile::remove_cvref_t<decltype(GetQRegKBlockGemm<Problem>())>;
+        using BlockGemm = ck_tile::remove_cvref_t<decltype(GetQRegKBlockGemm())>;
 
         return BlockGemm::template MakeABlockTileDistribution<
             Traits::kBlockM0,
@@ -470,9 +475,9 @@ public:
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
     {
-        constexpr int32_t kBlockSize = Problem::kBlockSize;
-        constexpr int32_t kNPerBlock = Problem::BlockFmhaShape::kN0;
-        constexpr int32_t kKPerBlock = Problem::BlockFmhaShape::kK0;
+        constexpr int32_t kBlockSize = Traits::kNumThreads;
+        constexpr int32_t kNPerBlock = Traits::kBlockN0;
+        constexpr int32_t kKPerBlock = Traits::kBlockK0;
 
         constexpr int32_t MaxVectorSize = 16 / sizeof(scalar_t);
         constexpr int32_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
@@ -583,7 +588,7 @@ public:
                                                     ck_tile::sequence<1, 3>>{});
         }
     }
-}
+};
 
 union TileSchedulerMetaData
 {
@@ -601,7 +606,7 @@ constexpr size_t TileSchedulerMetaDataSizeInDw = sizeof(TileSchedulerMetaData) /
 
 struct FlashMlaPrefillFwdParams
 {
-    int32_t* __restrict__ p_cu_seqlens_k;   // [b+1]
+    int32_t* __restrict__ p_seqlens_k;      // [b]
     int32_t* __restrict__ p_block_table;    // [b, max_seqlen_pad // block_size]
     
     void* __restrict__ p_query;
@@ -616,6 +621,7 @@ struct FlashMlaPrefillFwdParams
     int32_t size_s;         // seqlen of q
     int32_t size_h;         // head count of q
     int32_t hq_hk_ratio;    // head count of q / head count of kv
+    int32_t num_splits;
     int64_t block_table_batch_stride;
     int32_t page_block_size;
     float   scale_softmax;
@@ -650,7 +656,7 @@ struct FlashMlaPrefillFwdParams
 //
 
 template <typename Traits>
-CK_TILE_DEVICE static auto GetTileIndex()
+CK_TILE_DEVICE static auto GetTileIndex(const int32_t num_splits)
 {
     constexpr int32_t num_tile_n1 = ck_tile::integer_divide_ceil(Traits::kSizeDV, Traits::kBlockN1);
 
@@ -660,7 +666,7 @@ CK_TILE_DEVICE static auto GetTileIndex()
         return ck_tile::make_tuple(quotient, modulus);
     };
 
-    const auto [mnid, split_id] = f(blockIdx.x, kargs.num_splits);
+    const auto [mnid, split_id] = f(blockIdx.x, num_splits);
     const auto [mid, nid]       = f(mnid, num_tile_n1);
     const int32_t hid           = blockIdx.y;
     const int32_t bid           = blockIdx.z;
@@ -668,16 +674,16 @@ CK_TILE_DEVICE static auto GetTileIndex()
     return ck_tile::make_tuple(mid, nid, split_id, hid, bid);
 }
 
-template <typename Policy, typename scalar_t>
+template <typename Policy, typename scalar_t = typename Policy::InOutType>
 CK_TILE_DEVICE static auto MakeQDram(
     const scalar_t* p_data,
     const int32_t   height,
     const int32_t   stride_s)
 {
-    using Traits = Policy::Traits;
+    using Traits = typename Policy::Traits;
 
     const auto q_dram_naive = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-        p_query,
+        p_data,
         ck_tile::make_tuple(height, Traits::kSizeD),
         ck_tile::make_tuple(stride_s, 1),
         ck_tile::number<Policy::GetAlignmentQ()>{},
@@ -695,10 +701,10 @@ CK_TILE_DEVICE static auto MakeKDram(
     const int32_t   height,
     const int32_t   stride_s)
 {
-    using Traits = Policy::Traits;
+    using Traits = typename Policy::Traits;
 
     const auto k_dram_naive = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-        data, // will update this pointer if using paged-kvcache
+        p_data, // will update this pointer if using paged-kvcache
         ck_tile::make_tuple(height, Traits::kSizeD),
         ck_tile::make_tuple(stride_s, 1),
         ck_tile::number<Policy::GetAlignmentK()>{},
@@ -706,7 +712,7 @@ CK_TILE_DEVICE static auto MakeKDram(
 
     return ck_tile::pad_tensor_view(
         k_dram_naive,
-        ck_tile::make_tuple(Traits::number<Traits::::kBlockN0>{}, Traits::number<Traits::::kBlockK0>{}),
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kBlockK0>{}),
         ck_tile::sequence<false, Traits::kPadHeadDimQ>{});
 }
 
@@ -716,11 +722,11 @@ CK_TILE_DEVICE static auto MakeVDram(
     const int32_t   length,
     const int32_t   stride_s)
 {
-    using Traits = Policy::Traits;
+    using Traits = typename Policy::Traits;
 
     /// TODO: Assuming Value is row-major just like Key.
     const auto v_dram_naive = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-        data, // will update this pointer if using paged-kvcache
+        p_data, // will update this pointer if using paged-kvcache
         ck_tile::make_tuple(length, Traits::kSizeDV),
         ck_tile::make_tuple(stride_s, 1),
         ck_tile::number<Policy::GetAlignmentV()>{},
@@ -746,7 +752,7 @@ CK_TILE_DEVICE static auto MakeLseAccDram(
     const Lengths&  window_lengths,
     const int32_t   size_s)
 {
-    using Traits = Policy::Traits;
+    using Traits = typename Policy::Traits;
 
     const auto lse_acc_dram_naive = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
         p_data,
@@ -758,7 +764,7 @@ CK_TILE_DEVICE static auto MakeLseAccDram(
     return ck_tile::pad_tensor_view(
         lse_acc_dram_naive,
         window_lengths,
-        ck_tile::sequence<Traits::kPadSeqLenQ>);
+        ck_tile::sequence<Traits::kPadSeqLenQ>{});
 }
 
 template <typename Policy, typename scalar_t>
@@ -767,7 +773,7 @@ CK_TILE_DEVICE static auto MakeOutAccDram(
     const int32_t   size_s,
     const int32_t   stride_s)
 {
-    using Traits = Policy::Traits;
+    using Traits = typename Policy::Traits;
 
     const auto o_acc_dram_naive = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
         p_data,
@@ -788,7 +794,7 @@ CK_TILE_DEVICE static auto MakeLseDram(
     const Lengths&  window_lenghts,
     const int32_t   size_s)
 {
-    using Traits = Policy::Traits;
+    using Traits = typename Policy::Traits;
 
     const auto lse_dram_naive = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
         p_data,
@@ -807,10 +813,10 @@ CK_TILE_DEVICE static auto MakeOutDram(
     const int32_t   size_s,
     const int32_t   stride_s)
 {
-    using Traits = Policy::Traits;
+    using Traits = typename Policy::Traits;
 
     const auto o_dram_naive = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-        o_ptr,
+        p_data,
         ck_tile::make_tuple(size_s, Traits::kSizeDV),
         ck_tile::make_tuple(stride_s, 1),
         ck_tile::number<Policy::GetAlignmentO()>{},
@@ -868,24 +874,25 @@ CK_TILE_DEVICE static auto GetValidatedMax(acc_t raw_m)
 template<typename Traits,
          typename scalar_t,
          typename acc_t,
-         typename QDramBlockWindow,
+         typename QDramRegBlockWindow,
+         typename QDramSmemBlockWindow,
          typename LseDramBlockWindow,
          typename KPageBlockNavigator,
          typename VPageBlockNavigator,
          typename Mask>
 CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
-    const QDramBlockWindow&    q_dram_reg_window_,
-    const QDramBlockWindow&    q_dram_smem_window_,
-    const KPageBlockNavigator& k_page_block_navigator,
-    const VPageBlockNavigator& v_page_block_navigator,
-    LseDramBlockWindow&        lse_dram_window_,
-    int32_t                    num_splits,
-    int32_t                    split_id,
-    Mask                       mask,
-    float                      scale_s,
-    uint8_t*                   p_smem)
+    const QDramRegBlockWindow&  q_dram_reg_window_,
+    const QDramSmemBlockWindow& q_dram_smem_window_,
+    const KPageBlockNavigator&  k_page_block_navigator,
+    const VPageBlockNavigator&  v_page_block_navigator,
+    LseDramBlockWindow&         lse_dram_window_,
+    int32_t                     num_splits,
+    int32_t                     split_id,
+    Mask                        mask,
+    float                       scale_s,
+    uint8_t*                    p_smem)
 {
-    using Policy = FlashMlaPrefillPolicy<Traits, kIsSameKV, scalar_t, acc_t>;
+    using Policy = FlashMlaPrefillPolicy<Traits, scalar_t, acc_t>;
 
 
     // 1. Allocate LDS
@@ -953,7 +960,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
         if (num_total_loop <= 0)
         {
             auto lse_acc = ck_tile::make_static_distributed_tensor<acc_t>(m.get_tile_distribution());
-            ck_tile::set_tile(lse_acc, -ck_tile::numeric<acc_t>::infinity())
+            ck_tile::set_tile(lse_acc, -ck_tile::numeric<acc_t>::infinity());
             ck_tile::store_tile(lse_dram_window_, lse_acc);
             return o_acc;
         }
@@ -1108,8 +1115,8 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
             const bool need_perpixel_check = mask.IsEdgeTile(
                 q_origin.at(ck_tile::number<0>{}),
                 k_origin.at(ck_tile::number<0>{}),
-                ck_tile::number<Traits::kBlockM>,
-                ck_tile::number<Traits::kBlockN0>);
+                ck_tile::number<Traits::kBlockM>{},
+                ck_tile::number<Traits::kBlockN0>{});
 
             if (need_perpixel_check)
             {
@@ -1142,7 +1149,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
                 constexpr auto i = ck_tile::make_tuple(id0);
                 auto row_max  = scale_s * GetValidatedMax(m[i]);
                 ck_tile::sweep_tile_span(
-                    p_spans[number<1>{}],
+                    p_spans[ck_tile::number<1>{}],
                     [&](auto id1)
                     {
                         constexpr auto ij = ck_tile::make_tuple(id0, id1);
@@ -1162,10 +1169,10 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
             {
                 constexpr auto i = ck_tile::make_tuple(id0);
                 const auto row_max = scale_s * GetValidatedMax(m[i]);
-                const auto temp_i  = ck_tile::exp2(scale_s * m_old[i_idx] - row_max);
+                const auto temp_i  = ck_tile::exp2(scale_s * m_old[i] - row_max);
                 l(i) = temp_i * l[i] + rowsum_p[i];
                 ck_tile::sweep_tile_span(
-                    p_spans[number<1>{}],
+                    p_spans[ck_tile::number<1>{}],
                     [&](auto id1)
                     {
                         constexpr auto ij = ck_tile::make_tuple(id0, id1);
@@ -1188,7 +1195,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
         if constexpr (k1_loops > 1)
         {
             ck_tile::static_for<0, k1_loops - 1, 1>{}([&,
-                                                       &i_page_block_v_ = i_page_block_v,
+                                                       &i_page_block_v_ = page_block_v_id,
                                                        &v_dram_window_  = v_dram_window](auto k1_id) {
                 const auto v = ck_tile::load_tile(v_dram_window_); // load next v
                 ck_tile::block_sync_lds();
@@ -1218,7 +1225,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
                ck_tile::get_slice_tile(
                     p_intermedia,
                     ck_tile::sequence<0, (k1_loops - 1) * Traits::kBlockK1>{},
-                    ck_tile::sequence<Traits::kBlockM, Traits::kBlockK1>),
+                    ck_tile::sequence<Traits::kBlockM, Traits::kBlockK1>{}),
                v_lds_window);
         ck_tile::block_sync_lds();
     }
@@ -1259,24 +1266,22 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
 // Kernel Entry
 //
 
-template <typename Traits, typename scalar_t, typename acc_t, bool kIsCausal, bool kIsSameKV, bool kDoSplit>
-__global__ kn_fmla_fwd_splictkv_prefill(
+template <typename Traits, typename scalar_t, typename acc_t, bool kIsCausal, bool kDoSplit>
+__global__ void kn_fmla_fwd_splictkv_prefill(
     const FlashMlaPrefillFwdParams params)
 {
-    using Policy = FlashMlaPrefillPolicy<Traits, kIsSameKV, scalar_t, acc_t>;
+    using Policy = FlashMlaPrefillPolicy<Traits, scalar_t, acc_t>;
 
     // allocate LDS
     __shared__ uint8_t p_smem[Policy::GetSmemSize()];
 
-    const auto [tile_m_id, tile_n_id, split_id, hqid, bid] = GetTileIndex();
+    const auto [tile_m_id, tile_n_id, split_id, hqid, bid] = GetTileIndex<Traits>(params.num_splits);
     const auto hkid = hqid / params.hq_hk_ratio;
     const int32_t mid = __builtin_amdgcn_readfirstlane(tile_m_id * Traits::kBlockM);
     const int32_t nid = __builtin_amdgcn_readfirstlane(tile_n_id * Traits::kBlockN1);
 
-    //// TODO: replace p_cu_seqlens_k with p_seqlens_k whose shape is [b] if key_start_seq is not used.
-    const int32_t key_start_seq       = params.p_cu_seqlens_k[bid];
-    const int32_t seqlen_k            = params.p_cu_seqlens_k[bid+1] - key_start_seq;
-    const int32_t num_block           = ck_tile::integer_divide_ceil(seqlen_k, params.page_block_size);
+    const int32_t seqlen_k            = params.p_seqlens_k[bid];
+    const int32_t num_blocks          = ck_tile::integer_divide_ceil(seqlen_k, params.page_block_size);
     const int32_t last_block_size     = seqlen_k - (num_blocks - 1) * params.page_block_size;
     const int64_t batch_offset_lseacc = bid * params.stride_b_o;
 
@@ -1291,21 +1296,23 @@ __global__ kn_fmla_fwd_splictkv_prefill(
                               int64_t(bid * params.stride_b_q);     // batch offset
 
     const auto q_dram_complete = MakeQDram<Policy>(p_query, params.size_s,          params.stride_s_q);
-    const auto k_dram_complete = MakeKDram<Policy>(nullptr, params.page_block_size, params.stride_s_k);
-    const auto k_dram_last     = MakeKDram<Policy>(nullptr, last_block_size,        params.stride_s_k);
-    const auto v_dram_complete = MakeVDram<Policy>(nullptr, params.page_block_size, params.stride_s_v);
-    const auto v_dram_last     = MakeVDram<Policy>(nullptr, last_block_size,        params.stride_s_v);         
+    const auto k_dram_complete = MakeKDram<Policy, scalar_t>(nullptr, params.page_block_size, params.stride_s_k);
+    const auto k_dram_last     = MakeKDram<Policy, scalar_t>(nullptr, last_block_size,        params.stride_s_k);
+    const auto v_dram_complete = MakeVDram<Policy, scalar_t>(nullptr, params.page_block_size, params.stride_s_v);
+    const auto v_dram_last     = MakeVDram<Policy, scalar_t>(nullptr, last_block_size,        params.stride_s_v);         
 
     auto q_dram_req_window =
         ck_tile::make_tile_window(q_dram_complete, q_dram_reg_window_lengths, {mid, 0});
     auto q_dram_smem_window =
         ck_tile::make_tile_window(q_dram_complete, q_dram_smem_window_lengths, {mid, Traits::kK0InReg});
 
-    auto k_page_block_navigator = MakePageBlockNavigator<0>(
-        params.p_key,   k_dram_complete, k_dram_last, bid, hkid, seqlen_k, params.stride_b_k, params.stride_h_k,
+    auto k_page_block_navigator = MakePageBlockNavigator<0, scalar_t>(
+        reinterpret_cast<const scalar_t*>(params.p_key),   k_dram_complete, k_dram_last, bid, hkid, seqlen_k,
+        params.stride_b_k, params.stride_h_k,
         params.p_block_table, params.block_table_batch_stride, params.page_block_size);
-    auto v_page_block_navigator = MakePageBlockNavigator<1>(
-        params.p_value, v_dram_complete, v_dram_last, bid, hkid, seqlen_k, params.stride_b_v, params.stride_h_v,
+    auto v_page_block_navigator = MakePageBlockNavigator<1, scalar_t>(
+        reinterpret_cast<const scalar_t*>(params.p_value), v_dram_complete, v_dram_last, bid, hkid, seqlen_k,
+        params.stride_b_v, params.stride_h_v,
         params.p_block_table, params.block_table_batch_stride, params.page_block_size);
     
     using Mask = std::conditional_t<kIsCausal,
@@ -1351,7 +1358,7 @@ __global__ kn_fmla_fwd_splictkv_prefill(
             params.scale_softmax,
             p_smem);
 
-        ck_tile::store_tile(out_acc_dram_window, ck_tile::cast_tile<scalar_t>(o_acc_tile));
+        ck_tile::store_tile(out_acc_dram_window, ck_tile::cast_tile<acc_t>(o_acc_tile));
     }
     else
     {
@@ -1365,10 +1372,10 @@ __global__ kn_fmla_fwd_splictkv_prefill(
         auto lse_dram_window_lengths =
             ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{});
         auto out_dram_window_lengths =
-            ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlcokN1>{});
+            ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlockN1>{});
         
-        const auto lse_dram = MakeLseDram<Policy>();
-        const auto out_dram = MakeOutDram<Policy>();
+        const auto lse_dram = MakeLseDram<Policy>(p_lse, lse_dram_window_lengths, params.size_s);
+        const auto out_dram = MakeOutDram<Policy>(p_out, params.size_s, params.stride_s_o);
 
         auto lse_dram_window =
             ck_tile::make_tile_window(lse_dram, lse_dram_window_lengths, {mid});
@@ -1395,20 +1402,20 @@ __global__ kn_fmla_fwd_splictkv_prefill(
 // Dispatch
 //
 
-template <typename Traits, typename scalar_t, typename acc_t, bool kIsCausal, bool kIsSameKv>
+template <typename Traits, typename scalar_t, typename acc_t, bool kIsCausal>
 void dispatch_fmla_fwd_splictkv_prefill(
-    const FlashMlaPrefillFwdParams& params,
-    const int32_t                   num_splits)
+    const FlashMlaPrefillFwdParams& params)
 {
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
     const int32_t num_blk  = ck_tile::integer_divide_ceil(params.size_s,  Traits::kBlockM) *
-                             ck_tile::integer_divide_ceil(params.size_dv, Traits::kBlockN1) *
-                             num_splits;
+                             ck_tile::integer_divide_ceil(Traits::kSizeDV, Traits::kBlockN1) *
+                             params.num_splits;
     const dim3 grid = dim3(num_blk, params.size_h, params.size_b);
 
-    auto kernel = (num_splits > 1) ? kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, kIsSameKv, true> :
-                                     kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, kIsSameKv, false>;
+    auto kernel = (params.num_splits > 1) ? 
+        &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, true> :
+        &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, false>;
     kernel<<<grid, Traits::kNumThreads, 0, stream>>>(params);
 }
 
@@ -1460,7 +1467,7 @@ int num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int num_n_blocks)
 
     if (batch_nhead_mblocks < 0.8f * num_SMs)
     {
-        int32_t max_splits = std::min({max_splits, num_SMs, num_n_blocks});
+        int32_t max_splits = std::min(max_splits, std::min(num_SMs, num_n_blocks));
         float max_efficiency = 0.f;
         std::vector<float> efficiency;
         efficiency.reserve(max_splits);
@@ -1526,6 +1533,9 @@ int32_t calculate_num_splits(
     const int32_t num_m_blocks = ck_tile::integer_divide_ceil(size_s, Traits::kBlockM);
     const int32_t num_n_blocks = ck_tile::integer_divide_ceil(Traits::kSizeDV, Traits::kBlockN1);
 
+    /// TODO: Return 1 for debug
+    return 1;
+
     return num_splits_heuristic(size_b * size_h * num_m_blocks, cu_count * Traits::kCuReuse, num_n_blocks);
 }
 
@@ -1571,16 +1581,18 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
 
     torch::Tensor softmax_lseaccum;
     torch::Tensor output_accum;
-    int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads, seqlen_q);
+    int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads_q, seqlen_q);
     if (num_splits > 1)
     {
-        softmax_lseaccum = torch::empty({batch_size, num_heads, num_splits, seqlen_q}, opts.dtype(torch::kFloat32));
-        output_accum = torch::empty({batch_size, num_heads, num_splits, seqlen_q, head_size_v}, opts.dtype(torch::kFloat32));
+        softmax_lseaccum = torch::empty({batch_size, num_heads_q, num_splits, seqlen_q}, opts.dtype(torch::kFloat32));
+        output_accum = torch::empty({batch_size, num_heads_q, num_splits, seqlen_q, head_size_v}, opts.dtype(torch::kFloat32));
     }
 
     FlashMlaPrefillFwdParams params = {};
-    params.p_cu_seqlens_k            = cache_seqlens.data_ptr<int32_t>();
-    params.p_block_table             = block_table.data_ptr<int32_t>();
+
+    params.num_splits    = num_splits;
+    params.p_seqlens_k   = cache_seqlens.data_ptr<int32_t>();
+    params.p_block_table = block_table.data_ptr<int32_t>();
 
     params.p_query            = query.data_ptr();
     params.p_key              = key_cache.data_ptr();
@@ -1592,8 +1604,8 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
 
     params.size_b                   = batch_size;
     params.size_s                   = seqlen_q;
-    params.size_h                   = num_heads_q_ori;
-    params.hq_hk_ratio              = num_heads_q_ori / num_heads_k;
+    params.size_h                   = num_heads_q;
+    params.hq_hk_ratio              = num_heads_q / num_heads_k;
     params.block_table_batch_stride = block_table.stride(0);
     params.page_block_size          = page_block_size;
     params.scale_softmax            = softmax_scale;
@@ -1622,8 +1634,9 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     TORCH_CHECK(params.p_key == params.p_value, "Key and value are expected as the same thing for now.");
 
     /// TODO: Replace the follow code with DISPATCH_FMLA_TYPES!
-    TORCH_CHECK(query.scalar_type() == at::ScalarType::Half, "Only support fp16 inputs!")
-    dispatch_fmla_fwd_splictkv_prefill<Traits, ck_tile::fp16_t, float, Is_causal, true>(params, num_splits);
+    TORCH_CHECK(query.scalar_type() == at::ScalarType::Half, "Only support fp16 inputs!");
+    TORCH_CHECK(is_causal == false, "is_causal=True is not supported for now.");
+    dispatch_fmla_fwd_splictkv_prefill<Traits, ck_tile::fp16_t, float, false>(params);
 
 	// using acc_t = float;
     // DISPATCH_FMLA_TYPES(
@@ -1631,7 +1644,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     //     is_causal,
     //     "fmla_fwd",
     //     [&](){
-    //         dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, Is_causal, true>(params, num_splits);
+    //         dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, Is_causal>(params);
     //     }();
     // );
 

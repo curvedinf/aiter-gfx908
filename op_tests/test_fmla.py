@@ -161,25 +161,26 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
         )
     blocked_v = blocked_k[..., :dv]
 
-    tile_scheduler_metadata, num_splits = aiter.get_mla_metadata(
-        cache_seqlens, s_q * h_q // h_kv, h_kv
-    )
+    # tile_scheduler_metadata, num_splits = aiter.get_mla_metadata(
+    #     cache_seqlens, s_q * h_q // h_kv, h_kv
+    # )
 
-    tile_scheduler_metadata_torch, num_splits_torch = get_mla_metadata(
-        cache_seqlens, s_q * h_q // h_kv, h_kv
-    )
+    # tile_scheduler_metadata_torch, num_splits_torch = get_mla_metadata(
+    #     cache_seqlens, s_q * h_q // h_kv, h_kv
+    # )
 
     def flash_mla():
-        return aiter.flash_mla_fwd_with_kvcache(
-            q,
-            blocked_k,
-            block_table,
-            cache_seqlens,
-            dv,
-            tile_scheduler_metadata,
-            num_splits,
-            causal=causal,
-        )
+        # return aiter.flash_mla_fwd_with_kvcache(
+        #     q,
+        #     blocked_k,
+        #     block_table,
+        #     cache_seqlens,
+        #     dv,
+        #     tile_scheduler_metadata,
+        #     num_splits,
+        #     causal=causal,
+        # )
+        return aiter.flash_mla_fwd_prefill_with_kvcache(q, blocked_k, block_table, cache_seqlens, dv, causal=causal)
 
     def ref_mla():
         out = torch.empty(b, s_q, h_q, dv, dtype=torch.float32)

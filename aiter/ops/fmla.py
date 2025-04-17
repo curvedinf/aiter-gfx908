@@ -106,8 +106,6 @@ def flash_mla_fwd_prefill_with_kvcache(
     block_table: Tensor,
     cache_seqlens: Tensor,
     head_dim_v: int,
-    tile_scheduler_metadata: Tensor,
-    num_splits: Tensor,
     softmax_scale: Optional[float] = None,
     causal: bool = False,
 ) -> Tuple[Tensor, Tensor]:

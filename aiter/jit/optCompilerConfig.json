@@ -516,7 +516,7 @@
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
-            "'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3'"
+            "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'"
         ],
         "extra_ldflags": "None",
         "extra_include": [
@@ -539,7 +539,7 @@
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
-            "'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3'"
+            "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'"
         ],
         "extra_ldflags": "None",
         "extra_include": [
@@ -562,8 +562,7 @@
         ],
         "flags_extra_cc": [],
         "flags_extra_hip": [
-            "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
-            "'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3'"
+            "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'"
         ],
         "extra_ldflags": "None",
         "extra_include": [
@@ -585,8 +584,7 @@
         ],
         "flags_extra_cc": [],
         "flags_extra_hip": [
-            "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
-            "'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3'"
+            "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'"
         ],
         "extra_ldflags": "None",
         "extra_include": [
@@ -609,7 +607,7 @@
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
-            "'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3'"
+            "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 3)}'"
         ],
         "extra_ldflags": "None",
         "extra_include": [
@@ -632,7 +630,7 @@
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
-            "'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3'"
+            "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 3)}'"
         ],
         "extra_ldflags": "None",
         "extra_include": [
@@ -653,7 +651,7 @@
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
-            "'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3'",
+            "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 2)}'",
             "'-DCK_TILE_FMHA_FWD_SPLITKV_API=1'"
         ],
         "extra_ldflags": "None",
@@ -676,7 +674,7 @@
         "flags_extra_cc": [],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
-            "'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3'"
+            "f'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT={os.environ.get(\"CK_TILE_FLOAT_TO_BFLOAT16_DEFAULT\", 3)}'"
         ],
         "extra_ldflags": "None",
         "extra_include": [

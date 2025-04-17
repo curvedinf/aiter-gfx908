@@ -312,20 +312,21 @@ def run_benchmark(custom, args):
 
             # compare forward outputs
             torch.testing.assert_close(triton_out, torch_out, atol=1e-2, rtol=1e-2)
-            print("Outputs match")
+            print("Forward outputs match!")
             # Compare gradients
             torch.testing.assert_close(triton_dk, torch_dk, atol=1e-2, rtol=1e-2)
             torch.testing.assert_close(triton_dv, torch_dv, atol=1e-2, rtol=1e-2)
             torch.testing.assert_close(triton_dq, torch_dq, atol=1e-2, rtol=1e-2)
-            print(f"Gradients match for shape: BATCH={BATCH}, HQ={HQ}, HK={HK}, N_CTX_Q={N_CTX_Q}, N_CTX_K={N_CTX_K}, D_HEAD={D_HEAD}")
+            print(f"Backward gradients match for shape: BATCH={BATCH}, HQ={HQ}, HK={HK}, N_CTX_Q={N_CTX_Q}, N_CTX_K={N_CTX_K}, D_HEAD={D_HEAD}")
             return 0
 
         # Benchmark mode
         if "Torch" in provider:
             fn = lambda: attention_ref(q, k, v, dropout_p=dropout, causal=causal)
-            with torch.enable_grad():
-                torch_out, _ = fn()
-                fn = lambda: torch.autograd.grad(torch_out, (q, k, v), do, retain_graph=True)
+            if mode=="bwd":
+                with torch.enable_grad():
+                    torch_out, _ = fn()
+                    fn = lambda: torch.autograd.grad(torch_out, (q, k, v), do, retain_graph=True)
         else:  # Triton
             if varlen:
                 fn = lambda: flash_attn_varlen_func(
@@ -338,11 +339,12 @@ def run_benchmark(custom, args):
                     q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
                     return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward 
                 )
-            with torch.enable_grad():
-                triton_out, _, _ = fn()
-                if varlen:
-                    triton_out = output_pad_fn(triton_out)
-                fn = lambda: torch.autograd.grad(triton_out, (q_input, k_input, v_input), do.clone(), retain_graph=True)
+            if mode=="bwd":
+                with torch.enable_grad():
+                    triton_out, _, _ = fn()
+                    if varlen:
+                        triton_out = output_pad_fn(triton_out)
+                    fn = lambda: torch.autograd.grad(triton_out, (q_input, k_input, v_input), do.clone(), retain_graph=True)
 
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
 

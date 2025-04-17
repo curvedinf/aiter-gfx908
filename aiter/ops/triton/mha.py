@@ -354,9 +354,9 @@ def _attn_fwd(q_ptr: torch.Tensor,
             VARLEN: tl.constexpr,
 ):
     #calculate offsets
-    start_m = tl.program_id(0) #seqlen_q
-    off_q_head = tl.program_id(1)  #num_q_heads
-    off_z = tl.program_id(2) #batch
+    off_z = tl.program_id(0) #batch
+    off_q_head = tl.program_id(1) #num_q_heads
+    start_m = tl.program_id(2) #seqlen_q
 
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
@@ -730,14 +730,14 @@ def _flash_attn_forward(
     # Tuned for MI300x
     config = {
         'BLOCK_M': 128,
-        'BLOCK_N': 32, # BLOCK_N: 64 spills for _attn_fwd
+        'BLOCK_N': 64,
         'waves_per_eu': 2,
         'num_warps': 4,
         'num_ctas': 1,
         'num_stages': 1,
     }
 
-    grid = lambda META:(triton.cdiv(seqlen_q, META['BLOCK_M']), num_q_heads, batch)
+    grid = lambda META:(batch, num_q_heads, triton.cdiv(seqlen_q, META['BLOCK_M']))
     _attn_fwd[grid](q,
                     k,
                     v,
@@ -2379,7 +2379,7 @@ def _flash_attn_backward(
             "num_warps": 4,
             "num_stages": 1,
             "waves_per_eu": 1,
-            "BLK_SLICE_FACTOR": 2,
+            "BLK_SLICE_FACTOR": 1,
         }
         
         num_k_pids = (max_seqlen_k + BLOCK_N - 1) // BLOCK_N

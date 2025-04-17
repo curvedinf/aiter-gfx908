@@ -156,7 +156,7 @@ def create_benchmark_configs(custom, args):
     hk = args.hq if not args.hk else args.hk
     sk = args.sq if not args.sk else args.sk
     head_size = 128 if not args.d else args.d
-    mode = 'bwd'
+    mode = args.mode
     x_names = ['BATCH', 'HQ', 'HK', 'N_CTX_Q', 'N_CTX_K']
     causal = args.causal
     varlen = args.layout == 'thd'
@@ -187,13 +187,13 @@ def create_benchmark_configs(custom, args):
         unit = "GB/s"
     # unit = "ms"
 
+    if mode=="bwd":
+        line_vals = [f'fused-bwd({unit})', f'bwd({unit})']
+    else:
+        line_vals = [f'fwd({unit})']
+
     if args.bench_torch:
         line_vals = [f'Triton({unit})', f'Torch({unit})']
-    else:
-        line_vals = [unit]
-
-
-    line_vals = [f'fused-bwd({unit})', f'bwd({unit})']
 
     configs.append(
         triton.testing.Benchmark(
@@ -219,7 +219,7 @@ def run_benchmark(custom, args):
         Benchmark or test function for multi-head attention backward pass.
         In test_mode, verifies output matching with non-varlen inputs.
         """
-        assert mode == "bwd"
+        # assert mode == "bwd"
         requires_grad = True
         return_lse = True
         return_attn_probs = True
@@ -329,16 +329,29 @@ def run_benchmark(custom, args):
                     fn = lambda: torch.autograd.grad(torch_out, (q, k, v), do, retain_graph=True)
         else:  # Triton
             if varlen:
-                fn = lambda: flash_attn_varlen_func(
-                    q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
-                    dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
-                )
+                if args.fp8:
+                    fn = lambda: flash_attn_varlen_fp8_func(
+                        q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
+                        dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                    )
+                else:
+                    fn = lambda: flash_attn_varlen_func(
+                        q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
+                        dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                    )
             else:
-                fn = lambda: flash_attn_func(
-                    q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward 
-                )
+                if args.fp8:
+                    fn = lambda: flash_attn_fp8_func(
+                        q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                    )
+                else:
+                    fn = lambda: flash_attn_func(
+                        q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward 
+                    )
             if mode=="bwd":
                 with torch.enable_grad():
                     triton_out, _, _ = fn()
@@ -348,7 +361,11 @@ def run_benchmark(custom, args):
 
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
 
-        total_flops = 2 * flops_per_matmul * 2.5
+        total_flops = 2 * flops_per_matmul
+        if mode == "bwd":
+            total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
+
+
         input_bytes = q.element_size()
         output_bytes = q.element_size()
         if varlen:
@@ -403,6 +420,7 @@ def parse_args():
         "]. Use 'all' to benchmark all models. Provide model family (the part before -) to benchmark all models in that family. One can provide multiple as -model \"llama3,mistral_7B\""
     )
     parser.add_argument('-model', type=str, default="", help=model_help)
+    parser.add_argument('-mode', type=str, default="fwd", help="fwd:forward kernel, bwd:backward kernel")
     parser.add_argument("-b", type=int, default=0)
     parser.add_argument("-hq", type=int, default=0)
     parser.add_argument("-hk", type=int, default=0)

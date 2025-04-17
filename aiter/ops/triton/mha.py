@@ -2776,6 +2776,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
         return_lse,
         return_softmax,
         is_grad_enabled, 
+        fused_backward,
     ):
         is_grad = is_grad_enabled and any(
             x.requires_grad for x in [q,k,v]
@@ -2812,7 +2813,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
             cu_seqlens_k=None,
             descale_q=descale_q,
             descale_k=descale_k,
-            descale_v=descale_v
+            descale_v=descale_v,
         )
 
         if is_grad:
@@ -2824,6 +2825,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
             ctx.causal = causal
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
+            ctx.fused_backward = fused_backward
         
         out = out_padded[..., :head_size_og]
         result = [out]
@@ -2869,11 +2871,12 @@ class FlashAttnFP8Func(torch.autograd.Function):
             descale_k=descale_k,
             descale_v=descale_v,
             descale_do=descale_do,
+            fused=ctx.fused_backward,
         )
         #dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
         #dk = dk[..., : k_fp8.shape[-1]]
         #dv = dv[..., : v_fp8.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
 
 def flash_attn_fp8_func(
     q,
@@ -2886,7 +2889,8 @@ def flash_attn_fp8_func(
     alibi_slopes=None,
     deterministic=False,
     return_lse=False,
-    return_attn_probs=False
+    return_attn_probs=False,
+    fused_backward=False,
 ):
     return FlashAttnFP8Func.apply(
         q,
@@ -2900,7 +2904,8 @@ def flash_attn_fp8_func(
         deterministic,
         return_lse,
         return_attn_probs,
-        torch.is_grad_enabled()
+        torch.is_grad_enabled(),
+        fused_backward,
     ) 
 
 class FlashAttnVarlenFunc(torch.autograd.Function):
@@ -3127,6 +3132,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
         return_softmax,
         block_table,
         is_grad_enabled,
+        fused_backward,
     ):
         is_grad = is_grad_enabled and any(
             x.requires_grad for x in [q, k, v]
@@ -3163,7 +3169,8 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
             cu_seqlens_k=cu_seqlens_k,
             descale_q=descale_q,
             descale_k=descale_k,
-            descale_v=descale_v
+            descale_v=descale_v,
+            fused_backward=fused_backward,
         )
         if is_grad:
             ctx.save_for_backward(q_fp8, k_fp8, v_fp8, out_padded, softmax_lse, cu_seqlens_q, cu_seqlens_k, descale_q, descale_k, descale_v)
@@ -3176,6 +3183,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
             ctx.causal = causal
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
+            ctx.fused_backward = fused_backward
         out = out_padded[..., :head_size_og]
         result = [out]
         if return_lse:
@@ -3187,15 +3195,15 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
     
     @staticmethod
     def backward(ctx, do, *args):
-        q_fp8, k_fp8, v_fp8, out, softmax_lse, cu_seqlens_q, cu_seqlens_q, descale_q, descale_k, descale_v = ctx.saved_tensors
-        dq, dk, dv = torch.zeros_like(q, dtype=torch.float32), torch.zeros_like(k, dtype=torch.float32), torch.zeros_like(v, dtype=torch.float32)
+        q_fp8, k_fp8, v_fp8, out, softmax_lse, cu_seqlens_q, cu_seqlens_k, descale_q, descale_k, descale_v = ctx.saved_tensors
+        dq, dk, dv = torch.zeros_like(q_fp8, dtype=torch.float32), torch.zeros_like(k_fp8, dtype=torch.float32), torch.zeros_like(v_fp8, dtype=torch.float32)
         head_size_v_og = do.size(3)
         do_padded = do
         if head_size_v_og % 8 != 0:
             do_padded = torch.nn.functional.pad(do, [0, 8 - head_size_v_og % 8])
         
         fp8_dtype = torch.float8_e4m3fnuz 
-        do_padded_fp8, descale_do = cast_varlen_to_fp8(dout_padded, fp8_dtype, "thd", cu_seqlens_q)
+        do_padded_fp8, descale_do = cast_varlen_to_fp8(do_padded, fp8_dtype, "thd", cu_seqlens_q)
         
         _flash_attn_backward(
             do_padded_fp8,
@@ -3212,8 +3220,8 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
             ctx.causal,
             cu_seqlens_q,
             cu_seqlens_k,
-            max_seqlen_q=max_seqlen_q,
-            max_seqlen_k=max_seqlen_k,
+            max_seqlen_q=ctx.max_seqlen_q,
+            max_seqlen_k=ctx.max_seqlen_k,
             dropout_p=ctx.dropout_p,
             philox_seed=ctx.philox_seed,
             philox_offset=ctx.philox_offset,
@@ -3222,10 +3230,10 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
             descale_v=descale_v,
             descale_do=descale_do
         )
-        dq = dq[..., : q.shape[-1]]  # We could have padded the head dimension
-        dk = dk[..., : k.shape[-1]]
-        dv = dv[..., : v.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None
+        dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
+        dk = dk[..., : k_fp8.shape[-1]]
+        dv = dv[..., : v_fp8.shape[-1]]
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
 
 def flash_attn_varlen_fp8_func(
     q,
@@ -3243,7 +3251,8 @@ def flash_attn_varlen_fp8_func(
     deterministic=False,
     return_lse=False,
     return_attn_probs=False,
-    block_table=None
+    block_table=None,
+    fused_backward=False,
 ):
     return FlashAttnVarlenFP8Func.apply(
         q,
@@ -3262,5 +3271,6 @@ def flash_attn_varlen_fp8_func(
         return_lse,
         return_attn_probs,
         block_table,
-        torch.is_grad_enabled()
+        torch.is_grad_enabled(),
+        fused_backward,
     )

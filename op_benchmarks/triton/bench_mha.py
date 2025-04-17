@@ -195,6 +195,9 @@ def create_benchmark_configs(custom, args):
     if args.bench_torch:
         line_vals = [f'Triton({unit})', f'Torch({unit})']
 
+    if args.test_mode:
+        line_vals = ["test_mode"]
+
     configs.append(
         triton.testing.Benchmark(
             x_names=x_names,

@@ -3,6 +3,7 @@ import triton
 import triton.language as tl
 
 from typing import Optional, Tuple
+import warnings
 
 @triton.jit
 def cdiv_fn(x, y):
@@ -1300,184 +1301,198 @@ def _bwd_kernel_dkdvdq_causal(
     IS_VARLEN: tl.constexpr,
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
+    PERSISTENT: tl.constexpr,
+    atomic_pid_counter,
 ):
+    PADDED_HEAD: tl.constexpr = (BLOCK_D_MODEL != BLOCK_D_MODEL_POW2)
+
     wid = tl.program_id(0) # workgoup id: 0, ..., NUM_K_PIDS * BATCH * NUM_K_HEADS - 1
 
-    # workgroups get launched first along batch dim, then in head_k dim, and then in seq k block dim
-    batch_idx = wid % BATCH 
-    head_k_idx = wid // BATCH % NUM_K_HEADS 
-    seq_k_blk_idx = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS
+    total_num_pids = NUM_K_PIDS * BATCH * NUM_K_HEADS
 
-    #Determine q and k start along with seqlen_q and seqlen_k
-    q_start = 0
-    k_start = 0
-    seqlen_q = max_seqlen_q
-    seqlen_k = max_seqlen_k
-    if IS_VARLEN:
-        q_start = tl.load(cu_seqlens_q + batch_idx)
-        q_end = tl.load(cu_seqlens_q + batch_idx + 1)
-        k_start = tl.load(cu_seqlens_k + batch_idx)
-        k_end = tl.load(cu_seqlens_k + batch_idx + 1)
-        seqlen_q = q_end - q_start
-        seqlen_k = k_end - k_start
+    while wid < total_num_pids:
 
-    dk = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
-    dv = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
+        # workgroups get launched first along batch dim, then in head_k dim, and then in seq k block dim
+        batch_idx = wid % BATCH 
+        head_k_idx = wid // BATCH % NUM_K_HEADS 
+        seq_k_blk_idx = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS
 
-    # Figure out causal starting block since we have seqlen_q >=< seqlen_k.
-    # Unlike forward pass where we tile on M dim and iterate on N dim, so that
-    # we can skip some M blocks, in backward pass, we tile on the N dim for kv
-    # and iterate over the M. In this way, we cannot skip N blocks, but only to
-    # determine the starting M blocks to skip some initial blocks masked by
-    # causal.
-    delta_qk = seqlen_q - seqlen_k
+        #Determine q and k start along with seqlen_q and seqlen_k
+        q_start = 0
+        k_start = 0
+        seqlen_q = max_seqlen_q
+        seqlen_k = max_seqlen_k
+        if IS_VARLEN:
+            q_start = tl.load(cu_seqlens_q + batch_idx)
+            q_end = tl.load(cu_seqlens_q + batch_idx + 1)
+            k_start = tl.load(cu_seqlens_k + batch_idx)
+            k_end = tl.load(cu_seqlens_k + batch_idx + 1)
+            seqlen_q = q_end - q_start
+            seqlen_k = k_end - k_start
 
-    # q > k: diretcly skip all the way until the start of causal block
-    start_delta_q_gt_k = delta_qk
+        dk = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
+        dv = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
 
-    # q < k: some blocks will have no Masked block, other needs to re-calc
-    # starting position
-    # delta_qk is negative so flip it, only multiple of BLOCK_N can skip the
-    # masked op
-    num_blocks_skip = -delta_qk // BLOCK_N
-    delta_aligned = (num_blocks_skip + 1) * BLOCK_N + delta_qk
-    start_delta_q_lt_k = delta_aligned // BLOCK_M * BLOCK_M
-    if delta_qk >= 0:
-        start_delta = delta_qk
-    else:
-        start_delta = start_delta_q_lt_k
-    
-    start_n =  seq_k_blk_idx * BLOCK_N
+        # Figure out causal starting block since we have seqlen_q >=< seqlen_k.
+        # Unlike forward pass where we tile on M dim and iterate on N dim, so that
+        # we can skip some M blocks, in backward pass, we tile on the N dim for kv
+        # and iterate over the M. In this way, we cannot skip N blocks, but only to
+        # determine the starting M blocks to skip some initial blocks masked by
+        # causal.
+        delta_qk = seqlen_q - seqlen_k
 
-    offs_k = tl.arange(0, BLOCK_D_MODEL_POW2)
-    offs_n = start_n + tl.arange(0, BLOCK_N)
-    # Mask for loading K and V
-    mask_kv = offs_n[:, None] < seqlen_k
-    PADDED_HEAD: tl.constexpr = (BLOCK_D_MODEL != BLOCK_D_MODEL_POW2)
-    if PADDED_HEAD:
-        mask_k = offs_k < BLOCK_D_MODEL
-        mask_kv &= mask_k[None, :]
-    
-    GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
-    adj_k = (batch_idx * stride_k_b + 
-            head_k_idx * stride_k_h + 
-            k_start * stride_k_n + offs_n[:, None] * stride_k_n + 
-            offs_k[None, :] * stride_k_k)
-    adj_v = (batch_idx * stride_v_b + 
-            head_k_idx * stride_v_h + 
-            k_start * stride_v_n + offs_n[:, None] * stride_v_n + 
-            offs_k[None, :] * stride_v_k)
-    # load K and V: they stay in SRAM throughout the inner loop.
-    k = tl.load(k_ptr + adj_k , mask=mask_kv, other=0.0)
-    v = tl.load(v_ptr + adj_v, mask=mask_kv, other=0.0) 
+        # q > k: diretcly skip all the way until the start of causal block
+        start_delta_q_gt_k = delta_qk
 
-    # If MQA / GQA, set the K and V head offsets appropriately.
-    for head_q_idx in range(head_k_idx * GROUP_SIZE, head_k_idx * GROUP_SIZE + GROUP_SIZE):
+        # q < k: some blocks will have no Masked block, other needs to re-calc
+        # starting position
+        # delta_qk is negative so flip it, only multiple of BLOCK_N can skip the
+        # masked op
+        num_blocks_skip = -delta_qk // BLOCK_N
+        delta_aligned = (num_blocks_skip + 1) * BLOCK_N + delta_qk
+        start_delta_q_lt_k = delta_aligned // BLOCK_M * BLOCK_M
         if delta_qk >= 0:
-            start_m = start_n + start_delta
-            len_m = BLOCK_N
+            start_delta = delta_qk
         else:
-            start_m = max(start_n + delta_qk, 0)
-            start_m = (start_m // BLOCK_M) * BLOCK_M
-            # because we might shift the masked blocks up, we are deeper into
-            # the masked out region, so we would potentially increase the total
-            # steps with masked operation to get out of it
-            residue_m = max(start_n + delta_qk - start_m, 0)
-            len_m = BLOCK_N + residue_m
-
-        # offset input and output tensor by batch and Q/K heads
-        adj_q = batch_idx * stride_q_b + head_q_idx * stride_q_h + q_start * stride_q_m
+            start_delta = start_delta_q_lt_k
         
-        q_ptr_adj = q_ptr + adj_q
-        dq_ptr_adj = dq_ptr + adj_q
-        
-        adj_do = batch_idx * stride_do_b + head_q_idx * stride_do_h + q_start * stride_do_m
-        do_ptr_adj = do_ptr + adj_do
-        adj_delta = batch_idx * stride_delta_b + head_q_idx * stride_delta_h + q_start * stride_delta_m
-        m_ptr_adj = m_ptr + adj_delta
-        delta_ptr_adj = delta_ptr + adj_delta
+        start_n =  seq_k_blk_idx * BLOCK_N
 
-        # batch_philox_offset is the ACTUALLY dropout offset
-        # dropout_offset is for debug purpose and will be removed later
-        batch_philox_offset = 0
-        dropout_offset = 0
-        if ENABLE_DROPOUT:
-            batch_philox_offset = (philox_offset_base + batch_idx * stride_dropout_b + 
-                                  head_q_idx * stride_dropout_h)
-            dropout_offset = (dropout_mask + batch_idx * stride_dropout_b + 
-                             head_q_idx * stride_dropout_h)
-
-        MASK_BLOCK_M: tl.constexpr = BLOCK_M // BLK_SLICE_FACTOR
-        # bound the masked operation to q len so it does not have to wast cycles
-        len_m = min(len_m, seqlen_q)
-        num_steps = tl.cdiv(len_m, MASK_BLOCK_M)
+        offs_k = tl.arange(0, BLOCK_D_MODEL_POW2)
+        offs_n = start_n + tl.arange(0, BLOCK_N)
+        # Mask for loading K and V
+        mask_kv = offs_n[:, None] < seqlen_k
         
+        if PADDED_HEAD:
+            mask_k = offs_k < BLOCK_D_MODEL
+            mask_kv &= mask_k[None, :]
         
-        # when q < k, we may skip the initial masked op
-        # if seq_k_blk_idx < num_blocks_skip:
-        #     num_steps = 0
+        GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
+        adj_k = (batch_idx * stride_k_b + 
+                head_k_idx * stride_k_h + 
+                k_start * stride_k_n + offs_n[:, None] * stride_k_n + 
+                offs_k[None, :] * stride_k_k)
+        adj_v = (batch_idx * stride_v_b + 
+                head_k_idx * stride_v_h + 
+                k_start * stride_v_n + offs_n[:, None] * stride_v_n + 
+                offs_k[None, :] * stride_v_k)
+        # load K and V: they stay in SRAM throughout the inner loop.
+        k = tl.load(k_ptr + adj_k , mask=mask_kv, other=0.0)
+        v = tl.load(v_ptr + adj_v, mask=mask_kv, other=0.0) 
 
-        if IS_FP8:
-            descale_q = tl.load(descale_q_ptr + batch_idx * stride_descale_q_z + head_q_idx)
-            descale_k = tl.load(descale_k_ptr + batch_idx * stride_descale_k_z + head_k_idx)
-            descale_v = tl.load(descale_v_ptr + batch_idx * stride_descale_v_z + head_k_idx)
-            descale_do = tl.load(descale_do_ptr + batch_idx * stride_descale_do_z + head_q_idx)
+        # If MQA / GQA, set the K and V head offsets appropriately.
+        for head_q_idx in range(head_k_idx * GROUP_SIZE, head_k_idx * GROUP_SIZE + GROUP_SIZE):
+            if delta_qk >= 0:
+                start_m = start_n + start_delta
+                len_m = BLOCK_N
+            else:
+                start_m = max(start_n + delta_qk, 0)
+                start_m = (start_m // BLOCK_M) * BLOCK_M
+                # because we might shift the masked blocks up, we are deeper into
+                # the masked out region, so we would potentially increase the total
+                # steps with masked operation to get out of it
+                residue_m = max(start_n + delta_qk - start_m, 0)
+                len_m = BLOCK_N + residue_m
+
+            # offset input and output tensor by batch and Q/K heads
+            adj_q = batch_idx * stride_q_b + head_q_idx * stride_q_h + q_start * stride_q_m
+            
+            q_ptr_adj = q_ptr + adj_q
+            dq_ptr_adj = dq_ptr + adj_q
+            
+            adj_do = batch_idx * stride_do_b + head_q_idx * stride_do_h + q_start * stride_do_m
+            do_ptr_adj = do_ptr + adj_do
+            adj_delta = batch_idx * stride_delta_b + head_q_idx * stride_delta_h + q_start * stride_delta_m
+            m_ptr_adj = m_ptr + adj_delta
+            delta_ptr_adj = delta_ptr + adj_delta
+
+            # batch_philox_offset is the ACTUALLY dropout offset
+            # dropout_offset is for debug purpose and will be removed later
+            batch_philox_offset = 0
+            dropout_offset = 0
+            if ENABLE_DROPOUT:
+                batch_philox_offset = (philox_offset_base + batch_idx * stride_dropout_b + 
+                                    head_q_idx * stride_dropout_h)
+                dropout_offset = (dropout_mask + batch_idx * stride_dropout_b + 
+                                head_q_idx * stride_dropout_h)
+
+            MASK_BLOCK_M: tl.constexpr = BLOCK_M // BLK_SLICE_FACTOR
+            # bound the masked operation to q len so it does not have to wast cycles
+            len_m = min(len_m, seqlen_q)
+            num_steps = tl.cdiv(len_m, MASK_BLOCK_M)
+            
+            
+            # when q < k, we may skip the initial masked op
+            # if seq_k_blk_idx < num_blocks_skip:
+            #     num_steps = 0
+
+            if IS_FP8:
+                descale_q = tl.load(descale_q_ptr + batch_idx * stride_descale_q_z + head_q_idx)
+                descale_k = tl.load(descale_k_ptr + batch_idx * stride_descale_k_z + head_k_idx)
+                descale_v = tl.load(descale_v_ptr + batch_idx * stride_descale_v_z + head_k_idx)
+                descale_do = tl.load(descale_do_ptr + batch_idx * stride_descale_do_z + head_q_idx)
+            else:
+                descale_q, descale_k, descale_v, descale_do = 1.0, 1.0, 1.0, 1.0
+
+            # if start_m is negative, the current N-tile has no block on the
+            #   diagonal of causal mask, so everything have no causal mask
+            dk, dv = _bwd_dkdvdq_inner(
+                dk, dv,  # output tensors
+                q_ptr_adj, k, v, do_ptr_adj, dq_ptr_adj, m_ptr_adj, delta_ptr_adj, sm_scale, # input tensors
+                stride_q_m, stride_q_k,  # strides for q
+                stride_do_m, stride_do_k,  # strides for o
+                stride_dropout_m, stride_dropout_n,  # strides for dropout
+                stride_delta_m,
+                dropout_p, philox_seed, batch_philox_offset, dropout_offset,  #
+                seqlen_q, seqlen_k,  # max sequence length for q and k
+                start_n, start_m, num_steps,  # iteration numbers
+                descale_q, descale_k, descale_v, descale_do, # fp8 descale factors from user 
+                MASK_BLOCK_M, BLOCK_N,  # block dim
+                BLOCK_D_MODEL, BLOCK_D_MODEL_POW2,  # head dim
+                MASK=True,  # causal masking
+                ENABLE_DROPOUT=ENABLE_DROPOUT,  # activate dropout
+                IS_FP8=IS_FP8,
+                FP8_MAX=FP8_MAX,
+                workgroup_id=seq_k_blk_idx,
+            )
+            start_m += num_steps * MASK_BLOCK_M
+            num_steps = tl.cdiv(seqlen_q - start_m, BLOCK_M)
+            end_m = start_m + num_steps * BLOCK_M
+
+            dk, dv = _bwd_dkdvdq_inner(
+                dk, dv,  # output tensors
+                q_ptr_adj, k, v, do_ptr_adj, dq_ptr_adj, m_ptr_adj, delta_ptr_adj, sm_scale, # input tensors
+                stride_q_m, stride_q_k,  # strides for q
+                stride_do_m, stride_do_k,  # strides for o
+                stride_dropout_m, stride_dropout_n,  # strides for dropout
+                stride_delta_m,
+                dropout_p, philox_seed, batch_philox_offset, dropout_offset,  #
+                seqlen_q, seqlen_k,  # max sequence length for q and k
+                start_n, start_m, num_steps,  # iteration numbers
+                descale_q, descale_k, descale_v, descale_do, # fp8 descale factors from user
+                BLOCK_M, BLOCK_N,  # block dim
+                BLOCK_D_MODEL, BLOCK_D_MODEL_POW2,  # head dim
+                MASK=False,  # causal masking
+                ENABLE_DROPOUT=ENABLE_DROPOUT,  # activate dropout
+                IS_FP8=IS_FP8,
+                FP8_MAX=FP8_MAX,
+                workgroup_id=seq_k_blk_idx,
+            )
+
+        # Write back dV and dK.
+        offs_dkdv = (batch_idx * stride_dk_b + 
+                    head_k_idx * stride_dk_h + 
+                    k_start * stride_dk_n + offs_n[:, None] * stride_dk_n + 
+                    offs_k[None, :] * stride_dk_k)
+        tl.store(dv_ptr + offs_dkdv, dv, mask=mask_kv)
+        dk *= sm_scale
+        tl.store(dk_ptr + offs_dkdv, dk, mask=mask_kv)
+
+        if PERSISTENT:
+            # move to next available pid
+            wid = tl.atomic_add(atomic_pid_counter, 1)
         else:
-            descale_q, descale_k, descale_v, descale_do = 1.0, 1.0, 1.0, 1.0
-
-        # if start_m is negative, the current N-tile has no block on the
-        #   diagonal of causal mask, so everything have no causal mask
-        dk, dv = _bwd_dkdvdq_inner(
-            dk, dv,  # output tensors
-            q_ptr_adj, k, v, do_ptr_adj, dq_ptr_adj, m_ptr_adj, delta_ptr_adj, sm_scale, # input tensors
-            stride_q_m, stride_q_k,  # strides for q
-            stride_do_m, stride_do_k,  # strides for o
-            stride_dropout_m, stride_dropout_n,  # strides for dropout
-            stride_delta_m,
-            dropout_p, philox_seed, batch_philox_offset, dropout_offset,  #
-            seqlen_q, seqlen_k,  # max sequence length for q and k
-            start_n, start_m, num_steps,  # iteration numbers
-            descale_q, descale_k, descale_v, descale_do, # fp8 descale factors from user 
-            MASK_BLOCK_M, BLOCK_N,  # block dim
-            BLOCK_D_MODEL, BLOCK_D_MODEL_POW2,  # head dim
-            MASK=True,  # causal masking
-            ENABLE_DROPOUT=ENABLE_DROPOUT,  # activate dropout
-            IS_FP8=IS_FP8,
-            FP8_MAX=FP8_MAX,
-            workgroup_id=seq_k_blk_idx,
-        )
-        start_m += num_steps * MASK_BLOCK_M
-        num_steps = tl.cdiv(seqlen_q - start_m, BLOCK_M)
-        end_m = start_m + num_steps * BLOCK_M
-
-        dk, dv = _bwd_dkdvdq_inner(
-            dk, dv,  # output tensors
-            q_ptr_adj, k, v, do_ptr_adj, dq_ptr_adj, m_ptr_adj, delta_ptr_adj, sm_scale, # input tensors
-            stride_q_m, stride_q_k,  # strides for q
-            stride_do_m, stride_do_k,  # strides for o
-            stride_dropout_m, stride_dropout_n,  # strides for dropout
-            stride_delta_m,
-            dropout_p, philox_seed, batch_philox_offset, dropout_offset,  #
-            seqlen_q, seqlen_k,  # max sequence length for q and k
-            start_n, start_m, num_steps,  # iteration numbers
-            descale_q, descale_k, descale_v, descale_do, # fp8 descale factors from user
-            BLOCK_M, BLOCK_N,  # block dim
-            BLOCK_D_MODEL, BLOCK_D_MODEL_POW2,  # head dim
-            MASK=False,  # causal masking
-            ENABLE_DROPOUT=ENABLE_DROPOUT,  # activate dropout
-            IS_FP8=IS_FP8,
-            FP8_MAX=FP8_MAX,
-            workgroup_id=seq_k_blk_idx,
-        )
-
-    # Write back dV and dK.
-    offs_dkdv = (batch_idx * stride_dk_b + 
-                head_k_idx * stride_dk_h + 
-                k_start * stride_dk_n + offs_n[:, None] * stride_dk_n + 
-                offs_k[None, :] * stride_dk_k)
-    tl.store(dv_ptr + offs_dkdv, dv, mask=mask_kv)
-    dk *= sm_scale
-    tl.store(dk_ptr + offs_dkdv, dk, mask=mask_kv)
+            wid = total_num_pids
 
 
 @triton.jit
@@ -1886,116 +1901,129 @@ def _bwd_kernel_dkdvdq_noncausal(
     IS_VARLEN: tl.constexpr,
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
+    PERSISTENT: tl.constexpr,
+    atomic_pid_counter,
 ):
+
+    PADDED_HEAD: tl.constexpr = (BLOCK_D_MODEL != BLOCK_D_MODEL_POW2)
     # workgroup id
     wid = tl.program_id(0) # 0, ..., NUM_K_PIDS * BATCH * NUM_K_HEADS - 1
 
-    # Workgroups get launched first along batch dim, then in head_k dim, and then in seq k block dim
-    # This is in order to avoid contention for the tl.atomic_add (inside _bwd_dkdvdq_inner) that happens between workgroups that share the same batch and head_k. 
-    bid = wid % BATCH 
-    hkid = wid // BATCH % NUM_K_HEADS 
-    pid = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS 
+    total_num_pids = NUM_K_PIDS * BATCH * NUM_K_HEADS
 
-    q_start = 0
-    k_start = 0
-    seqlen_q = max_seqlen_q
-    seqlen_k = max_seqlen_k
+    while wid < total_num_pids:
+        # Workgroups get launched first along batch dim, then in head_k dim, and then in seq k block dim
+        # This is in order to avoid contention for the tl.atomic_add (inside _bwd_dkdvdq_inner) that happens between workgroups that share the same batch and head_k. 
+        bid = wid % BATCH 
+        hkid = wid // BATCH % NUM_K_HEADS 
+        pid = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS 
 
-    if IS_VARLEN:
-        q_start = tl.load(cu_seqlens_q + bid)
-        q_end = tl.load(cu_seqlens_q + bid + 1)
-        k_start = tl.load(cu_seqlens_k + bid)
-        k_end = tl.load(cu_seqlens_k + bid + 1)
-        seqlen_q = q_end - q_start
-        seqlen_k = k_end - k_start
+        q_start = 0
+        k_start = 0
+        seqlen_q = max_seqlen_q
+        seqlen_k = max_seqlen_k
+
+        if IS_VARLEN:
+            q_start = tl.load(cu_seqlens_q + bid)
+            q_end = tl.load(cu_seqlens_q + bid + 1)
+            k_start = tl.load(cu_seqlens_k + bid)
+            k_end = tl.load(cu_seqlens_k + bid + 1)
+            seqlen_q = q_end - q_start
+            seqlen_k = k_end - k_start
 
 
-    dk = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
-    dv = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
+        dk = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
+        dv = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
 
-    start_n = pid * BLOCK_N
+        start_n = pid * BLOCK_N
 
-    offs_k = tl.arange(0, BLOCK_D_MODEL_POW2)
-    offs_n = start_n + tl.arange(0, BLOCK_N)
-    mask_kv = offs_n[:, None] < seqlen_k
-    PADDED_HEAD: tl.constexpr = (BLOCK_D_MODEL != BLOCK_D_MODEL_POW2)
-    if PADDED_HEAD:
-        mask_kv &= offs_k < BLOCK_D_MODEL
-
-    GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
-    adj_k = (bid * stride_kb + 
-            hkid * stride_kh + 
-            k_start * stride_kn + 
-            offs_n[:, None] * stride_kn + 
-            offs_k[None, :] * stride_kk)
-    adj_v = (bid * stride_vb + 
-            hkid * stride_vh + 
-            k_start * stride_vn + 
-            offs_n[:, None] * stride_vn + 
-            offs_k[None, :] * stride_vk)
-
-    k = tl.load(K + adj_k, mask=mask_kv, other=0.0)
-    v = tl.load(V + adj_v, mask=mask_kv, other=0.0)
-
-    for hqid in range(hkid * GROUP_SIZE, hkid * GROUP_SIZE + GROUP_SIZE):
-        adj_q = (bid * stride_qb + hqid * stride_qh + q_start * stride_qm)
+        offs_k = tl.arange(0, BLOCK_D_MODEL_POW2)
+        offs_n = start_n + tl.arange(0, BLOCK_N)
+        mask_kv = offs_n[:, None] < seqlen_k
         
-        Q_ptr = Q + adj_q
-        DQ_ptr = DQ  + adj_q
-        
-        adj_do = (bid * stride_dob + hqid * stride_doh + q_start * stride_dom)
-        DO_ptr = DO + adj_do
-        adj_delta = (bid * stride_deltab + hqid * stride_deltah + q_start * stride_deltam)
-        M_ptr = M + adj_delta
-        Delta_ptr = Delta + adj_delta
+        if PADDED_HEAD:
+            mask_kv &= offs_k < BLOCK_D_MODEL
 
-        #dropout 
-        batch_philox_offset = 0
-        dropout_offset = 0
-        if ENABLE_DROPOUT:
-            batch_philox_offset = philox_offset + bid * stride_dropoutb + \
-                                  hqid * stride_dropouth
-            dropout_offset = dropout_mask + bid * stride_dropoutb + \
-                             hqid * stride_dropouth
+        GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
+        adj_k = (bid * stride_kb + 
+                hkid * stride_kh + 
+                k_start * stride_kn + 
+                offs_n[:, None] * stride_kn + 
+                offs_k[None, :] * stride_kk)
+        adj_v = (bid * stride_vb + 
+                hkid * stride_vh + 
+                k_start * stride_vn + 
+                offs_n[:, None] * stride_vn + 
+                offs_k[None, :] * stride_vk)
 
-        if IS_FP8:
-            descale_q = tl.load(descale_q_ptr + bid * stride_descale_q_z + hqid)
-            descale_k = tl.load(descale_k_ptr + bid * stride_descale_k_z + hkid)
-            descale_v = tl.load(descale_v_ptr + bid * stride_descale_v_z + hkid)
-            descale_do = tl.load(descale_do_ptr + bid * stride_descale_do_z + hqid)
+        k = tl.load(K + adj_k, mask=mask_kv, other=0.0)
+        v = tl.load(V + adj_v, mask=mask_kv, other=0.0)
+
+        for hqid in range(hkid * GROUP_SIZE, hkid * GROUP_SIZE + GROUP_SIZE):
+            adj_q = (bid * stride_qb + hqid * stride_qh + q_start * stride_qm)
+            
+            Q_ptr = Q + adj_q
+            DQ_ptr = DQ  + adj_q
+            
+            adj_do = (bid * stride_dob + hqid * stride_doh + q_start * stride_dom)
+            DO_ptr = DO + adj_do
+            adj_delta = (bid * stride_deltab + hqid * stride_deltah + q_start * stride_deltam)
+            M_ptr = M + adj_delta
+            Delta_ptr = Delta + adj_delta
+
+            #dropout 
+            batch_philox_offset = 0
+            dropout_offset = 0
+            if ENABLE_DROPOUT:
+                batch_philox_offset = philox_offset + bid * stride_dropoutb + \
+                                    hqid * stride_dropouth
+                dropout_offset = dropout_mask + bid * stride_dropoutb + \
+                                hqid * stride_dropouth
+
+            if IS_FP8:
+                descale_q = tl.load(descale_q_ptr + bid * stride_descale_q_z + hqid)
+                descale_k = tl.load(descale_k_ptr + bid * stride_descale_k_z + hkid)
+                descale_v = tl.load(descale_v_ptr + bid * stride_descale_v_z + hkid)
+                descale_do = tl.load(descale_do_ptr + bid * stride_descale_do_z + hqid)
+            else:
+                descale_q, descale_k, descale_v, descale_do = 1.0, 1.0, 1.0, 1.0
+
+            start_m = 0
+            num_steps = tl.cdiv(seqlen_q, BLOCK_M)
+
+            dk, dv = _bwd_dkdvdq_inner(
+                dk, dv,
+                Q_ptr, k, v, DO_ptr, DQ_ptr, M_ptr, Delta_ptr, sm_scale,
+                stride_qm, stride_qk,
+                stride_dom, stride_dok,
+                stride_dropoutm, stride_dropoutn,
+                stride_deltam,
+                dropout_p, philox_seed, batch_philox_offset, dropout_offset,
+                seqlen_q, seqlen_k,
+                start_n, start_m, num_steps,
+                descale_q, descale_k, descale_v, descale_do,
+                BLOCK_M, BLOCK_N,
+                BLOCK_D_MODEL, BLOCK_D_MODEL_POW2,
+                MASK=False,
+                ENABLE_DROPOUT=ENABLE_DROPOUT,
+                IS_FP8=IS_FP8,
+                FP8_MAX=FP8_MAX,
+                workgroup_id=pid,
+            )
+
+        adj_dkdv = (bid * stride_dkb +
+                    hkid * stride_dkh +
+                    k_start * stride_dkn + offs_n[:, None] * stride_dkn + 
+                    offs_k[None, :] * stride_dkk)
+        tl.store(DV + adj_dkdv, dv, mask=mask_kv)
+        dk *= sm_scale
+        tl.store(DK + adj_dkdv, dk, mask=mask_kv)
+
+        if PERSISTENT:
+            # move to next pid still undone
+            wid = tl.atomic_add(atomic_pid_counter, 1)
         else:
-            descale_q, descale_k, descale_v, descale_do = 1.0, 1.0, 1.0, 1.0
-
-        start_m = 0
-        num_steps = tl.cdiv(seqlen_q, BLOCK_M)
-
-        dk, dv = _bwd_dkdvdq_inner(
-            dk, dv,
-            Q_ptr, k, v, DO_ptr, DQ_ptr, M_ptr, Delta_ptr, sm_scale,
-            stride_qm, stride_qk,
-            stride_dom, stride_dok,
-            stride_dropoutm, stride_dropoutn,
-            stride_deltam,
-            dropout_p, philox_seed, batch_philox_offset, dropout_offset,
-            seqlen_q, seqlen_k,
-            start_n, start_m, num_steps,
-            descale_q, descale_k, descale_v, descale_do,
-            BLOCK_M, BLOCK_N,
-            BLOCK_D_MODEL, BLOCK_D_MODEL_POW2,
-            MASK=False,
-            ENABLE_DROPOUT=ENABLE_DROPOUT,
-            IS_FP8=IS_FP8,
-            FP8_MAX=FP8_MAX,
-            workgroup_id=pid,
-        )
-
-    adj_dkdv = (bid * stride_dkb +
-                hkid * stride_dkh +
-                k_start * stride_dkn + offs_n[:, None] * stride_dkn + 
-                offs_k[None, :] * stride_dkk)
-    tl.store(DV + adj_dkdv, dv, mask=mask_kv)
-    dk *= sm_scale
-    tl.store(DK + adj_dkdv, dk, mask=mask_kv)
+            wid = total_num_pids # break the loop
 
 
 
@@ -2325,7 +2353,7 @@ def _flash_attn_backward(
     WAVES_PER_EU = 1
     PRE_BLOCK = 128
     #BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
-    BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 64, 64, 64, 16 
+    BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 16, 64, 64, 16 
     BLK_SLICE_FACTOR = 2
 
     #init delta
@@ -2371,8 +2399,8 @@ def _flash_attn_backward(
     grid_dq = ((max_seqlen_q + BLOCK_M2 - 1) // BLOCK_M2, batch, num_k_heads)
     
     if fused: # fuses dk, dv, dq computations into one kernel by computing the dq using atomic adds between workgroups
-        
         BLOCK_N = 128
+        PERSISTENT = False # Persistent spills
         config = {
             "BLOCK_M": 32,
             "BLOCK_N": BLOCK_N,
@@ -2380,10 +2408,18 @@ def _flash_attn_backward(
             "num_stages": 1,
             "waves_per_eu": 1,
             "BLK_SLICE_FACTOR": 1,
+            "PERSISTENT": PERSISTENT,
+            "atomic_pid_counter": None,
         }
         
         num_k_pids = (max_seqlen_k + BLOCK_N - 1) // BLOCK_N
-        grid_dkdvdq = (batch * num_k_heads * num_k_pids,) 
+
+        if PERSISTENT:
+            NUM_WG = torch.cuda.get_device_properties("cuda").multi_processor_count * 1
+            grid_dkdvdq = (min(NUM_WG, batch * num_k_heads * num_k_pids),) 
+            config["atomic_pid_counter"] = torch.ones([1], device=q.device, dtype=torch.int32) * NUM_WG
+        else:
+            grid_dkdvdq = (batch * num_k_heads * num_k_pids,) 
 
         if causal:
             _bwd_kernel_dkdvdq_causal[grid_dkdvdq](
@@ -2447,7 +2483,6 @@ def _flash_attn_backward(
         return delta
     
     # split kernels solution: one kernel computes dk, dv and the other computes dq
-
     if causal:
         _bwd_kernel_dkdv_causal[grid_dkdv](
             q, k, v, sm_scale, do, dk, dv,

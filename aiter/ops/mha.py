@@ -56,7 +56,7 @@ def mha_varlen_fwd(
     bias: Optional[Tensor] = None,
     alibi_slopes: Optional[Tensor] = None,
     gen: Optional[Generator] = None,
-): ...
+) -> list[Tensor]: ...
 
 
 @compile_ops("module_mha_bwd", fc_name="mha_bwd")

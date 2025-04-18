@@ -40,6 +40,7 @@ def mha_varlen_fwd(
     v: Tensor,
     cu_seqlens_q: Tensor,
     cu_seqlens_k: Tensor,
+    seqlens_k: Tensor,
     max_seqlen_q: int,
     max_seqlen_k: int,
     dropout_p: float,
@@ -739,6 +740,7 @@ def _flash_attn_varlen_forward(
     v: torch.Tensor,
     cu_seqlens_q: torch.Tensor,
     cu_seqlens_k: torch.Tensor,
+    seqlens_k: torch.Tensor,
     max_seqlen_q: int,
     max_seqlen_k: int,
     dropout_p: float,
@@ -848,6 +850,7 @@ def _flash_attn_varlen_forward(
         v,
         cu_seqlens_q,
         cu_seqlens_k,
+        seqlens_k,
         max_seqlen_q,
         max_seqlen_k,
         dropout_p,
@@ -1063,6 +1066,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         v,
         cu_seqlens_q,
         cu_seqlens_k,
+        seqlens_k,
         max_seqlen_q,
         max_seqlen_k,
         dropout_p,
@@ -1076,6 +1080,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         return_softmax,
         block_table,
         is_grad_enabled,
+
         is_v3_atomic_fp32: Optional[bool] = True,
         how_v3_bf16_cvt: Optional[int] = 1
     ):
@@ -1097,6 +1102,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             v,
             cu_seqlens_q,
             cu_seqlens_k,
+            seqlens_k,
             max_seqlen_q,
             max_seqlen_k,
             dropout_p,
@@ -1177,7 +1183,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         dq = dq[..., : head_size_q_og]  # We could have padded the head dimension
         dk = dk[..., : head_size_q_og]
         dv = dv[..., : head_size_v_og]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, dbias, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, dbias, None, None, None, None, None, None
 
 
 def flash_attn_varlen_func(
@@ -1186,6 +1192,7 @@ def flash_attn_varlen_func(
     v,
     cu_seqlens_q,
     cu_seqlens_k,
+    seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
     dropout_p=0.0,
@@ -1260,6 +1267,7 @@ def flash_attn_varlen_func(
         v,
         cu_seqlens_q,
         cu_seqlens_k,
+        seqlens_k,
         max_seqlen_q,
         max_seqlen_k,
         dropout_p,

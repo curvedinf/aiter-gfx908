@@ -144,7 +144,7 @@ public:
         if constexpr (Traits::kPadHeadDimV == false)
         {
             constexpr int32_t kBlockSize = Traits::kNumThreads;
-            constexpr int32_t kMPerBlock = Traits::kBlockM0;
+            constexpr int32_t kMPerBlock = Traits::kBlockM;
             constexpr int32_t kNPerBlock = Traits::kBlockN1;
 
             constexpr int32_t M1 = kBlockSize / ck_tile::get_warp_size();
@@ -166,7 +166,7 @@ public:
         if constexpr (Traits::kPadHeadDimV == false)
         {
             constexpr int32_t kBlockSize = Traits::kNumThreads;
-            constexpr int32_t kMPerBlock = Traits::kBlockM0;
+            constexpr int32_t kMPerBlock = Traits::kBlockM;
             constexpr int32_t kNPerBlock = Traits::kBlockN1;
 
             constexpr int32_t M1 = kBlockSize / ck_tile::get_warp_size();
@@ -181,11 +181,11 @@ public:
         return result;
     }
 
-    CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentLSE()
+    CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentLse()
     {
         return GetVectorSizeForTile<Traits::kNumWarps,
                                     Traits::kMaxSplits,
-                                    Traits::kBlockM0,
+                                    Traits::kBlockM,
                                     acc_t>();
     }
 
@@ -313,7 +313,7 @@ public:
     CK_TILE_HOST_DEVICE static constexpr auto GetQRegKBlockGemm()
     {
         using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0, Traits::kBlockK0>;
-        using BlockWarps    = ck_tile::sequence<Traits::kNumWarps, 1, 1>;
+        using BlockWarps    = ck_tile::sequence<2, Traits::kNumWarps / 2, 1>;
         using WarpTile      = ck_tile::sequence<16, 16, 16>;
         using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, WarpTile>;
 
@@ -359,7 +359,7 @@ public:
     CK_TILE_HOST_DEVICE static constexpr auto GetQSmemKBlockGemm()
     {
         using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0, Traits::kBlockK0>;
-        using BlockWarps    = ck_tile::sequence<Traits::kNumWarps, 1, 1>;
+        using BlockWarps    = ck_tile::sequence<2, Traits::kNumWarps / 2, 1>;
         using WarpTile      = ck_tile::sequence<16, 16, 16>;
         using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, WarpTile>;
 
@@ -394,15 +394,15 @@ public:
         }();
 
         using BlockGemmPolicy =
-            ck_tile::BlockGemmARegBSmemCRegV2CustomPolicy<scalar_t, scalar_t, acc_t, BlockWarps, decltype(warp_gemm)>;
+            ck_tile::BlockGemmASmemBSmemCRegV1CustomPolicy<scalar_t, scalar_t, acc_t, BlockWarps, decltype(warp_gemm)>;
 
-        return ck_tile::BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
+        return ck_tile::BlockGemmASmemBSmemCRegV1<GemmProblem, BlockGemmPolicy>{};
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto GetKVBlockGemm()
     {
         using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN1, Traits::kBlockK1>;
-        using BlockWarps    = ck_tile::sequence<Traits::kNumWarps, 1, 1>;
+        using BlockWarps    = ck_tile::sequence<2, Traits::kNumWarps / 2, 1>;
         using WarpTile      = ck_tile::sequence<16, 16, 16>;
         using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, WarpTile>;
 
@@ -413,7 +413,7 @@ public:
 
         auto warp_gemm = [&]()
         {
-            if constexpr(std::is_same_v<scalar_t, ck_tile::fp16_t> && std::is_same_v<acc_t, float>)
+            if constexpr(std::is_same_v<scalar_t, ck_tile::fp8_t> && std::is_same_v<acc_t, float>)
             {
                 return ck_tile::WarpGemmMfmaFp8Fp8F32M32N32K16SwizzleBTransposedCDistribution<>{};
             }
@@ -441,7 +441,7 @@ public:
         using BlockGemm = ck_tile::remove_cvref_t<decltype(GetQRegKBlockGemm())>;
 
         return BlockGemm::template MakeABlockTileDistribution<
-            Traits::kBlockM0,
+            Traits::kBlockM,
             Traits::kK0InReg>();
     }
 
@@ -748,7 +748,7 @@ CK_TILE_DEVICE static auto MakeVDram(
 
 template <typename Policy, typename Lengths, typename scalar_t>
 CK_TILE_DEVICE static auto MakeLseAccDram(
-    const scalar_t* p_data,
+    scalar_t* p_data,
     const Lengths&  window_lengths,
     const int32_t   size_s)
 {
@@ -769,7 +769,7 @@ CK_TILE_DEVICE static auto MakeLseAccDram(
 
 template <typename Policy, typename scalar_t>
 CK_TILE_DEVICE static auto MakeOutAccDram(
-    const scalar_t* p_data,
+    scalar_t* p_data,
     const int32_t   size_s,
     const int32_t   stride_s)
 {
@@ -790,7 +790,7 @@ CK_TILE_DEVICE static auto MakeOutAccDram(
 
 template <typename Policy, typename Lengths, typename scalar_t>
 CK_TILE_DEVICE static auto MakeLseDram(
-    const scalar_t* p_data,
+    scalar_t* p_data,
     const Lengths&  window_lenghts,
     const int32_t   size_s)
 {
@@ -809,7 +809,7 @@ CK_TILE_DEVICE static auto MakeLseDram(
 
 template <typename Policy, typename scalar_t>
 CK_TILE_DEVICE static auto MakeOutDram(
-    const scalar_t* p_data,
+    scalar_t* p_data,
     const int32_t   size_s,
     const int32_t   stride_s)
 {
@@ -1006,7 +1006,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
     //
     constexpr int32_t k00_loops = Traits::kK0InReg / Traits::kBlockK0;      // #loop for Q in reg
     constexpr int32_t k01_loops = Traits::kK0InSmem / Traits::kBlockK0;     // #loop for Q in smem
-    constexpr int32_t k1_loops  = Traits::kBlockN0 / Traits::kBlockN1;
+    constexpr int32_t k1_loops  = Traits::kBlockN0 / Traits::kBlockK1;
     static_assert(k00_loops >= 2);
     static_assert(k1_loops  >= 1);
 
@@ -1053,7 +1053,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
                 ck_tile::get_slice_tile(
                     q_reg,
                     ck_tile::sequence<0, (k00_loops - 2) * Traits::kBlockK0>{},
-                    ck_tile::sequence<Traits::kBlockM0, (k00_loops - 1) * Traits::kBlockK0>{}),
+                    ck_tile::sequence<Traits::kBlockM, (k00_loops - 1) * Traits::kBlockK0>{}),
                 k_lds_window);
 
         ck_tile::block_sync_lds();
@@ -1069,7 +1069,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
                 ck_tile::get_slice_tile(
                     q_reg,
                     ck_tile::sequence<0, (k00_loops - 1) * Traits::kBlockK0>{},
-                    ck_tile::sequence<Traits::kBlockM0, k00_loops * Traits::kBlockK0>{}),
+                    ck_tile::sequence<Traits::kBlockM, k00_loops * Traits::kBlockK0>{}),
                 k_lds_window);
 
         // GEMM_01 for Q in smem
@@ -1147,7 +1147,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
             [&](auto id0)
             {
                 constexpr auto i = ck_tile::make_tuple(id0);
-                auto row_max  = scale_s * GetValidatedMax(m[i]);
+                auto row_max  = scale_s * GetValidatedMax<Mask::IsMasking>(m[i]);
                 ck_tile::sweep_tile_span(
                     p_spans[ck_tile::number<1>{}],
                     [&](auto id1)
@@ -1168,11 +1168,11 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
             [&](auto id0)
             {
                 constexpr auto i = ck_tile::make_tuple(id0);
-                const auto row_max = scale_s * GetValidatedMax(m[i]);
+                const auto row_max = scale_s * GetValidatedMax<Mask::IsMasking>(m[i]);
                 const auto temp_i  = ck_tile::exp2(scale_s * m_old[i] - row_max);
                 l(i) = temp_i * l[i] + rowsum_p[i];
                 ck_tile::sweep_tile_span(
-                    p_spans[ck_tile::number<1>{}],
+                    o_spans[ck_tile::number<1>{}],
                     [&](auto id1)
                     {
                         constexpr auto ij = ck_tile::make_tuple(id0, id1);
@@ -1200,11 +1200,11 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
                 const auto v = ck_tile::load_tile(v_dram_window_); // load next v
                 ck_tile::block_sync_lds();
                 gemm_1(o_acc,
-                        ck_tile::get_slice_tile(
-                            p_intermedia,
-                            ck_tile::sequence<0, k1_id * Traits::kBlockK1>{},
-                            ck_tile::sequence<Traits::kBlockM, (k1_id + 1) * Traits::kBlockK1>{}),
-                        v_lds_window);
+                       ck_tile::get_slice_tile(
+                           p,
+                           ck_tile::sequence<0, k1_id * Traits::kBlockK1>{},
+                           ck_tile::sequence<Traits::kBlockM, (k1_id + 1) * Traits::kBlockK1>{}),
+                       v_lds_window);
                 ck_tile::block_sync_lds();
                 auto v_shuffled = ck_tile::make_static_distributed_tensor<scalar_t>(
                     Policy::MakeShuffledVRegBlockDescriptor());
@@ -1223,9 +1223,9 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
         ck_tile::block_sync_lds();
         gemm_1(o_acc,
                ck_tile::get_slice_tile(
-                    p_intermedia,
+                    p,
                     ck_tile::sequence<0, (k1_loops - 1) * Traits::kBlockK1>{},
-                    ck_tile::sequence<Traits::kBlockM, Traits::kBlockK1>{}),
+                    ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0>{}),
                v_lds_window);
         ck_tile::block_sync_lds();
     }
@@ -1316,8 +1316,8 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
         params.p_block_table, params.block_table_batch_stride, params.page_block_size);
     
     using Mask = std::conditional_t<kIsCausal,
-                                    ck_tile::GenericAttentionMask<true, false>,
-                                    ck_tile::GenericAttentionMask<false>>;
+                                    ck_tile::SimplifiedGenericAttentionMask<true>,
+                                    ck_tile::SimplifiedGenericAttentionMask<false>>;
     Mask mask = kIsCausal ?
                 ck_tile::make_generic_attention_mask_from_lr_window<Mask>(-1, -1, params.size_s, seqlen_k, true) :
                 Mask{params.size_s, seqlen_k};
@@ -1328,10 +1328,10 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                            int64_t(hqid) * params.stride_h_lseacc +     // head offset
                            int64_t(bid) * params.stride_b_lseacc +      // batch offset
                            int64_t(split_id) * params.stride_sp_lseacc; // split offset
-        scalar_t* p_out_acc = reinterpret_cast<scalar_t*>(params.p_output_accum) +
-                              int64_t(hqid) * params.stride_h_oacc +      // head offset
-                              int64_t(bid) * params.stride_b_oacc +       // batch offset
-                              int64_t(split_id) * params.stride_sp_oacc;  // split offset
+        acc_t* p_out_acc = reinterpret_cast<acc_t*>(params.p_output_accum) +
+                           int64_t(hqid) * params.stride_h_oacc +      // head offset
+                           int64_t(bid) * params.stride_b_oacc +       // batch offset
+                           int64_t(split_id) * params.stride_sp_oacc;  // split offset
 
         auto lse_acc_dram_window_lengths =
             ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{});
@@ -1549,7 +1549,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const float          softmax_scale,
     const bool           is_causal)
 {
-    using Traits = FlashMlaPrefillKernelTrait<576, 512, 32, 32, 32, 4>;
+    using Traits = FlashMlaPrefillKernelTrait<576, 512, 32, 64, 32, 4>;
 
     torch::Tensor vcache = value_cache.data_ptr() ? value_cache : key_cache;
 

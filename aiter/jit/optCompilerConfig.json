@@ -668,6 +668,8 @@
         ],
         "isASM": "False",
         "verbose": "False",
+        "is_python_module": "True",
+        "is_standalone": "False",
         "blob_gen_cmd": "''"
     }
 }

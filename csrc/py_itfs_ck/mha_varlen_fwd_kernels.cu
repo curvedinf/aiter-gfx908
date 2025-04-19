@@ -126,7 +126,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          seqlens_k.data_ptr(), // seqstart_k
                          nullptr,              // seqlen_kpads
                          block_table_->data_ptr(), // page idx
-                         static_cast<ck_tile::index_t>(block_table_->size(0)),
+                         static_cast<ck_tile::index_t>(k.size(0)),
                          total_q,
                          total_k,
                          b,

@@ -13,6 +13,7 @@ fmha_fwd_traits get_ck_fmha_varlen_fwd_traits(const mask_info &mask,
                                               std::string dtype,
                                               int head_size_q,
                                               int head_size_v,
+                                              bool has_logits_soft_cap,
                                               bool has_dropout,
                                               bool has_lse,
                                               bool enable_alibi)
@@ -22,6 +23,7 @@ fmha_fwd_traits get_ck_fmha_varlen_fwd_traits(const mask_info &mask,
                            dtype,
                            true, // is_group_mode
                            true, // is_v_rowmajor
+                           has_logits_soft_cap,
                            mask.type,
                            enable_alibi ? bias_enum::alibi : bias_enum::no_bias,
                            has_lse,
@@ -33,6 +35,7 @@ fmha_fwd_splitkv_traits get_ck_fmha_varlen_fwd_splitkv_traits(const mask_info &m
                                                               std::string dtype,
                                                               int head_size_q,
                                                               int head_size_v,
+                                                              bool has_logits_soft_cap,
                                                               bool has_lse,
                                                               bool enable_alibi)
 {
@@ -41,6 +44,7 @@ fmha_fwd_splitkv_traits get_ck_fmha_varlen_fwd_splitkv_traits(const mask_info &m
                                    dtype,
                                    true, // is_group_mode
                                    true, // is_v_rowmajor
+                                   has_logits_soft_cap,
                                    mask.type,
                                    enable_alibi ? bias_enum::alibi : bias_enum::no_bias,
                                    has_lse,
@@ -68,6 +72,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                                           at::Tensor softmax_lse,
                                           at::Tensor dropout_randval,
                                           float softmax_scale,
+                                          float logits_soft_cap,
                                           float p_dropout,
                                           std::pair<uint64_t*, uint64_t*> drop_seed_offset)
 {
@@ -136,6 +141,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          softmax_scale, // scale_s
                          1,             // scale_p
                          1,             // scale_o
+                         logits_soft_cap,
                          stride_q,
                          stride_k,
                          stride_v,
@@ -175,6 +181,7 @@ fmha_fwd_splitkv_args get_ck_fmha_varlen_fwd_splitkv_args(bool has_lse,
                                                           const int page_block_size,
                                                           const int num_splits,
                                                           float softmax_scale,
+                                                          float logits_soft_cap,
                                                           // device pointers
                                                           const at::Tensor q,
                                                           const at::Tensor k,
@@ -242,6 +249,8 @@ fmha_fwd_splitkv_args get_ck_fmha_varlen_fwd_splitkv_args(bool has_lse,
     args.scale_p = 1;
     args.scale_o = 1;
 
+    args.logits_soft_cap = logits_soft_cap;
+
     args.batch_stride_q = 0;
     args.stride_q = q.stride(0);
     args.nhead_stride_q = q.stride(1);
@@ -307,6 +316,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                int max_seqlen_k,
                float p_dropout,
                float softmax_scale,
+               float logits_soft_cap,
                bool zero_tensors,
                bool is_causal,
                int window_size_left,
@@ -427,6 +437,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
     // Otherwise the kernel will be launched from cuda:0 device
     at::cuda::CUDAGuard device_guard{q.device()};
 
+    bool has_logits_soft_cap = logits_soft_cap > 0.0f;
     bool has_lse = return_softmax_lse;
     bool has_dropout = p_dropout > 0.0f;
     if (has_dropout)
@@ -490,6 +501,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                     q_dtype_str,
                     head_size_q,
                     head_size_v,
+                    has_logits_soft_cap,
                     has_lse,
                     alibi_slopes_.has_value());
 
@@ -506,6 +518,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                     page_block_size,
                     num_splits,
                     softmax_scale,
+                    logits_soft_cap,
                     q,
                     k,
                     v,
@@ -531,6 +544,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                     q_dtype_str,
                     head_size_q,
                     head_size_v,
+                    has_logits_soft_cap,
                     has_dropout,
                     has_lse,
                     alibi_slopes_.has_value());
@@ -556,6 +570,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                     softmax_lse,
                     p,
                     softmax_scale,
+                    logits_soft_cap,
                     p_dropout,
                     drop_seed_offset);
 

@@ -31,7 +31,7 @@ struct FlashMlaPrefillKernelTrait
     static constexpr int32_t kBlockN0                   = kBlockN0_;
     static constexpr int32_t kBlockN1                   = kBlockN1_;
     static constexpr int32_t kBlockK0                   = 32;
-    static constexpr int32_t kBlockK1                   = kBlockN0;
+    static constexpr int32_t kBlockK1                   = 32;
     static constexpr int32_t kFixedOverheadNumBlocks    = 5;
     static constexpr int32_t kMaxBatchSize              = 4096;
     static constexpr int32_t kCuReuse                   = 2;
@@ -402,7 +402,7 @@ public:
     CK_TILE_HOST_DEVICE static constexpr auto GetKVBlockGemm()
     {
         using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN1, Traits::kBlockK1>;
-        using BlockWarps    = ck_tile::sequence<2, Traits::kNumWarps / 2, 1>;
+        using BlockWarps    = ck_tile::sequence<Traits::kNumWarps, 1, 1>;
         using WarpTile      = ck_tile::sequence<16, 16, 16>;
         using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, WarpTile>;
 
@@ -1192,6 +1192,8 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
         page_block_v_id =
             v_page_block_navigator.move_tile_window(page_block_v_id, v_dram_window, {0, Traits::kBlockK1});
 
+        const auto p = ck_tile::cast_tile<scalar_t>(p_intermedia);
+
         if constexpr (k1_loops > 1)
         {
             ck_tile::static_for<0, k1_loops - 1, 1>{}([&,
@@ -1540,7 +1542,7 @@ int32_t calculate_num_splits(
 }
 
 std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
-    torch::Tensor& query,
+    torch::Tensor&       query,
     const torch::Tensor& key_cache,
     const torch::Tensor& value_cache,
     const int32_t        head_size_v,
@@ -1549,7 +1551,8 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const float          softmax_scale,
     const bool           is_causal)
 {
-    using Traits = FlashMlaPrefillKernelTrait<576, 512, 32, 64, 32, 4>;
+    //                                        dqk  dv   m0  n0  n1  #warp
+    using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 32, 32, 4>;
 
     torch::Tensor vcache = value_cache.data_ptr() ? value_cache : key_cache;
 
@@ -1566,26 +1569,20 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const int32_t page_block_size = key_cache.size(1);
     const int32_t num_heads_k = key_cache.size(2);
 
-    const int32_t num_groups = num_heads_q / num_heads_k;
-    const int32_t seqlen_q = seqlen_q_ori * num_groups;
-
-    query = query.reshape({batch_size, seqlen_q_ori, num_heads_k, num_groups, head_size}).transpose(2, 3)
-                .reshape({batch_size, seqlen_q_ori, num_heads_q, head_size});
-
     // CHECK_SHAPE(query, batch_size, seqlen_q, num_heads, head_size);
     // CHECK_SHAPE(key_cache, num_blocks, page_block_size, num_heads, head_size);
 
     /// TODO: transpose before return!!! But it may not be required.
-    auto output = torch::empty({batch_size, seqlen_q, num_heads_q, head_size_v}, opts);
-    auto softmax_lse = torch::empty({batch_size, num_heads_q, seqlen_q}, opts.dtype(torch::kFloat32));
+    auto output = torch::empty({batch_size, num_heads_q, seqlen_q_ori, head_size_v}, opts);
+    auto softmax_lse = torch::empty({batch_size, num_heads_q, seqlen_q_ori}, opts.dtype(torch::kFloat32));
 
     torch::Tensor softmax_lseaccum;
     torch::Tensor output_accum;
-    int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads_q, seqlen_q);
+    int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads_q, seqlen_q_ori);
     if (num_splits > 1)
     {
-        softmax_lseaccum = torch::empty({batch_size, num_heads_q, num_splits, seqlen_q}, opts.dtype(torch::kFloat32));
-        output_accum = torch::empty({batch_size, num_heads_q, num_splits, seqlen_q, head_size_v}, opts.dtype(torch::kFloat32));
+        softmax_lseaccum = torch::empty({batch_size, num_heads_q, num_splits, seqlen_q_ori}, opts.dtype(torch::kFloat32));
+        output_accum = torch::empty({batch_size, num_heads_q, num_splits, seqlen_q_ori, head_size_v}, opts.dtype(torch::kFloat32));
     }
 
     FlashMlaPrefillFwdParams params = {};
@@ -1599,11 +1596,11 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.p_value            = vcache.data_ptr();
     params.p_output           = output.data_ptr();
     params.p_softmax_lse      = softmax_lse.data_ptr();
-    params.p_softmax_lseaccum = softmax_lseaccum.data_ptr();
-    params.p_output_accum     = output_accum.data_ptr();
+    params.p_softmax_lseaccum = (num_splits > 1) ? softmax_lseaccum.data_ptr() : nullptr;
+    params.p_output_accum     = (num_splits > 1) ? output_accum.data_ptr() : nullptr;
 
     params.size_b                   = batch_size;
-    params.size_s                   = seqlen_q;
+    params.size_s                   = seqlen_q_ori;
     params.size_h                   = num_heads_q;
     params.hq_hk_ratio              = num_heads_q / num_heads_k;
     params.block_table_batch_stride = block_table.stride(0);
@@ -1623,13 +1620,13 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.stride_s_o = output.stride(1);
     params.stride_h_o = output.stride(2);
     /// TODO: not all of the following params are required?
-    params.stride_b_lseacc = softmax_lseaccum.stride(0);
-    params.stride_h_lseacc = softmax_lseaccum.stride(1);
-    params.stride_sp_lseacc = softmax_lseaccum.stride(2);
-    params.stride_b_oacc = output_accum.stride(0);
-    params.stride_h_oacc = output_accum.stride(1);
-    params.stride_sp_oacc = output_accum.stride(2);
-    params.stride_s_oacc = output_accum.stride(3);
+    params.stride_b_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(0) : 0;
+    params.stride_h_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(1) : 0;
+    params.stride_sp_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(2) : 0;
+    params.stride_b_oacc = (num_splits > 1) ? output_accum.stride(0) : 0;
+    params.stride_h_oacc = (num_splits > 1) ? output_accum.stride(1) : 0;
+    params.stride_sp_oacc = (num_splits > 1) ? output_accum.stride(2) : 0;
+    params.stride_s_oacc = (num_splits > 1) ? output_accum.stride(3) : 0;
 
     TORCH_CHECK(params.p_key == params.p_value, "Key and value are expected as the same thing for now.");
 
@@ -1649,5 +1646,6 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     // );
 
     /// TODO: transpose before return!!!
+    output = output.transpose(1,2);
     return {output, softmax_lse};
 }

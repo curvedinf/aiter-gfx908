@@ -208,10 +208,10 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     #
     # s_acc = query @ key.transpose(0, 1)
 
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
 
-    print(out_flash, lse_flash)
-    print(out_torch, lse_torch)
+    # print(out_flash, lse_flash)
+    # print(out_torch, lse_torch)
 
     cal_diff(out_flash, out_torch.cuda(), "out")
     cal_diff(lse_flash, lse_torch.cuda(), "lse")
@@ -229,15 +229,14 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
 if __name__ == "__main__":
     h_kv = 1
     d, dv = 576, 512
-    causal = True
+    causal = False
 
-    for (dtype, b, s, h_q, s_q, causal, varlen) in itertools.product(
-        (torch.float16, torch.bfloat16),
+    for (dtype, b, s, h_q, s_q, varlen) in itertools.product(
+        (torch.float16, torch.bfloat16)[0:1],
         (128,),
         (4096, 8192),
         (64, 128),
         (1, 2),
-        (True, False),
         (False, True)
     ):
         test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen)

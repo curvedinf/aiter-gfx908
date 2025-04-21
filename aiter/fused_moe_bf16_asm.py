@@ -11,6 +11,8 @@ import aiter
 from aiter import logger
 from aiter import pertoken_quant, get_hip_quant, get_torch_quant
 from aiter import ActivationType, QuantType
+from aiter import pertoken_quant, get_hip_quant, get_torch_quant
+from aiter import ActivationType, QuantType
 BLOCK_SIZE_M = 32
 
 
@@ -288,7 +290,8 @@ def ck_moe_2stages(
     a2_scale=None,  # [1]
     block_size=None,
     expert_mask=None,
-    activation=ActivationType.Silu
+    activation=ActivationType.Silu,
+    doweight_stage1=False,
 ):
     
     quant_func = get_hip_quant(quant_type)
@@ -323,20 +326,40 @@ def ck_moe_2stages(
     else:
         act_op = 0  # gelu_and_mul
 
-    aiter.ck_moe_stage1(a1, w1, w2,
-                        sorted_ids, sorted_expert_ids, num_valid_ids,
-                        a2, topk,
-                        fc1_scale, a1_scale, block_size, act_op)
+    aiter.ck_moe_stage1(
+        a1, 
+        w1, 
+        w2,
+        sorted_ids, 
+        sorted_expert_ids, 
+        num_valid_ids,
+        a2, topk,
+        fc1_scale, 
+        a1_scale, 
+        block_size, 
+        sorted_weights if doweight_stage1 else None,
+        act_op
+    )
 
     if quant_type == QuantType.per_Token:
         a2 = a2.view(M, -1)
     a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
     a2 = a2.view(M, topk, -1)
 
-    aiter.ck_moe_stage2(a2, w1, w2, sorted_ids,
-                        sorted_expert_ids, sorted_weights,
-                        num_valid_ids, moe_buf, topk, fc2_scale, a2_scale, block_size)
-
+    aiter.ck_moe_stage2(
+        a2, 
+        w1,
+        w2, 
+        sorted_ids,
+        sorted_expert_ids,
+        num_valid_ids, 
+        moe_buf, 
+        topk, 
+        fc2_scale, 
+        a2_scale, 
+        block_size, 
+        sorted_weights if not doweight_stage1 else None,
+    )
     return moe_buf
 
 

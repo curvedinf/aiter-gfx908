@@ -132,7 +132,8 @@ def mha_batch_prefill(
     k: Tensor,
     v: Tensor,
     cu_seqlens_q: Tensor,
-    cu_seqlens_k: Tensor,
+    kv_indptr: Tensor,
+    kv_page_indices: Tensor,
     max_seqlen_q: int,
     max_seqlen_k: int,
     dropout_p: float,
@@ -145,7 +146,6 @@ def mha_batch_prefill(
     return_softmax_lse: bool,
     return_dropout_randval: bool,
     out: Optional[Tensor] = None,
-    block_table: Optional[Tensor] = None,
     alibi_slopes: Optional[Tensor] = None,
     gen: Optional[Generator] = None,
 ): ...

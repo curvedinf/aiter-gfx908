@@ -41,11 +41,12 @@ protected:
         size_t kv_last_page_lens_size = batch_size * sizeof(int32_t);
         size_t logits_size = batch_size * num_kv_splits * num_heads * v_head_dim * sizeof(float);
         size_t attn_lse_size = batch_size * num_kv_splits * num_heads * sizeof(float);
-
+        size_t qo_indptr_size = (batch_size + 1) * sizeof(int32_t);
         // Allocate device memory
         HIP_CHECK(hipMalloc(&q_ptr, q_size));
         HIP_CHECK(hipMalloc(&kv_buffer_ptr, kv_size));
         HIP_CHECK(hipMalloc(&output_ptr, output_size));
+        HIP_CHECK(hipMalloc(&qo_indptr_ptr, qo_indptr_size));
         HIP_CHECK(hipMalloc(&kv_indptr_ptr, kv_indptr_size));
         HIP_CHECK(hipMalloc(&kv_page_indices_ptr, kv_page_indices_size));
         HIP_CHECK(hipMalloc(&kv_last_page_lens_ptr, kv_last_page_lens_size));
@@ -56,7 +57,8 @@ protected:
         std::vector<__hip_bfloat16> h_q(batch_size * num_heads * head_size);
         std::vector<__hip_bfloat16> h_kv(num_pages * page_size * num_kv_heads * head_size);
         std::vector<__hip_bfloat16> h_output(batch_size * num_heads * v_head_dim, __hip_bfloat16(-1.0f));
-        std::vector<int32_t> h_kv_indptr = {0, seq_len};
+        std::vector<int32_t> h_qo_indptr{0, seq_len};
+        std::vector<int32_t> h_kv_indptr{0, seq_len};
         std::vector<int32_t> h_kv_page_indices(seq_len);
         std::vector<int32_t> h_kv_last_page_lens(batch_size, 1);
         std::vector<float> h_logits(batch_size * num_kv_splits * num_heads * v_head_dim, 0.0f);
@@ -84,6 +86,7 @@ protected:
         HIP_CHECK(hipMemcpy(kv_buffer_ptr, h_kv.data(), kv_size, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(output_ptr, h_output.data(), output_size, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(kv_indptr_ptr, h_kv_indptr.data(), kv_indptr_size, hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(qo_indptr_ptr, h_qo_indptr.data(), qo_indptr_size, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(kv_page_indices_ptr, h_kv_page_indices.data(), kv_page_indices_size, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(kv_last_page_lens_ptr, h_kv_last_page_lens.data(), kv_last_page_lens_size, hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpy(logits_ptr, h_logits.data(), logits_size, hipMemcpyHostToDevice));
@@ -104,6 +107,7 @@ protected:
         HIP_CHECK(hipFree(q_ptr));
         HIP_CHECK(hipFree(kv_buffer_ptr));
         HIP_CHECK(hipFree(output_ptr));
+        HIP_CHECK(hipFree(qo_indptr_ptr));
         HIP_CHECK(hipFree(kv_indptr_ptr));
         HIP_CHECK(hipFree(kv_page_indices_ptr));
         HIP_CHECK(hipFree(kv_last_page_lens_ptr));
@@ -123,7 +127,7 @@ protected:
 
     // Device pointers
     void *q_ptr, *kv_buffer_ptr, *output_ptr;
-    void *kv_indptr_ptr, *kv_page_indices_ptr, *kv_last_page_lens_ptr;
+    void *qo_indptr_ptr, *kv_indptr_ptr, *kv_page_indices_ptr, *kv_last_page_lens_ptr;
     void *logits_ptr, *attn_lse_ptr;
 };
 
@@ -137,9 +141,11 @@ TEST_F(AsmMLADecodeFwdTest, BasicFunctionality) {
         std::nullopt,  // folder
         q_ptr,
         kv_buffer_ptr,
+        qo_indptr_ptr,
         kv_indptr_ptr,
         kv_page_indices_ptr,
         kv_last_page_lens_ptr,
+        1,
         softmax_scale,
         logits_ptr,
         attn_lse_ptr,

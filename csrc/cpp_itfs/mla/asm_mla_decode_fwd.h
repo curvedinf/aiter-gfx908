@@ -8,9 +8,11 @@ void asm_mla_decode_fwd(
                     std::optional<std::string> folder, 
                     void* q,                 //   [num_seqs, num_heads, head_size]
                     void* kv_buffer,                //   [num_page, page_size, num_kv_heads, head_size]
+                    void* qo_indptr,         //   [batch_size+1]
                     void* kv_indptr,         //   [batch_size+1]
                     void* kv_page_indices,   //   [num_page_used]
                     void* kv_last_page_lens, //   [batch_size]
+                    int max_seqlen_q,
                     float softmax_scale,
                     // following are output
                     void* logits, //[batch_size, num_kv_splits, num_heads, v_head_dim]

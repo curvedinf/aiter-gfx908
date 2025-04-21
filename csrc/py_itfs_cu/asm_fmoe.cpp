@@ -76,7 +76,7 @@ public:
     FMoeKernel(const char *name, const char *hsaco, uint32_t sub_GU = 512)
     {
         const char *AITER_ASM_DIR = std::getenv("AITER_ASM_DIR");
-        std::cout << "hipModuleLoad: " << (std::string(AITER_ASM_DIR) + hsaco).c_str() << " GetFunction: " << name;
+        std::cout << "[aiter] hipModuleLoad: " << (std::string(AITER_ASM_DIR) + hsaco).c_str() << " GetFunction: " << name;
         HIP_CALL(hipModuleLoad(&module, (std::string(AITER_ASM_DIR) + hsaco).c_str()));
         HIP_CALL(hipModuleGetFunction(&kernel_func, module, name));
         std::cout << " Success" << std::endl;
@@ -627,8 +627,13 @@ void fmoe_g1u1_tkw1(torch::Tensor &out,                            // [token_cnt
     };
     FMoeKernel *impl_ptr = nullptr;
     int inter_dim = down.size(2);
-    int sub_X_cnt = sorted_expert_ids.size(0);
     static std::unordered_map<std::string, std::unique_ptr<FMoeKernel>> impl_ptr_map;
+
+    const int token_cnt = input.size(0);
+    const int block_m = 32; // fmoe sorting kernel and fmoe kernel only support 32 for now
+    const int estimated_sub_X_cnt = (token_cnt * topk + block_m - 1) / block_m;
+
+
     if (input.dtype() == at::ScalarType::Float8_e4m3fnuz)
     {
         static std::unordered_map<int, FMoeKernelConfig> silu_kernel_fp8_configs = {
@@ -649,7 +654,7 @@ void fmoe_g1u1_tkw1(torch::Tensor &out,                            // [token_cnt
             {192, {"fmoe_fp8_g1u1_subGU_192_gelu_tkw1", "fmoe/gelu/fmoe_fp8_g1u1_subGU_192_gelu_tkw1.co", 192}},
             {128, {"fmoe_fp8_g1u1_subGU_128_gelu_tkw1", "fmoe/gelu/fmoe_fp8_g1u1_subGU_128_gelu_tkw1.co", 128}}};
 
-        int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 448, 384, 320, 256, 192, 128});
+        int selectedTile = get_heuristic_tile(inter_dim, estimated_sub_X_cnt, {512, 448, 384, 320, 256, 192, 128});
 
         std::unordered_map<int, FMoeKernelConfig> *config_map = nullptr;
         if (fc2_smooth_scale.has_value())
@@ -813,12 +818,13 @@ void fmoe_fp8_blockscale_g1u1(torch::Tensor &out,               // [token_cnt, d
                               torch::Tensor &sorted_expert_ids, // [max_num_m_blocks]
                               torch::Tensor &num_valid_ids,     // [1]
                               uint32_t topk,                    //
+                              torch::Tensor &input_scale,       // [expert, 1, dim]
                               torch::Tensor &fc1_scale,         // [expert, 1, inter_dim]
                               torch::Tensor &fc2_scale,         // [expert, 1, dim]
-                              torch::Tensor input_scale,        // [expert, 1, dim]
-                              int fc_scale_blkn = 128,
-                              int fc_scale_blkk = 128,
-                              std::optional<torch::Tensor> fc2_smooth_scale = std::nullopt) // [expert, 1, inter_dim])
+                              int fc_scale_blkn,
+                              int fc_scale_blkk,
+                              std::optional<torch::Tensor> fc2_smooth_scale,
+                              ActivationType activation)
 {
     FMoeKernel *impl_ptr = nullptr;
     int inter_dim = down.size(2);

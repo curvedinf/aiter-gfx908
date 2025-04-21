@@ -9,7 +9,7 @@ import argparse
 import time
 import os
 from aiter import ActivationType, QuantType
-from aiter.jit.core import AITER_ASM_DIR
+from aiter.jit.core import get_asm_dir
 from aiter.fused_moe import (
     fused_topk,
     moe_sorting,
@@ -163,7 +163,7 @@ def go(
         tasks = []
         tasks_ck = []
 
-        kernels_list_csv = f"{AITER_ASM_DIR}/fmoe_2stages/fmoe_stage1_bf16_pertoken{{quantDtype}}{{extraInfo}}_g1u1.csv"
+        kernels_list_csv = f"{get_asm_dir()}/fmoe_2stages/fmoe_stage1_bf16_pertoken{{quantDtype}}{{extraInfo}}_g1u1.csv"
 
         def get_kernels_dict(file):
             if not os.path.exists(file):

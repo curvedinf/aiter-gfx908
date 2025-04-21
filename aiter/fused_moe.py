@@ -12,7 +12,7 @@ import aiter
 from aiter import logger
 from aiter import ActivationType, QuantType
 from aiter import get_hip_quant, get_torch_quant
-from aiter.jit.core import AITER_ROOT_DIR, PY, AITER_ASM_DIR, bd_dir, mp_lock
+from aiter.jit.core import AITER_ROOT_DIR, PY, get_asm_dir, bd_dir, mp_lock
 
 BLOCK_SIZE_M = 32
 
@@ -321,7 +321,7 @@ def get_2stage_cfgs(
             )
         logger.info("\033[34m Start tuning fmoe")
         os.system(
-            f"{PY} {AITER_ASM_DIR}/fmoe_2stages/tune.py -i {untune_file} -o {tune_file}"
+            f"{PY} {get_asm_dir()}/fmoe_2stages/tune.py -i {untune_file} -o {tune_file}"
         )
 
     def FinalFunc():

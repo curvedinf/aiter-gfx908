@@ -596,6 +596,45 @@ def ck_stage1(
         aiter.gelu_and_mul(out, tmp)
     return out
 
+def ck_stage1_tune(
+    input,  # [token, model_dim]
+    w1,  # [E, inter_dim*2, model_dim]
+    w2,  # [E, model_dim, inter_dim]
+    sorted_ids,  # [max_num_tokens_padded]
+    sorted_expert_ids,  # [max_num_m_blocks]
+    num_valid_ids,  # [1]
+    out,  # [token_num, topk, inter_dim]
+    block_m=32,
+    activation=ActivationType.Silu,
+    a1_scale=None,
+    w1_scale=None,
+):
+    topk = out.shape[1]
+    expert, topk, _ = out.shape
+    # tmp = torch.empty_like(out)
+    dtype = out.dtype
+    device = out.device
+    tmp = torch.empty((expert, topk, w1.shape[1]), dtype=dtype, device=device)
+    aiter.moe_stage1(
+        input,
+        w1,
+        w2,
+        sorted_ids,
+        sorted_expert_ids,
+        num_valid_ids,
+        tmp,
+        topk,
+        "",#"ck_moe_stage1_B16_F8_F8_PerTensor_256x128x128x128_2x2_16_MulABScale_Nswizzle0_interwave_v1",
+        w1_scale,
+        a1_scale,
+        block_m,
+    )
+
+    if activation == ActivationType.Silu:
+        aiter.silu_and_mul(out, tmp)
+    else:
+        aiter.gelu_and_mul(out, tmp)
+    return out
 
 def torch_moe(
     hidden_states,

@@ -234,3 +234,37 @@ def ck_moe_stage2(
     a2_scale: Optional[Tensor] = None,
     block_m: Optional[int] = 32,
 ): ...
+
+
+@compile_ops("module_moe_2stages")
+def moe_stage1(
+    hidden_states: Tensor,
+    w1: Tensor,
+    w2: Tensor,
+    sorted_token_ids: Tensor,
+    sorted_expert_ids: Tensor,
+    num_valid_ids: Tensor,
+    out: Tensor,
+    topk: int,
+    kernelName: str,
+    w1_scale: Optional[Tensor] = None,
+    a1_scale: Optional[Tensor] = None,
+    block_m: Optional[int] = 32,
+): ...
+
+@compile_ops("module_moe_2stages")
+def moe_stage2(
+    inter_states: Tensor,
+    w1: Tensor,
+    w2: Tensor,
+    sorted_token_ids: Tensor,
+    sorted_expert_ids: Tensor,
+    sorted_weights: Tensor,
+    num_valid_ids: Tensor,
+    out: Tensor,
+    topk: int,
+    kernelName: str,
+    w2_scale: Optional[Tensor] = None,
+    a2_scale: Optional[Tensor] = None,
+    block_m: Optional[int] = 32,
+): ...

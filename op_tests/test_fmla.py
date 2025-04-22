@@ -80,41 +80,16 @@ def scaled_dot_product_attention(query, key, value, h_q, h_kv, is_causal=False):
     value = value.float()
     key = key.repeat_interleave(h_q // h_kv, dim=0)
     value = value.repeat_interleave(h_q // h_kv, dim=0)
-    attn_weight = query @ key.transpose(-2, -1)# / math.sqrt(query.size(-1))
-
-    scale = 1 / math.sqrt(query.size(-1))
-    scale_log2 = scale * math.log2(math.e)
+    attn_weight = query @ key.transpose(-2, -1)
+    attn_weight = attn_weight / math.sqrt(query.size(-1))
     if is_causal:
         s_q = query.shape[-2]
         s_k = key.shape[-2]
-        attn_bias = torch.zeros(s_q, s_k, dtype=query.dtype).cuda()
-        temp_mask = torch.ones(s_q, s_k, dtype=torch.bool).tril(diagonal=s_k - s_q).cuda()
+        attn_bias = torch.zeros(s_q, s_k, dtype=query.dtype)
+        temp_mask = torch.ones(s_q, s_k, dtype=torch.bool).tril(diagonal=s_k - s_q)
         attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
         attn_bias.to(query.dtype)
         attn_weight += attn_bias
-
-        bq = query[:, 0]
-        print("bq", bq)
-        bk = key[0][-16:]
-        print("bk", bk)
-        block_tmp = bq @ bk.transpose(0, 1)
-        print("block_tmp", block_tmp)
-
-        import pdb; pdb.set_trace()
-        block_tmp_masked = block_tmp + attn_bias[0, 0:16]
-        m = block_tmp_masked.max(-1).values
-        print("m", m) 
-        p_compute = 2 ** (scale_log2 * block_tmp_masked - scale_log2 * m.unsqueeze(-1)) 
-        print("p_compute", p_compute)
-        row_sum = p_compute.sum(-1).values
-        l = row_sum
-        print("l", l)
-        bv= value[0][-16:]
-        print("bv", bv)
-        oacc = p_compute @ bv 
-        print("oacc", oacc)
-
-
     lse = attn_weight.logsumexp(dim=-1)
     attn_weight = torch.softmax(attn_weight, dim=-1, dtype=torch.float32)
     return attn_weight @ value, lse
@@ -200,8 +175,8 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
             lse[i] = LSE
         return out, lse
 
-    out_flash, lse_flash = flash_mla()
     out_torch, lse_torch = ref_mla()
+    out_flash, lse_flash = flash_mla()
 
     # query = q[0][0]
     # key = blocked_k[63][48:64]
@@ -233,10 +208,11 @@ if __name__ == "__main__":
 
     for (dtype, b, s, h_q, s_q, varlen) in itertools.product(
         (torch.float16, torch.bfloat16)[0:1],
-        (128,),
+        (1,),
         (4096, 8192),
         (64, 128),
-        (1, 2),
+        # (1, 2),
+        (64,),
         (False, True)
     ):
         test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen)

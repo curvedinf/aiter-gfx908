@@ -221,17 +221,24 @@ def _attn_fwd_inner(
         # We start from end of seqlen_k so only the first iteration would need
         # to be checked for padding if it is not a multiple of block_n
         # TODO: This can be optimized to only be true for the padded block.
+        mask = tl.full([BLOCK_M, BLOCK_N], True, dtype=tl.int1)
         if MASK_STEPS:
             # If this is the last block / iteration, we want to
             # mask if the sequence length is not a multiple of block size
             # a solution is to always do BLOCK_M // BLOCK_N + 1 steps if not is_modulo_mn.
             # last step might get wasted but that is okay. check if this masking works For
             # that case.
-            if (start_n + BLOCK_N == block_max) and (n_extra_tokens != 0):
-                boundary_m = tl.full([BLOCK_M], seqlen_k, dtype=tl.int32)
-                size_n = start_n + OFFS_N[None, :]
-                mask = size_n < boundary_m[:, None]
-                qk = tl.where(mask, qk, float("-inf"))
+
+            # remove the old if condition
+            # if (start_n + BLOCK_N == block_max) and (n_extra_tokens != 0):
+            # Though this will unconditionally compute mask_partial at runtime,
+            # the causal for loop does not have the if-else block any more, which
+            # helps instruction scheduling and register pressure.
+            bound_cond = (start_n + BLOCK_N == block_max) and (n_extra_tokens != 0)
+            boundary_m = tl.full([BLOCK_M], seqlen_k, dtype=tl.int32)
+            size_n = start_n + OFFS_N[None, :]
+            mask_partial = size_n < boundary_m[:, None]
+            mask = tl.where(bound_cond, mask_partial, mask)
 
         # compute masks
         q_mask = (OFFS_M[:, None] < seqlen_q)
@@ -247,7 +254,9 @@ def _attn_fwd_inner(
         if IS_CAUSAL:
             causal_boundary = start_n + offs_n_causal
             causal_mask = OFFS_M[:, None] >= causal_boundary[None, :]
-            qk_scaled = tl.where(causal_mask, qk_scaled, float("-inf"))
+            mask = mask and causal_mask
+
+        qk_scaled = tl.where(mask, qk_scaled, float("-inf"))
 
         if alibi_slope is not None:
             # Compute the global position of each token within the sequence
@@ -354,9 +363,9 @@ def _attn_fwd(q_ptr: torch.Tensor,
             VARLEN: tl.constexpr,
 ):
     #calculate offsets
-    start_m = tl.program_id(0) #seqlen_q
+    off_z = tl.program_id(0) #batch
     off_q_head = tl.program_id(1)  #num_q_heads
-    off_z = tl.program_id(2) #batch
+    start_m = tl.program_id(2) #seqlen_q
 
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
@@ -727,17 +736,18 @@ def _flash_attn_forward(
 
 
     # Best config from ROCm/triton/python/perf-kernels/flash_attention.py::attn_fwd autotuning is BLOCK_M: 128, BLOCK_N: 64, waves_per_eu: 2, num_warps: 4, num_ctas: 1, num_stages: 1
+    # BLOCK_N=64 spills but has higher performance
     # Tuned for MI300x
     config = {
         'BLOCK_M': 128,
-        'BLOCK_N': 32, # BLOCK_N: 64 spills for _attn_fwd
+        'BLOCK_N': 64,
         'waves_per_eu': 2,
         'num_warps': 4,
         'num_ctas': 1,
         'num_stages': 1,
     }
 
-    grid = lambda META:(triton.cdiv(seqlen_q, META['BLOCK_M']), num_q_heads, batch)
+    grid = lambda META:(batch, num_q_heads, triton.cdiv(seqlen_q, META['BLOCK_M']))
     _attn_fwd[grid](q,
                     k,
                     v,

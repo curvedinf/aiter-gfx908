@@ -955,6 +955,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
     //
     const int32_t num_total_loop =
         ck_tile::integer_divide_ceil(seqlen_k_end - seqlen_k_start, Traits::kBlockN0);
+
     if constexpr (Mask::IsMasking)
     {
         if (num_total_loop <= 0)
@@ -1098,6 +1099,11 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
             // Tailing 1 tile of QK GEMM_01
             ck_tile::block_sync_lds();
             gemm_01(s_acc, q_lds_load_window, k_lds_window);
+
+            if constexpr (k01_loops > 1)
+            {
+                ck_tile::move_tile_window(q_lds_load_window, {0, -(k01_loops-1) * Traits::kBlockK0});
+            }
         }
 
         // prefetch load V tile
@@ -1297,7 +1303,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                               int64_t(hqid * params.stride_h_q) +   // head offset
                               int64_t(bid * params.stride_b_q);     // batch offset
 
-    const auto q_dram_complete = MakeQDram<Policy>(p_query, params.size_s,          params.stride_s_q);
+    const auto q_dram_complete = MakeQDram<Policy>(p_query, params.size_s,    params.stride_s_q);
     const auto k_dram_complete = MakeKDram<Policy, scalar_t>(nullptr, params.page_block_size, params.stride_s_k);
     const auto k_dram_last     = MakeKDram<Policy, scalar_t>(nullptr, last_block_size,        params.stride_s_k);
     const auto v_dram_complete = MakeVDram<Policy, scalar_t>(nullptr, params.page_block_size, params.stride_s_v);

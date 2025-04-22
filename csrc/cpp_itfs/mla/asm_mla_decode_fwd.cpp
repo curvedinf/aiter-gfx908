@@ -118,6 +118,12 @@ void asm_mla_decode_fwd(
                     const int v_head_dim,
                     const hipStream_t stream) {
   int gqa_ratio = num_heads / num_kv_heads;
+  if(num_kv_heads != 1){
+    throw invalid_argument("only support num_kv_heads==1 for now");
+  }
+  if(gqa_ratio == 16 && max_seqlen_q != 1){
+    throw invalid_argument("only support max_seqlen_q==1 when gqa_ratio==16");
+  }
   std::vector<std::string> args{std::to_string(gqa_ratio), std::to_string(page_size), q_dtype, kv_dtype, std::to_string(num_kv_splits), std::to_string(v_head_dim)};
   std::string func_name = get_default_func_name(MD_NAME, args);
   if(!folder){

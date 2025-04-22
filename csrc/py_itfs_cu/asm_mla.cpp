@@ -113,13 +113,13 @@ void mla_decode_stage1_asm_fwd(torch::Tensor &Q,                 //   [num_seqs,
         if (gqa_ratio == 128)
         {
             sub_Q = 128;
-            static AiterAsmKernel impl_a16w16_bf16_subQ128("_ZN5aiter41mla_dec_stage1_bf16_a16w16_subQ128_mqa128Ev", "/mla/mla_dec_stage1_bf16_a16w16_subQ128_mqa128.co");
+            static AiterAsmKernel impl_a16w16_bf16_subQ128("_ZN5aiter41mla_dec_stage1_bf16_a16w16_subQ128_mqa128E", "/mla/mla_dec_stage1_bf16_a16w16_subQ128_mqa128.co");
             impl_ptr = &impl_a16w16_bf16_subQ128;
         }
         else
         {
             sub_Q = 16;
-            static AiterAsmKernel impl_a16w16_bf16("_ZN5aiter39mla_dec_stage1_bf16_a16w16_subQ16_mqa16Ev", "/mla/mla_dec_stage1_bf16_a16w16_subQ16_mqa16.co");
+            static AiterAsmKernel impl_a16w16_bf16("_ZN5aiter39mla_dec_stage1_bf16_a16w16_subQ16_mqa16E", "/mla/mla_dec_stage1_bf16_a16w16_subQ16_mqa16.co");
             impl_ptr = &impl_a16w16_bf16;
         }
     }
@@ -198,12 +198,12 @@ void mla_prefill_asm_fwd(torch::Tensor &Q,                 //   [num_seqs, num_h
     {
         if (gqa_ratio == 16)
         {
-            static AiterAsmKernel impl_a16w16_bf16("_ZN5aiter39mla_pfl_bf16_a16w16_causal_subQ16_mqa16Ev", "/mla/mla_pfl_bf16_a16w16_causal_subQ16_mqa16.co");
+            static AiterAsmKernel impl_a16w16_bf16("_ZN5aiter39mla_pfl_bf16_a16w16_causal_subQ16_mqa16E", "/mla/mla_pfl_bf16_a16w16_causal_subQ16_mqa16.co");
             impl_ptr = &impl_a16w16_bf16;
         }
         else if (gqa_ratio == 128)
         {
-            static AiterAsmKernel impl_a16w16_bf16("_ZN5aiter34mla_pfl_bf16_a16w16_subQ128_mqa128Ev", "/mla/mla_pfl_bf16_a16w16_subQ128_mqa128.co");
+            static AiterAsmKernel impl_a16w16_bf16("_ZN5aiter41mla_pfl_bf16_a16w16_causal_subQ128_mqa128E", "/mla/mla_pfl_bf16_a16w16_causal_subQ128_mqa128.co");
             impl_ptr = &impl_a16w16_bf16;
         }
     }

@@ -46,7 +46,7 @@ void paged_attention_ragged(
         fmt::arg("fp8_kv_dtype", kv_cache_dtype), fmt::arg("out_dtype", dtype),
         fmt::arg("block_size", block_size),
         fmt::arg("alibi_enabled", alibi_enabled));
-    executeCmd(cmd);
+    execute_cmd(cmd);
   }
   run_lib(func_name, folder.value(), out_ptr, workspace_buffer_ptr, query_ptr, key_cache_ptr,
           value_cache_ptr, scale, num_seqs, num_kv_heads, num_heads,

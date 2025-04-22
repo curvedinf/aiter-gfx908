@@ -59,14 +59,14 @@ public:
 #define NAMED(x) NamedArg(#x, x)
 
 template<typename... Args>
-__inline__ std::string generateCmd(std::string& cmd, Args... args) {
+__inline__ std::string generate_cmd(std::string& cmd, Args... args) {
     std::stringstream ss;
     ss << cmd << " ";
     ((ss << NAMED(args).toString() << " "), ...);
     return ss.str();
 }
 
-__inline__ std::pair<std::string, int> executeCmd(const std::string& cmd) {
+__inline__ std::pair<std::string, int> execute_cmd(const std::string& cmd) {
     std::array<char, 128> buffer;
     std::string result;
     int exitCode;

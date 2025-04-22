@@ -123,10 +123,10 @@ void asm_mla_decode_fwd(
                     const hipStream_t stream) {
   int gqa_ratio = num_heads / num_kv_heads;
   if(num_kv_heads != 1){
-    throw invalid_argument("only support num_kv_heads==1 for now");
+    throw std::invalid_argument("only support num_kv_heads==1 for now");
   }
   if(gqa_ratio == 16 && max_seqlen_q != 1){
-    throw invalid_argument("only support max_seqlen_q==1 when gqa_ratio==16");
+    throw std::invalid_argument("only support max_seqlen_q==1 when gqa_ratio==16");
   }
   std::vector<std::string> args{std::to_string(gqa_ratio), std::to_string(page_size), q_dtype, kv_dtype, std::to_string(num_kv_splits), std::to_string(v_head_dim)};
   std::string func_name = get_default_func_name(MD_NAME, args);
@@ -147,7 +147,7 @@ void asm_mla_decode_fwd(
         fmt::arg("kv_dtype", kv_dtype),
         fmt::arg("num_kv_splits", num_kv_splits),
         fmt::arg("v_head_dim", v_head_dim));
-    executeCmd(cmd);
+    execute_cmd(cmd);
   }
   run_lib(func_name, folder.value(), q, kv_buffer, qo_indptr, kv_indptr, kv_page_indices, kv_last_page_lens, max_seqlen_q, softmax_scale, logits, attn_lse, output, num_seqs, num_heads, num_kv_heads, q_stride_0, kv_buffer_stride_0, attn_lse_stride_0, attn_lse_stride_1, attn_lse_stride_2, output_stride_0, output_stride_1, reinterpret_cast<const void*>(stream));
 }

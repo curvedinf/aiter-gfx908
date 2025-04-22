@@ -56,9 +56,11 @@ namespace aiter{
  *     std::nullopt,           // Use default folder
  *     q_ptr,                  // Query tensor
  *     kv_buffer_ptr,         // KV cache buffer
+ *     qo_indptr_ptr,         // Query output indices
  *     kv_indptr_ptr,         // KV indices
  *     kv_page_indices_ptr,   // Page indices
  *     kv_last_page_lens_ptr, // Last page lengths
+ *     max_seqlen_q,          // Maximum sequence length of query
  *     1.0f,                  // Softmax scale
  *     logits_ptr,           // Output logits
  *     attn_lse_ptr,         // Output LSE

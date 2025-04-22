@@ -313,7 +313,7 @@ public:
     CK_TILE_HOST_DEVICE static constexpr auto GetQRegKBlockGemm()
     {
         using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0, Traits::kBlockK0>;
-        using BlockWarps    = ck_tile::sequence<2, Traits::kNumWarps / 2, 1>;
+        using BlockWarps    = ck_tile::sequence<Traits::kNumWarps, 1, 1>;
         using WarpTile      = ck_tile::sequence<16, 16, 16>;
         using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, WarpTile>;
 
@@ -359,7 +359,7 @@ public:
     CK_TILE_HOST_DEVICE static constexpr auto GetQSmemKBlockGemm()
     {
         using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0, Traits::kBlockK0>;
-        using BlockWarps    = ck_tile::sequence<2, Traits::kNumWarps / 2, 1>;
+        using BlockWarps    = ck_tile::sequence<Traits::kNumWarps, 1, 1>;
         using WarpTile      = ck_tile::sequence<16, 16, 16>;
         using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, WarpTile>;
 

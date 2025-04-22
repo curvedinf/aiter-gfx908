@@ -363,6 +363,11 @@ def test_mla(
     #               msg=f'attn_logits [golden vs aiter_asm]')
     # checkAllclose(lse_ref, attn_lse,
     #               msg=f'attn_lse    [golden vs aiter_asm]')
+    flops = mtp * total_kv * nhead * (qk_head_dim + v_head_dim) * 2
+    bytes = (
+        total_kv * nhead_kv * qk_head_dim
+        + batch_size * mtp * nhead * (qk_head_dim + v_head_dim)
+    ) * (torch.finfo(dtype).bits // 8)
     checkAllclose(
         out_ref,
         out_asm,
@@ -371,6 +376,8 @@ def test_mla(
     return {
         "prefill:ck_192": us_aiter,
         "prefill:asm_576": us_asm,
+        "decode:flops": flops,
+        "decode:bytes": bytes,
         "decode:asm_576": us_asm_decode,
     }
 
@@ -406,7 +413,6 @@ for nhead, mtp in list_nhead:
             mtp=mtp,
         )
         df.append(ret)
-
     df = pd.DataFrame(df)
-    # df.to_csv("mla_prefill.csv")
+    # df.to_csv(f"mla_mtp{mtp}.csv")
     aiter.logger.info(f"summary:\n{df}")

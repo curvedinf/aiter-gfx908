@@ -11,6 +11,7 @@ from aiter.test_common import (
     perftest,
     tensor_load,
 )
+from aiter import dtypes
 from einops import rearrange
 
 torch.set_default_device("cuda")
@@ -29,11 +30,11 @@ def test_nofuse(
     M, _ = hidden_states.shape
 
     topk_weights = torch.empty(
-        M, topk, dtype=torch.float32, device=hidden_states.device
+        M, topk, dtype=dtypes.fp32, device=hidden_states.device
     )
-    topk_ids = torch.empty(M, topk, dtype=torch.int32, device=hidden_states.device)
+    topk_ids = torch.empty(M, topk, dtype=dtypes.i32, device=hidden_states.device)
     token_expert_indicies = torch.empty(
-        M, topk, dtype=torch.int32, device=hidden_states.device
+        M, topk, dtype=dtypes.i32, device=hidden_states.device
     )
 
     aiter.topk_softmax(
@@ -95,8 +96,8 @@ def test_biased_grouped_topk(
         num_warmup=1,
     )
     w_ref = w_ref * scale_factor
-    w_aiter = torch.empty_strided((token, topk), (topk + 10, 1), dtype=torch.float32)
-    id_aiter = torch.empty_strided((token, topk), (topk + 10, 1), dtype=torch.int32)
+    w_aiter = torch.empty_strided((token, topk), (topk + 10, 1), dtype=dtypes.fp32)
+    id_aiter = torch.empty_strided((token, topk), (topk + 10, 1), dtype=dtypes.i32)
     _, us_aiter = run_perftest(
         aiter.biased_grouped_topk,
         gating_output,
@@ -150,8 +151,8 @@ def test_grouped_topk(
         num_warmup=1,
     )
     w_ref = w_ref * scale_factor
-    w_aiter = torch.empty_strided((token, topk), (topk + 10, 1), dtype=torch.float32)
-    id_aiter = torch.empty_strided((token, topk), (topk + 10, 1), dtype=torch.int32)
+    w_aiter = torch.empty_strided((token, topk), (topk + 10, 1), dtype=dtypes.fp32)
+    id_aiter = torch.empty_strided((token, topk), (topk + 10, 1), dtype=dtypes.i32)
     _, us_aiter = run_perftest(
         aiter.grouped_topk,
         gating_output,
@@ -177,7 +178,7 @@ def test_grouped_topk(
     )
 
 
-for dtype in [torch.float16, torch.bfloat16]:
+for dtype in [dtypes.fp16, dtypes.bf16]:
     for m in [1, 2, 4, 8, 16, 32, 64, 128, 256][-2:-1]:
         for n in [4096, 8192, 16384, 32768, 65536][1:2]:
             test_topk_softmax(dtype, m, n, 32, 5)
@@ -190,7 +191,7 @@ for token in [1, 2, 5, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000][:]
     group = 8
     topk_group = 4
     expert = 256
-    dtype = torch.bfloat16
+    dtype = dtypes.bf16
     need_renorm = True
     test_biased_grouped_topk(token, expert, group, topk, topk_group, need_renorm, dtype)
 
@@ -201,7 +202,7 @@ for token in [1, 2, 5, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000]:
         group = 8
         topk_group = 4
         expert = 256
-        dtype = torch.bfloat16
+        dtype = dtypes.bf16
         need_renorm = True
         test_grouped_topk(
             token,

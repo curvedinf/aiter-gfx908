@@ -9,6 +9,7 @@ import os
 from typing import Any, Callable, Dict, Optional, Tuple
 import itertools
 import aiter
+from aiter import dtypes
 from aiter.test_common import (
     checkAllclose,
     perftest,
@@ -96,7 +97,7 @@ def test_fmoe(
 ):
     torch_quant = aiter.get_torch_quant(qType)
     torch_act = aiter.get_torch_act(actType)
-    input = torch.randn((token, model_dim), dtype=dtype) / math.sqrt(inter_dim)
+    input = torch.randn((token, model_dim), dtype=dtype)
     if use_g1u1:
         w1 = torch.randn((E, inter_dim * 2, model_dim), dtype=dtype)
     else:
@@ -114,8 +115,8 @@ def test_fmoe(
         w1_qt, w1_scale = aiter.pertoken_quant(w1.view(E, -1), quant_dtype=WQDType)
         w2_qt, w2_scale = aiter.pertoken_quant(w2.view(E, -1), quant_dtype=WQDType)
     elif qType == aiter.QuantType.per_Token and WQDType == torch.int4:  # int4 w quant
-        w1_qt, w1_scale = aiter.pertoken_quant(w1, quant_dtype=torch.int8, dtypeMax=7)
-        w2_qt, w2_scale = aiter.pertoken_quant(w2, quant_dtype=torch.int8, dtypeMax=7)
+        w1_qt, w1_scale = aiter.pertoken_quant(w1, quant_dtype=dtypes.i8, dtypeMax=7)
+        w2_qt, w2_scale = aiter.pertoken_quant(w2, quant_dtype=dtypes.i8, dtypeMax=7)
     else:
         w1_qt, w1_scale = torch_quant(w1, quant_dtype=WQDType)
         w2_qt, w2_scale = torch_quant(w2, quant_dtype=WQDType)
@@ -237,7 +238,7 @@ def test_fmoe(
     # a2_qt, a2_scale = torch_quant(out1_ck, quant_dtype=AQDType)
     # a2_qt = a2_qt.view(token, topk, -1)
     # if qType == aiter.QuantType.No:
-    #     a2_scale = torch.tensor(1.0, dtype=torch.float, device=a2_qt.device)
+    #     a2_scale = torch.tensor(1.0, dtype=dtypes.fp32, device=a2_qt.device)
     # out2_ck, us = ck_moe_stage2(
     #     a2_qt,
     #     w1_qt_aiter,
@@ -283,7 +284,7 @@ def test_fmoe(
     return {"us": us_fuse, "err": err}
 
 
-list_dtype = [torch.bfloat16, torch.float16][:1]
+list_dtype = [dtypes.bf16, dtypes.fp16][:1]
 list_dim = [(6144, 4096)]
 list_tokenNum = [
     1,
@@ -300,9 +301,9 @@ list_tokenNum = [
 ]
 list_quant = [
     (aiter.QuantType.No, None, None),  # a16w16
-    (aiter.QuantType.per_Tensor, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),  # a8w8
-    (aiter.QuantType.per_Token, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),  # a8w8
-    (aiter.QuantType.per_Token, torch.float8_e4m3fnuz, torch.int4),  # a8w4
+    (aiter.QuantType.per_Tensor, dtypes.fp8, dtypes.fp8),  # a8w8
+    (aiter.QuantType.per_Token, dtypes.fp8, dtypes.fp8),  # a8w8
+    (aiter.QuantType.per_Token, dtypes.fp8, torch.int4),  # a8w4
 ]
 list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][:1]
 list_doweight_stage1 = [False, True]
@@ -315,8 +316,10 @@ for (
     act_type,
     (quant_type, aq_dtype, wq_dtype),
     (model_dim, inter_dim),
-    doweight_stage1
-) in itertools.product(list_dtype, list_act, list_quant, list_dim, list_doweight_stage1):
+    doweight_stage1,
+) in itertools.product(
+    list_dtype, list_act, list_quant, list_dim, list_doweight_stage1
+):
     df = []
     for m in list_tokenNum:
         ret = test_fmoe(
@@ -339,7 +342,7 @@ for (
 
 
 # # per Tensor quant/a8w4
-# for dtype in [torch.bfloat16]:
+# for dtype in [dtypes.bf16]:
 #     for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096][-1:]:
 #         for dim in [6144]:
 #             for inter_dim in [4096]:
@@ -353,7 +356,7 @@ for (
 #                     topk,
 #                     aiter.ActivationType.Silu,
 #                     aiter.QuantType.per_Token,
-#                     torch.float8_e4m3fnuz,
+#                     dtypes.fp8,
 #                     torch.int4,
 #                     use_g1u1=True,
 #                 )

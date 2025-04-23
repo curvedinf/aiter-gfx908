@@ -91,7 +91,7 @@ def get_asm_dir():
     device = torch.cuda.current_device()
     gfx = torch.cuda.get_device_properties(device).gcnArchName.split(":")[0]
     global AITER_ASM_DIR
-    AITER_ASM_DIR = f"{AITER_ROOT_DIR}/hsa/{gfx}"
+    AITER_ASM_DIR = f"{AITER_ROOT_DIR}/hsa/{gfx}/"
     os.environ["AITER_ASM_DIR"] = AITER_ASM_DIR
     return AITER_ASM_DIR
 

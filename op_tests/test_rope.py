@@ -398,8 +398,8 @@ if __name__ == "__main__":
     parser.add_argument('--compare_check', action='store_true', help="Check correctness when compare with legacy implementation. Default: False")
     args = parser.parse_args()
 
-    # dtype_ = (torch.float, torch.float16, torch.bfloat16)
-    dtype_ = (torch.float16, torch.bfloat16)
+    # dtype_ = (dtypes.fp32, dtypes.fp16, dtypes.bf16)
+    dtype_ = (dtypes.fp16, dtypes.bf16)
     transpose_output_ = (False, True)
     batch_size_ = (1, 2, 4)
     seq_size_ = (1024, 2048, 4096)
@@ -510,7 +510,7 @@ if __name__ == "__main__":
     # Test thd format for uncached
     if not args.no_check:
         cu_seqlens = torch.tensor([0, 100, 102, 128, 233, 456, 460, 711, 1024, 1536, 1739, 1888, 2000, 2001, 2048],
-                                dtype=torch.int32, device="cuda")
+                                dtype=dtypes.i32, device="cuda")
         for (dtype, fdtype,
             rotate_style,
             rotary_percent_and_reuse,

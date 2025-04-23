@@ -5,6 +5,7 @@
 
 import torch
 import aiter
+from aiter import dtypes
 import triton
 import triton.language as tl
 import functools
@@ -117,7 +118,7 @@ def mla_decode_fwd(
     if nhead == 16:
         logits = torch.empty(
             (total_s, num_kv_splits, nhead, v_head_dim),
-            dtype=torch.float,
+            dtype=dtypes.fp32,
             device=device,
         )
         assert (
@@ -129,7 +130,7 @@ def mla_decode_fwd(
             if num_kv_splits == 1
             else torch.empty(
                 (total_s, num_kv_splits, nhead, v_head_dim),
-                dtype=torch.float,
+                dtype=dtypes.fp32,
                 device=device,
             )
         )
@@ -137,7 +138,7 @@ def mla_decode_fwd(
         assert False, f"{nhead=} not supported"
 
     attn_lse = torch.empty(
-        (total_s, num_kv_splits, nhead, 1), dtype=torch.float, device=device
+        (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
 
     aiter.mla_decode_stage1_asm_fwd(
@@ -206,10 +207,10 @@ def mla_prefill_fwd(
 
     logits = o.view(bs, num_kv_splits, nhead, v_head_dim)
     # logits = torch.empty(
-    #     (bs, num_kv_splits, nhead, v_head_dim), dtype=torch.float, device=device
+    #     (bs, num_kv_splits, nhead, v_head_dim), dtype=dtypes.fp32, device=device
     # )
     attn_lse = torch.empty(
-        (bs, num_kv_splits, nhead, 1), dtype=torch.float, device=device
+        (bs, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
 
     aiter.mla_prefill_asm_fwd(

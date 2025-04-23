@@ -7,6 +7,7 @@ import aiter
 from op_tests.triton.utils import mla_decode_ref, mla_extend_ref
 from aiter.test_common import checkAllclose, benchmark, run_perftest
 from aiter.test_mha_common import attention_ref
+from aiter import dtypes
 from einops import rearrange
 import random
 import itertools
@@ -317,7 +318,7 @@ def test_mla(
     #     num_kv_splits = 16
     #     attn_logits = torch.empty(
     #         (total_q, nhead, num_kv_splits, v_head_dim + 1),
-    #         dtype=torch.float32,
+    #         dtype=dtypes.fp32,
     #     )
     #     _, us_ref = run_perftest(
     #         mla_decode_ref.decode_attention_fwd,
@@ -387,7 +388,7 @@ qk_nope_head_dim = 128
 qk_rope_head_dim = 64
 v_head_dim = 128
 block_size = 1
-list_dtype = [(torch.bfloat16, torch.bfloat16)]
+list_dtype = [(dtypes.bf16, dtypes.bf16)]
 list_ctx_len = [21, 64, 256, 512, 1200, 3200, 5200, 8192][:]
 list_batch_size = [1, 3, 5, 16, 32, 64, 128, 256][:]
 list_nhead = [(16, 1), (128, 2)]

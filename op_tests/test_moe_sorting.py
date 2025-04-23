@@ -27,15 +27,15 @@ def test_moe_sorting_naive(
     max_num_m_blocks = int((max_num_tokens_padded + block_size - 1) // block_size)
     init_val = topk << 24 | M
     sorted_ids = torch.full(
-        (max_num_tokens_padded,), init_val, dtype=torch.int32, device=device
+        (max_num_tokens_padded,), init_val, dtype=dtypes.i32, device=device
     )
     sorted_weights = torch.empty(
-        (max_num_tokens_padded,), dtype=torch.float, device=device
+        (max_num_tokens_padded,), dtype=dtypes.fp32, device=device
     )
     sorted_expert_ids = torch.full(
-        (max_num_m_blocks,), -1, dtype=torch.int32, device=device
+        (max_num_m_blocks,), -1, dtype=dtypes.i32, device=device
     )
-    num_tokens_post_pad = torch.empty((1), dtype=torch.int32, device=device)
+    num_tokens_post_pad = torch.empty((1), dtype=dtypes.i32, device=device)
 
     sorted_ids_begin = 0
     sorted_expert_ids_begin = 0
@@ -140,14 +140,14 @@ def test_moe_sorting(
 
 
 print("test test_moe_sorting, no expert mask")
-for dtype in [torch.bfloat16]:
+for dtype in [dtypes.bf16]:
     for m in [1, 7, 31, 64, 128, 256, 163840]:
         for E in [32, 256]:
             for top in [5, 8]:
                 test_moe_sorting(dtype, m, 7168, 4096, E, top)
 
 print("test test_moe_sorting, with expert mask")
-for dtype in [torch.bfloat16]:
+for dtype in [dtypes.bf16]:
     for m in [1, 7, 31, 64, 128, 256]:
         for E in [32, 256]:
             for top in [5, 8]:

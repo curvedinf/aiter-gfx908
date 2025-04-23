@@ -22,6 +22,7 @@ from aiter.utility.mp_tuner import mp_tuner
 from aiter.test_common import checkAllclose
 from aiter import QuantType
 from aiter.int4_utils import *
+from aiter import dtypes
 
 torch.set_default_device("cuda")
 torch.int4 = torch.uint32
@@ -58,13 +59,13 @@ def weight_quant(
         qType == aiter.QuantType.per_Tensor and quant_dtype == torch.int4
     ):  # int4 w quant
         weight_qt, weight_scale = aiter.pertoken_quant(
-            weight.view(E, -1), quant_dtype=torch.int8, dtypeMax=7
+            weight.view(E, -1), quant_dtype=dtypes.i8, dtypeMax=7
         )
     elif (
         qType == aiter.QuantType.per_Token and quant_dtype == torch.int4
     ):  # int4 w quant
         weight_qt, weight_scale = aiter.pertoken_quant(
-            weight, quant_dtype=torch.int8, dtypeMax=7
+            weight, quant_dtype=dtypes.i8, dtypeMax=7
         )
     else:
         torch_quant = aiter.get_torch_quant(qType)
@@ -117,7 +118,7 @@ def go(
         q_dtype_w = eval(q_dtype_w)
         q_type = eval(q_type)
         print("\nStart tuning", line)
-        # if q_dtype_a == torch.int8 and q_type == QuantType.per_Tensor:
+        # if q_dtype_a == dtypes.i8 and q_type == QuantType.per_Tensor:
         #     print(f'no moe solution for ', line)
         #     continue
         act_type = eval(act_type)
@@ -161,7 +162,7 @@ def go(
             ref, ref_scale = aiter.pertoken_quant(
                 ref.view(ref.shape[0], -1, 128), quant_dtype=q_dtype_a
             )
-            ref = ref.view(ref.shape[0], topk, -1).to(torch.float32)
+            ref = ref.view(ref.shape[0], topk, -1).to(dtypes.fp32)
             ref_scale = ref_scale.view(token, -1)
 
         tasks = []
@@ -183,9 +184,9 @@ def go(
         if doweight_stage1:
             extraInfo += "_doweight"
 
-        if q_dtype_a == torch.int8:
+        if q_dtype_a == dtypes.i8:
             quantDtype = "Int8"
-        elif q_dtype_a == torch.float8_e4m3fnuz:
+        elif q_dtype_a == dtypes.fp8:
             quantDtype = "Fp8"
         else:
             quantDtype = ""
@@ -223,7 +224,7 @@ def go(
                                 sorted_ids,
                                 sorted_expert_ids,
                                 num_valid_ids,
-                                out.view(torch.bfloat16),
+                                out.view(dtypes.bf16),
                                 blockM,
                                 el,
                                 0,
@@ -283,10 +284,10 @@ def go(
                 scale = (
                     _[token:, ...]
                     .view(-1)[: (token * topk * inter_dim * 4 // 128)]
-                    .view(torch.float)
+                    .view(dtypes.fp32)
                     .view(token, -1)
                 )
-                _ = _[:token, :, :].to(torch.float32)
+                _ = _[:token, :, :].to(dtypes.fp32)
             err = checkAllclose(
                 ref.to("cpu"), _.to(ref.dtype), msg=f"[{tag:<50}]: {us:.2f}us ......      "
             )

@@ -64,16 +64,20 @@ static CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1, Q
     int E = w1.size(0);
     int dim1 = w1.size(1);
 
-    if (inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
-        w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
+    if ((inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
+         inp.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
+        (w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
+         w1.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
         out.scalar_type() == at::ScalarType::BFloat16 &&
         quant_type == QuantType::per_Token &&
         do_weight)
     {
         return &cfg_fmoe_stage1_bf16_pertokenFp8_doweight_g1u1;
     }
-    else if (inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
-             w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
+    else if ((inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
+              inp.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
+             (w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
+              w1.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
              out.scalar_type() == at::ScalarType::BFloat16 &&
              quant_type == QuantType::per_Token)
     {
@@ -86,16 +90,19 @@ static CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1, Q
     {
         return &cfg_fmoe_stage1_bf16_pertokenInt8_g1u1;
     }
-    else if (inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
-             w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
-             out.scalar_type() == at::ScalarType::Float8_e4m3fnuz &&
+    else if ((inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
+              inp.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
+             (w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
+              w1.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
+             (out.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
+              out.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
              quant_type == QuantType::per_128x128)
     {
         return &cfg_fmoe_stage1_bf16_pertokenFp8_blockscale_g1u1;
     }
     else
     {
-        TORCH_CHECK(false, "Unsupported input_type:", inp.scalar_type(), ", weight_type:", w1.scalar_type(),
+        TORCH_CHECK(false, __func__, "Unsupported input_type:", inp.scalar_type(), ", weight_type:", w1.scalar_type(),
                     ", out_type:", out.scalar_type(), ", quant_type:", static_cast<int>(quant_type), ", do_weight:", do_weight);
     }
 };

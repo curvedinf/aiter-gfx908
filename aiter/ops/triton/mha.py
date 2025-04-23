@@ -1430,29 +1430,34 @@ def _bwd_kernel_dkdvdq_causal(
 
         # if start_m is negative, the current N-tile has no block on the
         #   diagonal of causal mask, so everything have no causal mask
-        dk, dv = _bwd_dkdvdq_inner(
-            dk, dv,  # output tensors
-            q_ptr_adj, k, v, do_ptr_adj, dq_ptr_adj, m_ptr_adj, delta_ptr_adj, sm_scale, # input tensors
-            stride_q_m, stride_q_k,  # strides for q
-            stride_dq_m, stride_dq_k,  # strides for q
-            stride_do_m, stride_do_k,  # strides for o
-            stride_dropout_m, stride_dropout_n,  # strides for dropout
-            stride_delta_m,
-            dropout_p, philox_seed, batch_philox_offset, dropout_offset,  #
-            seqlen_q, seqlen_k,  # max sequence length for q and k
-            start_n, start_m, num_steps,  # iteration numbers
-            descale_q, descale_k, descale_v, descale_do, # fp8 descale factors from user 
-            MASK_BLOCK_M, BLOCK_N,  # block dim
-            BLOCK_D_MODEL, BLOCK_D_MODEL_POW2,  # head dim
-            MASK=True,  # causal masking
-            ENABLE_DROPOUT=ENABLE_DROPOUT,  # activate dropout
-            IS_FP8=IS_FP8,
-            FP8_MAX=FP8_MAX,
-            workgroup_id=seq_k_blk_idx,
-        )
+        if start_m:
+            dk, dv = _bwd_dkdvdq_inner(
+                dk, dv,  # output tensors
+                q_ptr_adj, k, v, do_ptr_adj, dq_ptr_adj, m_ptr_adj, delta_ptr_adj, sm_scale, # input tensors
+                stride_q_m, stride_q_k,  # strides for q
+                stride_dq_m, stride_dq_k,  # strides for q
+                stride_do_m, stride_do_k,  # strides for o
+                stride_dropout_m, stride_dropout_n,  # strides for dropout
+                stride_delta_m,
+                dropout_p, philox_seed, batch_philox_offset, dropout_offset,  #
+                seqlen_q, seqlen_k,  # max sequence length for q and k
+                start_n, start_m, num_steps,  # iteration numbers
+                descale_q, descale_k, descale_v, descale_do, # fp8 descale factors from user 
+                MASK_BLOCK_M, BLOCK_N,  # block dim
+                BLOCK_D_MODEL, BLOCK_D_MODEL_POW2,  # head dim
+                MASK=True,  # causal masking
+                ENABLE_DROPOUT=ENABLE_DROPOUT,  # activate dropout
+                IS_FP8=IS_FP8,
+                FP8_MAX=FP8_MAX,
+                workgroup_id=seq_k_blk_idx,
+            )
+
+
         start_m += num_steps * MASK_BLOCK_M
         num_steps = tl.cdiv(seqlen_q - start_m, BLOCK_M)
         end_m = start_m + num_steps * BLOCK_M
+
+        
 
         dk, dv = _bwd_dkdvdq_inner(
             dk, dv,  # output tensors

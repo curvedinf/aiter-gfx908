@@ -195,6 +195,9 @@ def create_benchmark_configs(custom, args):
     if args.bench_torch:
         line_vals = [f'Triton({unit})', f'Torch({unit})']
 
+    if args.test_mode:
+        line_vals = ["test_mode"]
+
     configs.append(
         triton.testing.Benchmark(
             x_names=x_names,
@@ -387,7 +390,7 @@ def run_benchmark(custom, args):
         else:  # GB/s
             return mem / ms * 1e-3
 
-    bench_mha_backward.run(save_path=".", print_data=True, show_plots=True)
+    bench_mha_backward.run(save_path=None, print_data=True, show_plots=False)
 
 
 def supported_layouts():

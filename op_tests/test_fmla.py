@@ -178,18 +178,8 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     out_torch, lse_torch = ref_mla()
     out_flash, lse_flash = flash_mla()
 
-    # query = q[0][0]
-    # key = blocked_k[63][48:64]
-    #
-    # s_acc = query @ key.transpose(0, 1)
-
-    # import pdb; pdb.set_trace()
-
-    # print(out_flash, lse_flash)
-    # print(out_torch, lse_torch)
-
-    cal_diff(out_flash, out_torch.cuda(), "out")
     cal_diff(lse_flash, lse_torch.cuda(), "lse")
+    cal_diff(out_flash, out_torch.cuda(), "out")
 
     # t = triton.testing.do_bench(flash_mla)
     # FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2

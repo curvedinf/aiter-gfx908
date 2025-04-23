@@ -1106,6 +1106,8 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
             }
         }
 
+        ck_tile::tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+
         // prefetch load V tile
         const auto v_prefetch = ck_tile::load_tile(v_dram_window);
         
@@ -1153,13 +1155,13 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
             [&](auto id0)
             {
                 constexpr auto i = ck_tile::make_tuple(id0);
-                auto row_max  = scale_s * GetValidatedMax<Mask::IsMasking>(m[i]);
+                auto row_max  = GetValidatedMax<Mask::IsMasking>(m[i]);
                 ck_tile::sweep_tile_span(
                     p_spans[ck_tile::number<1>{}],
                     [&](auto id1)
                     {
                         constexpr auto ij = ck_tile::make_tuple(id0, id1);
-                        p_intermedia(ij) = ck_tile::exp2(scale_s * s_acc[ij] - row_max);
+                        p_intermedia(ij) = ck_tile::exp(s_acc[ij] - row_max);
                     });
             });
 
@@ -1174,8 +1176,8 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
             [&](auto id0)
             {
                 constexpr auto i = ck_tile::make_tuple(id0);
-                const auto row_max = scale_s * GetValidatedMax<Mask::IsMasking>(m[i]);
-                const auto temp_i  = ck_tile::exp2(scale_s * m_old[i] - row_max);
+                const auto row_max = GetValidatedMax<Mask::IsMasking>(m[i]);
+                const auto temp_i  = ck_tile::exp(m_old[i] - row_max);
                 l(i) = temp_i * l[i] + rowsum_p[i];
                 ck_tile::sweep_tile_span(
                     o_spans[ck_tile::number<1>{}],
@@ -1244,7 +1246,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
     constexpr auto lse_acc_spans = decltype(lse_acc)::get_distributed_spans();
     ck_tile::sweep_tile_span(lse_acc_spans[ck_tile::number<0>{}], [&, m_ = m, l_ = l](auto id0) {
         constexpr auto i = make_tuple(id0);
-        lse_acc(i) = m_[i] * scale_s / C_LOG2E + log(l_[i]);
+        lse_acc(i) = m_[i] + log(l_[i]);
     });
     ck_tile::store_tile(lse_dram_window_, lse_acc);
 

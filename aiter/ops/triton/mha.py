@@ -1301,12 +1301,38 @@ def _bwd_kernel_dkdvdq_causal(
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
 ):
-    wid = tl.program_id(0) # workgoup id: 0, ..., NUM_K_PIDS * BATCH * NUM_K_HEADS - 1
+    # wid = tl.program_id(0) # workgoup id: 0, ..., NUM_K_PIDS * BATCH * NUM_K_HEADS - 1
 
     # workgroups get launched first along batch dim, then in head_k dim, and then in seq k block dim
-    batch_idx = wid % BATCH 
-    head_k_idx = wid // BATCH % NUM_K_HEADS 
-    seq_k_blk_idx = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS
+    batch_idx = tl.program_id(0) 
+    head_k_idx = tl.program_id(1)
+    seq_k_blk_idx = tl.program_id(2)
+    tl.assume(batch_idx > 0)
+    tl.assume(head_k_idx > 0)
+    tl.assume(seq_k_blk_idx > 0)
+    tl.assume(stride_q_b > 0)
+    tl.assume(stride_q_h > 0)
+    tl.assume(stride_q_m > 0)
+    tl.assume(stride_q_k > 0)
+    tl.assume(stride_k_b > 0)
+    tl.assume(stride_k_h > 0)
+    tl.assume(stride_k_n > 0)
+    tl.assume(stride_k_k > 0)
+    tl.assume(stride_v_b > 0)
+    tl.assume(stride_v_h > 0)
+    tl.assume(stride_v_n > 0)
+    tl.assume(stride_v_k > 0)
+    tl.assume(stride_dk_b > 0)
+    tl.assume(stride_dk_h > 0)
+    tl.assume(stride_dk_n > 0)
+    tl.assume(stride_dk_k > 0)
+    tl.assume(stride_delta_b > 0)
+    tl.assume(stride_delta_h > 0)
+    tl.assume(stride_delta_m > 0)
+    tl.assume(stride_do_b > 0)
+    tl.assume(stride_do_h > 0)
+    tl.assume(stride_do_m > 0)
+    tl.assume(stride_do_k > 0)
 
     #Determine q and k start along with seqlen_q and seqlen_k
     q_start = 0
@@ -2377,13 +2403,14 @@ def _flash_attn_backward(
             "BLOCK_M": 32,
             "BLOCK_N": BLOCK_N,
             "num_warps": 4,
-            "num_stages": 1,
+            "num_stages": 2,
             "waves_per_eu": 1,
             "BLK_SLICE_FACTOR": 1,
+            "matrix_instr_nonkdim": 32
         }
         
         num_k_pids = (max_seqlen_k + BLOCK_N - 1) // BLOCK_N
-        grid_dkdvdq = (batch * num_k_heads * num_k_pids,) 
+        grid_dkdvdq = (batch, num_k_heads, num_k_pids) 
 
         if causal:
             _bwd_kernel_dkdvdq_causal[grid_dkdvdq](

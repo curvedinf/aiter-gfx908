@@ -1335,19 +1335,19 @@ def _bwd_kernel_dkdvdq_causal(
     delta_qk = seqlen_q - seqlen_k
 
     # q > k: diretcly skip all the way until the start of causal block
-    start_delta_q_gt_k = delta_qk
+    # start_delta_q_gt_k = delta_qk
 
     # q < k: some blocks will have no Masked block, other needs to re-calc
     # starting position
     # delta_qk is negative so flip it, only multiple of BLOCK_N can skip the
     # masked op
-    num_blocks_skip = -delta_qk // BLOCK_N
-    delta_aligned = (num_blocks_skip + 1) * BLOCK_N + delta_qk
-    start_delta_q_lt_k = delta_aligned // BLOCK_M * BLOCK_M
-    if delta_qk >= 0:
-        start_delta = delta_qk
-    else:
-        start_delta = start_delta_q_lt_k
+    # num_blocks_skip = -delta_qk // BLOCK_N
+    # delta_aligned = (num_blocks_skip + 1) * BLOCK_N + delta_qk
+    # start_delta_q_lt_k = delta_aligned // BLOCK_M * BLOCK_M
+    # if delta_qk >= 0:
+    #     start_delta = delta_qk
+    # else:
+    #     start_delta = start_delta_q_lt_k
     
     start_n =  seq_k_blk_idx * BLOCK_N
 
@@ -1376,16 +1376,17 @@ def _bwd_kernel_dkdvdq_causal(
     # If MQA / GQA, set the K and V head offsets appropriately.
     for head_q_idx in range(head_k_idx * GROUP_SIZE, head_k_idx * GROUP_SIZE + GROUP_SIZE):
         if delta_qk >= 0:
-            start_m = start_n + start_delta
+            unaligned_start_m = start_n + delta_qk
             len_m = BLOCK_N
         else:
-            start_m = max(start_n + delta_qk, 0)
-            start_m = (start_m // BLOCK_M) * BLOCK_M
-            # because we might shift the masked blocks up, we are deeper into
-            # the masked out region, so we would potentially increase the total
-            # steps with masked operation to get out of it
-            residue_m = max(start_n + delta_qk - start_m, 0)
-            len_m = BLOCK_N + residue_m
+            unaligned_start_m = max(start_n + delta_qk, 0)
+        
+        start_m = (unaligned_start_m // BLOCK_M) * BLOCK_M
+        # because we might shift the masked blocks up, we are deeper into
+        # the masked out region, so we would potentially increase the total
+        # steps with masked operation to get out of it
+        residue_m = max(start_n + delta_qk - start_m, 0)
+        len_m = BLOCK_N + residue_m
 
         # offset input and output tensor by batch and Q/K heads
         adj_q = batch_idx * stride_q_b + head_q_idx * stride_q_h + q_start * stride_q_m
@@ -1428,9 +1429,9 @@ def _bwd_kernel_dkdvdq_causal(
         else:
             descale_q, descale_k, descale_v, descale_do = 1.0, 1.0, 1.0, 1.0
 
-        # if start_m is negative, the current N-tile has no block on the
+        # if unaligned start_m is negative or 0, the current N-tile has no block on the
         #   diagonal of causal mask, so everything have no causal mask
-        if start_m:
+        if unaligned_start_m:
             dk, dv = _bwd_dkdvdq_inner(
                 dk, dv,  # output tensors
                 q_ptr_adj, k, v, do_ptr_adj, dq_ptr_adj, m_ptr_adj, delta_ptr_adj, sm_scale, # input tensors
@@ -1452,33 +1453,32 @@ def _bwd_kernel_dkdvdq_causal(
                 workgroup_id=seq_k_blk_idx,
             )
 
-
+        tl.debug_barrier()
         start_m += num_steps * MASK_BLOCK_M
         num_steps = tl.cdiv(seqlen_q - start_m, BLOCK_M)
         end_m = start_m + num_steps * BLOCK_M
 
-        
-
-        dk, dv = _bwd_dkdvdq_inner(
-            dk, dv,  # output tensors
-            q_ptr_adj, k, v, do_ptr_adj, dq_ptr_adj, m_ptr_adj, delta_ptr_adj, sm_scale, # input tensors
-            stride_q_m, stride_q_k,  # strides for q
-            stride_dq_m, stride_dq_k,  # strides for dq
-            stride_do_m, stride_do_k,  # strides for o
-            stride_dropout_m, stride_dropout_n,  # strides for dropout
-            stride_delta_m,
-            dropout_p, philox_seed, batch_philox_offset, dropout_offset,  #
-            seqlen_q, seqlen_k,  # max sequence length for q and k
-            start_n, start_m, num_steps,  # iteration numbers
-            descale_q, descale_k, descale_v, descale_do, # fp8 descale factors from user
-            BLOCK_M, BLOCK_N,  # block dim
-            BLOCK_D_MODEL, BLOCK_D_MODEL_POW2,  # head dim
-            MASK=False,  # causal masking
-            ENABLE_DROPOUT=ENABLE_DROPOUT,  # activate dropout
-            IS_FP8=IS_FP8,
-            FP8_MAX=FP8_MAX,
-            workgroup_id=seq_k_blk_idx,
-        )
+        if num_steps:
+            dk, dv = _bwd_dkdvdq_inner(
+                dk, dv,  # output tensors
+                q_ptr_adj, k, v, do_ptr_adj, dq_ptr_adj, m_ptr_adj, delta_ptr_adj, sm_scale, # input tensors
+                stride_q_m, stride_q_k,  # strides for q
+                stride_dq_m, stride_dq_k,  # strides for dq
+                stride_do_m, stride_do_k,  # strides for o
+                stride_dropout_m, stride_dropout_n,  # strides for dropout
+                stride_delta_m,
+                dropout_p, philox_seed, batch_philox_offset, dropout_offset,  #
+                seqlen_q, seqlen_k,  # max sequence length for q and k
+                start_n, start_m, num_steps,  # iteration numbers
+                descale_q, descale_k, descale_v, descale_do, # fp8 descale factors from user
+                BLOCK_M, BLOCK_N,  # block dim
+                BLOCK_D_MODEL, BLOCK_D_MODEL_POW2,  # head dim
+                MASK=False,  # causal masking
+                ENABLE_DROPOUT=ENABLE_DROPOUT,  # activate dropout
+                IS_FP8=IS_FP8,
+                FP8_MAX=FP8_MAX,
+                workgroup_id=seq_k_blk_idx,
+            )
 
     # Write back dV and dK.
     offs_dkdv = (batch_idx * stride_dk_b + 

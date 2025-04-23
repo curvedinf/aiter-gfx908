@@ -53,8 +53,7 @@ def run_benchmark(args):
     int4_w4a16 = args.int4_w4a16
     group_size = args.group_size
     has_zp = args.has_zp
-    dtype = arg_to_torch_dtype[args.dtype]
-    fp8_type = arg_to_torch_dtype[args.fp8_type]
+    dtype = utils.arg_to_torch_dtype(args.dtype)
 
     if int4_w4a16:
         assert group_size != None, "set group_size with -group_size"
@@ -85,16 +84,17 @@ def run_benchmark(args):
             flops += M * top_k * N
 
         if fp8_w8a8:
-            a_bytes = b_bytes = torch.tensor([], dtype=fp8_type).element_size()
-            c_bytes = torch.tensor([], dtype=dtype).element_size()
+            a_bytes, b_bytes, c_bytes = 1, 1, dtype.itemsize
         elif int8_w8a16:
-            b_bytes = torch.tensor([], dtype=torch.int8).element_size()
-            a_bytes = c_bytes = torch.tensor([], dtype=dtype).element_size()
+            a_bytes, b_bytes, c_bytes = 2, 1, dtype.itemsize
+        elif int4_w4a16:
+            a_bytes, b_bytes, c_bytes = 2, 0.5, dtype.itemsize
         else:
-            a_bytes = b_bytes = c_bytes = torch.tensor([], dtype=dtype).element_size()
-        # TODO add the int4 case
+            a_bytes = b_bytes = c_bytes = dtype.itemsize
 
-        # (M, K) memory load for A (E,  N,  K) for B not (top_k,  N,  K) because we are in total bringing in all expert matrices into the chip from memory. It's just that not all multiply the same A.
+        # (M, K) memory load for A (E,  N,  K) for B not (top_k,  N,  K)
+        # because we are in total bringing in all expert matrices into the chip from memory.
+        # It's just that not all multiply the same A.
         mem_read = (M * K) * a_bytes + (E * N * K) * b_bytes
 
         mem_write = (M * top_k * N) * c_bytes
@@ -139,19 +139,23 @@ def parse_args():
     parser.add_argument("-int4_w4a16", action='store_true', default=False)
     parser.add_argument("-has_zp", action='store_true', default=False)
     parser.add_argument("-dtype", default='fp16')
-    parser.add_argument("-fp8_type", default='e5m2fnuz')
     args = parser.parse_args()
     return args
 
+def is_cdna4():
+    return triton.runtime.driver.active.get_current_target().arch == 'gfx950'
+
+e5m2_type = torch.float8_e5m2 if is_cdna4() else torch.float8_e5m2fnuz
+e4m3_type = torch.float8_e4m3fn if is_cdna4() else torch.float8_e4m3fnuz
 
 arg_to_torch_dtype = {
-    'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp32': torch.float32, "e5m2fnuz": torch.float8_e5m2fnuz, "e4m3fnuz":
-    torch.float8_e4m3fnuz
+    'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp32': torch.float32, "bf8": e5m2_type, "fp8": e4m3_type
 }
 
 
 def main():
     args = parse_args()
+
     run_benchmark(args)
 
 

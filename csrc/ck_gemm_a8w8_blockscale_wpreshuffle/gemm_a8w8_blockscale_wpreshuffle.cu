@@ -31,13 +31,17 @@ using BlockwiseKernelMap = std::unordered_map<
 template <typename DDataType, typename EDataType = DDataType>
 BlockwiseKernel blockwise_heuristic_dispatch(int M, int N, int K)
 {
-  if (M <= 16)
+  if (M <= 16  || (M <= 128 && N * K <= 512 * 7168))
   {
     return a8w8_blockscale_wpreshuffle_1x128x128_256x16x64x256_16x16_16x16_16x16x1_16x16x1_1x16x1x16_4_1x1_intrawave_v1<DDataType, EDataType>;
   }
   else if (M <= 32)
   {
     return a8w8_blockscale_wpreshuffle_1x128x128_256x32x64x256_16x16_16x16_16x16x1_16x16x1_1x32x1x8_8_2x1_intrawave_v1<DDataType, EDataType>;
+  }
+  else if (K < 320)
+  {
+    return a8w8_blockscale_wpreshuffle_1x128x128_256x16x128x256_16x16_16x16_16x16x1_16x16x1_1x16x1x16_8_1x2_intrawave_v1<DDataType, EDataType>;
   }
   else
   {

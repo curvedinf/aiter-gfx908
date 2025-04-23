@@ -1377,7 +1377,6 @@ def _bwd_kernel_dkdvdq_causal(
     for head_q_idx in range(head_k_idx * GROUP_SIZE, head_k_idx * GROUP_SIZE + GROUP_SIZE):
         if delta_qk >= 0:
             unaligned_start_m = start_n + delta_qk
-            len_m = BLOCK_N
         else:
             unaligned_start_m = max(start_n + delta_qk, 0)
         
@@ -2393,6 +2392,7 @@ def _flash_attn_backward(
             "num_stages": 1,
             "waves_per_eu": 1,
             "BLK_SLICE_FACTOR": 1,
+            # "matrix_instr_nonkdim": 32,
         }
         
         num_k_pids = (max_seqlen_k + BLOCK_N - 1) // BLOCK_N

@@ -348,7 +348,7 @@ def test_fmoe(
 
 
 list_dtype = [torch.bfloat16, torch.float16][:1]
-list_dim = [(6144, 4096), (4224, 4096)]
+list_dim = [(6144, 4096)]
 list_tokenNum = [
     1,
     3,

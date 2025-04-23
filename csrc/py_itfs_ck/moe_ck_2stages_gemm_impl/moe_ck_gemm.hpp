@@ -99,43 +99,6 @@ struct MulABScale
     {
         e = ck::type_convert<B16>(c);
     }
-
-    // template <>
-    // __host__ __device__ constexpr void operator()<F16, F16, float, float>(F16 &e,
-    //                                                                         const F16 &c,
-    //                                                                         const float &d0,
-    //                                                                         const float &d1) const
-    // {
-    //     e = ck::type_convert<F16>(c);
-    // }
-
-    // template <>
-    // __host__ __device__ constexpr void operator()<B16, B16, float, float>(B16 &e,
-    //                                                                         const B16 &c,
-    //                                                                         const float &d0,
-    //                                                                         const float &d1) const
-    // {
-    //     e = ck::type_convert<B16>(c);
-    // }
-
-
-    // template <>
-    // __host__ __device__ constexpr void operator()<F16, int, float, float>(F16 &e,
-    //                                                                         const int &c,
-    //                                                                         const float &d0,
-    //                                                                         const float &d1) const
-    // {
-    //     e = ck::type_convert<F16>(ck::type_convert<F32>(c));
-    // }
-
-    // template <>
-    // __host__ __device__ constexpr void operator()<B16, int, float, float>(B16 &e,
-    //                                                                         const int &c,
-    //                                                                         const float &d0,
-    //                                                                         const float &d1) const
-    // {
-    //     e = ck::type_convert<B16>(ck::type_convert<F32>(c));
-    // }
 };
 
 struct MulABScaleWint4
@@ -163,25 +126,6 @@ struct MulABScaleWint4
     {
         e = ck::type_convert<B16>(c);
     }
-
-    // template <>
-    // __host__ __device__ constexpr void operator()<F16, F16, float, float>(F16 &e,
-    //                                                                         const F16 &c,
-    //                                                                         const float &d0,
-    //                                                                         const float &d1) const
-    // {
-    //     e = ck::type_convert<F16>(c);
-    // }
-
-    // template <>
-    // __host__ __device__ constexpr void operator()<B16, B16, float, float>(B16 &e,
-    //                                                                         const B16 &c,
-    //                                                                         const float &d0,
-    //                                                                         const float &d1) const
-    // {
-    //     e = ck::type_convert<B16>(c);
-    // }
-
 
     template <>
     __host__ __device__ constexpr void operator()<F16, int, float, float, float>(F16 &e,

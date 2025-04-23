@@ -598,20 +598,21 @@ def ck_stage1(
     else:
         act_op = 0
 
-    aiter.ck_moe_stage1(input, 
-                        w1, 
-                        w2, 
-                        sorted_ids,
-                        sorted_expert_ids, 
-                        num_valid_ids, 
-                        out, 
-                        topk, 
-                        w1_scale, 
-                        a1_scale, 
-                        block_m, 
-                        sorted_weights,
-                        act_op,
-                    )
+    aiter.ck_moe_stage1(
+        input, 
+        w1, 
+        w2, 
+        sorted_ids,
+        sorted_expert_ids, 
+        num_valid_ids, 
+        out, 
+        topk, 
+        w1_scale, 
+        a1_scale, 
+        block_m, 
+        sorted_weights,
+        act_op,
+    )
 
     return out
 

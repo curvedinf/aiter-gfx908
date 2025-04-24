@@ -713,7 +713,7 @@ CK_TILE_DEVICE static auto MakeKDram(
     return ck_tile::pad_tensor_view(
         k_dram_naive,
         ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kBlockK0>{}),
-        ck_tile::sequence<false, Traits::kPadHeadDimQ>{});
+        ck_tile::sequence<true, Traits::kPadHeadDimQ>{});
 }
 
 template <typename Policy, typename scalar_t>

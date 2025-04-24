@@ -1439,7 +1439,7 @@ void dispatch_fmla_fwd_splictkv_prefill(
 #define DISPATCH_FMLA_TYPES(TYPE, IS_CAUSAL, NAME, ...) \
     switch ((TYPE))                                     \
     {                                                   \
-        case at::ScalarType::BFloat16:                           \
+        case at::ScalarType::BFloat16:                  \
         {                                               \
             using scalar_t = ck_tile::bf16_t;           \
             if ((IS_CAUSAL))                            \
@@ -1454,7 +1454,7 @@ void dispatch_fmla_fwd_splictkv_prefill(
             }                                           \
             break;                                      \
         }                                               \
-        case at::ScalarType::Half:                               \
+        case at::ScalarType::Half:                      \
         {                                               \
             using scalar_t = ck_tile::fp16_t;           \
             if ((IS_CAUSAL))                            \
@@ -1584,7 +1584,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     // CHECK_SHAPE(key_cache, num_blocks, page_block_size, num_heads, head_size);
 
     /// TODO: transpose before return!!! But it may not be required.
-    auto output = torch::empty({batch_size, num_heads_q, seqlen_q_ori, head_size_v}, opts);
+    auto output = torch::empty({batch_size, seqlen_q_ori, num_heads_q, head_size_v}, opts);
     auto softmax_lse = torch::empty({batch_size, num_heads_q, seqlen_q_ori}, opts.dtype(torch::kFloat32));
 
     torch::Tensor softmax_lseaccum;
@@ -1657,6 +1657,6 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     // );
 
     /// TODO: transpose before return!!!
-    output = output.transpose(1,2);
+    // output = output.transpose(1,2);
     return {output, softmax_lse};
 }

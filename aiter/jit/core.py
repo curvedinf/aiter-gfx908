@@ -246,7 +246,7 @@ def build_module(
                 "-mllvm",
                 "-amdgpu-function-calls=false",
             ]
-        if hip_version > Version("6.2.41133"):
+        if Version("6.4") >= hip_version > Version("6.2.41133"):
             flags_hip += ["-mllvm", "-amdgpu-coerce-illegal-types=1"]
 
         flags_cc += flags_extra_cc
@@ -378,7 +378,7 @@ def get_args_of_build(ops_name: str, exclue=[]):
                 d_ops[k] = eval(val)
             else:
                 pass
-            
+
         # undefined compile features will be replaced with default value
         d_opt_build_args.update(d_ops)
         return d_opt_build_args

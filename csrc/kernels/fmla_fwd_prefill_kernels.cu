@@ -886,6 +886,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
     const KPageBlockNavigator&  k_page_block_navigator,
     const VPageBlockNavigator&  v_page_block_navigator,
     LseDramBlockWindow&         lse_dram_window_,
+    int32_t                     nid,
     int32_t                     num_splits,
     int32_t                     split_id,
     Mask                        mask,
@@ -999,7 +1000,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
                                                 {seqlen_k_start, 0});
     auto [page_block_v_id, v_dram_window] =
         v_page_block_navigator.make_tile_window(v_dram_window_lengths,
-                                                {0, seqlen_k_start},
+                                                {nid, seqlen_k_start},
                                                 Policy::MakeVDramTileDistribution());
 
 
@@ -1362,6 +1363,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             k_page_block_navigator,
             v_page_block_navigator,
             lse_acc_dram_window,
+            nid,
             params.num_splits,
             split_id,
             mask,
@@ -1398,6 +1400,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             k_page_block_navigator,
             v_page_block_navigator,
             lse_dram_window,
+            nid,
             params.num_splits,
             split_id,
             mask,

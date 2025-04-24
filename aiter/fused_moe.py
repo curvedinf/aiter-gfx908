@@ -354,7 +354,7 @@ def get_2stage_cfgs(
         tag = cfg["tag"]
 
     # war
-    if q_dtype_w in [torch.bfloat16, torch.float16, torch.uint32, torch.int8, torch.float8_e4m3fnuz]:
+    if q_dtype_w in [torch.bfloat16, torch.float16, torch.uint32]:
         tag = "ck"
 
     logger.info(f"[fused_moe] using {'default' if cfg is None else tag} for {keys} ")

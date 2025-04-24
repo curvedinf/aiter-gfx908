@@ -346,7 +346,6 @@ def test_fmoe(
 
     return {"us": us_fuse, "err": err}
 
-
 list_dtype = [torch.bfloat16, torch.float16][:1]
 list_dim = [(6144, 4096)]
 list_tokenNum = [

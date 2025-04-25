@@ -391,6 +391,11 @@ def get_2stage_cfgs(
     )
 
 
+@functools.lru_cache()
+def get1tensor(device):
+    return torch.tensor(1.0, dtype=torch.float, device=device)
+
+
 def fused_moe_2stages(
     hidden_states,
     w1,  # [expert(local_expert:EP), inter_dim*2, dim] N,K
@@ -483,11 +488,6 @@ def fused_moe_2stages(
         a2 = a2_v
 
     if quant_type == aiter.QuantType.No:
-
-        @functools.lru_cache()
-        def get1tensor(device):
-            return torch.tensor(1.0, dtype=dtypes.fp32, device=device)
-
         a2_scale = get1tensor(device)
 
     stage2(
@@ -592,13 +592,14 @@ def ck_stage1(
     w1_scale=None,
     sorted_weights=None,
 ):
-    topk = out.shape[1]
-    expert, topk, _ = out.shape
+    _, topk, _ = out.shape
+    # max_num_tokens_padded = sorted_expert_ids.shape[0]*block_size
 
-    # tmp = torch.empty_like(out)
-    dtype = out.dtype
-    device = out.device
-    tmp = torch.empty((expert, topk, w1.shape[1]), dtype=dtype, device=device)
+    if activation == ActivationType.Silu:
+        act_op = 1
+    else:
+        act_op = 0
+
     aiter.ck_moe_stage1(
         input,
         w1,
@@ -606,17 +607,15 @@ def ck_stage1(
         sorted_ids,
         sorted_expert_ids,
         num_valid_ids,
-        tmp,
+        out,
         topk,
         w1_scale,
         a1_scale,
         block_m,
         sorted_weights,
+        act_op,
     )
-    if activation == ActivationType.Silu:
-        aiter.silu_and_mul(out, tmp)
-    else:
-        aiter.gelu_and_mul(out, tmp)
+
     return out
 
 

@@ -1563,7 +1563,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const bool           is_causal)
 {
     //                                        dqk  dv   m0  n0  n1  #warp
-    using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 32, 64, 4>;
+    using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4>;
 
     torch::Tensor vcache = value_cache.data_ptr() ? value_cache : key_cache;
 

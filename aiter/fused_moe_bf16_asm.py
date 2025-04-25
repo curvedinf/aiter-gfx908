@@ -107,16 +107,32 @@ def asm_moe(hidden_states,
             (M, model_dim), dtype=w1.dtype, device=device)
         a8_scale = torch.empty((M, model_dim//scale_blk_k), dtype=torch.float, device=device)
         aiter.dynamic_per_token_scaled_fp8_quant(a8, hidden_states, a8_scale)
-        
-        aiter.fmoe_fp8_blockscale_g1u1(moe_buf, a8, w1, w2, sorted_ids,
-                                       sorted_weights, sorted_expert_ids, num_valid_ids,
-                                       topk,
-                                       fc1_scale.view(E, -1),
-                                       fc2_scale.view(E, -1),
-                                       a8_scale.t().contiguous(),
-                                       scale_blk_n,
-                                       scale_blk_k,
-                                       fc2_smooth_scale)
+
+        a1_q, a1_scale = pertoken_quant(
+            hidden_states.view(-1, model_dim // scale_blk_k, scale_blk_k), quant_dtype=torch.float8_e4m3fnuz
+        )
+        a1_q = a1_q.view(-1, model_dim)
+        a1_scale = a1_scale.squeeze(-1).t().contiguous()
+
+
+        scale_blk_n, scale_blk_k = block_shape
+        aiter.fmoe_fp8_blockscale_g1u1(
+            moe_buf,
+            a1_q,
+            w1,
+            w2,
+            sorted_ids,
+            sorted_weights,
+            sorted_expert_ids,
+            num_valid_ids,
+            topk,
+            a1_scale,
+            fc1_scale,
+            fc2_scale,
+            scale_blk_n,
+            scale_blk_k,
+            None,
+        )
     else:
         # a8w8 fmoe, opt: smooth quant
         a8_type = w1.dtype if w1.dtype != torch.int32 and w1.dtype != torch.uint32 else torch.float8_e4m3fnuz

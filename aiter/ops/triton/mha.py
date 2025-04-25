@@ -1123,6 +1123,14 @@ def _bwd_dkdvdq_inner(
     FP8_MAX: tl.constexpr,
     workgroup_id: tl.int32,
 ):
+    tl.assume(stride_q_m >= 0)
+    tl.assume(stride_q_k >= 0)
+    tl.assume(stride_dq_m >= 0)
+    tl.assume(stride_dq_k >= 0)
+    tl.assume(stride_do_m >= 0)
+    tl.assume(stride_do_k >= 0)
+    tl.assume(stride_deltam >= 0)
+
     PADDED_HEAD: tl.constexpr = (BLOCK_D_MODEL != BLOCK_D_MODEL_POW2)
     delta_qk = seqlen_q - seqlen_k
     offs_m = start_m + tl.arange(0, BLOCK_M)
@@ -1303,6 +1311,34 @@ def _bwd_kernel_dkdvdq_causal(
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
 ):
+    tl.assume(stride_q_b >= 0)
+    tl.assume(stride_q_h >= 0)
+    tl.assume(stride_q_m >= 0)
+    tl.assume(stride_q_k >= 0)
+    tl.assume(stride_k_b >= 0)
+    tl.assume(stride_k_h >= 0)
+    tl.assume(stride_k_n >= 0)
+    tl.assume(stride_k_k >= 0)
+    tl.assume(stride_v_b >= 0)
+    tl.assume(stride_v_h >= 0)
+    tl.assume(stride_v_n >= 0)
+    tl.assume(stride_v_k >= 0)
+    tl.assume(stride_dk_b >= 0)
+    tl.assume(stride_dk_h >= 0)
+    tl.assume(stride_dk_n >= 0)
+    tl.assume(stride_dk_k >= 0)
+    tl.assume(stride_dq_b >= 0)
+    tl.assume(stride_dq_h >= 0)
+    tl.assume(stride_dq_m >= 0)
+    tl.assume(stride_dq_k >= 0)
+    tl.assume(stride_delta_b >= 0)
+    tl.assume(stride_delta_h >= 0)
+    tl.assume(stride_delta_m >= 0)
+    tl.assume(stride_do_b >= 0)
+    tl.assume(stride_do_h >= 0)
+    tl.assume(stride_do_m >= 0)
+    tl.assume(stride_do_k >= 0)
+
     wid = tl.program_id(0) # workgoup id: 0, ..., NUM_K_PIDS * BATCH * NUM_K_HEADS - 1
 
     # workgroups get launched first along batch dim, then in head_k dim, and then in seq k block dim

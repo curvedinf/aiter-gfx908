@@ -288,7 +288,6 @@ public:
     {
         constexpr int32_t SingleKSize = MakeKLdsBlockDescriptor().get_element_space_size();
         constexpr int32_t SingleVSize =[&]() {
-            /// TODO: Check correctness
             constexpr int32_t Banks        = 32; /// TODO: need change based on arch
             constexpr int32_t PixelsPerRow = Banks * 4 / sizeof(scalar_t);
             constexpr int32_t kKPack       = 16 / sizeof(scalar_t);
@@ -1120,7 +1119,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
         if constexpr (Mask::IsMasking)
         {
             const auto k_origin = k_page_block_navigator.to_global_window_origin(
-                page_block_k_id, k_dram_block_window.get_window_origion());
+                page_block_k_id, k_dram_block_window.get_window_origin());
             const bool need_perpixel_check = mask.IsEdgeTile(
                 q_origin.at(ck_tile::number<0>{}),
                 k_origin.at(ck_tile::number<0>{}),
@@ -1330,7 +1329,8 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                                     ck_tile::SimplifiedGenericAttentionMask<true>,
                                     ck_tile::SimplifiedGenericAttentionMask<false>>;
     Mask mask = kIsCausal ?
-                ck_tile::make_generic_attention_mask_from_lr_window<Mask>(-1, -1, params.size_s, seqlen_k, true) :
+                ck_tile::make_generic_attention_mask_from_lr_window<Mask>(
+                    -1, seqlen_k - params.size_s + 1, params.size_s, seqlen_k, true) :
                 Mask{params.size_s, seqlen_k};
 
     if constexpr (kDoSplit)
@@ -1580,10 +1580,6 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const int32_t page_block_size = key_cache.size(1);
     const int32_t num_heads_k = key_cache.size(2);
 
-    // CHECK_SHAPE(query, batch_size, seqlen_q, num_heads, head_size);
-    // CHECK_SHAPE(key_cache, num_blocks, page_block_size, num_heads, head_size);
-
-    /// TODO: transpose before return!!! But it may not be required.
     auto output = torch::empty({batch_size, seqlen_q_ori, num_heads_q, head_size_v}, opts);
     auto softmax_lse = torch::empty({batch_size, num_heads_q, seqlen_q_ori}, opts.dtype(torch::kFloat32));
 
@@ -1630,7 +1626,6 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.stride_b_o = output.stride(0);
     params.stride_s_o = output.stride(1);
     params.stride_h_o = output.stride(2);
-    /// TODO: not all of the following params are required?
     params.stride_b_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(0) : 0;
     params.stride_h_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(1) : 0;
     params.stride_sp_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(2) : 0;
@@ -1639,24 +1634,15 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.stride_sp_oacc = (num_splits > 1) ? output_accum.stride(2) : 0;
     params.stride_s_oacc = (num_splits > 1) ? output_accum.stride(3) : 0;
 
-    TORCH_CHECK(params.p_key == params.p_value, "Key and value are expected as the same thing for now.");
+	using acc_t = float;
+    DISPATCH_FMLA_TYPES(
+        query.scalar_type(),
+        is_causal,
+        "fmla_fwd",
+        [&](){
+            dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, Is_causal>(params);
+        }();
+    );
 
-    /// TODO: Replace the follow code with DISPATCH_FMLA_TYPES!
-    TORCH_CHECK(query.scalar_type() == at::ScalarType::Half, "Only support fp16 inputs!");
-    TORCH_CHECK(is_causal == false, "is_causal=True is not supported for now.");
-    dispatch_fmla_fwd_splictkv_prefill<Traits, ck_tile::fp16_t, float, false>(params);
-
-	// using acc_t = float;
-    // DISPATCH_FMLA_TYPES(
-    //     query.scalar_type(),
-    //     is_causal,
-    //     "fmla_fwd",
-    //     [&](){
-    //         dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, Is_causal>(params);
-    //     }();
-    // );
-
-    /// TODO: transpose before return!!!
-    // output = output.transpose(1,2);
     return {output, softmax_lse};
 }

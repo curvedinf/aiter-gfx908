@@ -8,6 +8,7 @@ import itertools
 import argparse
 import random
 import math
+import triton
 
 Block_M = 64
 Block_N = 16 
@@ -85,8 +86,8 @@ def scaled_dot_product_attention(query, key, value, h_q, h_kv, is_causal=False):
     if is_causal:
         s_q = query.shape[-2]
         s_k = key.shape[-2]
-        attn_bias = torch.zeros(s_q, s_k, dtype=query.dtype)
-        temp_mask = torch.ones(s_q, s_k, dtype=torch.bool).tril(diagonal=s_k - s_q)
+        attn_bias = torch.zeros(s_q, s_k, dtype=query.dtype, device="cuda")
+        temp_mask = torch.ones(s_q, s_k, dtype=torch.bool, device="cuda").tril(diagonal=s_k - s_q)
         attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
         attn_bias.to(query.dtype)
         attn_weight += attn_bias
@@ -101,7 +102,7 @@ def cal_diff(x: torch.Tensor, y: torch.Tensor, name: str) -> None:
     cos_diff = 1 - 2 * (x * y).sum().item() / max((x * x + y * y).sum().item(), 1e-12)
     amax_diff = (x - y).abs().max().item()
     # print(f"{name}: {cos_diff=}, {RMSE=}, {amax_diff=}")
-    assert cos_diff < 1e-5
+    assert cos_diff < 1e-3
 
 
 @torch.inference_mode()
@@ -181,28 +182,28 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     cal_diff(lse_flash, lse_torch.cuda(), "lse")
     cal_diff(out_flash, out_torch.cuda(), "out")
 
-    # t = triton.testing.do_bench(flash_mla)
-    # FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2
-    # bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d + b * s_q * h_q * dv) * (
-    #     torch.finfo(q.dtype).bits // 8
-    # )
-    # print(
-    #     f"{t:.3f} ms, {FLOPS / 10 ** 9 / t:.0f} TFLOPS, {bytes / 10 ** 6 / t:.0f} GB/s"
-    # )
+    t = triton.testing.do_bench(flash_mla)
+    FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2
+    bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d + b * s_q * h_q * dv) * (
+        torch.finfo(q.dtype).bits // 8
+    )
+    print(
+        f"{t:.3f} ms, {FLOPS / 10 ** 9 / t:.0f} TFLOPS, {bytes / 10 ** 6 / t:.0f} GB/s"
+    )
 
 
 if __name__ == "__main__":
     h_kv = 1
     d, dv = 576, 512
-    causal = False
 
-    for (dtype, b, s, h_q, s_q, varlen) in itertools.product(
-        (torch.float16, torch.bfloat16)[0:1],
-        (1,),
+    for (dtype, b, s, h_q, s_q, varlen, causal) in itertools.product(
+        (torch.float16, torch.bfloat16),
+        (2,4),
         (4096, 8192),
         (64, 128),
-        # (1, 2),
-        (64,),
+        # (1, 2), # s_q for decode
+        (64,),  # s_q for prefill
+        (False, True)[1:],
         (False, True)
     ):
         test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen)

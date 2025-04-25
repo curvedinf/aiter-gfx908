@@ -7,6 +7,7 @@ from aiter.test_common import checkAllclose, perftest
 import itertools
 from enum import IntEnum
 import argparse
+from aiter import dtypes
 
 
 @perftest()
@@ -159,7 +160,6 @@ def ref_rope_2d_fwd(x, size_h, size_w, cos_h, sin_h, cos_w, sin_w, rotate_style)
     return torch.cat([x1, x2], dim=-1).view(s, b, h, d).to(dtype=x.dtype)
 
 
-
 def test_rope_sbhd(input, freqs, grad, rotate_style, reuse_freqs_front_part, nope_first, transpose_output):
     input_msg = f"""
 dtype: {input.dtype}, \
@@ -256,7 +256,6 @@ transpose_output: {transpose_output}
     checkAllclose(ref, hip_cached_fwd, msg=f"rope_cached_position_fwd - avg: {hip_cached_fwd_avg:<8.2f} us - {input_msg}\n")
 
 
-
 def test_rope_sbhd_2c_positions(input_x, input_y, freqs, grad_x, grad_y, positions, offsets, rotate_style, reuse_freqs_front_part, nope_first, transpose_output):
     input_msg = f"""
 dtype: {input_x.dtype}, \
@@ -286,7 +285,6 @@ transpose_output: {transpose_output}
 
     checkAllclose(ref_x, hip_cached_fwd_x, msg=f"rope_cached_position_2d_fwd_x - avg: {hip_cached_fwd_avg:<8.2f} us - {input_msg}\n")
     checkAllclose(ref_y, hip_cached_fwd_y, msg=f"rope_cached_position_2d_fwd_y - avg: {hip_cached_fwd_avg:<8.2f} us - {input_msg}\n")
-
 
 
 def compare_rope_sbhd_2c_positions_with_legacy(input_x, input_y, freqs, positions, offsets, rotate_style, nope_first, check_correction=False):
@@ -342,7 +340,6 @@ nope_first: {nope_first}
     print(f"{color}{input_msg}hip: {hip_cached_fwd_avg:<8.2f} us. leg: {leg_cached_fwd_avg:<8.2f} us. diff: {100*hip_cached_fwd_avg/leg_cached_fwd_avg}%.\n{endc}")
 
 
-
 def test_rope_thd(input, cu_seqlens, freqs, grad, rotate_style, reuse_freqs_front_part, nope_first):
     torch.set_printoptions(profile="full")
     input_msg = f"""
@@ -388,7 +385,6 @@ dim_freqs: {str(freqs_h.shape):<20}
 
     checkAllclose(ref,        hip_fwd, msg=f"rope_2d_fwd - avg: {hip_fwd_avg:<8.2f} us - {input_msg}\n")
     checkAllclose(input.grad, hip_bwd, msg=f"rope_2d_bwd - avg: {hip_bwd_avg:<8.2f} us - {input_msg}\n")
-
 
 
 if __name__ == "__main__":

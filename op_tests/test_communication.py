@@ -8,6 +8,7 @@ import os
 import aiter
 from aiter.test_common import checkAllclose, perftest, tensor_dump, tensor_load
 from aiter.dist.parallel_state import graph_capture
+from aiter import dtypes
 import sys
 import traceback
 import logging

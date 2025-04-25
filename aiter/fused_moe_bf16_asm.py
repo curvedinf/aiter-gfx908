@@ -10,7 +10,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import aiter
 from aiter import logger
 from aiter import pertoken_quant, get_hip_quant, get_torch_quant
-from aiter import ActivationType, QuantType
+from aiter import ActivationType, QuantType, dtypes
+
 BLOCK_SIZE_M = 32
 
 

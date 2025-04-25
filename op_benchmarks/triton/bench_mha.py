@@ -188,7 +188,7 @@ def create_benchmark_configs(custom, args):
     # unit = "ms"
 
     if mode=="bwd":
-        line_vals = [f'fused-bwd({unit})', f'bwd({unit})']
+        line_vals = [f'fused-bwd({unit})' if args.fused_bwd else f'bwd({unit})']
     else:
         line_vals = [f'fwd({unit})']
 
@@ -437,9 +437,9 @@ def parse_args():
     parser.add_argument("-quantize_p", action='store_true', default=False)
     parser.add_argument("-dtype", default='fp16')
     parser.add_argument("-bench_torch", action='store_true', default=False)
-    parser.add_argument("-fused_bwd", action='store_true', default=False)
     parser.add_argument("-print_vgpr", action='store_true', default=False)
     parser.add_argument("-return_all", action='store_true', default=False, help="Prints TFLOPS, walltime, bandwidth.")
+    parser.add_argument("-fused_bwd", action='store_true', default=False, help="Uses fused backward kernel.")
     parser.add_argument("-test_mode", action='store_true', default=False, help="Tests correctness of the Triton provider comparing the output to the Torch sdpa.")
     # prints TFLOPS without setting the following
     parser.add_argument("-return_time", action='store_true', default=False, help="Prints only walltime.")

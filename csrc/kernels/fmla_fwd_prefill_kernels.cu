@@ -1563,7 +1563,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const bool           is_causal)
 {
     //                                        dqk  dv   m0  n0  n1  #warp
-    using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 32, 32, 4>;
+    using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 32, 64, 4>;
 
     torch::Tensor vcache = value_cache.data_ptr() ? value_cache : key_cache;
 
@@ -1574,7 +1574,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const int32_t num_heads_q = query.size(2);
 
     const int32_t head_size = query.size(3);
-
+    TORCH_CHECK((head_size == 576) && (head_size_v == 512), "Only support QK head dim 576 and V head dim 512!");
 
     const int32_t num_blocks = key_cache.size(0);
     const int32_t page_block_size = key_cache.size(1);

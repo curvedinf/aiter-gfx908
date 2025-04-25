@@ -167,9 +167,9 @@ def per_tensor_quant_triton(x, scale=None, quant_dtype=dtypes.i8):
     y = torch.empty(x.shape, dtype=quant_dtype, device=x.device)
     if scale is None:
         scale = torch.empty(1, dtype=dtypes.fp32, device=x.device)
-        triton.dynamic_scaled_fp8_quant(y, x, scale)
+        triton.quant.dynamic_per_tensor_fp8_quant(y, x, scale)
     else:
-        triton.static_scaled_fp8_quant(y, x, scale)
+        triton.quant.static_per_tensor_fp8_quant(y, x, scale)
     return y, scale
 
 

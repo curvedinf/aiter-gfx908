@@ -6,8 +6,9 @@ import torch.nn.functional as F
 import aiter
 from aiter.test_common import checkAllclose, perftest
 from torch.profiler import profile, record_function, ProfilerActivity
+from aiter import dtypes
 
-# input shape: torch.Size([4096, 64, 160]) (20480, 1, 128) 
+# input shape: torch.Size([4096, 64, 160]) (20480, 1, 128)
 # other shape: torch.Size([4096, 64, 160]) (10240, 160, 1)
 
 # input shape: torch.Size([4096, 64, 160]) (47360, 1, 296)
@@ -32,8 +33,8 @@ from torch.profiler import profile, record_function, ProfilerActivity
 shapes = [(512,), (1280, 232, 256), (256, 256), (256, 8192), (256,), (1280, 32, 256), (384, 256), (384,), (65536,), (65536, 256), (1, 8, 256), (512, 256), (1280, 532, 256)]  
 strides = [(1,), (59392, 256, 1), (256, 1), (8192, 1), (1, ), (8192, 256, 1), (256, 1), (1,), (1,), (256, 1), (2048, 256, 1), (256, 1), (136192, 256, 1)]
 
-#shapes = [(32,)]
-#strides = [(1,)]
+# shapes = [(32,)]
+# strides = [(1,)]
 
 tensors0 = [torch.empty_strided(shape, stride, dtype=dtypes.bf16, device='cuda') for shape, stride in zip(shapes, strides)]  
 tensors1 = [torch.empty_strided(shape, stride, dtype=dtypes.bf16, device='cuda') for shape, stride in zip(shapes, strides)]

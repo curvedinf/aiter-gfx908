@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import aiter
 from aiter.test_common import checkAllclose, perftest
 from torch.profiler import profile, record_function, ProfilerActivity
+from aiter import dtypes
 
 input_shapes = [
         (512,), (1280, 232, 256), (256, 256), (256, 8192), (256,), (1280, 32, 256), 

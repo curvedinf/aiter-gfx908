@@ -82,6 +82,7 @@ def get_torch_quant(qType):
         QuantType.No: lambda *a, **k: (a[0], None),
         QuantType.per_Tensor: per_tensor_quant,
         QuantType.per_Token: pertoken_quant,
+        QuantType.per_1x128: lambda a, **k: pertoken_quant(a.view(-1, 128), **k),
     }
     return tmp.get(qType, NotImplementedError)
 

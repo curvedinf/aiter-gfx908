@@ -606,6 +606,7 @@ def ck_stage1_tune(
     out,  # [token_num, topk, inter_dim]
     block_m=32,
     activation=ActivationType.Silu,
+    quant_type=QuantType.No,
     a1_scale=None,
     w1_scale=None,
 ):
@@ -740,6 +741,22 @@ def torch_moe_stage1(
             1, 1, hidden_states.shape[-1] // a1_scale.shape[1]
         ).view(hidden_states.shape[0], -1)
         hidden_states = hidden_states * a1_scale
+    # per_1x128
+    elif quant_type == QuantType.per_1x128:
+        w1_shape = w1.shape
+        w1 = w1.view(
+            w1.shape[0], w1.shape[1] // 128, 128, w1.shape[2] // 128, 128
+        ) * w1_scale.view(
+            w1_scale.shape[0], w1.shape[1] // 128, 1, w1.shape[2] // 128, 1
+        )
+        w1 = w1.view(w1_shape)
+
+        # Adjust a1_scale for 1x128 quantization
+        a1_scale = a1_scale.view(hidden_states.shape[0], 1, -1)
+        a1_scale = a1_scale.repeat(
+            1, 1, 128
+        ).view(hidden_states.shape[0], -1)
+        hidden_states = hidden_states * a1_scale     
     elif quant_type == QuantType.No:
         pass
     else:
@@ -799,10 +816,22 @@ def torch_moe_stage2(
             w2_scale.shape[0], w2.shape[1] // 128, 1, w2.shape[2] // 128, 1
         )
         w2 = w2.view(w2_shape)
+    elif quant_type == QuantType.per_1x128:
+        w2_shape = w2.shape
+        w2 = w2.view(
+            w2.shape[0], w2.shape[1] // 128, 128, w2.shape[2] // 128, 128
+        ) * w2_scale.view(
+            w2_scale.shape[0], w2.shape[1] // 128, 1, w2.shape[2] // 128, 1
+        )
+        w2 = w2.view(w2_shape)
 
     if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
         hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
     elif quant_type == QuantType.per_128x128:
+        a2_scale = a2_scale.view(hidden_states.shape[0], topk, -1, 1)
+        a2_scale = a2_scale.repeat(1, 1, 1, 128).view(hidden_states.shape[0], topk, -1)
+        hidden_states = hidden_states * a2_scale
+    elif quant_type == QuantType.per_1x128:
         a2_scale = a2_scale.view(hidden_states.shape[0], topk, -1, 1)
         a2_scale = a2_scale.repeat(1, 1, 1, 128).view(hidden_states.shape[0], topk, -1)
         hidden_states = hidden_states * a2_scale

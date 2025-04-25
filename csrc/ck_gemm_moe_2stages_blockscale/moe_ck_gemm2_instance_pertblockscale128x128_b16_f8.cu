@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+#include "gemm_moe_2stages_blockscale_common.cuh"
+
+using A0DataType = F8;
+using B0DataType = F8;
+using AccDataType = F32;
+using EDataType = B16;
+using CDEElementOp = MulABScaleExpertWeight;
+const bool Nswizzle = false;
+const bool PerTensorQuant = false;
+CK_MOE_STAGE2_GEMM_BLOCKSCALE_DEFINE(256, 128, 128, 128/sizeof(A0DataType), 2, 2, 16)

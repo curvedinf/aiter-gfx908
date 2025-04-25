@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 #pragma once
-
+#include "aiter_enum.h"
 #include <torch/extension.h>
 
 torch::Tensor ck_moe(torch::Tensor &hidden_states,          // [m, k], input token
@@ -67,5 +67,19 @@ void moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
                     std::optional<torch::Tensor> w2_scale, // [e, 1, n], gate(up) scale
                     std::optional<torch::Tensor> a2_scale, // [m, 1], token scale
                     std::optional<int> block_m);
- 
-//moe_stage1(at::Tensor&, at::Tensor&, at::Tensor&, at::Tensor&, at::Tensor&, at::Tensor&, at::Tensor&, int, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char>>&, std::optional<at::Tensor>&, std::optional<at::Tensor>&, std::optional<int>&)                 
+
+void moe_stage2_blockscale(torch::Tensor &inter_states,      // [m, k], input token
+                    torch::Tensor &w1,                // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
+                    torch::Tensor &w2,                // [e, n, k], pre-shuffle([e, nr, kr, w])
+                    torch::Tensor &sorted_token_ids,  // [max_num_tokens_padded]
+                    torch::Tensor &sorted_expert_ids, // [max_num_m_blocks]
+                    torch::Tensor &sorted_weights,    // [max_num_tokens_padded]
+                    torch::Tensor &num_valid_ids,     // [1]
+                    torch::Tensor &out,               // [max_num_tokens_padded, inter_dim]
+                    int topk,
+                    std::string &kernelName,
+                    QuantType quant_type,
+                    std::optional<torch::Tensor> w2_scale, // [e, 1, n], gate(up) scale
+                    std::optional<torch::Tensor> a2_scale, // [m, 1], token scale
+                    std::optional<int> block_m);
+  

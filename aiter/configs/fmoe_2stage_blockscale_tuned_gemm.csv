@@ -1,0 +1,2 @@
+token,model_dim,inter_dim,expert,topk,dtype,q_dtype,wq_dtype,q_type,stage,use_g1u1,block_m,ksplit,us,tag,err
+1,1024,1024,8,2,torch.bfloat16,torch.float8_e4m3fnuz,torch.float8_e4m3fnuz,QuantType.per_1x128,2,1,128,0,40.70715,ck_moe_stage2_B16_F8_F8_per_1x128_256x128x128x128_2x2_16_MulABScaleExpertWeight_Nswizzle0_interwave_v1,0.10%

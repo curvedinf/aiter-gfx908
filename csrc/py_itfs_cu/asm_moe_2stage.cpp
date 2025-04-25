@@ -8,6 +8,7 @@
 #include "aiter_hip_common.h"
 #include "moe_op.h"
 #include "asm_moe_2stage_configs.hpp"
+#include "py_itfs_common.h"
 
 struct __attribute__((packed)) KernelArgs
 {
@@ -64,20 +65,16 @@ static CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1, Q
     int E = w1.size(0);
     int dim1 = w1.size(1);
 
-    if ((inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
-         inp.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
-        (w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
-         w1.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
+    if ((inp.scalar_type() == torch_fp8) &&
+        (w1.scalar_type() == torch_fp8) &&
         out.scalar_type() == at::ScalarType::BFloat16 &&
         quant_type == QuantType::per_Token &&
         do_weight)
     {
         return &cfg_fmoe_stage1_bf16_pertokenFp8_doweight_g1u1;
     }
-    else if ((inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
-              inp.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
-             (w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
-              w1.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
+    else if ((inp.scalar_type() == torch_fp8) &&
+             (w1.scalar_type() == torch_fp8) &&
              out.scalar_type() == at::ScalarType::BFloat16 &&
              quant_type == QuantType::per_Token)
     {
@@ -90,12 +87,9 @@ static CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1, Q
     {
         return &cfg_fmoe_stage1_bf16_pertokenInt8_g1u1;
     }
-    else if ((inp.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
-              inp.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
-             (w1.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
-              w1.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
-             (out.scalar_type() == at::ScalarType::Float8_e4m3fnuz ||
-              out.scalar_type() == at::ScalarType::Float8_e4m3fn) &&
+    else if ((inp.scalar_type() == torch_fp8) &&
+             (w1.scalar_type() == torch_fp8) &&
+             (out.scalar_type() == torch_fp8) &&
              quant_type == QuantType::per_128x128)
     {
         return &cfg_fmoe_stage1_bf16_pertokenFp8_blockscale_g1u1;

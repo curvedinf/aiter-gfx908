@@ -21,6 +21,7 @@
 #include "hip_compat.h"
 #include "hip_reduce.h"
 #include "dispatch_utils.h"
+#include "py_itfs_common.h"
 
 #ifdef USE_ROCM
 #include "quant_utils.cuh"
@@ -999,9 +1000,10 @@ void reshape_and_cache_with_pertoken_quant(
   using dequant_scale_t = float; // should align with k_dequant_scales/v_dequant_scales dtype
 
   float dtypeMax;
-  if (key_cache.dtype() == at::ScalarType::Float8_e4m3fnuz)
+  std::cout << "torch_fp8: " << torch_fp8 << std::endl;
+  if (key_cache.dtype() == torch_fp8)
   {
-    dtypeMax = std::numeric_limits<c10::Float8_e4m3fnuz>::max();
+    dtypeMax = std::numeric_limits<c10_fp8>::max();
     if (key.dtype() == at::ScalarType::Float)
     {
       CALL_RESHAPE_AND_CACHE_WITH_PERTOKEN_QUANT(float, hip_fp8, dequant_scale_t);
@@ -1080,9 +1082,9 @@ void reshape_and_cache_with_block_quant(
   using dequant_scale_t = float; // should align with k_dequant_scales/v_dequant_scales dtype
 
   float dtypeMax;
-  if (key_cache.dtype() == at::ScalarType::Float8_e4m3fnuz)
+  if (key_cache.dtype() == torch_fp8)
   {
-    dtypeMax = std::numeric_limits<c10::Float8_e4m3fnuz>::max();
+    dtypeMax = std::numeric_limits<c10_fp8>::max();
     if (key.dtype() == at::ScalarType::Float)
     {
       CALL_RESHAPE_AND_CACHE_WITH_BLOCK_QUANT(float, hip_fp8, dequant_scale_t);

@@ -415,8 +415,8 @@ def fused_moe_2stages(
     a2_scale=None,  # [expert(local_expert:EP), 1, inter_dim]
 ):
 
-    quant_func = get_hip_quant(quant_type)
-    # quant_func = get_torch_quant(quant_type)
+    # quant_func = get_hip_quant(quant_type)
+    quant_func = get_torch_quant(quant_type)
 
     token_num, _ = hidden_states.shape
     E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)

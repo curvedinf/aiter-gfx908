@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include "aiter_hip_common.h"
+#include "py_itfs_common.h"
 
 struct __attribute__((packed)) KernelArgs
 {
@@ -113,7 +114,7 @@ torch::Tensor pa_fwd(torch::Tensor &Q,            //   [num_seqs, num_heads, hea
                 static AiterAsmKernel impl_a16w8_f16_i8("pa_a16w8_2tg_g8_i8", "pa_a16w8_f16_2tg_g8_i8.co");
                 impl_ptr = &impl_a16w8_f16_i8;
             }
-            else if (K.dtype() == at::ScalarType::Float8_e4m3fnuz)
+            else if (K.dtype() == torch_fp8)
             {
                 if (high_precision.value() == 0)
                 {
@@ -139,7 +140,7 @@ torch::Tensor pa_fwd(torch::Tensor &Q,            //   [num_seqs, num_heads, hea
                 static AiterAsmKernel impl_a16w8_b16_i8("pa_a16w8_2tg_g8_i8", "pa_a16w8_b16_2tg_g8_i8.co");
                 impl_ptr = &impl_a16w8_b16_i8;
             }
-            else if (K.dtype() == at::ScalarType::Float8_e4m3fnuz)
+            else if (K.dtype() == torch_fp8)
             {
                 if (high_precision.value() == 0)
                 {

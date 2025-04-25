@@ -4,6 +4,14 @@
 #pragma once
 #include <torch/all.h>
 
+#if defined(__gfx950__)
+const auto torch_fp8 = at::ScalarType::Float8_e4m3fn;
+using c10_fp8 = c10::Float8_e4m3fn;
+#else
+const auto torch_fp8 = at::ScalarType::Float8_e4m3fnuz;
+using c10_fp8 = c10::Float8_e4m3fnuz;
+#endif
+
 // common utility functions
 #define FOREACH_BUFFER_TORCH_TYPE_MAP(F) \
     F("fp32", torch::kFloat)             \
@@ -11,7 +19,7 @@
     F("bf16", torch::kBFloat16)          \
     F("int32", torch::kInt32)            \
     F("int8", torch::kInt8)              \
-    F("fp8", c10::kFloat8_e4m3fnuz)
+    F("fp8", torch_fp8)
 
 inline std::string torchDTypeToStr(caffe2::TypeMeta dtype)
 {

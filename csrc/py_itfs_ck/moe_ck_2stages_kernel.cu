@@ -178,7 +178,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         }
     }
     // FP8 Wint4
-    else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::UInt32)
+    else if (hidden_states.dtype() == torch_fp8 && w1.dtype() == at::ScalarType::UInt32)
     {
         using A0DataType = F8;
         using B0DataType = I4;
@@ -199,7 +199,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         }
     }
     // FP8
-    else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
+    else if (hidden_states.dtype() == torch_fp8)
     {
         using A0DataType = F8;
         using B0DataType = F8;
@@ -412,7 +412,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         }
     }
     // FP8 wint4
-    else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::UInt32)
+    else if (inter_states.dtype() == torch_fp8 && w1.dtype() == at::ScalarType::UInt32)
     {
         using A0DataType = F8;
         using B0DataType = I4;
@@ -433,7 +433,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         }
     }
     // FP8
-    else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
+    else if (inter_states.dtype() == torch_fp8)
     {
         using A0DataType = F8;
         using B0DataType = F8;

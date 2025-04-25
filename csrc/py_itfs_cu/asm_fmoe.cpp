@@ -7,6 +7,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include "aiter_hip_common.h"
 #include "moe_op.h"
+#include "py_itfs_common.h"
 
 struct __attribute__((packed)) KernelArgs
 {
@@ -514,7 +515,7 @@ void fmoe_g1u1(torch::Tensor &out,                            // [token_cnt, dim
             TORCH_CHECK(false, __func__, "No valid kernel selected!");
         }
     }
-    else if (input.dtype() == at::ScalarType::Float8_e4m3fnuz)
+    else if (input.dtype() == torch_fp8)
     {
         static std::unordered_map<int, FMoeKernelConfig> multix_kernel_fp8_configs = {
             {512, {"fmoe_fp8_g1u1_multix_subGU_512", "fmoe_fp8_g1u1_multix_subGU_512.co", 512}},
@@ -634,7 +635,7 @@ void fmoe_g1u1_tkw1(torch::Tensor &out,                            // [token_cnt
     const int estimated_sub_X_cnt = (token_cnt * topk + block_m - 1) / block_m;
 
 
-    if (input.dtype() == at::ScalarType::Float8_e4m3fnuz)
+    if (input.dtype() == torch_fp8)
     {
         static std::unordered_map<int, FMoeKernelConfig> silu_kernel_fp8_configs = {
             {512, {"fmoe_fp8_g1u1_subGU_512_silu_tkw1", "fmoe/silu/fmoe_fp8_g1u1_subGU_512_silu_tkw1.co", 512}},
@@ -772,7 +773,7 @@ void fmoe_g1u1_a16(torch::Tensor &out,               // [token_cnt, dim]
         static FMoeKernel impl_int8_320("fmoe_int8_g1u1_smf_subGU_320", "fmoe_int8_g1u1_smf_subGU_320.co", 320);
         impl_ptr = &impl_int8_320;
     }
-    else if (gate.dtype() == at::ScalarType::Float8_e4m3fnuz)
+    else if (gate.dtype() == torch_fp8)
     {
         int selectedTile = get_heuristic_tile(inter_dim, sub_X_cnt, {512, 320}); // todo,add tune interface here
         if (selectedTile == 512)

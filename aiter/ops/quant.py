@@ -165,8 +165,9 @@ def per_token_quant_triton(x, scale=None, quant_dtype=dtypes.i8):
 
 def per_tensor_quant_triton(x, scale=None, quant_dtype=dtypes.i8):
     y = torch.empty(x.shape, dtype=quant_dtype, device=x.device)
+    x = x.view(-1, x.shape[-1])
     if scale is None:
-        scale = torch.empty(1, dtype=dtypes.fp32, device=x.device)
+        scale = torch.zeros(1, dtype=dtypes.fp32, device=x.device)
         triton.quant.dynamic_per_tensor_fp8_quant(y, x, scale)
     else:
         triton.quant.static_per_tensor_fp8_quant(y, x, scale)

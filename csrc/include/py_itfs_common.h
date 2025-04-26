@@ -4,7 +4,8 @@
 #pragma once
 #include <torch/all.h>
 
-#if defined(__gfx950__)
+#include <hip/hip_fp8.h>
+#if HIP_FP8_TYPE_OCP
 const auto torch_fp8 = at::ScalarType::Float8_e4m3fn;
 using c10_fp8 = c10::Float8_e4m3fn;
 #else

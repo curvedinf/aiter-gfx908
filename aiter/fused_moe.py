@@ -11,7 +11,10 @@ import functools
 import aiter
 from aiter import logger
 from aiter import ActivationType, QuantType, dtypes
-from aiter import get_hip_quant, get_torch_quant
+
+# from aiter import get_hip_quant as get_quant
+# from aiter import get_torch_quant as get_quant
+from aiter import get_triton_quant as get_quant
 from aiter.jit.core import AITER_ROOT_DIR, PY, get_asm_dir, bd_dir, mp_lock
 
 BLOCK_SIZE_M = 32
@@ -210,7 +213,7 @@ def fused_moe_1stage(
         )
 
     else:
-        quant_func = get_hip_quant(quant_type)
+        quant_func = get_quant(quant_type)
         a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a)
         if quant_type == QuantType.per_1x128:
             fmoe_func = functools.partial(
@@ -420,8 +423,7 @@ def fused_moe_2stages(
     a2_scale=None,  # [expert(local_expert:EP), 1, inter_dim]
 ):
 
-    # quant_func = get_hip_quant(quant_type)
-    quant_func = get_torch_quant(quant_type)
+    quant_func = get_quant(quant_type)
 
     token_num, _ = hidden_states.shape
     E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
@@ -540,7 +542,7 @@ def asm_stage1(
     E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
 
     if quant_type == QuantType.per_Tensor:
-        a1_scale = a1_scale.view(1).repeat(token_num)
+        a1_scale = a1_scale.view(1, 1).repeat(token_num, 1)
         w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[1])
         quant_type = QuantType.per_Token
 

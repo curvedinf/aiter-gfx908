@@ -31,8 +31,8 @@ def test_quant(m, n, q_type, q_dtype, h_dtype):
     ref, ref_scale = get_torch_quant(q_type)(input, quant_dtype=q_dtype)
 
     q_funcs = {
-        # "triton": get_triton_quant,
-        "hip": get_hip_quant,
+        "triton": get_triton_quant,
+        # "hip": get_hip_quant,
     }
     ret = {}
     for name, q_func in q_funcs.items():
@@ -47,16 +47,19 @@ def test_quant(m, n, q_type, q_dtype, h_dtype):
         )
         ret[f"{name} dq"] = us1
         ret[f"{name} dq err"] = err1
-        # (out, scale), us2 = run_perftest(q_func, input, scale, quant_dtype=q_dtype)
-        # err2 = checkAllclose(
-        #     ref.to(dtypes.fp32),
-        #     out.to(dtypes.fp32),
-        #     rtol=1e-3,
-        #     atol=1e-3,
-        #     msg=f"{name}: static  quant",
-        # )
-        # ret[f"{name} sq"] = us2
-        # ret[f"{name} sq err"] = err2
+        if q_type == aiter.QuantType.per_Tensor:
+            (out, scale), us2 = run_perftest(
+                q_func, input, ref_scale, quant_dtype=q_dtype
+            )
+            err2 = checkAllclose(
+                ref.to(dtypes.fp32),
+                out.to(dtypes.fp32),
+                rtol=1e-3,
+                atol=1e-3,
+                msg=f"{name}: static  quant",
+            )
+            ret[f"{name} sq"] = us2
+            ret[f"{name} sq err"] = err2
 
     return ret
 
@@ -66,7 +69,7 @@ list_quant = [
     (aiter.QuantType.per_Token, dtypes.fp8),
     (aiter.QuantType.per_Token, dtypes.i8),
 ]
-list_dtype = [dtypes.fp16, dtypes.bf16]
+list_dtype = [dtypes.fp16, dtypes.bf16][]
 import pandas as pd
 
 for (

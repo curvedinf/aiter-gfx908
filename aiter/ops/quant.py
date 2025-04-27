@@ -82,7 +82,6 @@ def get_torch_quant(qType):
         QuantType.No: lambda *a, **k: (a[0], None),
         QuantType.per_Tensor: per_tensor_quant,
         QuantType.per_Token: pertoken_quant,
-        QuantType.per_1x128: lambda a, **k: pertoken_quant(a.view(-1, 128), **k),
     }
     return tmp.get(qType, NotImplementedError)
 
@@ -144,7 +143,7 @@ def per_tensor_quant_hip(x, scale=None, quant_dtype=torch.float8_e4m3fnuz):
             static_scaled_fp8_quant(y, x, scale)
     else:
         raise ValueError(f"unsupported: {quant_dtype=}")
-    return y, scale
+    return y, scale.view(1)
 
 
 def per_token_quant_triton(x, scale=None, quant_dtype=torch.int8):

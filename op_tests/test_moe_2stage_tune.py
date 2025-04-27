@@ -107,7 +107,7 @@ def moe_stage2_tune(
         device=hidden_states.device,
     )
     
-    if quant_type == aiter.QuantType.per_1x128:
+    if quant_type == aiter.QuantType.per_128x128:
         aiter.moe_stage2_blockscale(
             hidden_states,
             w1,
@@ -179,7 +179,7 @@ def test_fmoe(
     elif qType == aiter.QuantType.per_Token and WQDType == torch.int4:  # int4 w quant
         w1_qt, w1_scale = aiter.pertoken_quant(w1, quant_dtype=torch.int8, dtypeMax=7)
         w2_qt, w2_scale = aiter.pertoken_quant(w2, quant_dtype=torch.int8, dtypeMax=7)
-    elif qType == aiter.QuantType.per_1x128:
+    elif qType == aiter.QuantType.per_128x128:
         def weight_per_128x128_quant(weight, quant_dtype):
             E, dim1, dim2 = weight.shape  
             weight_blocks = weight.view(E, dim1 // 128, 128, dim2 // 128, 128)  # [E, num_blocks_dim1, 128, num_blocks_dim2, 128]
@@ -203,7 +203,7 @@ def test_fmoe(
     w1_qt = w1_qt_aiter = w1_qt.view(w1.shape)
     w2_qt = w2_qt_aiter = w2_qt.view(w2.shape)
 
-    if qType == aiter.QuantType.per_1x128:
+    if qType == aiter.QuantType.per_128x128:
         a1_qt, a1_scale = aiter.pertoken_quant(input.view(token, -1, 128), quant_dtype=AQDType)
         a1_qt = a1_qt.view(token, model_dim)
         a1_scale = a1_scale.squeeze(-1)
@@ -238,7 +238,7 @@ def test_fmoe(
     out1_ck = torch.empty((token, topk, inter_dim), dtype=dtype)
     out1_ck_tune = torch.empty((token, topk, inter_dim), dtype=dtype)
     
-    if qType != aiter.QuantType.per_1x128:
+    if qType != aiter.QuantType.per_128x128:
         _, us = run_perftest(
             ck_stage1,
             a1_qt,
@@ -259,7 +259,7 @@ def test_fmoe(
 #        out1_ck,
 #        msg=f"[perf]  ck_moe_stage1:{us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
 #    )
-    if qType != aiter.QuantType.per_1x128:
+    if qType != aiter.QuantType.per_128x128:
         _, us = run_perftest(
             ck_stage1_tune,
             a1_qt,
@@ -283,39 +283,43 @@ def test_fmoe(
         )
 
 
-    # if WQDType != torch.int4:
-    #     # asm int4 2 stage not support yet
-    #     if qType == aiter.QuantType.per_Tensor:
-    #         a1_scale = a1_scale.view(1).repeat(token)
-    #         w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
+    if WQDType != torch.int4:
+        # asm int4 2 stage not support yet
+        if qType == aiter.QuantType.per_Tensor:
+            a1_scale = a1_scale.view(1).repeat(token)
+            w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
 
-    #     out1_asm = torch.empty((token, topk, inter_dim), dtype=dtype)
-    #     _, us = run_perftest(
-    #         asm_stage1,
-    #         a1_qt,
-    #         shuffle_weight(w1_qt, (16, 16)),
-    #         shuffle_weight(w2_qt, (16, 16)),
-    #         sorted_ids,
-    #         sorted_expert_ids,
-    #         num_valid_ids,
-    #         out1_asm,
-    #         kernelName="fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2",
-    #         w1_scale=w1_scale,
-    #         a1_scale=a1_scale,
-    #         activation=actType,
-    #         quant_type=qType,
-    #         block_m=BLOCK_SIZE_M,
-    #     )
-    #     checkAllclose(
-    #         out1_ref,
-    #         out1_asm,
-    #         msg=f"[perf] asm_moe_stage1:{us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
-    #     )
+        if dtype == torch.bfloat16:
+            out1_asm_dtype = torch.float8_e4m3fnuz
+
+        out1_asm = torch.empty((token, topk, inter_dim), dtype=out1_asm_dtype)
+        _, us_asm_stage1 = run_perftest(
+             asm_stage1,
+             a1_qt,
+             shuffle_weight(w1_qt, (16, 16)),
+             shuffle_weight(w2_qt, (16, 16)),
+             sorted_ids,
+             sorted_expert_ids,
+             num_valid_ids,
+             out1_asm,
+             kernelName="",#fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2
+             w1_scale=w1_scale,
+             a1_scale=a1_scale,
+             activation=actType,
+             quant_type=qType,
+             block_m=BLOCK_SIZE_M,
+        )
+        
+        #checkAllclose(
+        #    out1_ref,
+        #    out1_asm,
+        #    msg=f"[perf] asm_moe_stage1:{us_asm_stage1:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
+        #)
 
     # ######################## stage 2 start ###########
     if qType == aiter.QuantType.per_Token:
         out1_ref = out1_ref.view(token, -1)
-    if qType == aiter.QuantType.per_1x128:
+    if qType == aiter.QuantType.per_128x128:
         a2_qt, a2_scale = aiter.pertoken_quant(out1_ref.view(token, -1, 128), quant_dtype=AQDType)
         a2_qt = a2_qt.view(token, topk, -1)
         a2_scale = a2_scale.view(token, topk, -1)    
@@ -347,7 +351,7 @@ def test_fmoe(
     # )
     # checkAllclose(out_ref, out2_ref, msg="[torch] 1_stage vs 2_stage")
 
-    if qType != aiter.QuantType.per_1x128: 
+    if qType != aiter.QuantType.per_128x128: 
         if qType == aiter.QuantType.per_Token:
             out1_ck = out1_ck.view(token, -1)
 
@@ -393,7 +397,7 @@ def test_fmoe(
     checkAllclose(
         out2_ref,
         out2_ck_tune,
-        msg=f"ck_moe_stage2_tune:{us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
+        msg=f"asm_stage1+ck_stage2:{us+us_asm_stage1:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
     )
     # ######################## stage 2 end ###########
 
@@ -414,7 +418,8 @@ def test_fmoe(
     err = checkAllclose(
         out2_ref,
         out2_ck_tune,
-        msg=f"aiter_all_stages:{us:>8.2f} us......",
+        msg=f"aiter done",
+        #msg=f"aiter_all_stages:{us:>8.2f} us......",
     )
     return {"us": us, "err": err}
 
@@ -439,55 +444,55 @@ list_quant = [
     (aiter.QuantType.per_Tensor, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),  # a8w8
     (aiter.QuantType.per_Token, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),  # a8w8
     # (aiter.QuantType.per_Token, torch.float8_e4m3fnuz, torch.int4),  # a8w4
-    (aiter.QuantType.per_1x128, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),
+    (aiter.QuantType.per_128x128, torch.float8_e4m3fnuz, torch.float8_e4m3fnuz),
 ]
 list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][:1]
 expert, topk = 8, 2
 
 import pandas as pd
 
-for (
-    dtype,
-    act_type,
-    (quant_type, aq_dtype, wq_dtype),
-    (model_dim, inter_dim),
-) in itertools.product(list_dtype, list_act, list_quant, list_dim):
-    df = []
-    for m in list_tokenNum:
-        ret = test_fmoe(
-            dtype,
-            m,
-            model_dim,
-            inter_dim,
-            expert,
-            topk,
-            act_type,
-            quant_type,
-            aq_dtype,
-            wq_dtype,
-            use_g1u1=True,
-        )
-        df.append(ret)
-    df = pd.DataFrame(df)
-    aiter.logger.info(f"summary:\n{df}")
+# for (
+#     dtype,
+#     act_type,
+#     (quant_type, aq_dtype, wq_dtype),
+#     (model_dim, inter_dim),
+# ) in itertools.product(list_dtype, list_act, list_quant, list_dim):
+#     df = []
+#     for m in list_tokenNum:
+#         ret = test_fmoe(
+#             dtype,
+#             m,
+#             model_dim,
+#             inter_dim,
+#             expert,
+#             topk,
+#             act_type,
+#             quant_type,
+#             aq_dtype,
+#             wq_dtype,
+#             use_g1u1=True,
+#         )
+#         df.append(ret)
+#     df = pd.DataFrame(df)
+#     aiter.logger.info(f"summary:\n{df}")
 
 
-# per per_1x128 quant/a8w4
-# for dtype in [torch.bfloat16]:
-#     for m in [1,32,128]:
-#         for dim in [1024]:
-#             for inter_dim in [1024]:
-#                 expert, topk = 8, 2
-#                 test_fmoe(
-#                     dtype,
-#                     m,
-#                     dim,
-#                     inter_dim,
-#                     expert,
-#                     topk,
-#                     aiter.ActivationType.Silu,
-#                     aiter.QuantType.per_1x128,
-#                     torch.float8_e4m3fnuz,
-#                     torch.float8_e4m3fnuz,
-#                     use_g1u1=True,
-#                 )
+# per per_128x128 quant/a8w4
+for dtype in [torch.bfloat16]:
+    for m in [128]:
+        for dim in [7168]:
+            for inter_dim in [2048]:
+                expert, topk = 8, 2
+                test_fmoe(
+                    dtype,
+                    m,
+                    dim,
+                    inter_dim,
+                    expert,
+                    topk,
+                    aiter.ActivationType.Silu,
+                    aiter.QuantType.per_128x128,
+                    torch.float8_e4m3fnuz,
+                    torch.float8_e4m3fnuz,
+                    use_g1u1=True,
+                )

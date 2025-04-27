@@ -60,7 +60,7 @@ MoeKernel moe_heuristics_dispatch(torch::ScalarType dtype, torch::ScalarType out
     }
     else // moe stage2
     {
-        if (q_type == QuantType::per_1x128)
+        if (q_type == QuantType::per_128x128)
         {
             if (q_dtype == at::ScalarType::Float8_e4m3fnuz && outtype == at::ScalarType::BFloat16)
             {
@@ -139,7 +139,7 @@ void moe_stage2_blockscale(torch::Tensor &inter_states,      // [m, k], input to
     int MPerBlock = block_m.value();
     // int M = agvtokens_per_expert < 32 ? 32 : (agvtokens_per_expert < 64 ? 64 : 128);
     //bool isPerTensorQuant = (!w2_scale.has_value()) || (w2_scale.value().numel() == E);
-    //QuantType q_type = QuantType::per_1x128;
+    //QuantType q_type = QuantType::per_128x128;
 
     void *inter_states_ptr = inter_states.data_ptr();
     void *w1_ptr = w1.data_ptr();

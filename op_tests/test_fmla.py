@@ -104,13 +104,14 @@ def scaled_dot_product_attention(query, key, value, h_q, h_kv, batch_id=0, parti
             n_block_num = (partition_end - partition_begin + Block_N - 1) // Block_N 
             # print("bq", bq)
 
-            m = torch.zeros([Block_M]).cuda()
-            l = torch.zeros([Block_M]).cuda()
-            oacc = torch.zeros([Block_M, key.shape[-1] - 64]).cuda()
+            m_size = min(Block_M, bq.shape[0])
+            m = torch.zeros([m_size]).cuda()
+            l = torch.zeros([m_size]).cuda()
+            oacc = torch.zeros([m_size, key.shape[-1] - 64]).cuda()
 
-            m_log2 = torch.zeros([Block_M]).cuda()
-            l_log2 = torch.zeros([Block_M]).cuda()
-            oacc_log2 = torch.zeros([Block_M, key.shape[-1] - 64]).cuda()
+            m_log2 = torch.zeros([m_size]).cuda()
+            l_log2 = torch.zeros([m_size]).cuda()
+            oacc_log2 = torch.zeros([m_size, key.shape[-1] - 64]).cuda()
 
             i_block_n = n_block_num
             for i in range(n_block_num):
@@ -161,7 +162,7 @@ def scaled_dot_product_attention(query, key, value, h_q, h_kv, batch_id=0, parti
 
             return oacc / l.unsqueeze(-1)
 
-        # out = flash_attention()
+        out = flash_attention()
         # import pdb; pdb.set_trace()
     lse = attn_weight.logsumexp(dim=-1)
     attn_weight = torch.softmax(attn_weight, dim=-1, dtype=torch.float32)
@@ -197,7 +198,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
 
     q = torch.randn(b, s_q, h_q, d, device="cuda", dtype=dtype)
 
-    block_size = 64
+    block_size = 16
 
     block_table = torch.arange(
         b * max_seqlen_pad // block_size, dtype=torch.int32, device="cuda"
@@ -297,7 +298,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     bv = bk[:, :512]
     bvt =bv.transpose(0,1)
 
-    # import pdb; pdb.set_trace()
+    import pdb; pdb.set_trace()
     out_torch, lse_torch = ref_mla(debug_p, debug_v)
     # import pdb; pdb.set_trace()
 
@@ -360,9 +361,9 @@ if __name__ == "__main__":
         (torch.float16, ),
         (128,),
         (8192,),
-        (64,),
+        (16,),
         (1,),
         (True,),
-        (True,)
+        (False,)
     ):
         test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen)

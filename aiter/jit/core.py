@@ -172,7 +172,7 @@ def build_module(md_name, srcs, flags_extra_cc, flags_extra_hip, blob_gen_cmd, e
             "-U__HIP_NO_HALF_OPERATORS__",
 
             "-mllvm", "--amdgpu-kernarg-preload-count=16",
-            # "-v", "--save-temps",
+            "-v", "--save-temps",
             "-Wno-unused-result",
             "-Wno-switch-bool",
             "-Wno-vla-cxx-extension",

@@ -91,6 +91,7 @@ def asm_moe_test(
         a16,
         None,
         None,
+        None,
         activation,
     )
 

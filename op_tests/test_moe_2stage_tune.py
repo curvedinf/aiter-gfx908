@@ -108,7 +108,7 @@ def moe_stage2_tune(
     )
     
     if quant_type == aiter.QuantType.per_128x128:
-        aiter.moe_stage2_blockscale(
+        aiter.ck_moe_stage2_blockscale(
             hidden_states,
             w1,
             w2,
@@ -418,7 +418,7 @@ def test_fmoe(
     err = checkAllclose(
         out2_ref,
         out2_ck_tune,
-        msg=f"aiter done",
+        msg=f"aiter done ",
         #msg=f"aiter_all_stages:{us:>8.2f} us......",
     )
     return {"us": us, "err": err}

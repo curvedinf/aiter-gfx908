@@ -270,7 +270,7 @@ def moe_stage2(
 ): ...
 
 @compile_ops("module_moe_2stages_blockscale")
-def moe_stage2_blockscale(
+def ck_moe_stage2_blockscale(
     inter_states: Tensor,
     w1: Tensor,
     w2: Tensor,

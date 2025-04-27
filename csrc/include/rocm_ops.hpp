@@ -379,8 +379,8 @@
            py::arg("a2_scale") = std::nullopt, \  
            py::arg("block_m") = 32);
 
-#define MOE_CK_2STAGES_BLOCKSCALE_TUNE_PYBIND             \
-           m.def("moe_stage2_blockscale", &moe_stage2_blockscale,         \ 
+#define MOE_CK_2STAGES_BLOCKSCALE_PYBIND             \
+           m.def("ck_moe_stage2_blockscale", &ck_moe_stage2_blockscale,         \ 
                 py::arg("inter_states"),            \  
                 py::arg("w1"),                      \  
                 py::arg("w2"),                      \  

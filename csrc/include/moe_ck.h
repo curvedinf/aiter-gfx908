@@ -68,7 +68,7 @@ void moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
                     std::optional<torch::Tensor> a2_scale, // [m, 1], token scale
                     std::optional<int> block_m);
 
-void moe_stage2_blockscale(torch::Tensor &inter_states,      // [m, k], input token
+void ck_moe_stage2_blockscale(torch::Tensor &inter_states,      // [m, k], input token
                     torch::Tensor &w1,                // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
                     torch::Tensor &w2,                // [e, n, k], pre-shuffle([e, nr, kr, w])
                     torch::Tensor &sorted_token_ids,  // [max_num_tokens_padded]

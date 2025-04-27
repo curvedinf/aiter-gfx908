@@ -634,7 +634,6 @@ void fmoe_g1u1_tkw1(torch::Tensor &out,                            // [token_cnt
     const int block_m = 32; // fmoe sorting kernel and fmoe kernel only support 32 for now
     const int estimated_sub_X_cnt = (token_cnt * topk + block_m - 1) / block_m;
 
-
     if (input.dtype() == torch_fp8)
     {
         static std::unordered_map<int, FMoeKernelConfig> silu_kernel_fp8_configs = {
@@ -837,12 +836,12 @@ void fmoe_fp8_blockscale_g1u1(torch::Tensor &out,               // [token_cnt, d
     {
         if (enable_vskip != nullptr && strcmp(enable_vskip, "1") == 0)
         {
-            static FMoeKernel impl_256("fmoe_fp8_blockscale_g1u1_subGU_256", "fmoe_fp8_blockscale_g1u1_subGU_256.co", 256);
+            static FMoeKernel impl_256("_ZN5aiter34fmoe_fp8_blockscale_g1u1_subGU_256E", "/fmoe/fmoe_fp8_blockscale_g1u1_subGU_256.co", 256);
             impl_ptr = &impl_256;
         }
         else
         {
-            static FMoeKernel impl_256_novs("fmoe_fp8_blockscale_g1u1_novs_subGU_256", "fmoe_fp8_blockscale_g1u1_novs_subGU_256.co", 256);
+            static FMoeKernel impl_256_novs("_ZN5aiter39fmoe_fp8_blockscale_g1u1_novs_subGU_256E", "/fmoe/fmoe_fp8_blockscale_g1u1_novs_subGU_256.co", 256);
             impl_ptr = &impl_256_novs;
         }
     }

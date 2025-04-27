@@ -119,7 +119,7 @@ def fused_moe(
             doweight_stage1,
         )
     run_1stage = M < 256
-    run_1stage = False
+    run_1stage = quant_type == QuantType.per_128x128
     block_size_M = 32 if run_1stage else block_size_M
 
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
@@ -213,6 +213,9 @@ def fused_moe_1stage(
         )
 
     else:
+        quant_type = (
+            QuantType.per_1x128 if quant_type == QuantType.per_128x128 else quant_type
+        )
         quant_func = get_quant(quant_type)
         a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a)
         if quant_type == QuantType.per_1x128:
@@ -239,8 +242,8 @@ def fused_moe_1stage(
             a1_scale,
             w1_scale,
             w2_scale,
-            None,
-            activation,
+            fc2_smooth_scale=None,
+            activation=activation,
         )
     return moe_buf
 

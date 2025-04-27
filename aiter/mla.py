@@ -159,7 +159,7 @@ def mla_decode_fwd(
     Lv = v_head_dim
     BLOCK_DV = triton.next_power_of_2(Lv)
     grid = (bs, nhead, max_seqlen_q)
-    extra_kargs = {"waves_per_eu": 4, "matrix_instr_nonkdim": 16, "kpack": 2}
+    extra_kargs = {"waves_per_eu": 4}
     _fwd_kernel_stage2_asm[grid](
         logits,
         attn_lse,

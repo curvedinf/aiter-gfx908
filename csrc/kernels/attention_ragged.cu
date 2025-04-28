@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <hip/hip_bf16.h>
 
+#include <ck_tile/ops/fmha/block/block_masking.hpp>
 #include <ck_tile/ops/fmha/block/variants.hpp>
 
 #include "hip_compat.h"
@@ -489,15 +490,19 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     const int wg_start_kv_head_idx = blockIdx.z;
     const int total_num_heads      = gridDim.z * GQA_RATIO;
 
+    /// NOTICE: We don't support mask for this kernel, so just use a placeholder type/object here.
+    using Mask = ck_tile::SimplifiedGenericAttentionMask</*IsMasking=*/false>;
+    const Mask mask{/*seqlen_q=*/1, /*seqlen_k=*/context_len};
+
     const auto variant_params = [&] {
         if constexpr(AttentionVariant::use_logits_soft_cap)
         {
-            return ck_tile::LogitsSoftCapParams<AttentionVariant::use_exp2>{
-                scale, logits_soft_cap, logits_soft_cap_rcp};
+            return ck_tile::LogitsSoftCapParams<Mask, AttentionVariant::use_exp2>{
+                mask, scale, logits_soft_cap, logits_soft_cap_rcp};
         }
         else
         {
-            return ck_tile::StandardAttentionParams{scale};
+            return ck_tile::StandardAttentionParams<Mask>{mask, scale};
         }
     }();
 
@@ -770,7 +775,12 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     {
         for(int i = 0; i < 4; i++)
         {
-            dout[token_depth][i] = variant.LogitsTransform(variant_params, dout[token_depth][i]);
+            dout[token_depth][i] =
+                variant.LogitsTransform(variant_params,
+                                        dout[token_depth][i],
+                                        /*batch_idx=*/blockIdx.x,
+                                        /*qo_head_idx=*/wg_start_head_idx + lane16id,
+                                        /*kv_head_idx=*/blockIdx.z);
         }
     }
 
@@ -2134,7 +2144,10 @@ void paged_attention_custom_launcher(torch::Tensor& out,
     }
 
 #define CALL_CUSTOM_LAUNCHER_ALIBI(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, PSIZE)            \
-    if(alibi_slopes) {}                                                                           \
+    if(alibi_slopes)                                                                              \
+    {                                                                                             \
+        CALL_CUSTOM_LAUNCHER_SOFT_CAP(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, PSIZE, true);  \
+    }                                                                                             \
     else                                                                                          \
     {                                                                                             \
         CALL_CUSTOM_LAUNCHER_SOFT_CAP(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, PSIZE, false); \
@@ -2158,23 +2171,29 @@ void paged_attention_custom_launcher(torch::Tensor& out,
         CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, T); \
     }
 #else
-#define CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE)       \
-    if(fp8_out_scale) {}                                                      \
-    else                                                                      \
-    {                                                                         \
-        CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, T); \
+#define CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE)             \
+    if(fp8_out_scale)                                                               \
+    {                                                                               \
+        CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, uint8_t); \
+    }                                                                               \
+    else                                                                            \
+    {                                                                               \
+        CALL_CUSTOM_LAUNCHER_PSIZE(T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, T);       \
     }
 #endif
 #define CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, HEAD_SIZE)                   \
     switch(block_size)                                                          \
     {                                                                           \
     case 1: CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 1, HEAD_SIZE); break;    \
+    case 16: CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 16, HEAD_SIZE); break;  \
+    case 32: CALL_CUSTOM_LAUNCHER_OUT(T, KVT, KV_DTYPE, 32, HEAD_SIZE); break;  \
     default: TORCH_CHECK(false, "Unsupported block size: ", block_size); break; \
     }
 
 #define CALL_CUSTOM_LAUNCHER_BLK_HEAD(T, KVT, KV_DTYPE)                       \
     switch(head_size)                                                         \
     {                                                                         \
+    case 64: CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, 64); break;           \
     case 128: CALL_CUSTOM_LAUNCHER_BLK(T, KVT, KV_DTYPE, 128); break;         \
     default: TORCH_CHECK(false, "Unsupported head size: ", head_size); break; \
     }

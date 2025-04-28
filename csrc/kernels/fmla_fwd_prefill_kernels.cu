@@ -8,6 +8,11 @@
 #include <ck_tile/ops/fmha.hpp>
 #include <ck_tile/ops/gemm.hpp>
 
+CK_TILE_DEVICE bool IsDebugThreadBlock()
+{
+    return blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z==0;
+}
+
 // =====================================================================================================================
 // Definitions and helper structures
 //
@@ -1116,27 +1121,25 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
         //
 
         // Masking
-        if constexpr (Mask::IsMasking)
-        {
-            const auto k_origin = k_page_block_navigator.to_global_window_origin(
-                page_block_k_id, k_dram_block_window.get_window_origin());
-            const bool need_perpixel_check = mask.IsEdgeTile(
-                q_origin.at(ck_tile::number<0>{}),
-                k_origin.at(ck_tile::number<0>{}),
-                ck_tile::number<Traits::kBlockM>{},
-                ck_tile::number<Traits::kBlockN0>{});
+        // Note that masking is also required when k is padded
+        const auto k_origin = k_page_block_navigator.to_global_window_origin(
+            page_block_k_id, k_dram_block_window.get_window_origin());
+        const bool need_perpixel_check = mask.IsEdgeTile(
+            q_origin.at(ck_tile::number<0>{}),
+            k_origin.at(ck_tile::number<0>{}),
+            ck_tile::number<Traits::kBlockM>{},
+            ck_tile::number<Traits::kBlockN0>{});
 
-            if (need_perpixel_check)
-            {
-                ck_tile::set_tile_if(
-                    s_acc, -ck_tile::numeric<acc_t>::infinity(),
-                    [&](auto ids)
-                    {
-                        const auto row = q_origin.at(ck_tile::number<0>{}) + ids.at(ck_tile::number<0>{});
-                        const auto col = k_origin.at(ck_tile::number<0>{}) + ids.at(ck_tile::number<1>{});
-                        return mask.IsOutOfBound(row, col);
-                    });
-            }
+        if (need_perpixel_check)
+        {
+            ck_tile::set_tile_if(
+                s_acc, -ck_tile::numeric<acc_t>::infinity(),
+                [&](auto ids)
+                {
+                    const auto row = q_origin.at(ck_tile::number<0>{}) + ids.at(ck_tile::number<0>{});
+                    const auto col = k_origin.at(ck_tile::number<0>{}) + ids.at(ck_tile::number<1>{});
+                    return mask.IsOutOfBound(row, col);
+                });
         }
 
         // Get max of row

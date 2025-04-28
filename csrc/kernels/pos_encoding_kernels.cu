@@ -111,11 +111,15 @@ namespace vllm
       const scalar_t *__restrict__ cos_cache,        // [max_position, rot_dim //2]
       const scalar_t *__restrict__ sin_cache,        // [max_position, rot_dim //2]
       const int rot_dim, const int64_t query_stride, const int64_t key_stride,
-      const int num_heads, const int num_kv_heads, const int head_size)
+      const int num_heads, const int num_kv_heads, const int head_size, const int max_position)
   {
     // Each thread block is responsible for one token.
     const int token_idx = blockIdx.x;
     int64_t pos = positions[token_idx];
+    if (pos >= max_position)
+    {
+      return;
+    }
     int64_t cos_sin_cache_offset = pos * rot_dim / 2;
     const scalar_t *cos_ptr = cos_cache + cos_sin_cache_offset;
     const scalar_t *sin_ptr = sin_cache + cos_sin_cache_offset;
@@ -140,12 +144,16 @@ namespace vllm
       const int64_t *__restrict__ cos_sin_cache_offsets, // [batch_size, seq_len]
                                                          // or [num_tokens]
       const int rot_dim, const int64_t query_stride, const int64_t key_stride,
-      const int num_heads, const int num_kv_heads, const int head_size)
+      const int num_heads, const int num_kv_heads, const int head_size, const int max_position)
   {
     // Each thread block is responsible for one token.
     const int token_idx = blockIdx.x;
     int64_t pos = positions[token_idx];
     int64_t cos_sin_cache_offset = cos_sin_cache_offsets[token_idx];
+    if ((cos_sin_cache_offset + pos) >= max_position)
+    {
+      return;
+    }
     int64_t cos_sin_cache_offset2 = (cos_sin_cache_offset + pos) * rot_dim/2;
     const scalar_t *cos_ptr =
         cos_cache + cos_sin_cache_offset2;
@@ -176,6 +184,7 @@ void rotary_embedding(
   int num_kv_heads = key.size(-1) / head_size;
   int64_t query_stride = query.stride(-2);
   int64_t key_stride = key.stride(-2);
+  int64_t max_position = cos_cache.size(0);
 
   dim3 grid(num_tokens);
   dim3 block(std::min<int64_t>(num_heads * rot_dim / 2, 512));
@@ -189,14 +198,14 @@ void rotary_embedding(
         vllm::rotary_embedding_kernel<scalar_t, true, true><<<grid, block, 0, stream>>>(
             positions.data_ptr<int64_t>(), query.data_ptr<scalar_t>(),
             key.data_ptr<scalar_t>(), cos_cache.data_ptr<scalar_t>(), sin_cache.data_ptr<scalar_t>(), rot_dim,
-            query_stride, key_stride, num_heads, num_kv_heads, head_size);
+            query_stride, key_stride, num_heads, num_kv_heads, head_size, max_position);
       }
       else
       {
         vllm::rotary_embedding_kernel<scalar_t, true, false><<<grid, block, 0, stream>>>(
             positions.data_ptr<int64_t>(), query.data_ptr<scalar_t>(),
             key.data_ptr<scalar_t>(), cos_cache.data_ptr<scalar_t>(), sin_cache.data_ptr<scalar_t>(), rot_dim,
-            query_stride, key_stride, num_heads, num_kv_heads, head_size);
+            query_stride, key_stride, num_heads, num_kv_heads, head_size, max_position);
       }
     } else {
       if (is_nope_first)
@@ -204,14 +213,14 @@ void rotary_embedding(
         vllm::rotary_embedding_kernel<scalar_t, false, true><<<grid, block, 0, stream>>>(
             positions.data_ptr<int64_t>(), query.data_ptr<scalar_t>(),
             key.data_ptr<scalar_t>(), cos_cache.data_ptr<scalar_t>(), sin_cache.data_ptr<scalar_t>(), rot_dim,
-            query_stride, key_stride, num_heads, num_kv_heads, head_size);
+            query_stride, key_stride, num_heads, num_kv_heads, head_size, max_position);
       }
       else
       {
         vllm::rotary_embedding_kernel<scalar_t, false, false><<<grid, block, 0, stream>>>(
             positions.data_ptr<int64_t>(), query.data_ptr<scalar_t>(),
             key.data_ptr<scalar_t>(), cos_cache.data_ptr<scalar_t>(), sin_cache.data_ptr<scalar_t>(), rot_dim,
-            query_stride, key_stride, num_heads, num_kv_heads, head_size);
+            query_stride, key_stride, num_heads, num_kv_heads, head_size, max_position);
       }
       
     } });
@@ -239,6 +248,7 @@ void batched_rotary_embedding(
   int num_kv_heads = key.size(-1) / head_size;
   int64_t query_stride = query.stride(-2);
   int64_t key_stride = key.stride(-2);
+  int64_t max_position = cos_cache.size(0);
 
   dim3 grid(num_tokens);
   dim3 block(std::min<int64_t>(num_heads * rot_dim / 2, 512));
@@ -254,7 +264,7 @@ void batched_rotary_embedding(
                 positions.data_ptr<int64_t>(), query.data_ptr<scalar_t>(),
                 key.data_ptr<scalar_t>(), cos_cache.data_ptr<scalar_t>(), sin_cache.data_ptr<scalar_t>(),
                 cos_sin_cache_offsets.data_ptr<int64_t>(), rot_dim, query_stride,
-                key_stride, num_heads, num_kv_heads, head_size);
+                key_stride, num_heads, num_kv_heads, head_size, max_position);
       }
       else
       {
@@ -263,7 +273,7 @@ void batched_rotary_embedding(
                 positions.data_ptr<int64_t>(), query.data_ptr<scalar_t>(),
                 key.data_ptr<scalar_t>(), cos_cache.data_ptr<scalar_t>(), sin_cache.data_ptr<scalar_t>(),
                 cos_sin_cache_offsets.data_ptr<int64_t>(), rot_dim, query_stride,
-                key_stride, num_heads, num_kv_heads, head_size);
+                key_stride, num_heads, num_kv_heads, head_size, max_position);
       }
     } else {
       if (is_nope_first)
@@ -273,7 +283,7 @@ void batched_rotary_embedding(
                 positions.data_ptr<int64_t>(), query.data_ptr<scalar_t>(),
                 key.data_ptr<scalar_t>(), cos_cache.data_ptr<scalar_t>(), sin_cache.data_ptr<scalar_t>(),
                 cos_sin_cache_offsets.data_ptr<int64_t>(), rot_dim, query_stride,
-                key_stride, num_heads, num_kv_heads, head_size);
+                key_stride, num_heads, num_kv_heads, head_size, max_position);
       }
       else
       {
@@ -282,7 +292,7 @@ void batched_rotary_embedding(
                 positions.data_ptr<int64_t>(), query.data_ptr<scalar_t>(),
                 key.data_ptr<scalar_t>(), cos_cache.data_ptr<scalar_t>(), sin_cache.data_ptr<scalar_t>(),
                 cos_sin_cache_offsets.data_ptr<int64_t>(), rot_dim, query_stride,
-                key_stride, num_heads, num_kv_heads, head_size);
+                key_stride, num_heads, num_kv_heads, head_size, max_position);
       }
     } });
 }

@@ -1,10 +1,11 @@
 import triton
 import triton.language as tl
 from utils.benchmark_utils import get_model_configs, get_available_models
-from op_tests.triton_tests.test_moe_align_block_size import input_helper
 import torch
 import argparse
 from aiter.ops.triton.moe_align_block_size import moe_align_block_size_triton
+from op_benchmarks.triton.utils.moe.utils import generate_moe_logits
+
 import sys
 
 def model_benchmark_configs(args):
@@ -30,7 +31,7 @@ def model_benchmark_configs(args):
     return moe_configs
 
 def fused_moe_align_block_size(M: int, E: int, top_k: int, block_size: int):
-    topk_ids = input_helper(M, E, top_k)
+    _, topk_ids = generate_moe_logits(M, E, top_k)
 
     max_num_tokens_padded = topk_ids.numel() + E * (block_size - 1)
     sorted_ids = torch.empty((max_num_tokens_padded, ),

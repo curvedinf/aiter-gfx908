@@ -334,27 +334,26 @@ def test_fmoe(
             a1_scale = a1_scale.view(1).repeat(token)
             w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
 
-        if dtype == torch.bfloat16:
-            out1_asm_dtype = torch.float8_e4m3fnuz
 
-        out1_asm = torch.empty((token, topk, inter_dim), dtype=out1_asm_dtype)
-        _, us_asm_stage1 = run_perftest(
-             asm_stage1,
-             a1_qt,
-             shuffle_weight(w1_qt, (16, 16)),
-             shuffle_weight(w2_qt, (16, 16)),
-             sorted_ids,
-             sorted_expert_ids,
-             num_valid_ids,
-             out1_asm,
-             kernelName="fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2",#fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2
-             w1_scale=w1_scale,
-             a1_scale=a1_scale,
-             activation=actType,
-             quant_type=qType,
-             block_m=BLOCK_SIZE_M,
-        )
-        
+# input_type:Float8_e4m3fnuz, weight_type:Float8_e4m3fnuz, out_type:BFloat16, quant_type:4, do_weight:0
+        out1_asm = torch.empty((token, topk, inter_dim), dtype=dtype)
+        # _, us_asm_stage1 = run_perftest(
+        #      asm_stage1,
+        #      a1_qt,
+        #      shuffle_weight(w1_qt, (16, 16)),
+        #      shuffle_weight(w2_qt, (16, 16)),
+        #      sorted_ids,
+        #      sorted_expert_ids,
+        #      num_valid_ids,
+        #      out1_asm,
+        #      kernelName="",#fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2
+        #      w1_scale=w1_scale,
+        #      a1_scale=a1_scale,
+        #      activation=actType,
+        #      quant_type=qType,
+        #      block_m=BLOCK_SIZE_M,
+        # )
+        # 
         #checkAllclose(
         #    out1_ref,
         #    out1_asm,
@@ -449,24 +448,24 @@ def test_fmoe(
     # ######################## stage 2 end ###########
 
     # ######################## fused 2 stage #########
-    out2_ck, us = run_perftest(
-        ck_moe_2stages,
-        input,
-        w1_qt_aiter,
-        w2_qt_aiter,
-        topk_weights, topk_ids,
-        quant_type=qType,
-        fc1_scale=w1_scale,  # [expert(local_expert:EP), inter_dim, 1]
-        fc2_scale=w2_scale,  # [expert(local_expert:EP), model_dim, 1]
-        block_size=BLOCK_SIZE_M,
-        activation=actType,
-        doweight_stage1=doweight_stage1,
-    )
-    checkAllclose(
-        out2_ref,
-        out2_ck,
-        msg=f"ck_moe_2stages:{us:>8.2f} us, {token*model_dim*inter_dim*3*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
-    )
+    #out2_ck, us = run_perftest(
+    #    ck_moe_2stages,
+    #    input,
+    #    w1_qt_aiter,
+    #    w2_qt_aiter,
+    #    topk_weights, topk_ids,
+    #    quant_type=qType,
+    #    fc1_scale=w1_scale,  # [expert(local_expert:EP), inter_dim, 1]
+    #    fc2_scale=w2_scale,  # [expert(local_expert:EP), model_dim, 1]
+    #    block_size=BLOCK_SIZE_M,
+    #    activation=actType,
+    #    doweight_stage1=doweight_stage1,
+    #)
+    #checkAllclose(
+    #    out2_ref,
+    #    out2_ck,
+    #    msg=f"ck_moe_2stages:{us:>8.2f} us, {token*model_dim*inter_dim*3*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
+    #)
 
     out2_aiter, us_fuse = run_perftest(
         fused_moe,

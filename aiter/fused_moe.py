@@ -529,6 +529,8 @@ def asm_stage1(
     sorted_weights=None
 ):
     dtype = torch.bfloat16 # out.dtype, asm only support bf16
+    if quant_type == aiter.QuantType.per_128x128: 
+        dtype = torch.float8_e4m3fnuz
     out = out.view(dtype)
     device = out.device
     token_num, topk, _ = out.shape

@@ -1122,6 +1122,7 @@ def _bwd_dkdvdq_inner(
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
     workgroup_id: tl.int32,
+    num_atomics_concurrent: tl.constexpr,
 ):
     tl.assume(stride_q_m >= 0)
     tl.assume(stride_q_k >= 0)
@@ -1166,16 +1167,15 @@ def _bwd_dkdvdq_inner(
     #dQ = dSK
     #dK = QdS^T
 
+
+    offset_factor = num_steps // num_atomics_concurrent # 3 if num_steps > 1 or num_steps==3 else 1 # coprime with num_steps
     # Compute a starting index and step based on workgroup_id
     # Use a simple hash-like function to spread out the starting points
-    start_idx = (workgroup_id * 17) % num_steps  # 17 is an arbitrary prime to spread indices
-    # Ensure step is coprime with num_steps to visit all indices exactly once
-    step = 1 # 3 if num_steps > 1 or num_steps==3 else 1 # coprime with num_steps
-
+    start_idx = (workgroup_id * offset_factor) % num_steps  # 17 is an arbitrary prime to spread indices
 
     for iter in range(num_steps):
         # Compute the permuted block index
-        blk_idx = (start_idx + iter * step) % num_steps
+        blk_idx = (start_idx + iter) % num_steps
 
         curr_m = start_m + blk_idx * step_m
         qT_ptrs = qT_ptrs_start + blk_idx * step_m * stride_q_m
@@ -1310,6 +1310,7 @@ def _bwd_kernel_dkdvdq_causal(
     IS_VARLEN: tl.constexpr,
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
+    NUM_SMS: tl.constexpr,
 ):
     tl.assume(stride_q_b >= 0)
     tl.assume(stride_q_h >= 0)
@@ -1345,7 +1346,7 @@ def _bwd_kernel_dkdvdq_causal(
     batch_idx = wid % BATCH 
     head_k_idx = wid // BATCH % NUM_K_HEADS 
     seq_k_blk_idx = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS
-
+    num_atomics_concurrent = NUM_SMS // (NUM_K_HEADS *  BATCH)
     #Determine q and k start along with seqlen_q and seqlen_k
     q_start = 0
     k_start = 0
@@ -1485,6 +1486,7 @@ def _bwd_kernel_dkdvdq_causal(
             IS_FP8=IS_FP8,
             FP8_MAX=FP8_MAX,
             workgroup_id=seq_k_blk_idx,
+            num_atomics_concurrent=num_atomics_concurrent
         )
 
 
@@ -1513,6 +1515,7 @@ def _bwd_kernel_dkdvdq_causal(
             IS_FP8=IS_FP8,
             FP8_MAX=FP8_MAX,
             workgroup_id=seq_k_blk_idx,
+            num_atomics_concurrent=num_atomics_concurrent
         )
 
     # Write back dV and dK.
@@ -2434,6 +2437,7 @@ def _flash_attn_backward(
         grid_dkdvdq = (batch * num_k_heads * num_k_pids,) 
 
         if causal:
+            NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
             _bwd_kernel_dkdvdq_causal[grid_dkdvdq](
                 q, k, v, sm_scale, do, dk, dv, dq,
                 softmax_lse, delta,
@@ -2461,6 +2465,7 @@ def _flash_attn_backward(
                 IS_VARLEN=IS_VARLEN,
                 IS_FP8=IS_FP8,
                 FP8_MAX=FP8_MAX,
+                NUM_SMS=NUM_SMS,
                 **config,
             )
         else:

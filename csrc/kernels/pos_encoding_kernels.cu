@@ -116,7 +116,7 @@ namespace vllm
     // Each thread block is responsible for one token.
     const int token_idx = blockIdx.x;
     int64_t pos = positions[token_idx];
-    if (pos >= max_position)
+    if (pos >= max_position || pos < 0)
     {
       return;
     }
@@ -150,7 +150,7 @@ namespace vllm
     const int token_idx = blockIdx.x;
     int64_t pos = positions[token_idx];
     int64_t cos_sin_cache_offset = cos_sin_cache_offsets[token_idx];
-    if ((cos_sin_cache_offset + pos) >= max_position)
+    if (((cos_sin_cache_offset + pos) >= max_position) || ((cos_sin_cache_offset + pos) < 0))
     {
       return;
     }

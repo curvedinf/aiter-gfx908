@@ -105,13 +105,13 @@ def test_fmoe(
 ):
     torch_quant = aiter.get_torch_quant(qType)
     torch_act = aiter.get_torch_act(actType)
-    input = torch.ones((token, model_dim), dtype=dtype) / math.sqrt(inter_dim)
+    input = torch.randn((token, model_dim), dtype=dtype) / math.sqrt(inter_dim)
     device = input.device
     if use_g1u1:
-        w1 = torch.ones((E, inter_dim * 2, model_dim), dtype=dtype) / 10 
+        w1 = torch.randn((E, inter_dim * 2, model_dim), dtype=dtype)
     else:
         w1 = torch.randn((E, inter_dim, model_dim), dtype=dtype) 
-    w2 = torch.ones((E, model_dim, inter_dim), dtype=dtype) 
+    w2 = torch.randn((E, model_dim, inter_dim), dtype=dtype) 
 
     score = torch.randn((token, E), dtype=dtype)
     topk_weights, topk_ids = fused_topk(input, score, topk, True)
@@ -119,10 +119,10 @@ def test_fmoe(
     M, _ = topk_ids.shape
     BLOCK_SIZE_M = get_block_size(M, topk, E)
     BLOCK_SIZE_M = 128
-    # _, us_moe_sort = run_perftest(
-    #  moe_sorting,
-    #  topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M,
-    #)
+    _, us_moe_sort = run_perftest(
+      moe_sorting,
+      topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M,
+    )
 
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
         topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M
@@ -146,9 +146,12 @@ def test_fmoe(
     w1_qt = w1_qt_aiter = w1_qt.view(w1.shape)
     w2_qt = w2_qt_aiter = w2_qt.view(w2.shape)
 
+
+    triton_quant = aiter.get_triton_quant(aiter.QuantType.per_128x128)
     _, us_aq1 = run_perftest(
-        aiter.pertoken_quant,
-        input.view(token, -1, 128), quant_dtype=AQDType,
+        triton_quant,
+        input,
+        quant_dtype=AQDType,
     )
 
     a1_qt, a1_scale = aiter.pertoken_quant(input.view(token, -1, 128), quant_dtype=AQDType)
@@ -218,7 +221,7 @@ def test_fmoe(
     checkAllclose(
         a2_qt.to(dtype),
         out1_asm.to(dtype),
-        msg=f"[perf] asm_moe_stage1:{us_asm_stage1:>8.2f} us_asm_stage1, {token*model_dim*inter_dim*topk*2/us_asm_stage1/1000/1000:>8.2f} tflops......(quant:{AQDType})",
+        msg=f"[perf] asm_moe_stage1:{us_asm_stage1:>8.2f} us, {token*model_dim*inter_dim*topk*2/us_asm_stage1/1000/1000:>8.2f} tflops......(quant:{AQDType})",
     )
 
     out2_ref, us_ref = run_perftest(
@@ -255,8 +258,13 @@ def test_fmoe(
     checkAllclose(
         out2_ref,
         out2_ck_tune,
-        msg=f"asm_stage1+ck_stage2: {us:>8.2f} us_aq1+us_asm_stage1+us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
+        msg=f"asm_stage1+ck_stage2: {us_moe_sort+us_aq1+us_asm_stage1+us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
     )
+    print("asm_stage1+ck_stage2:",us_moe_sort+us_aq1+us_asm_stage1+us," us")
+    print(" us_moe_sort:",us_moe_sort," us")
+    print(" us_aq1: ",us_aq1," us")
+    print(" us_asm_stage1: ",us_asm_stage1," us")
+    print(" us_ck_stage2: ",us," us")
     ######################## stage 2 end ###########
     
 

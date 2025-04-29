@@ -560,7 +560,7 @@ auto moe_dispatch(torch::ScalarType dtype, torch::ScalarType outtype, torch::Sca
         std::cout << "[aiter] found CK kernel : " << kernelName << std::endl;
         return it->second;
     }
-    std::cerr << "[aiter] ck kernel not found: " << kernelName << std::endl;
+    //std::cerr << "[aiter] ck kernel not found: " << kernelName << std::endl;
 
     // Otherwise, use heuristics.
     return moe_heuristics_dispatch(dtype, outtype, q_dtype, wq_dtype, q_type, stage, block_m);

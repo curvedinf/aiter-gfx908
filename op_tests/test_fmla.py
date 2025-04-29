@@ -108,7 +108,7 @@ def cal_diff(x: torch.Tensor, y: torch.Tensor, name: str) -> None:
 @torch.inference_mode()
 def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     print(
-        f"{b=}, {s_q=}, {mean_sk=}, {h_q=}, {h_kv=}, {d=}, {dv=}, {causal=}, {varlen=}"
+        f"{dtype=}, {b=}, {s_q=}, {mean_sk=}, {h_q=}, {h_kv=}, {d=}, {dv=}, {causal=}, {varlen=}"
     )
 
     cache_seqlens = torch.full((b,), mean_sk, dtype=torch.int32, device="cuda")
@@ -172,15 +172,15 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
                 h_kv=h_kv,
                 is_causal=causal,
             )
-            out[i] = O.transpose(0, 1)
+            out[i] = torch.nan_to_num(O.transpose(0, 1))
             lse[i] = LSE
         return out, lse
 
     out_torch, lse_torch = ref_mla()
     out_flash, lse_flash = flash_mla()
 
-    cal_diff(lse_flash, lse_torch.cuda(), "lse")
-    cal_diff(out_flash, out_torch.cuda(), "out")
+    checkAllclose(lse_flash, lse_torch.cuda(), msg="lse")
+    checkAllclose(out_flash, out_torch.cuda().to(dtype=dtype), msg="out")
 
     t = triton.testing.do_bench(flash_mla)
     FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2
@@ -190,6 +190,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     print(
         f"{t:.3f} ms, {FLOPS / 10 ** 9 / t:.0f} TFLOPS, {bytes / 10 ** 6 / t:.0f} GB/s"
     )
+    print("====================================")
 
 
 if __name__ == "__main__":
@@ -199,11 +200,11 @@ if __name__ == "__main__":
     for (dtype, b, s, h_q, s_q, varlen, causal) in itertools.product(
         (torch.float16, torch.bfloat16),
         (2,4),
-        (4096, 8192),
-        (64, 128),
+        (64, 512, 4096, 8192),
+        (16, 64, 128),
         # (1, 2), # s_q for decode
         (64,),  # s_q for prefill
-        (False, True)[1:],
+        (False, True),
         (False, True)
     ):
         test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen)

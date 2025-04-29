@@ -125,7 +125,7 @@ public:
 
     CK_TILE_HOST_DEVICE static constexpr int32_t GetAlignmentV()
     {
-        /// TODO: Assuming Value is row-major just like Key.
+        // Assuming Value is row-major just like Key.
         constexpr int32_t kBlockSize   = Traits::kNumThreads;
         constexpr int32_t kNPerBlock   = Traits::kBlockN1;
         constexpr int32_t kKPerBlock   = Traits::kBlockK1;
@@ -728,7 +728,7 @@ CK_TILE_DEVICE static auto MakeVDram(
 {
     using Traits = typename Policy::Traits;
 
-    /// TODO: Assuming Value is row-major just like Key.
+    // Assuming Value is row-major just like Key.
     const auto v_dram_naive = ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
         p_data, // will update this pointer if using paged-kvcache
         ck_tile::make_tuple(length, Traits::kSizeDV),
@@ -1264,7 +1264,9 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
                 return l[i] == 0.f ? 0.f : 1 / l[i];
             }
             else
+            {
                 return 1 / l[i];
+            }
         }();
         ck_tile::sweep_tile_span(o_spans[ck_tile::number<1>{}], [&](auto id1) {
             constexpr auto ij = ck_tile::make_tuple(id0, id1);
@@ -1288,7 +1290,8 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
     // allocate LDS
     __shared__ uint8_t p_smem[Policy::GetSmemSize()];
 
-    const auto [tile_m_id, tile_n_id, split_id, hqid, bid] = GetTileIndex<Traits>(params.num_splits);
+    const auto [tile_m_id, tile_n_id, split_id, hqid, bid] =
+        kDoSplit ? GetTileIndex<Traits>(params.num_splits) : GetTileIndex<Traits>(1);
     const auto hkid = hqid / params.hq_hk_ratio;
     const int32_t mid = __builtin_amdgcn_readfirstlane(tile_m_id * Traits::kBlockM);
     const int32_t nid = __builtin_amdgcn_readfirstlane(tile_n_id * Traits::kBlockN1);
@@ -1332,8 +1335,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                                     ck_tile::SimplifiedGenericAttentionMask<true>,
                                     ck_tile::SimplifiedGenericAttentionMask<false>>;
     Mask mask = kIsCausal ?
-                ck_tile::make_generic_attention_mask_from_lr_window<Mask>(
-                    -1, seqlen_k - params.size_s + 1, params.size_s, seqlen_k, true) :
+                Mask{params.size_s, seqlen_k - params.size_s + 1, params.size_s, seqlen_k} :
                 Mask{params.size_s, seqlen_k};
 
     if constexpr (kDoSplit)
@@ -1377,7 +1379,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
     }
     else
     {
-        /// TODO: Assuming lse is in shape [b, h, s] and is contiguous
+        // Assuming lse is in shape [b, h, s] and is contiguous
         acc_t* p_lse = reinterpret_cast<acc_t*>(params.p_softmax_lse) +
                        (int64_t(bid) * params.size_h + hqid) * params.size_s; // batch+head offset
         scalar_t* p_out = reinterpret_cast<scalar_t*>(params.p_output) +
@@ -1404,8 +1406,8 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             v_page_block_navigator,
             lse_dram_window,
             nid,
-            params.num_splits,
-            split_id,
+            1, // num_splits
+            0, // split_id
             mask,
             params.scale_softmax,
             p_smem);

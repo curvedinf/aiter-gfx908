@@ -890,6 +890,7 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
     const KPageBlockNavigator&  k_page_block_navigator,
     const VPageBlockNavigator&  v_page_block_navigator,
     LseDramBlockWindow&         lse_dram_window_,
+    int32_t                     seqlen_k,
     int32_t                     nid,
     int32_t                     num_splits,
     int32_t                     split_id,
@@ -948,13 +949,15 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
     ck_tile::clear_tile(l);
 
     const auto q_origin = q_dram_reg_window_.get_window_origin();
-    const auto [seqlen_k_start, seqlen_k_end] =
+    auto [origin_start, origin_end] =
         mask.GetTileRangeAlongX(q_origin.at(ck_tile::number<0>{}),
                                 ck_tile::number<Traits::kBlockM>{},
-                                ck_tile::number<Traits::kBlockN0>{},
-                                num_splits,
-                                split_id);
-
+                                ck_tile::number<Traits::kBlockN0>{});
+    const int32_t x_per_split    = ck_tile::max(Traits::kBlockN0, ck_tile::integer_divide_ceil(seqlen_k, num_splits));
+    const int32_t split_start    = x_per_split * split_id;
+    const int32_t split_end      = ck_tile::min(seqlen_k, split_start + x_per_split);
+    const int32_t seqlen_k_start = ck_tile::max(origin_start, split_start);
+    const int32_t seqlen_k_end   = ck_tile::min(origin_end, split_end);
 
     // 3. Quick exit if no work to do
     //
@@ -1368,6 +1371,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             k_page_block_navigator,
             v_page_block_navigator,
             lse_acc_dram_window,
+            seqlen_k,
             nid,
             params.num_splits,
             split_id,
@@ -1405,6 +1409,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             k_page_block_navigator,
             v_page_block_navigator,
             lse_dram_window,
+            seqlen_k,
             nid,
             1, // num_splits
             0, // split_id
@@ -1479,13 +1484,13 @@ void dispatch_fmla_fwd_splictkv_prefill(
                         toString((TYPE)), ".");         \
     }
 
-int num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int num_n_blocks)
+int num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int num_n_blocks, int max_splits)
 {
     int32_t result = 1;
 
     if (batch_nhead_mblocks < 0.8f * num_SMs)
     {
-        int32_t max_splits = std::min(max_splits, std::min(num_SMs, num_n_blocks));
+        max_splits = std::min(max_splits, std::min(num_SMs, num_n_blocks));
         float max_efficiency = 0.f;
         std::vector<float> efficiency;
         efficiency.reserve(max_splits);
@@ -1554,7 +1559,7 @@ int32_t calculate_num_splits(
     /// TODO: Return 1 for debug
     return 1;
 
-    return num_splits_heuristic(size_b * size_h * num_m_blocks, cu_count * Traits::kCuReuse, num_n_blocks);
+    return num_splits_heuristic(size_b * size_h * num_m_blocks, cu_count * Traits::kCuReuse, num_n_blocks, 128);
 }
 
 std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
@@ -1593,8 +1598,8 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads_q, seqlen_q_ori);
     if (num_splits > 1)
     {
+        output_accum = torch::empty({batch_size, seqlen_q_ori, num_splits, num_heads_q, head_size_v}, opts.dtype(torch::kFloat32));
         softmax_lseaccum = torch::empty({batch_size, num_heads_q, num_splits, seqlen_q_ori}, opts.dtype(torch::kFloat32));
-        output_accum = torch::empty({batch_size, num_heads_q, num_splits, seqlen_q_ori, head_size_v}, opts.dtype(torch::kFloat32));
     }
 
     FlashMlaPrefillFwdParams params = {};
@@ -1631,13 +1636,13 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.stride_b_o = output.stride(0);
     params.stride_s_o = output.stride(1);
     params.stride_h_o = output.stride(2);
+    params.stride_b_oacc = (num_splits > 1) ? output_accum.stride(0) : 0;
+    params.stride_h_oacc = (num_splits > 1) ? output_accum.stride(3) : 0;
+    params.stride_sp_oacc = (num_splits > 1) ? output_accum.stride(2) : 0;
+    params.stride_s_oacc = (num_splits > 1) ? output_accum.stride(1) : 0;
     params.stride_b_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(0) : 0;
     params.stride_h_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(1) : 0;
     params.stride_sp_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(2) : 0;
-    params.stride_b_oacc = (num_splits > 1) ? output_accum.stride(0) : 0;
-    params.stride_h_oacc = (num_splits > 1) ? output_accum.stride(1) : 0;
-    params.stride_sp_oacc = (num_splits > 1) ? output_accum.stride(2) : 0;
-    params.stride_s_oacc = (num_splits > 1) ? output_accum.stride(3) : 0;
 
 	using acc_t = float;
     DISPATCH_FMLA_TYPES(

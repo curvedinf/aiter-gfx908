@@ -116,11 +116,11 @@ def gemm_a16w16(x,
     BLOCK_SIZE_M = 256
     BLOCK_SIZE_N = 256
     BLOCK_SIZE_K = 64
-    GROUP_SIZE_M = 4
+    GROUP_SIZE_M = 16
     waves_per_eu = 2
     kpack = 1
     matrix_instr_nonkdim = 16
-    num_warps = 8
+    num_warps = 4
     num_stages = 2
 
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), )

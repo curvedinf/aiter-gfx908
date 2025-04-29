@@ -16,6 +16,7 @@ from aiter import silu_and_mul
 from aiter.ops.triton.moe_op_gelu import fused_moe_gelu as triton_moe_gelu
 from aiter.ops.triton.moe_op_gelu import moe_set_use_persistent_kernel as moe_set_use_persistent_kernel_gelu
 from aiter.ops.triton.utils.moe_config_utils import get_optimal_moe_config_func
+from aiter.ops.triton.utils import utils
 
 DEBUG_MODE = False
 
@@ -164,7 +165,7 @@ def get_default_config() -> Dict[str, int]:
 def quantize_fp8(tensor: torch.Tensor, dim=() ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     quantize_dim = [i for i in range(tensor.dim()) if i not in dim]
     max_vals = tensor.abs().amax(dim=quantize_dim, keepdim=True)
-    max_repr_val = torch.finfo(torch.float8_e4m3fnuz).max
+    max_repr_val = torch.finfo(utils.get_torch_fp8_type()).max
     max_vals[max_vals == 0] = 1e-8 # Avoid division by zero
 
     # Compute scale factors for each channel
@@ -173,7 +174,7 @@ def quantize_fp8(tensor: torch.Tensor, dim=() ) -> tuple[torch.Tensor, torch.Ten
     # Quantize the tensor
     tensor = tensor * scale
     tensor.clamp_(-max_repr_val, max_repr_val)
-    tensor_quantized = tensor.to(torch.float8_e4m3fnuz)
+    tensor_quantized = tensor.to(utils.get_torch_fp8_type())
 
     scale = scale.squeeze(dim=quantize_dim)
 

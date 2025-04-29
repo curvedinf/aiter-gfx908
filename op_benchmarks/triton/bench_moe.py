@@ -2,6 +2,7 @@ import triton
 import triton.language as tl
 from utils.benchmark_utils import get_model_configs, get_available_models, torch_to_tl_dtype
 from op_tests.triton.test_moe import input_helper, input_helper_int4_w4a16
+from aiter.ops.triton.utils import utils
 import torch
 import argparse
 from aiter.ops.triton.moe_op import fused_moe as triton_moe
@@ -53,7 +54,6 @@ def run_benchmark(args):
     int4_w4a16 = args.int4_w4a16
     group_size = args.group_size
     has_zp = args.has_zp
-    dtype = utils.arg_to_torch_dtype(args.dtype)
 
     if int4_w4a16:
         assert group_size != None, "set group_size with -group_size"
@@ -84,13 +84,13 @@ def run_benchmark(args):
             flops += M * top_k * N
 
         if fp8_w8a8:
-            a_bytes, b_bytes, c_bytes = 1, 1, dtype.itemsize
+            a_bytes, b_bytes, c_bytes = 1, 1, 2
         elif int8_w8a16:
-            a_bytes, b_bytes, c_bytes = 2, 1, dtype.itemsize
+            a_bytes, b_bytes, c_bytes = 2, 1, 2
         elif int4_w4a16:
-            a_bytes, b_bytes, c_bytes = 2, 0.5, dtype.itemsize
+            a_bytes, b_bytes, c_bytes = 2, 0.5, 2
         else:
-            a_bytes = b_bytes = c_bytes = dtype.itemsize
+            a_bytes = b_bytes = c_bytes = 2
 
         # (M, K) memory load for A (E,  N,  K) for B not (top_k,  N,  K)
         # because we are in total bringing in all expert matrices into the chip from memory.
@@ -138,19 +138,8 @@ def parse_args():
     parser.add_argument("-fp8_w8a8", action='store_true', default=False)
     parser.add_argument("-int4_w4a16", action='store_true', default=False)
     parser.add_argument("-has_zp", action='store_true', default=False)
-    parser.add_argument("-dtype", default='fp16')
     args = parser.parse_args()
     return args
-
-def is_cdna4():
-    return triton.runtime.driver.active.get_current_target().arch == 'gfx950'
-
-e5m2_type = torch.float8_e5m2 if is_cdna4() else torch.float8_e5m2fnuz
-e4m3_type = torch.float8_e4m3fn if is_cdna4() else torch.float8_e4m3fnuz
-
-arg_to_torch_dtype = {
-    'fp16': torch.float16, 'bf16': torch.bfloat16, 'fp32': torch.float32, "bf8": e5m2_type, "fp8": e4m3_type
-}
 
 
 def main():

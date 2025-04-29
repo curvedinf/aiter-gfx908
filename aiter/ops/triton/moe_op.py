@@ -4,6 +4,7 @@ import triton.language as tl
 from typing import Any, Dict, Optional, List
 from aiter.ops.triton.quant import dynamic_per_tensor_fp8_quant
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
+from aiter.ops.triton.utils import utils
 
 #Source:
 #MoE Kernel adapted from VLLM
@@ -889,9 +890,13 @@ def fused_moe(A: torch.Tensor,
     if use_fp8_w8a8:
         assert B_scale is not None
         if block_shape is None:
-            output = torch.zeros(A.shape, device=A.device, dtype=torch.float8_e4m3fnuz)
+            output = torch.zeros(A.shape, device=A.device, dtype=utils.get_torch_fp8_type())
             A_scale = torch.zeros(1, device=A.device, dtype=torch.float32)
             A, A_scale = _MOE_A_QUANT_FUNC(output, A, A_scale)
+            print(f"out dtype = {output.dtype}")
+            print(f"A dtype = {A.dtype}")
+            print(f"B dtype = {B.dtype}")
+            print(f"C dtype = {C.dtype}")
         else:
             #TODO: Add support for per token group quantization
             assert len(block_shape) == 2

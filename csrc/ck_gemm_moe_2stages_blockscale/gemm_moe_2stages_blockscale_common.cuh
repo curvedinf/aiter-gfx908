@@ -191,7 +191,7 @@ void moe_stage2_gemm_blockscale(const hipStream_t &stream, int tokens, int sorte
     static constexpr ck::index_t Scale_Block_K = 128;
     constexpr ck::index_t NumDTensor = DsDataType::Size();
     constexpr auto StrideDs          = std::array<ck::index_t, NumDTensor>{0};
-
+    //static constexpr ck::index_t MPerBlock = 128; 
     using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemmBlockScale<
                    Row, Col, DsLayout, ELayout,
                    A0DataType, A1DataType, B0DataType, B1DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,

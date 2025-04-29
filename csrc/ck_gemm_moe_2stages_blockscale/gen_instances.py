@@ -65,7 +65,7 @@ class ck_moe_2stage_gemm_codegen:
                     # _B16    # EDataType
                     # _F8    # A0DataType
                     # _I4    # B0DataType
-                    # _PerToken || per_1x128
+                    # _PerToken || per_128x128
                     # _256x128x128x128 # BLOCKSIZE, MPerfBlock, NPerBlock, KPerBlock
                     # _1x4     # MWaves, NWaves
                     # _32     # MNPerXDL

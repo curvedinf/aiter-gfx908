@@ -116,7 +116,8 @@ def fused_moe(
             doweight_stage1,
         )
     run_1stage = M < 256
-    run_1stage = False
+    #run_1stage = False
+    run_1stage = True
     block_size_M = 32 if run_1stage else block_size_M
 
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
@@ -209,13 +210,16 @@ def fused_moe_1stage(
 
     else:
         quant_func = get_hip_quant(quant_type)
+        tokenNum=hidden_states.shape[0]
         a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a)
-        if quant_type == QuantType.per_1x128:
+        if quant_type == QuantType.per_128x128:
             fmoe_func = functools.partial(
                 aiter.fmoe_fp8_blockscale_g1u1,
                 fc_scale_blkn=128,
                 fc_scale_blkk=128,
             )
+            a1=a1.view(tokenNum,-1)
+            
         elif isG1U1:
             fmoe_func = aiter.fmoe_g1u1
         else:
@@ -234,9 +238,9 @@ def fused_moe_1stage(
             a1_scale,
             w1_scale,
             w2_scale,
-            None,
-            activation,
-        )
+            fc2_smooth_scale=None,
+            activation=activation,
+        )  
     return moe_buf
 
 
@@ -529,7 +533,7 @@ def asm_stage1(
     sorted_weights=None
 ):
     dtype = torch.bfloat16 # out.dtype, asm only support bf16
-    if quant_type == aiter.QuantType.per_128x128: 
+    if quant_type == QuantType.per_128x128:
         dtype = torch.float8_e4m3fnuz
     out = out.view(dtype)
     device = out.device
@@ -567,6 +571,7 @@ def asm_stage1(
         w1_scale=w1_scale, 
         sorted_weights=sorted_weights,
     )
+
     if ksplit > 0:
         if activation == ActivationType.Silu:
             aiter.silu_and_mul(out, tmp_out.view(torch.float).to(dtype))

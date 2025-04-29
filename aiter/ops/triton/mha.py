@@ -1942,6 +1942,7 @@ def _bwd_kernel_dkdvdq_noncausal(
     IS_VARLEN: tl.constexpr,
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
+    NUM_SMS: tl.constexpr,
 ):
     # workgroup id
     wid = tl.program_id(0) # 0, ..., NUM_K_PIDS * BATCH * NUM_K_HEADS - 1
@@ -1951,6 +1952,8 @@ def _bwd_kernel_dkdvdq_noncausal(
     bid = wid % BATCH 
     hkid = wid // BATCH % NUM_K_HEADS 
     pid = wid // (BATCH * NUM_K_HEADS) % NUM_K_PIDS 
+
+    num_atomics_concurrent = NUM_SMS // (NUM_K_HEADS *  BATCH)
 
     q_start = 0
     k_start = 0
@@ -2045,6 +2048,7 @@ def _bwd_kernel_dkdvdq_noncausal(
             IS_FP8=IS_FP8,
             FP8_MAX=FP8_MAX,
             workgroup_id=pid,
+            num_atomics_concurrent=num_atomics_concurrent,
         )
 
     adj_dkdv = (bid * stride_dkb +
@@ -2443,8 +2447,9 @@ def _flash_attn_backward(
         num_k_pids = (max_seqlen_k + BLOCK_N - 1) // BLOCK_N
         grid_dkdvdq = (batch * num_k_heads * num_k_pids,) 
 
+        NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+
         if causal:
-            NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
             # change to parallelize over q heads.
             # We can incur the cost of atomic adds for dk and dv, because they are not in the loop.
             # Avoiding contention for dq atomic add (inside the loop) is critical. 
@@ -2508,6 +2513,7 @@ def _flash_attn_backward(
                 IS_VARLEN=IS_VARLEN,
                 IS_FP8=IS_FP8,
                 FP8_MAX=FP8_MAX,
+                NUM_SMS=NUM_SMS,
                 **config,
             )
         

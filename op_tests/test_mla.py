@@ -183,7 +183,7 @@ def test_mla(
         checkAllclose(
             out_ref,
             out_aiter,
-            msg=f"mla_prefill-normal    [torch vs  aiter_ck]:{us_ref:>8.2f} us vs {us_aiter:>8.2f} us...... {flop/us_aiter/1000/1000:>8.2f} TFlops",
+            msg=f"mla_prefill-normal    [torch vs  aiter_ck]:{us_ref:>8.2f} us vs {us_aiter:>8.2f} us...... {flop / us_aiter / 1000 / 1000:>8.2f} TFlops",
         )
         return us_aiter
 

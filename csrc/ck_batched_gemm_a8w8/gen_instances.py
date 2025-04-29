@@ -11,7 +11,6 @@ import shutil
 from batched_gemm_a8w8_common import kernelInstance, kernels_list, default_kernels_dict
 
 
-
 class batched_gemm_a8w8_fwd_codegen:
     def __init__(self, working_path, istune=False):
         self.working_path = working_path
@@ -71,10 +70,10 @@ torch::Tensor
                 {k.WAVE_TILE_N},
                 {k.WAVE_MAP_M},
                 {k.WAVE_MAP_N},
-                S<{(", ").join(map(lambda x:str(x),k.ABLOCK_TRANSFER))}>,
-                S<{(", ").join(map(lambda x:str(x),k.BBLOCK_TRANSFER))}>,
-                S<{(", ").join(map(lambda x:str(x),k.CBLOCK_TRANSFER))}>,
-                S<{(", ").join(map(lambda x:str(x),k.CBLOCK_SPV))}>,
+                S<{(", ").join(map(lambda x: str(x), k.ABLOCK_TRANSFER))}>,
+                S<{(", ").join(map(lambda x: str(x), k.BBLOCK_TRANSFER))}>,
+                S<{(", ").join(map(lambda x: str(x), k.CBLOCK_TRANSFER))}>,
+                S<{(", ").join(map(lambda x: str(x), k.CBLOCK_SPV))}>,
                 {k.CSHUFFLE_MX_PER_WAVE_PERSHUFFLE},
                 {k.CSHUFFLE_NX_PER_WAVE_PERSHUFFLE},
                 ck::BlockGemmPipelineScheduler::{k.LOOP_SCHED},
@@ -94,10 +93,10 @@ torch::Tensor
             {k.WAVE_TILE_N},
             {k.WAVE_MAP_M},
             {k.WAVE_MAP_N},
-            S<{(", ").join(map(lambda x:str(x),k.ABLOCK_TRANSFER))}>,
-            S<{(", ").join(map(lambda x:str(x),k.BBLOCK_TRANSFER))}>,
-            S<{(", ").join(map(lambda x:str(x),k.CBLOCK_TRANSFER))}>,
-            S<{(", ").join(map(lambda x:str(x),k.CBLOCK_SPV))}>,
+            S<{(", ").join(map(lambda x: str(x), k.ABLOCK_TRANSFER))}>,
+            S<{(", ").join(map(lambda x: str(x), k.BBLOCK_TRANSFER))}>,
+            S<{(", ").join(map(lambda x: str(x), k.CBLOCK_TRANSFER))}>,
+            S<{(", ").join(map(lambda x: str(x), k.CBLOCK_SPV))}>,
             {k.CSHUFFLE_MX_PER_WAVE_PERSHUFFLE},
             {k.CSHUFFLE_NX_PER_WAVE_PERSHUFFLE},
             ck::BlockGemmPipelineScheduler::{k.LOOP_SCHED},
@@ -107,14 +106,25 @@ torch::Tensor
         return batched_gemm_a8w8_rowwise_impl<DDataType, EDataType, DeviceGemmInstance>(XQ, WQ, x_scale, w_scale, Y, bias, KBatch);
 """
         if self.istune:
-            INSTANCE_IMPL_str = INSTANCE_IMPL.format(INSTANCE_CONTENT_pad=(INSTANCE_CONTENT_nobias.format(GemmSpec="MNKPadding")),
-                                                     INSTANCE_CONTENT_nopad=(INSTANCE_CONTENT_nobias.format(GemmSpec="Default")))
+            INSTANCE_IMPL_str = INSTANCE_IMPL.format(
+                INSTANCE_CONTENT_pad=(
+                    INSTANCE_CONTENT_nobias.format(GemmSpec="MNKPadding")
+                ),
+                INSTANCE_CONTENT_nopad=(
+                    INSTANCE_CONTENT_nobias.format(GemmSpec="Default")
+                ),
+            )
         else:
-            INSTANCE_IMPL_str = INSTANCE_IMPL.format(INSTANCE_CONTENT_pad=INSTANCE_CONTENT_bias.format(GemmSpec="MNKPadding"),
-                                                     INSTANCE_CONTENT_nopad=INSTANCE_CONTENT_bias.format(GemmSpec="Default"))
+            INSTANCE_IMPL_str = INSTANCE_IMPL.format(
+                INSTANCE_CONTENT_pad=INSTANCE_CONTENT_bias.format(
+                    GemmSpec="MNKPadding"
+                ),
+                INSTANCE_CONTENT_nopad=INSTANCE_CONTENT_bias.format(GemmSpec="Default"),
+            )
 
         Path(os.path.join(self.impl_path, f"{k.name}.cuh")).write_text(
-                INSTANCE_IMPL_str)
+            INSTANCE_IMPL_str
+        )
 
         INSTANCE_template = """// SPDX-License-Identifier: MIT
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
@@ -132,27 +142,28 @@ template torch::Tensor
     int KBatch);
 
 """
-        INSTANCE_dBF16_eBF16 = INSTANCE_template.format(
-            name=k.name, dtypes="B16")
-        INSTANCE_dFP32_eBF16 = INSTANCE_template.format(
-            name=k.name, dtypes="F32, B16")
-        INSTANCE_dFP16_eFP16 = INSTANCE_template.format(
-            name=k.name, dtypes="F16")
-        INSTANCE_dFP32_eFP16 = INSTANCE_template.format(
-            name=k.name, dtypes="F32, F16")
+        INSTANCE_dBF16_eBF16 = INSTANCE_template.format(name=k.name, dtypes="B16")
+        INSTANCE_dFP32_eBF16 = INSTANCE_template.format(name=k.name, dtypes="F32, B16")
+        INSTANCE_dFP16_eFP16 = INSTANCE_template.format(name=k.name, dtypes="F16")
+        INSTANCE_dFP32_eFP16 = INSTANCE_template.format(name=k.name, dtypes="F32, F16")
 
         if self.istune:
-            Path(os.path.join(self.instances_path, f"{k.name}_dBF16_eBF16.cpp")).write_text(
-                INSTANCE_dBF16_eBF16)
+            Path(
+                os.path.join(self.instances_path, f"{k.name}_dBF16_eBF16.cpp")
+            ).write_text(INSTANCE_dBF16_eBF16)
         else:
-            Path(os.path.join(self.instances_path, f"{k.name}_dBF16_eBF16.cpp")).write_text(
-                INSTANCE_dBF16_eBF16)
-            Path(os.path.join(self.instances_path, f"{k.name}_dFP32_eBF16.cpp")).write_text(
-                INSTANCE_dFP32_eBF16)
-            Path(os.path.join(self.instances_path, f"{k.name}_dFP16_eFP16.cpp")).write_text(
-                INSTANCE_dFP16_eFP16)
-            Path(os.path.join(self.instances_path, f"{k.name}_dFP32_eFP16.cpp")).write_text(
-                INSTANCE_dFP32_eFP16)
+            Path(
+                os.path.join(self.instances_path, f"{k.name}_dBF16_eBF16.cpp")
+            ).write_text(INSTANCE_dBF16_eBF16)
+            Path(
+                os.path.join(self.instances_path, f"{k.name}_dFP32_eBF16.cpp")
+            ).write_text(INSTANCE_dFP32_eBF16)
+            Path(
+                os.path.join(self.instances_path, f"{k.name}_dFP16_eFP16.cpp")
+            ).write_text(INSTANCE_dFP16_eFP16)
+            Path(
+                os.path.join(self.instances_path, f"{k.name}_dFP32_eFP16.cpp")
+            ).write_text(INSTANCE_dFP32_eFP16)
 
     def gen_lookup_dict(self, kernels_dict):
         LOOKUP_head = """#pragma once
@@ -173,13 +184,21 @@ template torch::Tensor
 
 #endif // USE_ROCM
 """
-        with open(os.path.join(self.working_path, "batched_gemm_a8w8_lookup.h"), "w") as f:
+        with open(
+            os.path.join(self.working_path, "batched_gemm_a8w8_lookup.h"), "w"
+        ) as f:
             f.write(LOOKUP_head)
             for mnk, k in kernels_dict.items():
-                #print((", ").join(map(lambda x: str(x), list(mnk))), ":", k.name)
+                # print((", ").join(map(lambda x: str(x), list(mnk))), ":", k.name)
                 if not self.istune and (isinstance(mnk, tuple) and mnk[0] > 0):
-                    f.write(LOOKUP_template.format(mnk="{"+(", ").join(
-                        map(lambda x: str(x), list(mnk))) + "}", kernel_name=k.name))
+                    f.write(
+                        LOOKUP_template.format(
+                            mnk="{"
+                            + (", ").join(map(lambda x: str(x), list(mnk)))
+                            + "}",
+                            kernel_name=k.name,
+                        )
+                    )
                 elif self.istune and isinstance(mnk, int):
                     f.write(LOOKUP_template.format(mnk=mnk, kernel_name=k.name))
             f.write(LOOKUP_end)
@@ -212,7 +231,9 @@ torch::Tensor
 #endif // USE_ROCM
 """
 
-        with open(os.path.join(self.working_path, "batched_gemm_a8w8_manifest.h"), "w") as f:
+        with open(
+            os.path.join(self.working_path, "batched_gemm_a8w8_manifest.h"), "w"
+        ) as f:
             f.write(MAINFEST_head)
             for mnk, k in kernels_dict.items():
                 f.write(MAINFEST_template.format(kernel_name=k.name))
@@ -246,6 +267,7 @@ def get_tune_dict(tune_dict_csv):
             tune_dict[(B, M, N, K)] = kernels_list[kid]
     return tune_dict
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="generate",
@@ -258,7 +280,7 @@ if __name__ == "__main__":
         "--working_path",
         default="./",
         required=False,
-        help="the path where all the blobs are going to be generated"
+        help="the path where all the blobs are going to be generated",
     )
 
     parser.add_argument(
@@ -266,14 +288,11 @@ if __name__ == "__main__":
         "--tune_file",
         default="aiter/configs/a8w8_tuned_batched_gemm.csv",
         required=False,
-        help="tune_file include the result after run batched_gemm_a8w8_tune.py"
+        help="tune_file include the result after run batched_gemm_a8w8_tune.py",
     )
 
     parser.add_argument(
-        "--tune",
-        action='store_true',
-        required=False,
-        help="generated tune instanses"
+        "--tune", action="store_true", required=False, help="generated tune instanses"
     )
 
     # parser.add_argument(
@@ -293,7 +312,6 @@ if __name__ == "__main__":
     #         all: [fp32, same as out] \n  \
     #         same: [same as out]"
     # )
-
 
     args = parser.parse_args()
     codegen = batched_gemm_a8w8_fwd_codegen(args.working_path, args.tune)

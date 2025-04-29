@@ -71,7 +71,7 @@ def test_topk_softmax(dtype, m, n, E, topk):
     (topk_weights_b, topk_ids_b), avg_b = test_fuse(
         hidden_states, gating_output, topk, True
     )
-    msg = f"[perf] {m=}, {n=}, {E=}, {topk=}, dtype: {dtype}, ref avg: {avg_a:<8.2f} us, b avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b-1:<5.1%}"
+    msg = f"[perf] {m=}, {n=}, {E=}, {topk=}, dtype: {dtype}, ref avg: {avg_a:<8.2f} us, b avg: {avg_b:<8.2f} us, uplift: {avg_a / avg_b - 1:<5.1%}"
     checkAllclose(topk_weights_a, topk_weights_b, atol=0.03, msg=msg)
     checkAllclose(topk_ids_a, topk_ids_b, atol=0, msg="topk_ids")
 

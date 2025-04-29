@@ -17,10 +17,12 @@ import multiprocessing
 from packaging.version import parse, Version
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, f'{this_dir}/utils/')
+sys.path.insert(0, f"{this_dir}/utils/")
 from cpp_extension import _jit_compile, get_hip_version
 from file_baton import FileBaton
+
 AITER_REBUILD = int(os.environ.get("AITER_REBUILD", "0"))
+
 
 def mp_lock(
     lockPath: str,
@@ -82,7 +84,9 @@ AITER_CSRC_DIR = f"{AITER_ROOT_DIR}/csrc"
 AITER_GRADLIB_DIR = f"{AITER_ROOT_DIR}/gradlib"
 AITER_ASM_DIR = f"{AITER_ROOT_DIR}/hsa/"
 os.environ["AITER_ASM_DIR"] = AITER_ASM_DIR
-CK_3RDPARTY_DIR = os.environ.get("CK_DIR", f"{AITER_ROOT_DIR}/3rdparty/composable_kernel")
+CK_3RDPARTY_DIR = os.environ.get(
+    "CK_DIR", f"{AITER_ROOT_DIR}/3rdparty/composable_kernel"
+)
 
 
 @functools.lru_cache(maxsize=None)
@@ -115,9 +119,9 @@ def validate_and_update_archs():
     allowed_archs = ["native", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx1100"]
 
     # Validate if each element in archs is in allowed_archs
-    assert all(
-        arch in allowed_archs for arch in archs
-    ), f"One of GPU archs of {archs} is invalid or not supported"
+    assert all(arch in allowed_archs for arch in archs), (
+        f"One of GPU archs of {archs} is invalid or not supported"
+    )
     return archs
 
 
@@ -185,10 +189,13 @@ def get_module(md_name):
         __mds[md_name] = importlib.import_module(f"{__package__}.{md_name}")
     return __mds[md_name]
 
+
 rebuilded_list = ["module_aiter_enum"]
+
 
 def rm_module(md_name):
     os.system(f"rm -rf {get_user_jit_dir()}/{md_name}.so")
+
 
 @functools.lru_cache()
 def recopy_ck():
@@ -196,8 +203,10 @@ def recopy_ck():
         os.system(f"rm -rf {CK_DIR}")
     shutil.copytree(CK_3RDPARTY_DIR, CK_DIR, dirs_exist_ok=True)
 
+
 def clear_build(md_name):
     os.system(f"rm -rf {bd_dir}/{md_name}")
+
 
 def build_module(
     md_name,
@@ -348,12 +357,10 @@ def build_module(
 
     def FinalFunc():
         logger.info(
-            f"finish build [{md_name}], cost {time.perf_counter()-startTS:.8f}s"
+            f"finish build [{md_name}], cost {time.perf_counter() - startTS:.8f}s"
         )
 
-    mp_lock(
-        lockPath=lock_path, MainFunc=MainFunc, FinalFunc=FinalFunc
-    )
+    mp_lock(lockPath=lock_path, MainFunc=MainFunc, FinalFunc=FinalFunc)
 
 
 def get_args_of_build(ops_name: str, exclue=[]):
@@ -389,7 +396,7 @@ def get_args_of_build(ops_name: str, exclue=[]):
                 d_ops[k] = eval(val)
             else:
                 pass
-            
+
         # undefined compile features will be replaced with default value
         d_opt_build_args.update(d_ops)
         return d_opt_build_args

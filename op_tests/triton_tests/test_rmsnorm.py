@@ -12,6 +12,7 @@ def generate_rmsnorm_inputs(M, N, dtype):
 
     return x, weight
 
+
 def torch_rmsnorm(x, g, out_dtype=torch.float16, epsilon=1e-6):
     M, N = x.shape
     # cast to float32 as the triton kernel
@@ -83,12 +84,12 @@ def test_rmsnorm(M, N, in_dtype_str):
         # float32 typically can be tighter
         atol, rtol = 1e-4, 1e-4
 
-    assert (
-        y_triton.dtype == out_dtype
-    ), f"y_triton has dtype={y_triton.dtype}, expected {out_dtype}"
-    assert (
-        y_torch.dtype == out_dtype
-    ), f"y_torch has dtype={y_torch.dtype}, expected {out_dtype}"
+    assert y_triton.dtype == out_dtype, (
+        f"y_triton has dtype={y_triton.dtype}, expected {out_dtype}"
+    )
+    assert y_torch.dtype == out_dtype, (
+        f"y_torch has dtype={y_torch.dtype}, expected {out_dtype}"
+    )
 
     triton.testing.assert_close(y_triton, y_torch, atol=atol, rtol=rtol)
 
@@ -134,12 +135,12 @@ def test_fused_add_rmsnorm(M, N, in_dtype_str):
         # float32 typically can be tighter
         atol, rtol = 1e-5, 1e-5
 
-    assert (
-        y_triton.dtype == out_dtype
-    ), f"y_triton has dtype={y_triton.dtype}, expected {out_dtype}"
-    assert (
-        y_torch.dtype == out_dtype
-    ), f"y_torch has dtype={y_torch.dtype}, expected {out_dtype}"
+    assert y_triton.dtype == out_dtype, (
+        f"y_triton has dtype={y_triton.dtype}, expected {out_dtype}"
+    )
+    assert y_torch.dtype == out_dtype, (
+        f"y_torch has dtype={y_torch.dtype}, expected {out_dtype}"
+    )
 
     triton.testing.assert_close(y_triton, y_torch, atol=atol, rtol=rtol)
     triton.testing.assert_close(res_triton, res_torch, atol=atol, rtol=rtol)

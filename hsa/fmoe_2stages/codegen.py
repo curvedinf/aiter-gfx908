@@ -8,7 +8,7 @@ import pandas as pd
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 
-template  ='''// SPDX-License-Identifier: MIT
+template = """// SPDX-License-Identifier: MIT
 // Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #define ADD_CFG(M, N, path, name)             \\
@@ -26,7 +26,7 @@ struct FMoe2StageConfig
 
 using CFG = std::unordered_map<std::string, FMoe2StageConfig>;
 
-'''
+"""
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         prog="generate",
@@ -41,21 +41,20 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    cfgs=[]
+    cfgs = []
     for el in glob.glob(f"{this_dir}/*.csv"):
         df = pd.read_csv(el)
         cfg = [
             f'ADD_CFG({tileM:>4}, {tileN:>4}, "fmoe_2stages/", "{name}"),'
             for tileM, tileN, name in df.values
         ]
-        filename=os.path.basename(el)
-        cfgname=filename.split('.')[0]
-        cfg_txt ="\n            ".join(cfg) + "\n"
+        filename = os.path.basename(el)
+        cfgname = filename.split(".")[0]
+        cfg_txt = "\n            ".join(cfg) + "\n"
 
-        txt = f'''static CFG cfg_{cfgname} = {{
-            {cfg_txt}}};'''
+        txt = f"""static CFG cfg_{cfgname} = {{
+            {cfg_txt}}};"""
         cfgs.append(txt)
-    txt_all=template+'\n'.join(cfgs)
-    with open(f'{args.output_dir}/asm_moe_2stage_configs.hpp','w') as f:
+    txt_all = template + "\n".join(cfgs)
+    with open(f"{args.output_dir}/asm_moe_2stage_configs.hpp", "w") as f:
         f.write(txt_all)
-

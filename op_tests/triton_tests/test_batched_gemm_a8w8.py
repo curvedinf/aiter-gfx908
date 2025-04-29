@@ -44,7 +44,6 @@ name_to_torch_types = {
 
 
 def get_x_vals():
-
     x_vals = [(1024 * v, 1024 * v, 1024 * v) for v in range(1, 9)]
     x_vals += [(4864, 4096, 8192), (9728, 8192, 65000), (4864, 8192, 4160)]
     x_vals += [
@@ -83,7 +82,6 @@ def get_x_vals():
     [(dtype, b, *shape) for dtype in ["bf16"] for b in [16] for shape in get_x_vals()],
 )
 def test_batched_gemm_a8w8(dtype, b, m, n, k):
-
     dtype = name_to_torch_types[dtype]
 
     x = torch.randint(-20, 20, (b, m, k), dtype=torch.int8).cuda()

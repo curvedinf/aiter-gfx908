@@ -141,7 +141,6 @@ def ref_compute_full_fwd(
     use_rope,
     device="cuda",
 ):
-
     B, H = q.shape[0], q.shape[1]
     S = kv_indptr[1].item()
 

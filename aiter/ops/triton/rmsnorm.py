@@ -273,7 +273,6 @@ def get_num_sms():
 
 
 def rms_norm(x: torch.Tensor, weight: torch.Tensor, epsilon: float = 1e-6):
-
     n_rows, n_cols = x.shape
     y = torch.empty_like(x, device="cuda", dtype=x.dtype)
 
@@ -308,7 +307,6 @@ def rmsnorm2d_fwd_with_add(
     weight: torch.Tensor,
     epsilon: float,
 ):
-
     n_rows, n_cols = input.shape
 
     MAX_FUSED_SIZE = 65536 // input.element_size()

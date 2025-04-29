@@ -66,7 +66,6 @@ def flatmm_a8w8_blockscale_asm(
 
 @functools.lru_cache(maxsize=1024)
 def compute_gemm_SplitK(M: int, N: int, K: int, tile_m: int, tile_n: int, tile_k: int):
-
     device_properties = torch.cuda.get_device_properties(0)
     cu_num = device_properties.multi_processor_count
     tile_num = ((M + tile_m - 1) // tile_m) * ((N + tile_n - 1) // tile_n)
@@ -134,9 +133,9 @@ def gemm_a8w8_ASM(
         assert dtype in [
             torch.bfloat16,
         ], f"Output {dtype=} is currently not supported in gemm_a8w8_ASM"
-        assert (
-            x_scale.dtype == torch.float32 and w_scale.dtype == torch.float32
-        ), f"{x_scale.dtype=} or {w_scale.dtype=} must be torch.float32"
+        assert x_scale.dtype == torch.float32 and w_scale.dtype == torch.float32, (
+            f"{x_scale.dtype=} or {w_scale.dtype=} must be torch.float32"
+        )
     m = XQ.shape[0]
     n = WQ.shape[0]
     k = XQ.shape[-1]
@@ -145,10 +144,10 @@ def gemm_a8w8_ASM(
         and w_scale.dtype == torch.float32
         and (asm_config := get_ASMGEMM_config(m, n, k, bias != None, dtype)) != None
     ):
-        assert (
-            bias != None
-        ), "Use asm gemm must give bias, please give a \
+        assert bias != None, (
+            "Use asm gemm must give bias, please give a \
             bias=torch.zeros(n,dtype=torch.float32,device='cuda')"
+        )
         splitK = asm_config["splitK"]
         Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
         return gemm_a8w8_asm(XQ, WQ, x_scale, w_scale, Y, bias, splitK=splitK)

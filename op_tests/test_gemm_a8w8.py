@@ -25,6 +25,7 @@ def run_torch(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16):
 def run_gemm_ck(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16):
     return aiter.gemm_a8w8_CK(x, weight, x_scale, w_scale, bias, dtype)
 
+
 @perftest()
 def run_gemm_asm(x, weightshuffle, x_scale, w_scale, bias=None, dtype=torch.bfloat16):
     return aiter.gemm_a8w8_ASM(x, weightshuffle, x_scale, w_scale, bias)
@@ -45,23 +46,24 @@ def test_gemm(dtype, m, n, k, quantDtype=torch.int8):
     a, avg_a = run_torch(x, weight, x_scale, w_scale, bias, dtype)
     b, avg_b = run_gemm_ck(x, weight, x_scale, w_scale, bias, dtype)
     if dtype == torch.bfloat16 and quantDtype == torch.int8 and bias is not None:
-        weightshuffle = shuffle_weight(weight,layout=(32,16))
+        weightshuffle = shuffle_weight(weight, layout=(32, 16))
         bias_f32 = bias.to(torch.float)
         c, avg_c = run_gemm_asm(x, weightshuffle, x_scale, w_scale, bias_f32, dtype)
     else:
         c = None
     if c is None:
-        msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, {quantDtype=} torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, asm : not support, uplift: {avg_a/avg_b-1:<5.1%}"
+        msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, {quantDtype=} torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, asm : not support, uplift: {avg_a / avg_b - 1:<5.1%}"
     else:
-        msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, {quantDtype=} torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, asm avg: {avg_c:<8.2f} us, uplift: {avg_a/min(avg_b,avg_c)-1:<5.1%}"
-    checkAllclose(a, b, msg="a,b: "+msg, rtol=1e-2, atol=0.01)
+        msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, {quantDtype=} torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, asm avg: {avg_c:<8.2f} us, uplift: {avg_a / min(avg_b, avg_c) - 1:<5.1%}"
+    checkAllclose(a, b, msg="a,b: " + msg, rtol=1e-2, atol=0.01)
     if c != None:
-        checkAllclose(a, c, msg="\033[1A\033[2K" + "a,c: "+ msg, rtol=1e-2, atol=0.01)
+        checkAllclose(a, c, msg="\033[1A\033[2K" + "a,c: " + msg, rtol=1e-2, atol=0.01)
+
 
 for dtype in [torch.bfloat16, torch.float16]:
     for quantDtype in [torch.int8, torch.float8_e4m3fnuz]:
         # qkv_proj
-        for (m, n, k) in [
+        for m, n, k in [
             (1, 1280, 8192),
             (32, 1280, 8192),
             (64, 1280, 8192),
@@ -78,7 +80,7 @@ for dtype in [torch.bfloat16, torch.float16]:
         ]:
             test_gemm(dtype, m, n, k, quantDtype)
         # attn_out
-        for (m, n, k) in [
+        for m, n, k in [
             (1, 8192, 1024),
             (32, 8192, 1024),
             (64, 8192, 1024),

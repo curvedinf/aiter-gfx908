@@ -68,7 +68,7 @@ def test_quant(m, n, dtype=torch.bfloat16):
 
     (a, a_scale), avg_a = test_torch_perTensorQuantFp8(input)
     (b, b_scale), avg_b = test_aiter_perTensorQuantFp8(input)
-    msg = f"[perf] dynamic_perTensorQuantFp8 dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, aiter avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b-1:<5.1%}"
+    msg = f"[perf] dynamic_perTensorQuantFp8 dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, aiter avg: {avg_b:<8.2f} us, uplift: {avg_a / avg_b - 1:<5.1%}"
     checkAllclose(a.to(torch.float), b.to(torch.float), rtol=0.125, atol=1e-3, msg=msg)
     checkAllclose(a_scale, b_scale, msg="scale")
     # print(f'{a_scale=}, {b_scale=}')
@@ -76,16 +76,16 @@ def test_quant(m, n, dtype=torch.bfloat16):
     scale = a_scale
     (a, a_scale), avg_a = test_torch_perTensorQuantFp8(input, scale)
     (b, b_scale), avg_b = test_aiter_perTensorQuantFp8(input, scale)
-    msg = f"[perf] static_perTensorQuantFp8 dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, aiter  avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b-1:<5.1%}"
+    msg = f"[perf] static_perTensorQuantFp8 dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, aiter  avg: {avg_b:<8.2f} us, uplift: {avg_a / avg_b - 1:<5.1%}"
     checkAllclose(a.to(torch.float), b.to(torch.float), rtol=0.125, atol=1e-3, msg=msg)
 
     (a, a_scale), avg_a = test_torch_perTokenQuantFp8(input)
     (b, b_scale), avg_b = test_aiter_perTokenQuantFp8(input)
     (c, c_scale), avg_c = test_triton_perTokenQuantFp8(input)
-    msg = f"[perf] dynamic_perTokenQuantFp8 dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, aiter  avg: {avg_b:<8.2f} us, triton avg: {avg_c:<8.2f} us, uplift: {avg_a/avg_b-1:<5.1%}"
+    msg = f"[perf] dynamic_perTokenQuantFp8 dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, aiter  avg: {avg_b:<8.2f} us, triton avg: {avg_c:<8.2f} us, uplift: {avg_a / avg_b - 1:<5.1%}"
     checkAllclose(a.to(torch.float), b.to(torch.float), rtol=0.125, atol=1e-3, msg=msg)
     checkAllclose(a_scale.view(-1), b_scale, msg="scale")
-    msg = f"[perf] dynamic_perTokenQuantFp8 dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us,                               triton avg: {avg_c:<8.2f} us, uplift: {avg_a/avg_c-1:<5.1%}"
+    msg = f"[perf] dynamic_perTokenQuantFp8 dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us,                               triton avg: {avg_c:<8.2f} us, uplift: {avg_a / avg_c - 1:<5.1%}"
     checkAllclose(a.to(torch.float), c.to(torch.float), rtol=0.125, atol=1e-3, msg=msg)
     checkAllclose(a_scale.view(-1), c_scale, msg="scale")
 

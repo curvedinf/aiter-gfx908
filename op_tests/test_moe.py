@@ -229,7 +229,7 @@ def test_fmoe(
             input, w1b, w2b, topk_weights, topk_ids, None, None, None, None
         )
 
-        msg = f"[perf] {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {topk=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:>8.2f} us, ck_avg: {avg_ck:>8.2f} us, uplift: {avg_c/avg_b-1:.1%}"
+        msg = f"[perf] {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {topk=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:>8.2f} us, ck_avg: {avg_ck:>8.2f} us, uplift: {avg_c / avg_b - 1:.1%}"
         checkAllclose(ref2, out_b, rtol=0.01, atol=100, msg=msg)
         checkAllclose(ref2, out_ck, rtol=0.01, atol=100, msg="ck check")
     else:
@@ -350,7 +350,7 @@ def test_fmoe(
         # out_ck, avg_ck = ck_moe_test(input, w1b, w2b, topk_weights, topk_ids,
         #                              fc1_scale, fc2_scale,
         #                              fc1_smooth_scale, fc2_smooth_scale)
-        msg = f"[perf] {use_g1u1=} {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {shared_E=}, {topk=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:>8.2f} us ...... uplift: {avg_c/avg_b-1:.1%}"
+        msg = f"[perf] {use_g1u1=} {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {shared_E=}, {topk=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:>8.2f} us ...... uplift: {avg_c / avg_b - 1:.1%}"
         checkAllclose(ref2, out_b, rtol=0.01, atol=100, msg=msg)
         # checkAllclose(ref2, avg_ck, rtol=0.01, atol=100)
 

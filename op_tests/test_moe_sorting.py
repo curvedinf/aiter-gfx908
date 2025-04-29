@@ -17,7 +17,6 @@ def test_moe_sorting_naive(
     num_experts: int,
     expert_mask=None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-
     block_size = BLOCK_SIZE_M
 
     device = topk_ids.device
@@ -57,7 +56,7 @@ def test_moe_sorting_naive(
         sorted_ids_begin = sorted_ids_begin + tokensNumPad
         sorted_expert_ids[
             sorted_expert_ids_begin : sorted_expert_ids_begin + sorted_expert_ids_num
-        ] = (expertId - skip_expert_num)
+        ] = expertId - skip_expert_num
         sorted_expert_ids_begin = sorted_expert_ids_begin + sorted_expert_ids_num
 
     num_tokens_post_pad[0] = sorted_ids_begin
@@ -96,24 +95,28 @@ def test_moe_sorting(
     )
 
     (
-        sorted_ids_a,
-        sorted_weights_a,
-        sorted_expert_ids_a,
-        num_tokens_post_padded_a,
-    ), avg_a = test_moe_sorting_naive(topk_ids, topk_weights, E, expert_mask)
+        (
+            sorted_ids_a,
+            sorted_weights_a,
+            sorted_expert_ids_a,
+            num_tokens_post_padded_a,
+        ),
+        avg_a,
+    ) = test_moe_sorting_naive(topk_ids, topk_weights, E, expert_mask)
 
     (
-        sorted_ids_b,
-        sorted_weights_b,
-        sorted_expert_ids_b,
-        num_tokens_post_padded_b,
-        moe_buf,
-    ), avg_b = test_moe_sorting_ck(
-        topk_ids, topk_weights, E, model_dim, dtype, expert_mask
-    )
+        (
+            sorted_ids_b,
+            sorted_weights_b,
+            sorted_expert_ids_b,
+            num_tokens_post_padded_b,
+            moe_buf,
+        ),
+        avg_b,
+    ) = test_moe_sorting_ck(topk_ids, topk_weights, E, model_dim, dtype, expert_mask)
 
     print(
-        f"[perf] {token=}, {model_dim=}, {inter_dim=}, {E=}, {topk=}, dtype: {dtype}, torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b-1:<5.1%}"
+        f"[perf] {token=}, {model_dim=}, {inter_dim=}, {E=}, {topk=}, dtype: {dtype}, torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, uplift: {avg_a / avg_b - 1:<5.1%}"
     )
     checkAllclose(
         num_tokens_post_padded_a,

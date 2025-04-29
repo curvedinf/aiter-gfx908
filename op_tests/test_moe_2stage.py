@@ -38,18 +38,22 @@ from aiter import ActivationType
 torch.int4 = getattr(torch, "int4", torch.uint32)
 torch.set_default_device("cuda")
 
-def ck_moe_stage1(hidden_states,
-                  w1,  # [E, inter_dim*2, model_dim]
-                  w2,  # [E, model_dim, inter_dim]
-                  sorted_token_ids,  # [max_num_tokens_padded]
-                  sorted_expert_ids,  # [max_num_m_blocks]
-                  num_valid_ids,  # [1]
-                  w1_scale, a1_scale, dtype,
-                  topk,
-                  block_size=32,
-                  Activation=ActivationType.Gelu,
-                  sorted_weights=None,  # [max_num_tokens_padded]
-                  ):
+
+def ck_moe_stage1(
+    hidden_states,
+    w1,  # [E, inter_dim*2, model_dim]
+    w2,  # [E, model_dim, inter_dim]
+    sorted_token_ids,  # [max_num_tokens_padded]
+    sorted_expert_ids,  # [max_num_m_blocks]
+    num_valid_ids,  # [1]
+    w1_scale,
+    a1_scale,
+    dtype,
+    topk,
+    block_size=32,
+    Activation=ActivationType.Gelu,
+    sorted_weights=None,  # [max_num_tokens_padded]
+):
     token_num = hidden_states.shape[0]
     D = w2.shape[-1]
     # max_num_tokens_padded = sorted_expert_ids.shape[0]*block_size
@@ -64,34 +68,38 @@ def ck_moe_stage1(hidden_states,
     out = torch.empty((token_num, topk, D), dtype=dtype)
 
     aiter.ck_moe_stage1(
-        hidden_states, 
-        w1, 
-        w2, 
-        sorted_token_ids,             
-        sorted_expert_ids, 
-        num_valid_ids, 
-        out, 
-        topk, 
+        hidden_states,
+        w1,
+        w2,
+        sorted_token_ids,
+        sorted_expert_ids,
+        num_valid_ids,
+        out,
+        topk,
         w1_scale,
-        a1_scale, 
-        block_size, 
-        sorted_weights, 
-        act_op
+        a1_scale,
+        block_size,
+        sorted_weights,
+        act_op,
     )
 
     return out
 
-def ck_moe_stage2(hidden_states,
-                  w1,  # [E, inter_dim*2, model_dim]
-                  w2,  # [E, model_dim, inter_dim]
-                  sorted_token_ids,  # [max_num_tokens_padded]
-                  sorted_expert_ids,  # [max_num_m_blocks]
-                  num_valid_ids,  # [1]
-                  w2_scale, a2_scale, dtype,
-                  topk,
-                  block_size=32,
-                  sorted_weights=None,  # [max_num_tokens_padded]
-                  ):
+
+def ck_moe_stage2(
+    hidden_states,
+    w1,  # [E, inter_dim*2, model_dim]
+    w2,  # [E, model_dim, inter_dim]
+    sorted_token_ids,  # [max_num_tokens_padded]
+    sorted_expert_ids,  # [max_num_m_blocks]
+    num_valid_ids,  # [1]
+    w2_scale,
+    a2_scale,
+    dtype,
+    topk,
+    block_size=32,
+    sorted_weights=None,  # [max_num_tokens_padded]
+):
     token_num = hidden_states.shape[0]
     D = w2.shape[1]
     # max_num_tokens_padded = sorted_expert_ids.shape[0]*block_size
@@ -116,6 +124,7 @@ def ck_moe_stage2(hidden_states,
         sorted_weights,
     )
     return out
+
 
 @benchmark()
 def test_fmoe(
@@ -147,10 +156,10 @@ def test_fmoe(
     M, _ = topk_ids.shape
 
     BLOCK_SIZE_M = get_block_size(M, topk, E)
-    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(
-        topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M
+    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
+        moe_sorting_ck(topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M)
     )
-    
+
     if qType == aiter.QuantType.per_Tensor:
         w1_qt, w1_scale = aiter.pertoken_quant(w1.view(E, -1), quant_dtype=WQDType)
         w2_qt, w2_scale = aiter.pertoken_quant(w2.view(E, -1), quant_dtype=WQDType)
@@ -185,8 +194,16 @@ def test_fmoe(
     )
 
     if WQDType == torch.int4:  # int4 w quant
-        w1_qt_aiter = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w1_qt_aiter, (16, 16), use_int4=True)))
-        w2_qt_aiter = rearrange_4bit_elements(convert_int8_to_uint32_int4(shuffle_weight(w2_qt_aiter, (16, 16), use_int4=True)))
+        w1_qt_aiter = rearrange_4bit_elements(
+            convert_int8_to_uint32_int4(
+                shuffle_weight(w1_qt_aiter, (16, 16), use_int4=True)
+            )
+        )
+        w2_qt_aiter = rearrange_4bit_elements(
+            convert_int8_to_uint32_int4(
+                shuffle_weight(w2_qt_aiter, (16, 16), use_int4=True)
+            )
+        )
     else:
         w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(16, 16))
         w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(16, 16))
@@ -213,7 +230,7 @@ def test_fmoe(
     checkAllclose(
         out1_ref,
         out1_ck,
-        msg=f"[perf]  ck_moe_stage1:{us:>8.2f} us, {token*model_dim*inter_dim*2*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
+        msg=f"[perf]  ck_moe_stage1:{us:>8.2f} us, {token * model_dim * inter_dim * 2 * topk * 2 / us / 1000 / 1000:>8.2f} tflops......(quant:{AQDType})",
     )
     # ######################## stage 2 end ###########
 
@@ -300,7 +317,7 @@ def test_fmoe(
     checkAllclose(
         out2_ref,
         out2_ck,
-        msg=f"[perf]  ck_moe_stage2:{us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
+        msg=f"[perf]  ck_moe_stage2:{us:>8.2f} us, {token * model_dim * inter_dim * topk * 2 / us / 1000 / 1000:>8.2f} tflops......(quant:{AQDType})",
     )
     # ######################## stage 2 end ###########
 
@@ -310,7 +327,8 @@ def test_fmoe(
         input,
         w1_qt_aiter,
         w2_qt_aiter,
-        topk_weights, topk_ids,
+        topk_weights,
+        topk_ids,
         quant_type=qType,
         fc1_scale=w1_scale,  # [expert(local_expert:EP), inter_dim, 1]
         fc2_scale=w2_scale,  # [expert(local_expert:EP), model_dim, 1]
@@ -321,7 +339,7 @@ def test_fmoe(
     checkAllclose(
         out2_ref,
         out2_ck,
-        msg=f"ck_moe_2stages:{us:>8.2f} us, {token*model_dim*inter_dim*3*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
+        msg=f"ck_moe_2stages:{us:>8.2f} us, {token * model_dim * inter_dim * 3 * topk * 2 / us / 1000 / 1000:>8.2f} tflops......(quant:{AQDType})",
     )
 
     out2_aiter, us_fuse = run_perftest(
@@ -375,13 +393,12 @@ expert, topk = 8, 2
 
 import pandas as pd
 
-for (
-    dtype,
-    act_type,
-    (quant_type, aq_dtype, wq_dtype),
-    (model_dim, inter_dim),
-    doweight_stage1
-) in itertools.product(list_dtype, list_act, list_quant, list_dim, list_doweight_stage1):
+for dtype, act_type, (quant_type, aq_dtype, wq_dtype), (
+    model_dim,
+    inter_dim,
+), doweight_stage1 in itertools.product(
+    list_dtype, list_act, list_quant, list_dim, list_doweight_stage1
+):
     df = []
     for m in list_tokenNum:
         ret = test_fmoe(

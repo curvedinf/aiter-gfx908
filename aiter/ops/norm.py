@@ -3,11 +3,16 @@
 
 from torch import Tensor
 from typing import List, Optional
-from ..jit.core import compile_ops, CK_DIR, AITER_CSRC_DIR, AITER_ROOT_DIR, AITER_CORE_DIR
+from ..jit.core import (
+    compile_ops,
+    CK_DIR,
+    AITER_CSRC_DIR,
+    AITER_ROOT_DIR,
+    AITER_CORE_DIR,
+)
 import torch.nn.functional as F
 
 MD_NAME = "module_norm"
-
 
 
 @compile_ops("module_norm", fc_name="layernorm2d_fwd")
@@ -82,6 +87,7 @@ def layernorm2d_fwd_with_add_smoothquant(
 #     bias: Tensor,
 #     epsilon: float,
 #     x_bias: Optional[Tensor] = None,):...
+
 
 # @compile_ops("module_norm")
 # def layernorm2d_fwd_with_add_dynamicquant(

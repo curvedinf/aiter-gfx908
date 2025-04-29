@@ -19,7 +19,9 @@ def perftest(
             if num < 1:
                 gpu_id = torch.cuda.current_device()
 
-                iter_used_memory, inputSize, _, _ = device_memory_profiling(func, *args, **kwargs)
+                iter_used_memory, inputSize, _, _ = device_memory_profiling(
+                    func, *args, **kwargs
+                )
 
                 properties = torch.cuda.get_device_properties(gpu_id)
                 free_memory = torch.cuda.mem_get_info(gpu_id)[0]
@@ -32,9 +34,9 @@ def perftest(
                 # print(f"{iter_used_memory=}, {inputSize=}, {cache_size=}, {free_memory=}, {num=}")
             num = min(num, num_iters)
 
-            rotate_args =[
-                (copy.deepcopy(args), copy.deepcopy(kwargs)) for _ in range(num-1)
-            ] +  [(args, kwargs)]
+            rotate_args = [
+                (copy.deepcopy(args), copy.deepcopy(kwargs)) for _ in range(num - 1)
+            ] + [(args, kwargs)]
 
             run_iters(num_warmup, func, *args, **kwargs)
             if int(os.environ.get("AITER_LOG_MORE", 0)):
@@ -103,7 +105,14 @@ def benchmark():
 def device_memory_profiling(func, *args, **kwargs):
     gpu_id = torch.cuda.current_device()
     inputSize = (
-        sum([el.nbytes for el in args if isinstance(el, torch.Tensor) and el.device.index == gpu_id]) + 1
+        sum(
+            [
+                el.nbytes
+                for el in args
+                if isinstance(el, torch.Tensor) and el.device.index == gpu_id
+            ]
+        )
+        + 1
     )
     torch.cuda.reset_peak_memory_stats(gpu_id)
     cuda_memory_before = (
@@ -160,7 +169,6 @@ def run_perftest(
     needTrace=False,
     **kwargs,
 ):
-
     @perftest(
         num_iters=num_iters,
         num_warmup=num_warmup,
@@ -189,7 +197,7 @@ def log_args(func, *args, **kwargs):
             viewNum = 5
             if len(el) > viewNum:
                 el = list(el[:viewNum]) + ["..."]
-            return f'\n{" "*(len(prefix)+31)}'.join(
+            return f"\n{' ' * (len(prefix) + 31)}".join(
                 ["("] + [f" {getTensorInfo(e)}" for e in el] + [")"]
             )
         return el

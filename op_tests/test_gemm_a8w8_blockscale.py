@@ -62,7 +62,7 @@ def test_gemm(dtype, m, n, k):
     a, avg_a = run_torch(x, weight, x_scale, w_scale, dtype)
     b, avg_b = run_gemm_ck(x, weight, x_scale, w_scale, dtype)
 
-    msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b -1:<5.1%}"
+    msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, uplift: {avg_a / avg_b - 1:<5.1%}"
     checkAllclose(a, b, msg="a,b: " + msg, rtol=1e-2, atol=0.01)
 
 
@@ -119,7 +119,7 @@ def test_gemm_asm(dtype, m, n, k):
     a, avg_a = run_torch2(x, weight, x_scale_trans, w_scale_trans, dtype)
     b, avg_b = run_asm(x, flat_weight, x_scale, w_scale, dtype)
 
-    msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, asm avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b -1:<5.1%}"
+    msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, asm avg: {avg_b:<8.2f} us, uplift: {avg_a / avg_b - 1:<5.1%}"
     checkAllclose(a, b, msg="a,b: " + msg, rtol=1e-2, atol=0.01)
 
 

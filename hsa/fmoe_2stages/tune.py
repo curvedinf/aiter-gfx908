@@ -92,7 +92,7 @@ def go(
         "q_dtype_w",
         "q_type",
         "use_g1u1",
-        "doweight_stage1"
+        "doweight_stage1",
     ]
     print(untunedf[args])
     prorfiles = []
@@ -110,7 +110,7 @@ def go(
             q_dtype_w,
             q_type,
             use_g1u1,
-            doweight_stage1
+            doweight_stage1,
         ) = line
         dtype = eval(dtype)
         q_dtype_a = eval(q_dtype_a)
@@ -155,7 +155,7 @@ def go(
             dtype=dtype,
             a1_scale=a1_scale,
             w1_scale=w1_scale,
-            doweight=doweight_stage1
+            doweight=doweight_stage1,
         )
         if q_type == QuantType.per_128x128:
             ref, ref_scale = aiter.pertoken_quant(
@@ -288,7 +288,9 @@ def go(
                 )
                 _ = _[:token, :, :].to(torch.float32)
             err = checkAllclose(
-                ref.to("cpu"), _.to(ref.dtype), msg=f"[{tag:<50}]: {us:.2f}us ......      "
+                ref.to("cpu"),
+                _.to(ref.dtype),
+                msg=f"[{tag:<50}]: {us:.2f}us ......      ",
             )
             profileDF.append(
                 [
@@ -317,7 +319,7 @@ def go(
         best_one = profileDF.loc[profileDF["us"].idxmin()]
         prorfiles.append(profileDF)
         bests.append(best_one)
-    print(f"finish tuning, cost {time.perf_counter()-startTS:.8f}s")
+    print(f"finish tuning, cost {time.perf_counter() - startTS:.8f}s")
     if len(prorfiles) > 0:
         return pd.concat(prorfiles), pd.concat(bests, axis=1).T
     else:
@@ -374,7 +376,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     untunedf = pd.read_csv(args.untune_file)
     untunedf = untunedf.drop_duplicates(keep="last")
-    
+
     if not args.all or args.last:
         if os.path.exists(args.tune_file):
             old_tunedf = pd.read_csv(args.tune_file)
@@ -391,15 +393,30 @@ if __name__ == "__main__":
             old_tunedf[untunedf_cols].apply(tuple, axis=1)
         )
         untunedf = untunedf[~mask]
-    
+
     tunedf = None
     # tunedf = pd.read_csv(args.tune_file)
     profiles, tunedf = go(untunedf, tunedf)
     if old_tunedf is not None and tunedf is not None:
         tunedf = pd.concat([old_tunedf, tunedf], axis=0)
     if tunedf is not None:
-        tunedf = tunedf.astype(str).drop_duplicates(subset=["token","model_dim","inter_dim","expert","topk","act_type","dtype",
-                                                "q_dtype_a","q_dtype_w","q_type","use_g1u1","doweight_stage1"], keep="last")
+        tunedf = tunedf.astype(str).drop_duplicates(
+            subset=[
+                "token",
+                "model_dim",
+                "inter_dim",
+                "expert",
+                "topk",
+                "act_type",
+                "dtype",
+                "q_dtype_a",
+                "q_dtype_w",
+                "q_type",
+                "use_g1u1",
+                "doweight_stage1",
+            ],
+            keep="last",
+        )
         tunedf.to_csv(args.tune_file, index=False)
     if profiles is not None:
         profiles.to_csv(args.profile_file, index=False)

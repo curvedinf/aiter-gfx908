@@ -120,9 +120,9 @@ def mla_decode_fwd(
             dtype=torch.float,
             device=device,
         )
-        assert (
-            max_seqlen_q == 1
-        ), f"Assertion: max_seqlen_q should be 1 when n_head=16, but got {max_seqlen_q}"
+        assert max_seqlen_q == 1, (
+            f"Assertion: max_seqlen_q should be 1 when n_head=16, but got {max_seqlen_q}"
+        )
     elif nhead == 128:
         logits = (
             o.view((total_s, num_kv_splits, nhead, v_head_dim))

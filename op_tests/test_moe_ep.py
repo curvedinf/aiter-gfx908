@@ -61,7 +61,6 @@ def asm_moe_test(
     a16=False,
     expert_mask=None,
 ):
-
     return asm_moe(
         hidden_states,
         w1,
@@ -154,7 +153,9 @@ def test_fmoe_ep(
     if use_g1u1:
         w1 = (
             torch.randn(
-                (E // ep + shared_E, inter_dim * 2, model_dim), dtype=dtype, device="cuda"
+                (E // ep + shared_E, inter_dim * 2, model_dim),
+                dtype=dtype,
+                device="cuda",
             )
             / 10
         )
@@ -166,7 +167,9 @@ def test_fmoe_ep(
             / 10
         )
     w2 = (
-        torch.randn((E // ep + shared_E, model_dim, inter_dim), dtype=dtype, device="cuda")
+        torch.randn(
+            (E // ep + shared_E, model_dim, inter_dim), dtype=dtype, device="cuda"
+        )
         / 10
     )
     score = torch.randn((token, E), device="cuda", dtype=dtype)
@@ -228,7 +231,7 @@ def test_fmoe_ep(
             input, w1b, w2b, topk_weights, topk_ids, None, None, None, None, expert_mask
         )
 
-        msg = f"[perf] {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {shared_E=}, {topk=}, {ep=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:>8.2f} us, ck_avg: {avg_ck:>8.2f} us, uplift: {avg_c/avg_b-1:.1%}"
+        msg = f"[perf] {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {shared_E=}, {topk=}, {ep=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:>8.2f} us, ck_avg: {avg_ck:>8.2f} us, uplift: {avg_c / avg_b - 1:.1%}"
         checkAllclose(ref2, out_b, rtol=0.01, atol=10, msg=msg)
         checkAllclose(ref2, out_ck, rtol=0.01, atol=10, msg="ck check")
 
@@ -339,7 +342,7 @@ def test_fmoe_ep(
         #                              fc1_scale, fc2_scale,
         #                              fc1_smooth_scale, fc2_smooth_scale)
 
-        msg = f"[perf] {use_g1u1=} {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {shared_E=}, {topk=}, {ep=}, {topk=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:>8.2f} us ...... uplift: {avg_c/avg_b-1:.1%}"
+        msg = f"[perf] {use_g1u1=} {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {shared_E=}, {topk=}, {ep=}, {topk=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:>8.2f} us ...... uplift: {avg_c / avg_b - 1:.1%}"
         checkAllclose(ref2, out_b, rtol=0.01, atol=10, msg=msg)
         # checkAllclose(ref2, avg_ck, rtol=0.01, atol=10)
 

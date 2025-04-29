@@ -27,7 +27,7 @@ def reshape_and_cache(
     kv_cache_dtype: str,
     k_scale: float,
     v_scale: float,
-    asm_layout: bool
+    asm_layout: bool,
 ): ...
 
 
@@ -43,6 +43,7 @@ def reshape_and_cache_flash(
     v_scale: float,
 ): ...
 
+
 @compile_ops("module_cache")
 def reshape_and_cache_with_pertoken_quant(
     key: Tensor,
@@ -52,8 +53,9 @@ def reshape_and_cache_with_pertoken_quant(
     k_dequant_scales: Tensor,
     v_dequant_scales: Tensor,
     slot_mapping: Tensor,
-    asm_layout: bool
+    asm_layout: bool,
 ): ...
+
 
 @compile_ops("module_cache")
 def reshape_and_cache_with_block_quant(
@@ -64,7 +66,7 @@ def reshape_and_cache_with_block_quant(
     k_dequant_scales: Tensor,
     v_dequant_scales: Tensor,
     slot_mapping: Tensor,
-    asm_layout: bool
+    asm_layout: bool,
 ): ...
 
 

@@ -13,7 +13,8 @@ from aiter.test_mha_common import (
     convert_flash_attn_S_to_softmax,
     generate_qkv,
     generate_random_padding_mask,
-    pad_rearrange_dropout_mask_hts_to_bhss)
+    pad_rearrange_dropout_mask_hts_to_bhss,
+)
 import pytest
 
 
@@ -31,7 +32,7 @@ def run_torch(
     causal=False,
     window_size=(-1, -1),  # -1 means infinite context window
     upcast=True,
-    reorder_ops=False
+    reorder_ops=False,
 ):
     (b, seqlen_q, _, _) = q.shape
     (_, seqlen_k, _, _) = k.shape
@@ -40,25 +41,30 @@ def run_torch(
         attn_bias = bias.reshape(b, 1, seqlen_q, seqlen_k)
     elif alibi_slopes is not None:
         attn_bias = attn_bias_from_alibi_slopes(
-            alibi_slopes, seqlen_q, seqlen_k, query_padding_mask, key_padding_mask, causal=causal
-            )
+            alibi_slopes,
+            seqlen_q,
+            seqlen_k,
+            query_padding_mask,
+            key_padding_mask,
+            causal=causal,
+        )
     else:
         attn_bias = None
 
     out, _ = attention_ref(
-            q,
-            k,
-            v,
-            query_padding_mask,
-            key_padding_mask,
-            attn_bias,
-            dropout_p,
-            dropout_mask,
-            causal=causal,
-            window_size=window_size,
-            upcast=upcast,
-            reorder_ops=reorder_ops,
-        )
+        q,
+        k,
+        v,
+        query_padding_mask,
+        key_padding_mask,
+        attn_bias,
+        dropout_p,
+        dropout_mask,
+        causal=causal,
+        window_size=window_size,
+        upcast=upcast,
+        reorder_ops=reorder_ops,
+    )
 
     if dout == None:
         return out
@@ -81,7 +87,7 @@ def run_ck(
     window_size=(-1, -1),  # -1 means infinite context window
     deterministic=False,
     return_lse=False,
-    return_attn_probs=False
+    return_attn_probs=False,
 ):
     (
         q_unpad,
@@ -101,9 +107,9 @@ def run_ck(
     if bias is not None:
         # TODO - implement generate_bias() to unpad
         total_q = q_unpad.shape[0]
-        assert (total_q == batch_size * max_seqlen_q)
-        assert (q.shape[1] == max_seqlen_q)
-        assert (k.shape[1] == max_seqlen_k)
+        assert total_q == batch_size * max_seqlen_q
+        assert q.shape[1] == max_seqlen_q
+        assert k.shape[1] == max_seqlen_k
         bias_unpad = bias.reshape(batch_size * max_seqlen_q, max_seqlen_k)
     else:
         bias_unpad = None
@@ -131,7 +137,9 @@ def run_ck(
         (_, seqlen_q, _, d) = q.shape
         (_, seqlen_k, _, d) = k.shape
         S_dmask = ck_randval_to_dropout_mask(S_dmask, dropout_p)
-        S_dmask = pad_rearrange_dropout_mask_hts_to_bhss(S_dmask, cu_seqlens_q, seqlen_q, seqlen_k)
+        S_dmask = pad_rearrange_dropout_mask_hts_to_bhss(
+            S_dmask, cu_seqlens_q, seqlen_q, seqlen_k
+        )
         S_dmask_converted = convert_flash_attn_S_to_softmax(
             S_dmask,
             seqlen_q,
@@ -150,7 +158,9 @@ def run_ck(
     if dout == None:
         return out, dropout_mask
     else:
-        dq_unpad, dk_unpad, dv_unpad = torch.autograd.grad(out, (q_unpad, k_unpad, v_unpad), dout)
+        dq_unpad, dk_unpad, dv_unpad = torch.autograd.grad(
+            out, (q_unpad, k_unpad, v_unpad), dout
+        )
         dq = dq_pad_fn(dq_unpad)
         dk = dk_pad_fn(dk_unpad)
         dv = dk_pad_fn(dv_unpad)
@@ -211,7 +221,7 @@ def test_flash_attn_varlen_func(
     bias_type,
     deterministic,
     mha_type,
-    dtype
+    dtype,
 ):
     torch.random.manual_seed(0)
     nheads_k = nheads if mha_type == "mha" else (1 if mha_type == "mqa" else 3)
@@ -221,39 +231,118 @@ def test_flash_attn_varlen_func(
     return_lse = True
     return_attn_probs = True
 
-    q = torch.randn(batch_size, seqlen_q, nheads, d, device="cuda", dtype=dtype, requires_grad=True)
-    k = torch.randn(batch_size, seqlen_k, nheads_k, d, device="cuda", dtype=dtype, requires_grad=True)
-    v = torch.randn(batch_size, seqlen_k, nheads_k, d_v, device="cuda", dtype=dtype, requires_grad=True)
-    if bias_type == 'bias':
+    q = torch.randn(
+        batch_size, seqlen_q, nheads, d, device="cuda", dtype=dtype, requires_grad=True
+    )
+    k = torch.randn(
+        batch_size,
+        seqlen_k,
+        nheads_k,
+        d,
+        device="cuda",
+        dtype=dtype,
+        requires_grad=True,
+    )
+    v = torch.randn(
+        batch_size,
+        seqlen_k,
+        nheads_k,
+        d_v,
+        device="cuda",
+        dtype=dtype,
+        requires_grad=True,
+    )
+    if bias_type == "bias":
         # TODO - We need to implement unpad bias [batch_size, seqlen_q, seqlen_k] -> [total_q, max_seqlen_k]
         # Let total_q = batch_size * seqlen_q to pass the test for now
-        query_padding_mask = generate_random_padding_mask(seqlen_q, batch_size, "cuda", mode="full")
-        key_padding_mask = generate_random_padding_mask(seqlen_k, batch_size, "cuda", mode="full")
+        query_padding_mask = generate_random_padding_mask(
+            seqlen_q, batch_size, "cuda", mode="full"
+        )
+        key_padding_mask = generate_random_padding_mask(
+            seqlen_k, batch_size, "cuda", mode="full"
+        )
     else:
-        query_padding_mask = generate_random_padding_mask(seqlen_q, batch_size, "cuda", mode="random")
-        key_padding_mask = generate_random_padding_mask(seqlen_k, batch_size, "cuda", mode="random")
+        query_padding_mask = generate_random_padding_mask(
+            seqlen_q, batch_size, "cuda", mode="random"
+        )
+        key_padding_mask = generate_random_padding_mask(
+            seqlen_k, batch_size, "cuda", mode="random"
+        )
 
     attn_bias = None
     alibi_slopes = None
-    if bias_type == 'bias':
-        attn_bias = torch.randn(batch_size, seqlen_q, seqlen_k, device="cuda", dtype=dtype, requires_grad=True)
-    elif bias_type == 'alibi':
-        alibi_slopes = torch.rand(batch_size, nheads, device="cuda", dtype=torch.float32)
+    if bias_type == "bias":
+        attn_bias = torch.randn(
+            batch_size,
+            seqlen_q,
+            seqlen_k,
+            device="cuda",
+            dtype=dtype,
+            requires_grad=True,
+        )
+    elif bias_type == "alibi":
+        alibi_slopes = torch.rand(
+            batch_size, nheads, device="cuda", dtype=torch.float32
+        )
 
-    dout = torch.randn(batch_size, seqlen_q, nheads, d_v, device="cuda", dtype=dtype, requires_grad=True)
+    dout = torch.randn(
+        batch_size,
+        seqlen_q,
+        nheads,
+        d_v,
+        device="cuda",
+        dtype=dtype,
+        requires_grad=True,
+    )
 
     out, dropout_mask, dq, dk, dv = run_ck(
-        q, k, v, query_padding_mask, key_padding_mask, attn_bias, alibi_slopes,
-        dout, dropout_p, causal, window_size, deterministic, return_lse, return_attn_probs)
+        q,
+        k,
+        v,
+        query_padding_mask,
+        key_padding_mask,
+        attn_bias,
+        alibi_slopes,
+        dout,
+        dropout_p,
+        causal,
+        window_size,
+        deterministic,
+        return_lse,
+        return_attn_probs,
+    )
 
-    out_ref, dq_ref, dk_ref, dv_ref  = run_torch(
-        q, k, v, query_padding_mask, key_padding_mask, attn_bias, alibi_slopes,
-        dout, dropout_p, dropout_mask, causal, window_size)
+    out_ref, dq_ref, dk_ref, dv_ref = run_torch(
+        q,
+        k,
+        v,
+        query_padding_mask,
+        key_padding_mask,
+        attn_bias,
+        alibi_slopes,
+        dout,
+        dropout_p,
+        dropout_mask,
+        causal,
+        window_size,
+    )
 
-    out_pt, dq_pt, dk_pt, dv_pt  = run_torch(
-        q, k, v, query_padding_mask, key_padding_mask, attn_bias, alibi_slopes,
-        dout, dropout_p, dropout_mask, causal, window_size,
-        upcast=False, reorder_ops=True)
+    out_pt, dq_pt, dk_pt, dv_pt = run_torch(
+        q,
+        k,
+        v,
+        query_padding_mask,
+        key_padding_mask,
+        attn_bias,
+        alibi_slopes,
+        dout,
+        dropout_p,
+        dropout_mask,
+        causal,
+        window_size,
+        upcast=False,
+        reorder_ops=True,
+    )
 
     print(f"Output max diff: {(out - out_ref).abs().max().item()}")
     print(f"Output Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
@@ -261,8 +350,8 @@ def test_flash_attn_varlen_func(
     assert (out - out_ref).abs().max().item() <= out_tol
 
     # TODO: Support varlen bwd for bias
-    if bias_type == 'bias':
-        pytest.skip('Does not support varlen bwd for bias')
+    if bias_type == "bias":
+        pytest.skip("Does not support varlen bwd for bias")
 
     print(f"dQ max diff: {(dq - dq_ref).abs().max().item()}")
     print(f"dK max diff: {(dk - dk_ref).abs().max().item()}")
@@ -280,7 +369,7 @@ def test_flash_attn_varlen_func(
     assert (dv - dv_ref).abs().max().item() <= dv_tol
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     batch_size = 4
     nheads = 4
     (seqlen_q, seqlen_k) = (4, 4)
@@ -289,9 +378,9 @@ if __name__ == '__main__':
     dropout_p = 0.5
     causal = False
     local = False
-    bias_type = 'no'
+    bias_type = "no"
     deterministic = True
-    mha_type = 'mha'
+    mha_type = "mha"
     dtype = torch.bfloat16
 
     test_flash_attn_varlen_func(
@@ -307,5 +396,5 @@ if __name__ == '__main__':
         bias_type,
         deterministic,
         mha_type,
-        dtype
+        dtype,
     )

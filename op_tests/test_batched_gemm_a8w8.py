@@ -25,6 +25,7 @@ def run_torch(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16):
         out[b, :, :] = b_out
     return out.to(dtype)
 
+
 @perftest()
 def run_gemm_ck(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16):
     return aiter.batched_gemm_a8w8_CK(x, weight, x_scale, w_scale, bias)
@@ -39,13 +40,13 @@ def test_gemm(dtype, b, m, n, k):
 
     a, avg_a = run_torch(x, weight, x_scale, w_scale, None, dtype)
     b, avg_b = run_gemm_ck(x, weight, x_scale, w_scale, None, dtype)
-    msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b-1:<5.1%}"
-    checkAllclose(a, b, msg="a,b: "+msg, rtol=1e-2, atol=0.01)
+    msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, uplift: {avg_a / avg_b - 1:<5.1%}"
+    checkAllclose(a, b, msg="a,b: " + msg, rtol=1e-2, atol=0.01)
 
 
 for dtype in [torch.bfloat16]:
     # qkv_proj
-    for (b, m, n, k) in [
+    for b, m, n, k in [
         (16, 1, 1280, 8192),
         (16, 32, 1280, 8192),
         (16, 64, 1280, 8192),
@@ -61,7 +62,7 @@ for dtype in [torch.bfloat16]:
     ]:
         test_gemm(dtype, b, m, n, k)
     # attn_out
-    for (b, m, n, k) in [
+    for b, m, n, k in [
         (16, 1, 8192, 1024),
         (16, 32, 8192, 1024),
         (16, 64, 8192, 1024),

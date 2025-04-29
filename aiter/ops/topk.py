@@ -5,7 +5,13 @@
 
 import torch
 from torch import Tensor
-from ..jit.core import compile_ops, CK_DIR, AITER_CSRC_DIR, AITER_ROOT_DIR, AITER_CORE_DIR
+from ..jit.core import (
+    compile_ops,
+    CK_DIR,
+    AITER_CSRC_DIR,
+    AITER_ROOT_DIR,
+    AITER_CORE_DIR,
+)
 
 
 @compile_ops("module_moe_asm")
@@ -17,8 +23,9 @@ def biased_grouped_topk(
     num_expert_group: int,
     topk_group: int,
     need_renorm: bool,
-    routed_scaling_factor: float=1.0  # mul to topk_weights
+    routed_scaling_factor: float = 1.0,  # mul to topk_weights
 ): ...
+
 
 @compile_ops("module_moe_asm")
 def grouped_topk(
@@ -28,9 +35,10 @@ def grouped_topk(
     num_expert_group: int,
     topk_group: int,
     need_renorm: bool,
-    scoring_func: str="softmax",
-    scale_factor: float=1.0,
+    scoring_func: str = "softmax",
+    scale_factor: float = 1.0,
 ): ...
+
 
 # this one copied from sglang
 def biased_grouped_topk_torch(
@@ -44,8 +52,7 @@ def biased_grouped_topk_torch(
     scores = gating_output.to(torch.float).sigmoid()
     num_token = scores.shape[0]
 
-    scores_for_choice = scores.view(
-        num_token, -1) + correction_bias.unsqueeze(0)
+    scores_for_choice = scores.view(num_token, -1) + correction_bias.unsqueeze(0)
 
     group_scores = (
         scores_for_choice.view(num_token, num_expert_group, -1)
@@ -63,8 +70,7 @@ def biased_grouped_topk_torch(
         .expand(num_token, num_expert_group, scores.shape[-1] // num_expert_group)
         .reshape(num_token, -1)
     )  # [n, e]
-    tmp_scores = scores_for_choice.masked_fill(
-        ~score_mask.bool(), 0.0)  # [n, e]
+    tmp_scores = scores_for_choice.masked_fill(~score_mask.bool(), 0.0)  # [n, e]
 
     _, topk_ids = torch.topk(tmp_scores, k=topk, dim=-1, sorted=False)
     topk_weights = scores.gather(1, topk_ids)

@@ -187,7 +187,7 @@ def moe_stage1_g1u1(
     a1_scale: Optional[Tensor] = None,
     w1_scale: Optional[Tensor] = None,
     doweight_stage1: bool = False,
-    sorted_weights: Optional[Tensor] = None # do sorted weight multiply in stage1
+    sorted_weights: Optional[Tensor] = None,  # do sorted weight multiply in stage1
 ): ...
 
 

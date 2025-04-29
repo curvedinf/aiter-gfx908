@@ -229,7 +229,6 @@ def layer_norm(
     eps: float = 1e-5,
     x_bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-
     out = torch.empty_like(input)
     M, N = input.shape
 
@@ -254,7 +253,6 @@ def layernorm2d_fwd_with_add(
     epsilon: float,
     x_bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-
     M, N = input.shape
 
     # Less than 64KB per feature: enqueue fused kernel

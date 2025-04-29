@@ -331,9 +331,9 @@ def _decode_grouped_att_m_fwd_rope(
     """
 
     if use_rope:
-        assert (
-            k_pe_tokens_out is not None
-        ), "We must output the k_pe tokens with rope applied if rope fusion enabled."
+        assert k_pe_tokens_out is not None, (
+            "We must output the k_pe tokens with rope applied if rope fusion enabled."
+        )
 
     BLOCK = 32
 

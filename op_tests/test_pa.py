@@ -73,7 +73,6 @@ def kv_cache_factory(
     seed: int = 0,
     device: Optional[str] = "cuda",
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
-
     if cache_dtype == "fp8" and head_size % 16:
         raise ValueError(
             f"Does not support key cache of type fp8 with head_size {head_size}"

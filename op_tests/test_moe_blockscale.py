@@ -132,7 +132,6 @@ def asm_moe_test(
     a1_scale=None,
     scale_blk=(128, 128),
 ):
-
     model_dim = hidden_states.shape[-1]
     topk = topk_ids.shape[-1]
     E = w1.shape[0]

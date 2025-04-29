@@ -9,30 +9,29 @@ import torch.nn.functional as F
 MD_NAME = "module_rmsnorm"
 
 
-
 @compile_ops("module_rmsnorm")
 def rms_norm_cu(
     out: Tensor,
     input: Tensor,
     weight: Tensor,
     epsilon: float,
-): 
-    '''
+):
+    """
     Cuda version of rmsnorm
-    '''
+    """
     ...
 
 
 @compile_ops("module_rmsnorm")
 def fused_add_rms_norm_cu(
-    input: Tensor,        # input/out 
-    residual_in: Tensor,  # residual_in/out 
+    input: Tensor,  # input/out
+    residual_in: Tensor,  # residual_in/out
     weight: Tensor,
     epsilon: float,
-): 
-    '''
+):
+    """
     Cuda version of rmsnorm fused add
-    '''
+    """
     ...
 
 
@@ -41,11 +40,12 @@ def rms_norm(
     input: Tensor,
     weight: Tensor,
     epsilon: float,
-): 
-    '''
+):
+    """
     CK version of rmsnorm
-    '''
+    """
     ...
+
 
 @compile_ops("module_rmsnorm")
 def rmsnorm2d_fwd(

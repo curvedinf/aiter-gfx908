@@ -58,7 +58,6 @@ name_to_torch_types = {
 
 
 def get_x_vals():
-
     x_vals = [(1024 * v, 1024 * v, 1024 * v) for v in range(1, 9)]
     x_vals += [(4864, 4096, 8192), (9728, 8192, 65536)]
     x_vals += [
@@ -119,8 +118,9 @@ def test_gemm(dtype, M, N, K):
         pytest.skip("Skip N/K sizes not aligned to SCALE_BLOCK_SIZE")
 
     dtype = name_to_torch_types[dtype]
-    x, weight, x_scale, w_scale = generate_gemm_a8w8_blockscale_inputs(M, N, K, block_shape_n,
-            block_shape_k)
+    x, weight, x_scale, w_scale = generate_gemm_a8w8_blockscale_inputs(
+        M, N, K, block_shape_n, block_shape_k
+    )
 
     a = run_torch(x, weight, x_scale, w_scale, dtype)
     b = run_triton(x, weight, x_scale, w_scale, dtype)

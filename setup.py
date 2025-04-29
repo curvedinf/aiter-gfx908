@@ -40,9 +40,9 @@ else:
 FORCE_CXX11_ABI = False
 
 if IS_ROCM:
-    assert os.path.exists(
-        ck_dir
-    ), f'CK is needed by aiter, please make sure clone by "git clone --recursive https://github.com/ROCm/aiter.git" or "git submodule sync ; git submodule update --init --recursive"'
+    assert os.path.exists(ck_dir), (
+        f'CK is needed by aiter, please make sure clone by "git clone --recursive https://github.com/ROCm/aiter.git" or "git submodule sync ; git submodule update --init --recursive"'
+    )
 
     if int(os.environ.get("PREBUILD_KERNELS", 0)) == 1:
         exclude_ops = ["libmha_fwd", "libmha_bwd"]

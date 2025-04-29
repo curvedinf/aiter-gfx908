@@ -260,11 +260,7 @@ def test_fmoe(
         out2_ck_tune,
         msg=f"asm_stage1+ck_stage2: {us_moe_sort+us_aq1+us_asm_stage1+us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
     )
-    print("asm_stage1+ck_stage2:",us_moe_sort+us_aq1+us_asm_stage1+us," us")
-    print(" us_moe_sort:",us_moe_sort," us")
-    print(" us_aq1: ",us_aq1," us")
-    print(" us_asm_stage1: ",us_asm_stage1," us")
-    print(" us_ck_stage2: ",us," us")
+
     ######################## stage 2 end ###########
     
 
@@ -288,24 +284,88 @@ def test_fmoe(
         out2_aiter,
         msg=f"asm one stages: {us_fuse:>8.2f} us......",
     )
+    print("asm_stage1+ck_stage2:",us_moe_sort+us_aq1+us_asm_stage1+us," us")
+    print(" us_moe_sort:",us_moe_sort," us")
+    print(" us_aq1: ",us_aq1," us")
+    print(" us_asm_stage1: ",us_asm_stage1," us")
+    print(" us_ck_stage2: ",us," us")
     return {"us": us, "err": err}
 
-for dtype in [torch.bfloat16]:
-    for m in [128]:
-        for dim in [7168]:
-            for inter_dim in [2048]:
-                expert, topk = 8, 2
-                test_fmoe(
-                    dtype,
-                    m,
-                    dim,
-                    inter_dim,
-                    expert,
-                    topk,
-                    aiter.ActivationType.Silu,
-                    aiter.QuantType.per_128x128,
-                    torch.float8_e4m3fnuz,
-                    torch.float8_e4m3fnuz,
-                    use_g1u1=True,
-                    doweight_stage1 = False,
-                )
+
+
+
+
+
+list_dtype = [torch.bfloat16]
+list_dim = [(7168, 2048)]
+list_tokenNum = [
+    1,
+    3,
+    5,
+    16,
+    32,
+    64,
+    128,
+    256,
+    1024,
+    4096,
+    163840,
+]
+list_quant = [
+    (aiter.QuantType.per_128x128, torch.float8_e4m3fnuz,torch.float8_e4m3fnuz),  
+]
+list_act = [aiter.ActivationType.Silu]
+list_doweight_stage1 = [False]
+expert, topk = 8, 2
+
+import pandas as pd
+
+for (
+    dtype,
+    act_type,
+    (quant_type, aq_dtype, wq_dtype),
+    (model_dim, inter_dim),
+    doweight_stage1
+) in itertools.product(list_dtype, list_act, list_quant, list_dim, list_doweight_stage1):
+    df = []
+    for m in list_tokenNum:
+        ret = test_fmoe(
+            dtype,
+            m,
+            model_dim,
+            inter_dim,
+            expert,
+            topk,
+            act_type,
+            quant_type,
+            aq_dtype,
+            wq_dtype,
+            use_g1u1=True,
+            doweight_stage1=doweight_stage1,
+        )
+        df.append(ret)
+    df = pd.DataFrame(df)
+    aiter.logger.info(f"summary:\n{df}")
+
+
+
+# for dtype in [torch.bfloat16]:
+#     #for m in [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 1536, 2048, 3072, 4096]:
+#     for m in [256, 512, 1024, 1536, 2048, 3072, 4096]:
+#         for dim in [7168]:
+#             for inter_dim in [2048]:
+#                 expert, topk = 8, 2
+#                 test_fmoe(
+#                     dtype,
+#                     m,
+#                     dim,
+#                     inter_dim,
+#                     expert,
+#                     topk,
+#                     aiter.ActivationType.Silu,
+#                     aiter.QuantType.per_128x128,
+#                     torch.float8_e4m3fnuz,
+#                     torch.float8_e4m3fnuz,
+#                     use_g1u1=True,
+#                     doweight_stage1 = False,
+#                 )

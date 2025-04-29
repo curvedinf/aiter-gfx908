@@ -9,4 +9,4 @@ using EDataType = B16;
 using CDEElementOp = MulABScaleExpertWeight;
 const bool Nswizzle = false;
 const bool PerTensorQuant = false;
-CK_MOE_STAGE2_GEMM_BLOCKSCALE_DEFINE(256, 128, 128, 128/sizeof(A0DataType), 2, 2, 16)
+CK_MOE_STAGE2_GEMM_BLOCKSCALE_DEFINE(256, 128, 128, 128/sizeof(A0DataType), 1, 4, 16)

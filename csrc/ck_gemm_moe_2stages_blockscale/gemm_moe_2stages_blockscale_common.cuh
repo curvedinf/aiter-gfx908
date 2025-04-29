@@ -191,19 +191,31 @@ void moe_stage2_gemm_blockscale(const hipStream_t &stream, int tokens, int sorte
     static constexpr ck::index_t Scale_Block_K = 128;
     constexpr ck::index_t NumDTensor = DsDataType::Size();
     constexpr auto StrideDs          = std::array<ck::index_t, NumDTensor>{0};
-    //static constexpr ck::index_t MPerBlock = 128; 
+    static constexpr ck::index_t MXDLPerWave = MPerBlock / (MNPerXDL * MWaves);
+    static constexpr ck::index_t NXDLPerWave = NPerBlock / (MNPerXDL * NWaves);
+    static constexpr ck::index_t CShuffleMXDLPerWave = ck::is_same_v<B0DataType, I4> ? 1 : 2;
+    static constexpr ck::index_t CShuffleNXDLPerWave = ck::is_same_v<B0DataType, I4> ? 1 : 2;
+    static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);
+    static constexpr ck::index_t BK1 = ck::is_same_v<B0DataType, I4> ? 32 : 16 / sizeof(B0DataType);
+    static constexpr ck::index_t EVec = 16 / sizeof(EDataType);
+    static constexpr ck::index_t K0_A = KPerBlock / AK1;
+    static constexpr ck::index_t K0_B = KPerBlock / BK1;
+    static constexpr ck::index_t K0_M_A = BLOCKSIZE / K0_A;
+    static constexpr ck::index_t K0_N_B = BLOCKSIZE / K0_B;
+    static constexpr ck::index_t D0Vec = 1;
+    static constexpr ck::index_t D1Vec = PerTensorQuant ? 1 : EVec;
     using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemmBlockScale<
                    Row, Col, DsLayout, ELayout,
                    A0DataType, A1DataType, B0DataType, B1DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
                    AElementOp,  BElementOp, CDEElementOp,   GemmSpec,   
                    256,  Scale_Block_M, Scale_Block_N, Scale_Block_K,
                    MPerBlock,   128,    128,
-                   16,   16,
-                   32,   32,
-                   4,    1,
-                   S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
-                   S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
-                   1,    1,   S<1, 32, 1, 8>, S<2, 1, 1, 1>,
+                   AK1,   BK1,
+                   MNPerXDL,   MNPerXDL,
+                   MXDLPerWave,    NXDLPerWave,
+                   S<K0_A, K0_M_A, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, AK1, AK1, 0,
+                   S<K0_B, K0_N_B, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, BK1, BK1, 0,
+                   CShuffleMXDLPerWave,    CShuffleNXDLPerWave,   S<1, 32, 1, 8>, S<EVec, D0Vec, D1Vec>,
                    ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, false, false, A0DataType>;
 
 

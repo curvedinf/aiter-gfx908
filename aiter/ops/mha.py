@@ -753,6 +753,7 @@ def _flash_attn_varlen_forward(
     return_lse: bool = False,
     return_softmax: bool = False,
     block_table: Optional[torch.Tensor] = None,
+    out: Optional[torch.Tensor] = None,
     zero_tensors: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     # causal=true is the same as causal=false in this case
@@ -861,7 +862,7 @@ def _flash_attn_varlen_forward(
         window_size_right,
         return_lse,
         return_softmax,
-        None,
+        out,
         block_table,
         bias,
         alibi_slopes,
@@ -1079,6 +1080,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         return_lse,
         return_softmax,
         block_table,
+        out,
         is_grad_enabled,
 
         is_v3_atomic_fp32: Optional[bool] = True,
@@ -1115,6 +1117,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             return_lse=return_lse,
             return_softmax=return_softmax and dropout_p > 0,
             block_table=block_table,
+            out=out,
         )
         if is_grad:
             ctx.save_for_backward(
@@ -1183,7 +1186,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         dq = dq[..., : head_size_q_og]  # We could have padded the head dimension
         dk = dk[..., : head_size_q_og]
         dv = dv[..., : head_size_v_og]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, dbias, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, dbias, None, None, None, None, None, None, None
 
 
 def flash_attn_varlen_func(
@@ -1205,6 +1208,7 @@ def flash_attn_varlen_func(
     return_lse=False,
     return_attn_probs=False,
     block_table=None,
+    out=None
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in K, V with fewer heads
@@ -1280,5 +1284,6 @@ def flash_attn_varlen_func(
         return_lse,
         return_attn_probs,
         block_table,
+        out,
         torch.is_grad_enabled(),
     )

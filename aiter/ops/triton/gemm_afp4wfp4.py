@@ -86,9 +86,11 @@ def _gemm_afp4_wfp4_kernel(
 
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
-    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K // 2)):
         a_scales = tl.load(a_scale_ptrs)
         b_scales = tl.load(b_scale_ptrs)
+        # a_scales = tl.full((BLOCK_SIZE_M, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)
+        # b_scales = tl.full((BLOCK_SIZE_N, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
         if EVEN_K:
@@ -101,8 +103,8 @@ def _gemm_afp4_wfp4_kernel(
         accumulator += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
 
         # Advance the ptrs to the next K block.
-        a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
+        a_ptrs += (BLOCK_SIZE_K // 2) * stride_ak
+        b_ptrs += (BLOCK_SIZE_K // 2) * stride_bk
         a_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_ask
         b_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_bsk
 

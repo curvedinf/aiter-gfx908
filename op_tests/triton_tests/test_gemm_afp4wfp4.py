@@ -9,6 +9,7 @@ def generate_gemm_afp4wfp4_inputs(M, N, K):
     # 34 is two packed e2m1 values 0010 which is 1.0.
     x = torch.full((M, K//2), 34, dtype=torch.uint8, device='cuda')
     w = torch.full((N, K//2), 34, dtype=torch.uint8, device='cuda')
+    w = w.T
     # Scale of 1.0 in e8m0, bias 127.
     x_scales = torch.full((K//32, M), 127, dtype=torch.uint8, device='cuda')
     w_scales = torch.full((K//32, N), 127, dtype=torch.uint8, device='cuda')
@@ -49,7 +50,7 @@ def get_x_vals():
     #     (8192, 8192, 1024),
     #     (16384, 8192, 1024),
     # ]
-    x_vals = [(1024, 1024, 1024)]
+    x_vals = [(8192, 8192, 8192)]
     return x_vals
 
 @pytest.mark.parametrize("M, N, K", get_x_vals())

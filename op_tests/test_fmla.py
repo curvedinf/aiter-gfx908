@@ -3,7 +3,7 @@
 
 import torch
 import aiter
-from aiter.test_common import checkAllclose, perftest
+from aiter.test_common import checkAllclose, perftest, run_perftest
 import itertools
 import argparse
 import random
@@ -182,13 +182,15 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     checkAllclose(lse_flash, lse_torch.cuda(), msg="lse")
     checkAllclose(out_flash, out_torch.cuda().to(dtype=dtype), msg="out")
 
-    t = triton.testing.do_bench(flash_mla)
+    _, t = run_perftest(flash_mla,
+                         num_iters=2,
+                         num_warmup=0)
     FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2
     bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d + b * s_q * h_q * dv) * (
         torch.finfo(q.dtype).bits // 8
     )
     print(
-        f"{t:.3f} ms, {FLOPS / 10 ** 9 / t:.0f} TFLOPS, {bytes / 10 ** 6 / t:.0f} GB/s"
+        f"{t:.3f} ms, {FLOPS / 10 ** 6 / t:.0f} TFLOPS, {bytes / 10 ** 3 / t:.0f} GB/s"
     )
     print("====================================")
 

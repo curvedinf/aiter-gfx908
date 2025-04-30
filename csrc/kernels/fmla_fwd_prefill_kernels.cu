@@ -8,9 +8,39 @@
 #include <ck_tile/ops/fmha.hpp>
 #include <ck_tile/ops/gemm.hpp>
 
+// =====================================================================================================================
+// Utils
+//
+
 CK_TILE_DEVICE bool IsDebugThreadBlock()
 {
     return blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z==0;
+}
+
+// Returns count of warps which don't contain any idle thread.
+template <int32_t NumWarps, int32_t M, int32_t N>
+CK_TILE_HOST_DEVICE static constexpr auto GetMaxNumWarpsForTile()
+{
+    static_assert(NumWarps == 1 || NumWarps == 2 || NumWarps == 4);
+    constexpr int32_t ElemPerThread = (M * N) / (NumWarps * ck_tile::get_warp_size());
+    if constexpr(0 < ElemPerThread)
+    {
+        return NumWarps;
+    }
+    else
+    {
+        return GetMaxNumWarpsForTile<NumWarps / 2, M, N>();
+    }
+}
+
+// Returns vector size for given warp count for handing the specified matrix.
+template <int32_t NumWarps, int32_t M, int32_t N, typename DataType>
+CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeForTile()
+{
+    constexpr int32_t MaxNumWarps = GetMaxNumWarpsForTile<NumWarps, M, N>();
+    constexpr int32_t ElemPerThread = (M * N) / (MaxNumWarps * ck_tile::get_warp_size());
+    constexpr int32_t MaxNPerThread = 16 / sizeof(DataType);
+    return ck_tile::min(MaxNPerThread, ElemPerThread);
 }
 
 // =====================================================================================================================
@@ -32,6 +62,8 @@ struct FlashMlaPrefillKernelTrait
     static constexpr int32_t kNumThreads                = kNumWarps * ck_tile::get_warp_size();
     static constexpr int32_t kNumWarpsSoftmax           = 4;
     static constexpr int32_t kNumThreadsSoftmax         = kNumWarpsSoftmax * ck_tile::get_warp_size();
+    static constexpr int32_t kNumWarpsCombine           = 4;
+    static constexpr int32_t kNumThreadsCombine         = kNumWarpsCombine * ck_tile::get_warp_size();
     static constexpr int32_t kBlockM                    = kBlockM_;
     static constexpr int32_t kBlockN0                   = kBlockN0_;
     static constexpr int32_t kBlockN1                   = kBlockN1_;
@@ -67,36 +99,6 @@ public:
     using InOutType = scalar_t;
     using AccType   = acc_t;
 
-private:
-    template <int32_t NumWarps, int32_t M, int32_t N, typename DataType>
-    CK_TILE_HOST_DEVICE static constexpr auto GetMaxNumWarpsForTile()
-    {
-        static_assert(NumWarps == 1 || NumWarps == 2 || NumWarps == 4);
-
-        constexpr int32_t ElemPerThread = (M * N) / (NumWarps * ck_tile::get_warp_size());
-        if constexpr(0 < ElemPerThread)
-        {
-            return NumWarps;
-        }
-        else
-        { // try dividing tile by smaller # of warps
-            return GetMaxNumWarpsForTile<NumWarps / 2, M, N, DataType>();
-        }
-    }
-
-    template <int32_t NumWarps, int32_t M, int32_t N, typename DataType>
-    CK_TILE_HOST_DEVICE static constexpr auto GetVectorSizeForTile()
-    {
-        constexpr int32_t MaxNumWarps = GetMaxNumWarpsForTile<NumWarps, M, N, DataType>();
-
-        constexpr int32_t ElemPerThread = (M * N) / (MaxNumWarps * ck_tile::get_warp_size());
-
-        constexpr int32_t MaxNPerThread = 16 / sizeof(DataType);
-
-        return ck_tile::min(MaxNPerThread, ElemPerThread);
-    }
-
-public:
     CK_TILE_HOST_DEVICE static constexpr int32_t GetAlignmentQ()
     {
         constexpr int32_t kBlockSize = Traits::kNumThreads;
@@ -594,6 +596,83 @@ public:
     }
 };
 
+template <typename Traits, typename scalar_t, typename acc_t>
+struct FlashMlaCombineKernelPolicy
+{
+private:
+    template <typename DataType>
+    CK_TILE_DEVICE static constexpr auto MakeOutputTileDistribution()
+    {
+        constexpr int32_t kVectorN     = GetVectorSizeForTile<Traits::kNumWarpsCombine, 1, Traits::kSizeDV, DataType>();
+        constexpr int32_t kThrPerWarpN = ck_tile::get_warp_size();
+        constexpr int32_t kNumWarpN    = Traits::kNumWarpsCombine;
+
+        return ck_tile::make_static_tile_distribution(
+            ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<>,    // no replicate
+                ck_tile::tuple<ck_tile::sequence<1>,
+                               ck_tile::sequence<kNumWarpN, kThrPerWarpN, kVectorN>>,
+                ck_tile::tuple<ck_tile::sequence<2>, ck_tile::sequence<2>>,
+                ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1>>,
+                ck_tile::sequence<1, 2>,
+                ck_tile::sequence<0, 2>>{});
+    }
+
+public:
+    CK_TILE_DEVICE static auto MakeOaccuTileWindow(
+        void* p_output_accum,
+        const int32_t hsidx,
+        const int32_t size_hs,
+        const int32_t split_offset,
+        const int32_t num_splits)
+    {
+        const int32_t offset_oaccum = split_offset * size_hs * Traits::kSizeDV;
+
+        // Shape of tensor for a block: [num_splits, Traits::kSizeDV]
+        const auto naive_view =
+            ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
+                reinterpret_cast<acc_t*>(p_output_accum) + offset_oaccum,
+                ck_tile::make_tuple(num_splits * size_hs, Traits::kSizeDV), // lengths
+                ck_tile::make_tuple(Traits::kSizeDV, 1),                    // strides
+                ck_tile::number<Traits::kSizeDV>{},                         // last dim alignment
+                ck_tile::number<1>{});                                      // last dim stride
+
+        // Each thread group handles tile whose shape is [1, Traits::kSizeDV]
+        const auto tile_window = ck_tile::make_tile_window(
+            naive_view,
+            ck_tile::make_tuple(ck_tile::number<1>{},               // window size
+                                ck_tile::number<Traits::kSizeDV>{}),
+            {hsidx, 0});                          // origin
+
+        return ck_tile::make_tile_window(tile_window, MakeOutputTileDistribution<acc_t>());
+    }
+
+    CK_TILE_DEVICE static auto MakeOutputTileWindow(
+        void* p_output,
+        const int32_t offset_b,
+        const int32_t offset_s,
+        const int32_t offset_h)
+    {
+        scalar_t* p_out = reinterpret_cast<scalar_t*>(p_output) + offset_b + offset_s + offset_h;
+
+        const auto naive_view =
+            ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
+                p_out,
+                ck_tile::make_tuple(1, Traits::kSizeDV),    // lengths
+                ck_tile::make_tuple(Traits::kSizeDV, 1),    // strides
+                ck_tile::number<Traits::kSizeDV>{},         // last dim alignment
+                ck_tile::number<1>{});                      // last dim stride
+
+        const auto tile_window = ck_tile::make_tile_window(
+            naive_view,
+            ck_tile::make_tuple(ck_tile::number<1>{},               // window size
+                                ck_tile::number<Traits::kSizeDV>{}),
+            {0, 0});                                                // origin
+
+        return ck_tile::make_tile_window(tile_window, MakeOutputTileDistribution<scalar_t>());
+    }
+};
+
 union TileSchedulerMetaData
 {
     struct Core
@@ -964,15 +1043,12 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
     const int32_t num_total_loop =
         ck_tile::integer_divide_ceil(seqlen_k_end - seqlen_k_start, Traits::kBlockN0);
 
-    if constexpr (Mask::IsMasking)
+    if (num_total_loop <= 0)
     {
-        if (num_total_loop <= 0)
-        {
-            auto lse_acc = ck_tile::make_static_distributed_tensor<acc_t>(m.get_tile_distribution());
-            ck_tile::set_tile(lse_acc, -ck_tile::numeric<acc_t>::infinity());
-            ck_tile::store_tile(lse_dram_window_, lse_acc);
-            return o_acc;
-        }
+        auto lse_acc = ck_tile::make_static_distributed_tensor<acc_t>(m.get_tile_distribution());
+        ck_tile::set_tile(lse_acc, -ck_tile::numeric<acc_t>::infinity());
+        ck_tile::store_tile(lse_dram_window_, lse_acc);
+        return o_acc;
     }
 
 
@@ -1421,6 +1497,121 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
     }    
 }
 
+template <typename Traits, int32_t kMaxSplits, typename scalar_t, typename acc_t>
+__global__ void kn_fmla_fwd_splictkv_prefill_combine(
+    const FlashMlaPrefillFwdParams params)
+{
+    using Policy  = FlashMlaCombineKernelPolicy<Traits, scalar_t, acc_t>;
+    using index_t = int64_t;
+
+    __shared__ acc_t lds_lse_scale[kMaxSplits];
+
+    const int32_t bidx = blockIdx.z;
+
+    const int32_t num_splits   = params.num_splits;
+    const int32_t split_offset = bidx * params.num_splits;
+    assert(num_splits <= kMaxSplits);
+
+    if (num_splits > 1)
+    {
+        const int32_t lane_id          = ck_tile::get_lane_id();
+        const int32_t hidx             = blockIdx.y;
+        const int32_t sidx             = blockIdx.x;
+        const int32_t hsidx            = hidx * params.size_s + sidx;
+        const int32_t size_hs          = params.size_h * params.size_s;
+        const index_t offset_lse_accum = split_offset * size_hs + hsidx;
+        const index_t offset_lse       = bidx * size_hs + hsidx;
+
+        if (ck_tile::get_warp_id() == 0)
+        {
+            const acc_t* p_lse_accum = reinterpret_cast<acc_t*>(params.p_softmax_lseaccum) + offset_lse_accum;
+            acc_t* p_lse             = reinterpret_cast<acc_t*>(params.p_softmax_lse) + offset_lse;
+
+            constexpr int32_t kNumLsePerThr = ck_tile::integer_divide_ceil(kMaxSplits, ck_tile::get_warp_size());
+            acc_t local_lse[kNumLsePerThr];
+
+            // Load thread local LSE and get local max LSE
+            acc_t max_lse = -ck_tile::numeric<acc_t>::infinity();
+            #pragma unroll
+            for (int32_t i = 0; i < kNumLsePerThr; ++i)
+            {
+                const int32_t split_idx = i * ck_tile::get_warp_size() + lane_id;
+                const acc_t lse =
+                    (split_idx < num_splits) ? p_lse_accum[split_idx * size_hs] : -ck_tile::numeric<acc_t>::infinity();
+                local_lse[i] = lse;
+                max_lse = ck_tile::max(max_lse, lse);
+            }
+
+            // Get global max LSE
+            #pragma unroll
+            for (int32_t offset = ck_tile::get_warp_size() / 2; offset > 0; offset /= 2)
+            {
+                max_lse = ck_tile::max(max_lse, __shfl_xor(max_lse, offset));
+            }
+
+            // Get sum of LSE
+            acc_t sum_lse = 0.f;
+            #pragma unroll
+            for (int32_t i = 0; i < kNumLsePerThr; ++i)
+            {
+                sum_lse += ck_tile::exp(local_lse[i] - max_lse);
+            }
+            #pragma unroll
+            for (int32_t offset = ck_tile::get_warp_size() / 2; offset > 0; offset /= 2)
+            {
+                sum_lse += __shfl_xor(sum_lse, offset);
+            }
+
+            // Get global LSE
+            acc_t global_lse = ((sum_lse == 0.f) || (sum_lse != sum_lse)) ?
+                ck_tile::numeric<acc_t>::infinity() : (ck_tile::log(sum_lse) + max_lse);
+            if (lane_id == 0)
+            {
+                *p_lse = global_lse;
+            }
+
+            // Write LSE to LDS
+            #pragma unroll
+            for (int32_t i = 0; i < kNumLsePerThr; ++i)
+            {
+                const int32_t split_idx = i * ck_tile::get_warp_size() + lane_id;
+                if (split_idx < num_splits)
+                {
+                    lds_lse_scale[split_idx] = ck_tile::exp(local_lse[i] - global_lse);
+                }
+            }
+        }
+
+        __builtin_amdgcn_sched_barrier(0);
+        ck_tile::block_sync_lds();
+
+        static_assert(Traits::kSizeDV % Traits::kNumThreadsCombine == 0);
+
+        auto oaccu_window =
+            Policy::MakeOaccuTileWindow(params.p_output_accum, hsidx, size_hs, split_offset, num_splits);
+
+        auto reg_out = ck_tile::make_static_distributed_tensor<acc_t>(
+            decltype(ck_tile::load_tile(oaccu_window))::get_tile_distribution());
+        ck_tile::set_tile(reg_out, 0.f);
+
+        for (int32_t split_idx = 0; split_idx < num_splits; ++split_idx)
+        {
+            const acc_t lse_scale = lds_lse_scale[split_idx];
+            auto oaccu = ck_tile::load_tile(oaccu_window);
+            ck_tile::sweep_tile(oaccu, [&](auto idx) {
+                reg_out(idx) += lse_scale * oaccu(idx);
+            });
+            ck_tile::move_tile_window(oaccu_window, {size_hs, 0});
+        }
+
+        auto dram_out = Policy::MakeOutputTileWindow(params.p_output,
+                                                     bidx * params.stride_b_o,
+                                                     hidx * params.stride_h_o,
+                                                     sidx * params.stride_s_o);
+        ck_tile::store_tile(dram_out, ck_tile::cast_tile<scalar_t>(reg_out));
+    }
+}
+
 // =====================================================================================================================
 // Dispatch
 //
@@ -1434,12 +1625,27 @@ void dispatch_fmla_fwd_splictkv_prefill(
     const int32_t num_blk  = ck_tile::integer_divide_ceil(params.size_s,  Traits::kBlockM) *
                              ck_tile::integer_divide_ceil(Traits::kSizeDV, Traits::kBlockN1) *
                              params.num_splits;
-    const dim3 grid = dim3(num_blk, params.size_h, params.size_b);
+    const dim3 grid_attn = dim3(num_blk, params.size_h, params.size_b);
+    const dim3 grid_comb = dim3(params.size_s, params.size_h, params.size_b);
 
-    auto kernel = (params.num_splits > 1) ? 
-        &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, true> :
-        &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, false>;
-    kernel<<<grid, Traits::kNumThreads, 0, stream>>>(params);
+    if (params.num_splits > 1)
+    {
+        auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, true>;
+        auto kn_comb =
+            (params.num_splits <= 32)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 32,  scalar_t, acc_t> :
+            (params.num_splits <= 64)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 64,  scalar_t, acc_t> :
+            (params.num_splits <= 96)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 96,  scalar_t, acc_t> :
+            (params.num_splits <= 128) ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 128, scalar_t, acc_t> :
+            static_cast<decltype(kn_fmla_fwd_splictkv_prefill_combine<Traits, 32, scalar_t, acc_t>)*>(nullptr);
+        TORCH_CHECK(kn_comb != nullptr, "num_splits is larger than expected (<=128) !");
+        kn_attn<<<grid_attn, Traits::kNumThreads, 0, stream>>>(params);
+        kn_comb<<<grid_comb, Traits::kNumThreadsCombine, 0, stream>>>(params);
+    }
+    else
+    {
+        auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, false>;
+        kn_attn<<<grid_attn, Traits::kNumThreads, 0, stream>>>(params);
+    }
 }
 
 // =====================================================================================================================
@@ -1556,9 +1762,6 @@ int32_t calculate_num_splits(
     const int32_t num_m_blocks = ck_tile::integer_divide_ceil(size_s, Traits::kBlockM);
     const int32_t num_n_blocks = ck_tile::integer_divide_ceil(Traits::kSizeDV, Traits::kBlockN1);
 
-    /// TODO: Return 1 for debug
-    return 1;
-
     return num_splits_heuristic(size_b * size_h * num_m_blocks, cu_count * Traits::kCuReuse, num_n_blocks, 128);
 }
 
@@ -1598,8 +1801,8 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads_q, seqlen_q_ori);
     if (num_splits > 1)
     {
-        output_accum = torch::empty({batch_size, seqlen_q_ori, num_splits, num_heads_q, head_size_v}, opts.dtype(torch::kFloat32));
-        softmax_lseaccum = torch::empty({batch_size, num_heads_q, num_splits, seqlen_q_ori}, opts.dtype(torch::kFloat32));
+        output_accum = torch::empty({batch_size, num_splits, seqlen_q_ori, num_heads_q, head_size_v}, opts.dtype(torch::kFloat32));
+        softmax_lseaccum = torch::empty({batch_size, num_splits, num_heads_q, seqlen_q_ori}, opts.dtype(torch::kFloat32));
     }
 
     FlashMlaPrefillFwdParams params = {};
@@ -1638,8 +1841,8 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.stride_h_o = output.stride(2);
     params.stride_b_oacc = (num_splits > 1) ? output_accum.stride(0) : 0;
     params.stride_h_oacc = (num_splits > 1) ? output_accum.stride(3) : 0;
-    params.stride_sp_oacc = (num_splits > 1) ? output_accum.stride(2) : 0;
-    params.stride_s_oacc = (num_splits > 1) ? output_accum.stride(1) : 0;
+    params.stride_sp_oacc = (num_splits > 1) ? output_accum.stride(1) : 0;
+    params.stride_s_oacc = (num_splits > 1) ? output_accum.stride(2) : 0;
     params.stride_b_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(0) : 0;
     params.stride_h_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(1) : 0;
     params.stride_sp_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(2) : 0;

@@ -1,0 +1,102 @@
+import pytest
+import torch
+import triton.language as tl
+
+from triton_bench.numerics_details.mxfp import downcast_to_mxfp, upcast_from_mxfp
+from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
+from op_benchmarks.triton.utils.common import str_to_torch_dtype, torch_to_tl_dtype
+from op_benchmarks.triton.utils.moe import generate_moe_alignment
+
+from .utils.fused_moe_ref import torch_moe
+
+DEBUG_MODE = False
+
+
+def alloc_rand(shape, device, dtype, requires_grad=True):
+    if dtype.itemsize == 1:
+        tmp = 2**-(torch.randint(4, 8, shape, device=device, dtype=torch.float16))
+        return tmp.to(dtype).requires_grad_(requires_grad)
+    return torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+
+@pytest.mark.parametrize("M, N, K, E, top_k, a_dtype_str, b_dtype_str", [
+    # mx types (bf16):
+    # (16, 256, 256, 128, 4, "bf16", "mxfp4_e2m1"),
+    # (1000, 700, 700, 8, 2, "bf16", "mxfp4_e2m1"),
+    # (1000, 700, 700, 8, 2, "bf16", "mxfp4_e2m1"),
+    # # (300, 400, 400, 8, 4, "bf16", "mxfp8_e4m3"),
+    # # (300, 400, 400, 32, 4, "bf16", "mxfp8_e5m2"),
+    # (1000, 700, 2, 8, 2, "bf16", "mxfp4_e2m1"),
+    # # mx types (fp16):
+    # (16, 256, 256, 128, 4, "fp16", "mxfp4_e2m1"),
+    # (1000, 700, 700, 8, 2, "fp16", "mxfp4_e2m1"),
+    # (1000, 700, 700, 8, 2, "fp16", "mxfp4_e2m1"),
+    # # (300, 400, 400, 8, 4, "fp16", "mxfp8_e4m3"),
+    # # (300, 400, 400, 32, 4, "fp16", "mxfp8_e5m2"),
+    # (1000, 700, 2, 8, 2, "fp16", "mxfp4_e2m1"),
+    # # fp8 x mxfp4
+    (16, 256, 256, 128, 4, "fp8_e5m2", "mxfp4_e2m1"),
+    (1000, 704, 800, 3, 1, "fp8_e5m2", "mxfp4_e2m1"),
+    (1000, 704, 800, 8, 2, "fp8_e5m2", "mxfp4_e2m1"),
+    # (300, 400, 400, 8, 4, "fp8_e5m2", "mxfp8_e4m3"),
+    # (300, 400, 400, 32, 4, "fp8_e5m2", "mxfp8_e4m3"),
+])
+@pytest.mark.parametrize('routed_weight', [False])
+@pytest.mark.parametrize('swizzle_mx_scale', [False])
+def test_fused_moe(M: int, N: int, K: int, top_k: int, E: int, a_dtype_str: str,
+                   b_dtype_str: str, routed_weight: bool, swizzle_mx_scale: bool):
+    is_mixed_input = b_dtype_str.startswith("mx")
+    a_dtype = str_to_torch_dtype[a_dtype_str]
+    b_dtype = str_to_torch_dtype[b_dtype_str]
+    a_tri = alloc_rand((M, K) , dtype=a_dtype, device='cuda', requires_grad=False)
+    b_tri = alloc_rand((E, N, K), dtype=torch.bfloat16, device='cuda', requires_grad=False)
+    c_tri = torch.zeros((M, top_k, N), dtype=a_dtype, device='cuda', requires_grad=False)
+    a_scale = torch.tensor([1.00], dtype=torch.float32, device="cuda")
+    b_scale = torch.tensor([1.00] * E, dtype=torch.float32, device="cuda")
+    # torch reference inputs
+    a_ref, b_ref, c_ref = a_tri, b_tri, c_tri
+    # try fixed config for now
+    config = {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_K": 128,
+        "GROUP_SIZE_M": 4,
+        "num_warps": 8,
+        "num_stages": 2,
+        "waves_per_eu": 0,
+        "matrix_instr_nonkdim": 16,
+        "kpack": 1
+    }
+    # mo
+    topk_weights, topk_ids, sorted_token_ids, expert_ids, num_tokens_post_padded = \
+        generate_moe_alignment(M, E, top_k, config["BLOCK_SIZE_M"])
+
+    if is_mixed_input:
+        swizzle_axis = 2 if swizzle_mx_scale else None
+        b_tri, b_mx_scales, b_scale_shape = downcast_to_mxfp(b_tri, b_dtype,axis=1,
+                                                           swizzle_axis=swizzle_axis)
+        b_ref = upcast_from_mxfp(b_tri, b_mx_scales, torch.bfloat16, axis=1, swizzle_axis=swizzle_axis)
+
+    print(f"{a_tri.shape=}")
+    print(f"{b_tri.shape=}")
+    print(f"{c_tri.shape=}")
+    print(f"{a_scale.shape=}")
+    print(f"{b_scale.shape=}")
+    print(f"{b_mx_scales.shape=}")
+
+    fused_moe_mxfp4(a_tri, b_tri, c_tri, a_scale, b_scale, b_mx_scales,
+                    topk_weights, topk_ids, sorted_token_ids, expert_ids,
+                    num_tokens_post_padded, routed_weight, top_k,
+                    swizzle_mx_scale, config, torch_to_tl_dtype[c_tri.dtype])
+
+    # Upcast a_ref to fp16 for torch reference implementation
+    a_ref = a_ref.to(torch.bfloat16)
+    b_zp = None
+    group_size = 0
+    # a_scale and b_scale not used actually
+    torch_moe(a_ref, b_ref, c_ref, a_scale, b_scale, b_zp, group_size,
+              topk_ids, topk_weights, routed_weight, sorted_token_ids,
+              expert_ids, num_tokens_post_padded,
+              dtype=torch.float16, fp8_w8a8=False, int8_w8a16=False,
+              int4_w4a16=False, gelu=False)
+
+    torch.testing.assert_close(c_tri.to(torch.bfloat16), c_ref.to(torch.bfloat16))

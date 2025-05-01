@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <torch/all.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -294,7 +294,6 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                const at::Tensor &v,            // [total_k, hk, d]
                const at::Tensor &cu_seqlens_q, // [b+1]
                std::optional<const at::Tensor> &cu_seqlens_k, // [b+1]
-               std::optional<const at::Tensor> &seqlens_k, // [b]
                int max_seqlen_q,
                int max_seqlen_k,
                float p_dropout,
@@ -321,9 +320,6 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
     if (cu_seqlens_k.has_value()) {
         TORCH_CHECK(cu_seqlens_k.value().dtype() == torch::kInt32, "cu_seqlens_k must have dtype int32");
     }
-    if (seqlens_k.has_value()) {
-        TORCH_CHECK(seqlens_k.value().dtype() == torch::kInt32, "seqlens_k must have dtype int32");
-    }
 
     std::string q_dtype_str = q_dtype == torch::kFloat16 ? "fp16" : "bf16";
 
@@ -331,9 +327,6 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
     CHECK_DEVICE(cu_seqlens_q);
     if (cu_seqlens_k.has_value()) {
         CHECK_DEVICE(cu_seqlens_k.value());
-    }
-    if (seqlens_k.has_value()) {
-        CHECK_DEVICE(seqlens_k.value());
     }
 
     at::Tensor block_table;
@@ -351,9 +344,6 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
     CHECK_CONTIGUOUS(cu_seqlens_q);
     if (cu_seqlens_k.has_value()) {
         CHECK_CONTIGUOUS(cu_seqlens_k.value());
-    }
-    if (seqlens_k.has_value()) {
-        CHECK_CONTIGUOUS(seqlens_k.value());
     }
 
     const auto sizes = q.sizes();
@@ -423,9 +413,6 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
     if (cu_seqlens_k.has_value()) {
         CHECK_SHAPE(cu_seqlens_k.value(), batch_size + 1);
     }
-    if (seqlens_k.has_value()) {
-        CHECK_SHAPE(seqlens_k.value(), batch_size);
-    }
     auto opts = q.options();
 
     at::Tensor out;
@@ -493,7 +480,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
         hipLaunchKernelGGL(
             aiter::ParsePhiloxCudaState, dim3(1), dim3(64), 0, 0, philox_args, rng_state_ptr);
     }
-
+    std::optional<const at::Tensor> seqlens_k = std::nullopt;
     if (max_seqlen_k > 0) {
         auto stream = at::cuda::getCurrentHIPStream().stream();
         ck_tile::stream_config stream_config{stream};

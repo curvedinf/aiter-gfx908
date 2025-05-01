@@ -143,7 +143,7 @@ def gemm_afp4wfp4(x,
     """
     
     M, K = x.shape
-    K, N = w.shape
+    N, K = w.shape
 
     y = torch.empty((M, N), dtype=dtype, device=x.device)
 

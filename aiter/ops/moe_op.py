@@ -48,7 +48,7 @@ def fmoe(
     gate: Tensor,
     down: Tensor,
     sorted_token_ids: Tensor,
-    sorted_weight_buf: Tensor,
+    sorted_weights: Tensor,
     sorted_expert_ids: Tensor,
     num_valid_ids: Tensor,
     topk: int,
@@ -62,7 +62,7 @@ def fmoe_int8_g1u0(
     gate: Tensor,
     down: Tensor,
     sorted_token_ids: Tensor,
-    sorted_weight_buf: Tensor,
+    sorted_weights: Tensor,
     sorted_expert_ids: Tensor,
     num_valid_ids: Tensor,
     topk: int,
@@ -81,7 +81,7 @@ def fmoe_g1u1(
     gate: Tensor,
     down: Tensor,
     sorted_token_ids: Tensor,
-    sorted_weight_buf: Tensor,
+    sorted_weights: Tensor,
     sorted_expert_ids: Tensor,
     num_valid_ids: Tensor,
     topk: int,
@@ -100,7 +100,7 @@ def fmoe_g1u1_tkw1(
     gate: Tensor,
     down: Tensor,
     sorted_token_ids: Tensor,
-    sorted_weight_buf: Tensor,
+    sorted_weights: Tensor,
     sorted_expert_ids: Tensor,
     num_valid_ids: Tensor,
     topk: int,
@@ -119,7 +119,7 @@ def fmoe_int8_g1u0_a16(
     gate: Tensor,
     down: Tensor,
     sorted_token_ids: Tensor,
-    sorted_weight_buf: Tensor,
+    sorted_weights: Tensor,
     sorted_expert_ids: Tensor,
     num_valid_ids: Tensor,
     topk: int,
@@ -137,7 +137,7 @@ def fmoe_g1u1_a16(
     gate: Tensor,
     down: Tensor,
     sorted_token_ids: Tensor,
-    sorted_weight_buf: Tensor,
+    sorted_weights: Tensor,
     sorted_expert_ids: Tensor,
     num_valid_ids: Tensor,
     topk: int,
@@ -155,7 +155,7 @@ def fmoe_fp8_blockscale_g1u1(
     gate: Tensor,
     down: Tensor,
     sorted_token_ids: Tensor,
-    sorted_weight_buf: Tensor,
+    sorted_weights: Tensor,
     sorted_expert_ids: Tensor,
     num_valid_ids: Tensor,
     topk: int,
@@ -186,7 +186,8 @@ def moe_stage1_g1u1(
     quant_type: QuantType = QuantType.No,
     a1_scale: Optional[torch.Tensor] = None,
     w1_scale: Optional[torch.Tensor] = None,
-): ...
+    sorted_weights: Optional[torch.Tensor] = None,
+) -> None: ...
 
 
 @compile_ops("module_moe")
@@ -218,6 +219,8 @@ def ck_moe_stage1(
     w1_scale: Optional[Tensor] = None,
     a1_scale: Optional[Tensor] = None,
     block_m: Optional[int] = 32,
+    sorted_weights: Optional[Tensor] = None,
+    act_op: Optional[int] = 0,
 ): ...
 
 
@@ -228,11 +231,11 @@ def ck_moe_stage2(
     w2: Tensor,
     sorted_token_ids: Tensor,
     sorted_expert_ids: Tensor,
-    sorted_weights: Tensor,
     num_valid_ids: Tensor,
     out: Tensor,
     topk: int,
     w2_scale: Optional[Tensor] = None,
     a2_scale: Optional[Tensor] = None,
     block_m: Optional[int] = 32,
+    sorted_weights: Optional[Tensor] = None,
 ): ...

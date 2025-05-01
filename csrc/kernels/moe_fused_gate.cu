@@ -19,6 +19,7 @@
 #include <ck/ck.hpp>
 #include <ck/utility/data_type.hpp>
 #include <ck/utility/type_convert.hpp>
+#include <ck/utility/array.hpp>
 #include <stdio.h>
 #include <torch/all.h>
 
@@ -70,15 +71,15 @@ __device__ inline bool cmp_eq(const T& a, const T& b) {
 
 // Fixed constants common to both dynamic and static template versions:
 // static constexpr int WARP_SIZE = 32;
-static constexpr int WARPS_PER_CTA = 4;
+static constexpr int WARPS_PER_CTA = 1;
 static constexpr int MAX_VPT = 32;  // maximum VPT we support, > params.VPT = num_expert / num_expert_group
 
 // Create an alias for Array using AlignedArray
-template <typename T, int N>
-using Array = AlignedArray<T, N>;
+// template <typename T, int N>
+// using Array = AlignedArray<T, N>;
 // QQ: NOTE expression must have a constant value, this has to be > params.VPT
-template <typename T>
-using AccessType = AlignedArray<T, MAX_VPT>;
+// template <typename T>
+// using AccessType = AlignedArray<T, MAX_VPT>;
 
 template <typename T, typename Params>
 __device__ void moe_fused_gate_impl(
@@ -113,15 +114,16 @@ __device__ void moe_fused_gate_impl(
   // Create local arrays for the row chunk and bias chunk and then reinterpret the address of row_chunk as a pointer to
   // AccessType.
 
+  constexpr uint32_t vec_size = 32 / sizeof(T);
+  using AccessType = ck::Array<T, vec_size>;
+
   T* thread_read_ptr = thread_row_ptr + first_elt_read_by_thread;
   float row_chunk[MAX_VPT];
-  // AccessType<T>* row_chunk_vec_ptr = reinterpret_cast<AccessType<T>*>(&row_chunk);
-  // AccessType<T> const* vec_thread_read_ptr = reinterpret_cast<AccessType<T> const*>(thread_read_ptr);
+  AccessType const* vec_thread_read_ptr = reinterpret_cast<AccessType const*>(thread_read_ptr);
 
   T* bias_thread_read_ptr = bias_ptr + first_elt_read_by_thread;
   float bias_chunk[MAX_VPT];
-  // AccessType<T>* bias_chunk_vec_ptr = reinterpret_cast<AccessType<T>*>(&bias_chunk);
-  // AccessType<T> const* vec_bias_thread_read_ptr = reinterpret_cast<AccessType<T> const*>(bias_thread_read_ptr);
+  AccessType const* vec_bias_thread_read_ptr = reinterpret_cast<AccessType const*>(bias_thread_read_ptr);
 
 // QQ NOTE: doing the follow will be slower than loop assign and more importantly
 // have misaligned address issue when params.VPT < 8 and mismatch with MAX_VPT
@@ -135,17 +137,16 @@ __device__ void moe_fused_gate_impl(
 //   }]
 
   #pragma unroll
-  for (int ii = 0; ii < params.VPT; ++ii) {
-    row_chunk[ii] = ck::type_convert<float>(thread_read_ptr[ii]);
-    bias_chunk[ii] = ck::type_convert<float>(bias_thread_read_ptr[ii]);
+  for (int ii = 0; ii < params.VPT / vec_size; ++ii) {
+    AccessType row_chunk_vec = vec_thread_read_ptr[ii];
+    AccessType bias_thread_read_vec = vec_bias_thread_read_ptr[ii];
+    for (int jj = 0; jj < vec_size; ++jj) {
+      row_chunk[ii * vec_size + jj] = ck::type_convert<float>(row_chunk_vec(jj));
+      bias_chunk[ii * vec_size + jj] = ck::type_convert<float>(bias_thread_read_vec(jj));
+    }
   }
   
   __syncthreads();
-
-  // if (threadIdx.x == 1 && blockIdx.x == 0) {
-  //   printf("row_chunk[0]: %f, row_chunk[1]: %f, row_chunk[2]: %f, bias_chunk[0]: %f, bias_chunk[1]: %f, bias_chunk[2]: %f\n", 
-  //     row_chunk[0], row_chunk[1], row_chunk[2], bias_chunk[0], bias_chunk[1], bias_chunk[2]);
-  // }
 
 ////////////////////// Sigmoid //////////////////////
 #pragma unroll

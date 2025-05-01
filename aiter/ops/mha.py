@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 from torch import Tensor, Generator
 from typing import Optional, Tuple
 from ..jit.core import compile_ops, CK_DIR, AITER_CSRC_DIR, AITER_ROOT_DIR
 from ..utility import dtypes
 import torch
+
 
 @compile_ops("module_mha_fwd", fc_name="mha_fwd")
 def mha_fwd(
@@ -420,7 +421,9 @@ def _flash_attn_backward(
         # bwd_hd64_bf16_causal_a32_rtz_pssk
         # bwd_hd64_fp16_a32_pssk
         # bwd_hd64_fp16_causal_a32_pssk
-        ret = is_v3_atomic_fp32 == True # nhead_stride_dq_acc >= stride_dq_acc must be guaranteed
+        ret = (
+            is_v3_atomic_fp32 == True
+        )  # nhead_stride_dq_acc >= stride_dq_acc must be guaranteed
         ret &= hdim_q == 64
         ret &= nmask or (
             mask and seqlen_q == seqlen_k
@@ -475,7 +478,9 @@ def _flash_attn_backward(
         # bwd_hd192_bf16_causal_a32_rtz_psskddv
         ret = is_v3_atomic_fp32 == True
         ret &= hdim_q > 64 and hdim_q <= 192
-        ret &= nmask or (mask and seqlen_q == seqlen_k) # TODO: or (seqlen_q != seqlen_k and mask_type == top_left)
+        ret &= nmask or (
+            mask and seqlen_q == seqlen_k
+        )  # TODO: or (seqlen_q != seqlen_k and mask_type == top_left)
 
         return ret
 
@@ -1000,12 +1005,14 @@ def _flash_attn_varlen_backward(
         # bwd_hd128_bf16_causal_a32_rtz_pssk_group
         # bwd_hd128_fp16_a32_pssk_group
         # bwd_hd128_fp16_causal_a32_pssk_group
-        ret = is_v3_atomic_fp32 == True # nhead_stride_dq_acc >= stride_dq_acc must be guaranteed
+        ret = (
+            is_v3_atomic_fp32 == True
+        )  # nhead_stride_dq_acc >= stride_dq_acc must be guaranteed
         ret &= hdim_q == 64 or hdim_q == 128
-        ret &= nmask # TODO: or (mask and mask_type == mask_enum::mask_top_left)
+        ret &= nmask  # TODO: or (mask and mask_type == mask_enum::mask_top_left)
 
         return ret
-    
+
     def psskddv():
         # bwd_hd128_bf16_a32_rtne_psskddv_group
         # bwd_hd128_bf16_a32_rtna_psskddv_group
@@ -1015,9 +1022,11 @@ def _flash_attn_varlen_backward(
         # bwd_hd128_bf16_causal_a32_rtz_psskddv_group
         # bwd_hd128_fp16_a32_psskddv_group
         # bwd_hd128_fp16_causal_a32_psskddv_group
-        ret = is_v3_atomic_fp32 == True # nhead_stride_dq_acc >= stride_dq_acc must be guaranteed
+        ret = (
+            is_v3_atomic_fp32 == True
+        )  # nhead_stride_dq_acc >= stride_dq_acc must be guaranteed
         ret &= hdim_q > 64 and hdim_q < 128
-        ret &= nmask # TODO: or (mask and mask_type == mask_enum::mask_top_left)
+        ret &= nmask  # TODO: or (mask and mask_type == mask_enum::mask_top_left)
 
         return ret
 
@@ -1033,7 +1042,7 @@ def _flash_attn_varlen_backward(
         ret &= hdim_q >= 64 and hdim_q <= 128 and hdim_q % 8 == 0
         ret &= mask or nmask
         ret &= pssk() or psskddv()
-        ret &= 'gfx942' in torch.cuda.get_device_properties("cuda").gcnArchName
+        ret &= "gfx942" in torch.cuda.get_device_properties("cuda").gcnArchName
 
         return ret
 
@@ -1131,7 +1140,6 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         block_table,
         out,
         is_grad_enabled,
-
         is_v3_atomic_fp32: Optional[bool] = True,
         how_v3_bf16_cvt: Optional[int] = 1,
     ):
@@ -1255,6 +1263,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
@@ -1277,7 +1286,7 @@ def flash_attn_varlen_func(
     return_lse=False,
     return_attn_probs=False,
     block_table=None,
-    out=None
+    out=None,
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in K, V with fewer heads

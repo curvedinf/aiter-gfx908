@@ -18,6 +18,7 @@
 #include <cuda_runtime.h>
 #include <ck/ck.hpp>
 #include <ck/utility/data_type.hpp>
+#include <ck/utility/type_convert.hpp>
 #include <stdio.h>
 #include <torch/all.h>
 
@@ -49,9 +50,9 @@ using float32_t = float;
 // "arithmetic > arithmetic" function "operator>(const __half &, const __half &)"
 template <typename T>
 __device__ inline bool cmp_gt(const T& a, const T& b) {
-  if constexpr (std::is_same<T, at::Half>::value) {
+  if constexpr (std::is_same<T, float16_t>::value || std::is_same<T, bfloat16_t>::value) {
     // at::Half (or float16_t in our native case) causes ambiguity, so we cast to float.
-    return static_cast<float>(a) > static_cast<float>(b);
+    return ck::type_convert<float>(a) > ck::type_convert<float>(b);
   } else {
     // For types like float, at::BFloat16, or cutlass::half_t / cutlass::bfloat16_t, assume operator> works as expected.
     return a > b;
@@ -60,8 +61,8 @@ __device__ inline bool cmp_gt(const T& a, const T& b) {
 
 template <typename T>
 __device__ inline bool cmp_eq(const T& a, const T& b) {
-  if constexpr (std::is_same<T, at::Half>::value) {
-    return static_cast<float>(a) == static_cast<float>(b);
+  if constexpr (std::is_same<T, float16_t>::value || std::is_same<T, bfloat16_t>::value) {
+    return ck::type_convert<float>(a) == ck::type_convert<float>(b);
   } else {
     return a == b;
   }
@@ -135,8 +136,8 @@ __device__ void moe_fused_gate_impl(
 
   #pragma unroll
   for (int ii = 0; ii < params.VPT; ++ii) {
-    row_chunk[ii] = thread_read_ptr[ii];
-    bias_chunk[ii] = bias_thread_read_ptr[ii];
+    row_chunk[ii] = ck::type_convert<float>(thread_read_ptr[ii]);
+    bias_chunk[ii] = ck::type_convert<float>(bias_thread_read_ptr[ii]);
   }
   
   __syncthreads();
@@ -149,7 +150,7 @@ __device__ void moe_fused_gate_impl(
 ////////////////////// Sigmoid //////////////////////
 #pragma unroll
   for (int ii = 0; ii < params.VPT; ++ii) {
-    row_chunk[ii] = static_cast<T>(1.0f / (1.0f + expf(-float(row_chunk[ii]))));
+    row_chunk[ii] = 1.0f / (1.0f + expf(-row_chunk[ii]));
   }
   __syncthreads();
 
@@ -165,11 +166,11 @@ __device__ void moe_fused_gate_impl(
        ++k_idx) {  // QQ NOTE Here params.THREADS_PER_ROW = num_expert_group
     int expert = first_elt_read_by_thread;
     // local argmax
-    T max_val = static_cast<T>(-FLT_MAX);
-    T max_val_second = static_cast<T>(-FLT_MAX);
+    float max_val = -FLT_MAX;
+    float max_val_second = -FLT_MAX;
 #pragma unroll
     for (int ii = 0; ii < params.VPT; ++ii) {
-      T val = bias_chunk[ii];
+      float val = bias_chunk[ii];
 
       if (cmp_gt(val, max_val)) {
         max_val_second = max_val;
@@ -181,13 +182,13 @@ __device__ void moe_fused_gate_impl(
 
     // QQ NOTE: currently fixed to pick top2 sigmoid weight value in each expert group and sum them as the group weight
     // to select expert groups
-    T max_sum = max_val + max_val_second;
+    float max_sum = max_val + max_val_second;
 
 // argmin reduce
 #pragma unroll
     for (int mask = params.THREADS_PER_ROW / 2; mask > 0; mask /= 2) {
-      T other_max_sum =
-          static_cast<T>(VLLM_SHFL_XOR_SYNC_WIDTH(static_cast<float>(max_sum), mask, params.THREADS_PER_ROW));
+      float other_max_sum =
+          VLLM_SHFL_XOR_SYNC_WIDTH(max_sum, mask, params.THREADS_PER_ROW);
       int other_expert = VLLM_SHFL_XOR_SYNC_WIDTH(expert, mask, params.THREADS_PER_ROW);
 
       // higher indices win
@@ -204,7 +205,7 @@ __device__ void moe_fused_gate_impl(
       if (thread_group_idx == thread_to_clear_in_group) {
 #pragma unroll
         for (int ii = 0; ii < params.VPT; ++ii) {
-          bias_chunk[ii] = static_cast<T>(FLT_MAX);
+          bias_chunk[ii] = FLT_MAX;
         }
       }
     }
@@ -216,27 +217,27 @@ __device__ void moe_fused_gate_impl(
   float output_sum = 0.0f;
   for (int k_idx = 0; k_idx < topk_excluding_share_expert_fusion; ++k_idx) {
     // local argmax
-    T max_val = bias_chunk[0];
+    float max_val = bias_chunk[0];
     int expert = first_elt_read_by_thread;
 
-    if (!cmp_eq(max_val, static_cast<T>(FLT_MAX))) {
+    if (!cmp_eq(max_val, FLT_MAX)) {
 #pragma unroll
       for (int ii = 1; ii < params.VPT; ++ii) {
-        T val = bias_chunk[ii];
+        float val = bias_chunk[ii];
         if (cmp_gt(val, max_val)) {
           max_val = val;
           expert = first_elt_read_by_thread + ii;
         }
       }
     } else {
-      max_val = static_cast<T>(-FLT_MAX);
+      max_val = -FLT_MAX;
     }
 
     // argmax reduce
 #pragma unroll
     for (int mask = params.THREADS_PER_ROW / 2; mask > 0; mask /= 2) {
-      T other_max =
-          static_cast<T>(VLLM_SHFL_XOR_SYNC_WIDTH(static_cast<float>(max_val), mask, params.THREADS_PER_ROW));
+      float other_max =
+          VLLM_SHFL_XOR_SYNC_WIDTH(max_val, mask, params.THREADS_PER_ROW);
       int other_expert = VLLM_SHFL_XOR_SYNC_WIDTH(expert, mask, params.THREADS_PER_ROW);
 
       // lower indices to win
@@ -253,11 +254,11 @@ __device__ void moe_fused_gate_impl(
       int expert_to_clear_in_thread = expert % params.VPT;
 
       // clear the max value in the thread
-      bias_chunk[expert_to_clear_in_thread] = static_cast<T>(-FLT_MAX);
+      bias_chunk[expert_to_clear_in_thread] = -FLT_MAX;
 
       // store output
-      output_ptr[idx] = static_cast<float>(row_chunk[expert_to_clear_in_thread]);
-      indices_ptr[idx] = static_cast<int32_t>(expert);
+      output_ptr[idx] = row_chunk[expert_to_clear_in_thread];
+      indices_ptr[idx] = ck::type_convert<int32_t>(expert);
     }
 
     // accumulate sum for all elements
@@ -273,7 +274,7 @@ __device__ void moe_fused_gate_impl(
 
     // Use round-robin to select expert
     int64_t expert_offset = thread_row % n_share_experts_fusion;
-    indices_ptr[last_idx] = static_cast<int32_t>(params.NUM_EXPERTS + expert_offset);
+    indices_ptr[last_idx] = ck::type_convert<int32_t>(params.NUM_EXPERTS + expert_offset);
 
     // Set the weight to the sum of all weights divided by routed_scaling_factor
     output_ptr[last_idx] = output_sum / routed_scaling_factor;

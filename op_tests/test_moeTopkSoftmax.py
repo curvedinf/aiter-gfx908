@@ -137,13 +137,19 @@ def test_biased_grouped_topk(
 
     w_sglang = _[0]
     id_sglang = _[1]
-    print(f"{w_sglang=}")
-    print(f"{id_sglang=}")
+    
+    id_sglang, _sglang = torch.sort(id_sglang)
+    w_sglang = w_sglang.gather(1, _sglang)
 
-    checkAllclose(w_ref.sum(), w_sglang.sum(), msg=f"topk_weights [golden vs aiter]")
+    # print(f"{w_ref=}")
+    # print(f"{w_sglang=}")
+    # print(f"{id_ref=}")
+    # print(f"{id_sglang=}")
+
+    checkAllclose(w_ref, w_sglang, msg=f"topk_weights [golden vs sglang]")
     checkAllclose(
-        id_ref.sum(),
-        id_sglang.sum(),
+        id_ref,
+        id_sglang,
         msg=f"topk_ids     [aiter vs sglang]:{us_aiter:>8.2f} us vs {us_sglang:>8.2f} us......",
     )
 
@@ -201,40 +207,40 @@ def test_grouped_topk(
     )
 
 
-# for dtype in [torch.float16, torch.bfloat16]:
-#     for m in [1, 2, 4, 8, 16, 32, 64, 128, 256][-2:-1]:
-#         for n in [4096, 8192, 16384, 32768, 65536][1:2]:
-#             test_topk_softmax(dtype, m, n, 32, 5)
+for dtype in [torch.float16, torch.bfloat16]:
+    for m in [1, 2, 4, 8, 16, 32, 64, 128, 256][-2:-1]:
+        for n in [4096, 8192, 16384, 32768, 65536][1:2]:
+            test_topk_softmax(dtype, m, n, 32, 5)
 
 
 # for token in [16][:]:
-for token in [1, 2, 5, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000][4:5]:
+for token in [1, 2, 5, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000][:]:
     # DeepSeek-R1
     topk = 8
     group = 8
     topk_group = 4
     expert = 256
-    dtype = torch.float16
+    dtype = torch.bfloat16
     need_renorm = True
     test_biased_grouped_topk(token, expert, group, topk, topk_group, need_renorm, dtype)
 
-# for token in [1, 2, 5, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000]:
-#     for scoring_func in ["softmax", "sigmoid"]:
-#         # DeepSeek-R1
-#         topk = 8
-#         group = 8
-#         topk_group = 4
-#         expert = 256
-#         dtype = torch.bfloat16
-#         need_renorm = True
-#         test_grouped_topk(
-#             token,
-#             expert,
-#             group,
-#             topk,
-#             topk_group,
-#             need_renorm,
-#             dtype,
-#             scale_factor=1.5,
-#             scoring_func=scoring_func,
-#         )
+for token in [1, 2, 5, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000]:
+    for scoring_func in ["softmax", "sigmoid"]:
+        # DeepSeek-R1
+        topk = 8
+        group = 8
+        topk_group = 4
+        expert = 256
+        dtype = torch.bfloat16
+        need_renorm = True
+        test_grouped_topk(
+            token,
+            expert,
+            group,
+            topk,
+            topk_group,
+            need_renorm,
+            dtype,
+            scale_factor=1.5,
+            scoring_func=scoring_func,
+        )

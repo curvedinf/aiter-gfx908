@@ -6,6 +6,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <cassert>
 
+#define SHFL_MASK 0xffffffffffffffffULL
+
 #define CHECK_HIP(call) \
     do { \
         hipError_t err = call; \
@@ -67,12 +69,27 @@ __global__ void mla_decode_hip_kernel(
         reduce_buf[d] = dot;
         __syncthreads();
 
-        if (d == 0) {
-            float total_dot = 0.0f;
-            for (int j = 0; j < D_qk; ++j)
-                total_dot += reduce_buf[j];
-            dot_buf[i] = total_dot;
+        float val = reduce_buf[d];
+        for (int offset = warpSize / 2; offset > 0; offset /= 2)
+            val += __shfl_down_sync(SHFL_MASK, val, offset);
+
+        __shared__ float warp_sum[32];
+        int lane = threadIdx.x % warpSize;
+        int warp_id = threadIdx.x / warpSize;
+
+        if (lane == 0)
+            warp_sum[warp_id] = val;
+
+        __syncthreads();
+
+        if (warp_id == 0) {
+            val = (d < (blockDim.x / warpSize)) ? warp_sum[lane] : 0.0f;
+            for (int offset = warpSize / 2; offset > 0; offset /= 2)
+                val += __shfl_down_sync(SHFL_MASK, val, offset);
+            if (lane == 0)
+                dot_buf[i] = val;
         }
+
         __syncthreads();
 
         if (d == 0)

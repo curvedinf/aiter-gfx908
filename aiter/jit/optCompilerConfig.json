@@ -41,7 +41,9 @@
             "f'{AITER_CSRC_DIR}/pybind/mla_hip_pybind.cu'"
         ],
         "flags_extra_cc": [],
-        "flags_extra_hip": [],
+        "flags_extra_hip": [
+            "'-DHIP_ENABLE_WARP_SYNC_BUILTINS'"
+        ],
         "extra_ldflags": "None",
         "extra_include": [],
         "verbose": "False",

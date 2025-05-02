@@ -19,29 +19,29 @@ def alloc_rand(shape, device, dtype, requires_grad=True):
     return torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
 
 @pytest.mark.parametrize("M, N, K, E, top_k, a_dtype_str, b_dtype_str", [
-    # mx types (bf16):
-    # (16, 256, 256, 128, 4, "bf16", "mxfp4_e2m1"),
-    # (1000, 700, 700, 8, 2, "bf16", "mxfp4_e2m1"),
-    # (1000, 700, 700, 8, 2, "bf16", "mxfp4_e2m1"),
-    # # (300, 400, 400, 8, 4, "bf16", "mxfp8_e4m3"),
-    # # (300, 400, 400, 32, 4, "bf16", "mxfp8_e5m2"),
-    # (1000, 700, 2, 8, 2, "bf16", "mxfp4_e2m1"),
-    # # mx types (fp16):
-    # (16, 256, 256, 128, 4, "fp16", "mxfp4_e2m1"),
-    # (1000, 700, 700, 8, 2, "fp16", "mxfp4_e2m1"),
-    # (1000, 700, 700, 8, 2, "fp16", "mxfp4_e2m1"),
-    # # (300, 400, 400, 8, 4, "fp16", "mxfp8_e4m3"),
-    # # (300, 400, 400, 32, 4, "fp16", "mxfp8_e5m2"),
-    # (1000, 700, 2, 8, 2, "fp16", "mxfp4_e2m1"),
     # # fp8 x mxfp4
     (16, 256, 256, 128, 4, "fp8_e5m2", "mxfp4_e2m1"),
     (1000, 704, 800, 3, 1, "fp8_e5m2", "mxfp4_e2m1"),
     (1000, 704, 800, 8, 2, "fp8_e5m2", "mxfp4_e2m1"),
+    (64, 14336, 4096, 8, 2, "fp8_e5m2", "mxfp4_e2m1"),
+    # (16, 14336, 1, 4, 2, "fp8_e5m2", "mxfp4_e2m1"),
+    # (4, 4, 8, 2, 1, "fp8_e5m2", "mxfp4_e2m1"),
+    (16, 14336, 128, 8, 2, "fp8_e5m2", "mxfp4_e2m1"),  # not working either
+    (16, 14336, 4096, 4, 1, "fp8_e5m2", "mxfp4_e2m1"),
+    (16, 14336, 128, 4, 1, "fp8_e5m2", "mxfp4_e2m1"),  # WORKING
+    (1, 14336, 128, 4, 2, "fp8_e5m2", "mxfp4_e2m1"),
+    (3, 14336, 128, 4, 2, "fp8_e5m2", "mxfp4_e2m1"),
+    (16, 14336, 128, 1, 1, "fp8_e5m2", "mxfp4_e2m1"),
+    (64, 7186, 128, 8, 2, "fp8_e5m2", "mxfp4_e2m1"),
+    (64, 3584, 128, 8, 2, "fp8_e5m2", "mxfp4_e2m1"),
+    (64, 1792, 128, 8, 2, "fp8_e5m2", "mxfp4_e2m1"),
+    (64, 64, 128, 8, 2, "fp8_e5m2", "mxfp4_e2m1"),
+    (1, 1024, 16384, 2, 1, "fp8_e5m2", "mxfp4_e2m1"),
     # (300, 400, 400, 8, 4, "fp8_e5m2", "mxfp8_e4m3"),
     # (300, 400, 400, 32, 4, "fp8_e5m2", "mxfp8_e4m3"),
 ])
-@pytest.mark.parametrize('routed_weight', [False])
-@pytest.mark.parametrize('swizzle_mx_scale', [False])
+@pytest.mark.parametrize('routed_weight', [False, True])
+@pytest.mark.parametrize('swizzle_mx_scale', [False, True])
 def test_fused_moe(M: int, N: int, K: int, top_k: int, E: int, a_dtype_str: str,
                    b_dtype_str: str, routed_weight: bool, swizzle_mx_scale: bool):
     is_mixed_input = b_dtype_str.startswith("mx")
@@ -71,17 +71,10 @@ def test_fused_moe(M: int, N: int, K: int, top_k: int, E: int, a_dtype_str: str,
         generate_moe_alignment(M, E, top_k, config["BLOCK_SIZE_M"])
 
     if is_mixed_input:
-        swizzle_axis = 2 if swizzle_mx_scale else None
-        b_tri, b_mx_scales, b_scale_shape = downcast_to_mxfp(b_tri, b_dtype,axis=1,
+        swizzle_axis = 1 if swizzle_mx_scale else None
+        b_tri, b_mx_scales, _ = downcast_to_mxfp(b_tri, b_dtype,axis=2,
                                                            swizzle_axis=swizzle_axis)
-        b_ref = upcast_from_mxfp(b_tri, b_mx_scales, torch.bfloat16, axis=1, swizzle_axis=swizzle_axis)
-
-    print(f"{a_tri.shape=}")
-    print(f"{b_tri.shape=}")
-    print(f"{c_tri.shape=}")
-    print(f"{a_scale.shape=}")
-    print(f"{b_scale.shape=}")
-    print(f"{b_mx_scales.shape=}")
+        b_ref = upcast_from_mxfp(b_tri, b_mx_scales, torch.bfloat16, axis=2, swizzle_axis=swizzle_axis)
 
     fused_moe_mxfp4(a_tri, b_tri, c_tri, a_scale, b_scale, b_mx_scales,
                     topk_weights, topk_ids, sorted_token_ids, expert_ids,

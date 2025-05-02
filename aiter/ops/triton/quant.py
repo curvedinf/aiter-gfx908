@@ -193,11 +193,10 @@ def _dynamic_mxfp4_quant_kernel(x_ptr,
 
     #Calculate scale
     amax = tl.max(tl.abs(x), axis=1, keep_dims=True)
-    eps =  tl.where(amax == 0.0, 2**(-126), 0.0)
     amax = amax.to(tl.int32, bitcast=True)
     amax = (amax + 0x200000).to(tl.uint32, bitcast=True) & 0xff800000
     amax = amax.to(tl.float32, bitcast=True)
-    scale_e8m0_unbiased = tl.log2(amax + eps).floor() - 2
+    scale_e8m0_unbiased = tl.log2(amax).floor() - 2
     scale_e8m0_unbiased = tl.clamp(scale_e8m0_unbiased, min=-127, max=127)
     quant_scale = tl.exp2(-scale_e8m0_unbiased)
 

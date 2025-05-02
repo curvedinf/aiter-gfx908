@@ -161,30 +161,31 @@ __device__ void moe_fused_gate_impl(
     bias_chunk[ii] = row_chunk[ii] + bias_chunk[ii];
   }
 
+  // local argmax
+  float max_val = -FLT_MAX;
+  float max_val_second = -FLT_MAX;
+#pragma unroll
+  for (int ii = 0; ii < params.VPT; ++ii) {
+    float val = bias_chunk[ii];
+
+    if (cmp_gt(val, max_val)) {
+      max_val_second = max_val;
+      max_val = val;
+    } else if (cmp_gt(val, max_val_second)) {
+      max_val_second = val;
+    }
+  }
+  // QQ NOTE: currently fixed to pick top2 sigmoid weight value in each expert group and sum them as the group weight
+  // to select expert groups
+  max_val = max_val + max_val_second;
+
 ////////////////////// Exclude Groups //////////////////////
 #pragma unroll
   for (int k_idx = 0; k_idx < params.THREADS_PER_ROW - topk_group;
        ++k_idx) {  // QQ NOTE Here params.THREADS_PER_ROW = num_expert_group
     int expert = first_elt_read_by_thread;
-    // local argmax
-    float max_val = -FLT_MAX;
-    float max_val_second = -FLT_MAX;
-#pragma unroll
-    for (int ii = 0; ii < params.VPT; ++ii) {
-      float val = bias_chunk[ii];
-
-      if (cmp_gt(val, max_val)) {
-        max_val_second = max_val;
-        max_val = val;
-      } else if (cmp_gt(val, max_val_second)) {
-        max_val_second = val;
-      }
-    }
-
-    // QQ NOTE: currently fixed to pick top2 sigmoid weight value in each expert group and sum them as the group weight
-    // to select expert groups
-    float max_sum = max_val + max_val_second;
-
+    float max_sum = max_val;
+    
 // argmin reduce
 #pragma unroll
     for (int mask = params.THREADS_PER_ROW / 2; mask > 0; mask /= 2) {
@@ -204,10 +205,8 @@ __device__ void moe_fused_gate_impl(
       int const thread_to_clear_in_group = expert / params.VPT;
 
       if (thread_group_idx == thread_to_clear_in_group) {
-#pragma unroll
-        for (int ii = 0; ii < params.VPT; ++ii) {
-          bias_chunk[ii] = FLT_MAX;
-        }
+        bias_chunk[0] = FLT_MAX;
+        max_val = FLT_MAX;
       }
     }
   }

@@ -5,6 +5,7 @@ import torch
 import triton
 import triton.language as tl
 from typing import Optional
+from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 
 
 #TODO Move this to a common folder. Will need to add future arch list
@@ -85,41 +86,9 @@ def _gemm_a8w8_kernel(
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
-    ## pid remapping on xcds
-    # Number of pids per XCD in the new arrangement
-    pids_per_xcd = (GRID_MN + NUM_XCDS - 1) // NUM_XCDS
-    # When GRID_MN cannot divide NUM_XCDS, some xcds will have
-    # pids_per_xcd pids, the other will have pids_per_xcd - 1 pids.
-    # We calculate the number of xcds that have pids_per_xcd pids as
-    # tall_xcds
-    tall_xcds = GRID_MN % NUM_XCDS
-    tall_xcds = NUM_XCDS if tall_xcds == 0 else tall_xcds
-    # Compute current XCD and local pid within the XCD
-    xcd = pid % NUM_XCDS
-    local_pid = pid // NUM_XCDS
-    # Calculate new pid based on the new grouping
-    # Note that we need to consider the following two cases:
-    # 1. the current pid is on a tall xcd
-    # 2. the current pid is on a short xcd
-    if xcd < tall_xcds:
-        pid = xcd * pids_per_xcd + local_pid
-    else:
-        pid = (
-            tall_xcds * pids_per_xcd
-            + (xcd - tall_xcds) * (pids_per_xcd - 1)
-            + local_pid
-        )
+    remap_xcd(pid, GRID_MN)
 
-    if GROUP_SIZE_M == 1:
-        pid_m = pid // num_pid_n
-        pid_n = pid % num_pid_n
-    else:
-        num_pid_in_group = GROUP_SIZE_M * num_pid_n
-        group_id = pid // num_pid_in_group
-        first_pid_m = group_id * GROUP_SIZE_M
-        group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-        pid_m = first_pid_m + (pid % group_size_m)
-        pid_n = (pid % num_pid_in_group) // group_size_m
+    pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
 
     tl.assume(pid_m > 0)
     tl.assume(pid_n > 0)
@@ -137,8 +106,7 @@ def _gemm_a8w8_kernel(
     a_scale = tl.load(a_scale_ptr + offs_a_scale)
     b_scale = tl.load(b_scale_ptr + offs_b_scale)
 
-    acc_dtype = tl.float32 if c_ptr.type.element_ty != tl.int8 else tl.int32
-    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
+    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
@@ -150,7 +118,7 @@ def _gemm_a8w8_kernel(
             a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
             b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
 
-        accumulator += tl.dot(a, b, input_precision="ieee")
+        accumulator += tl.dot(a, b)
 
         # Advance the ptrs to the next K block.
         a_ptrs += BLOCK_SIZE_K * stride_ak
@@ -180,8 +148,8 @@ def gemm_a8w8(
     w: torch.Tensor,
     x_scale: torch.Tensor,
     w_scale: torch.Tensor,
+    y: torch.Tensor,
     bias: Optional[torch.Tensor] = None,
-    dtype: Optional[float] = torch.bfloat16,
 ):
     """
     Computes the 8 bit matmul Y = X x WT, applies a conversion scale and optionally adds a bias
@@ -191,7 +159,7 @@ def gemm_a8w8(
 
     Key parameters:
     - X: Matrix X with shape (M, K).
-    - W: Matrix W with shape (N, K).
+    - W: Matrix W with shape (K, N).
     - X_scale: First scale tensor with shape (M, 1).
     - W_scale: Second scale tensor with shape (1, N).
     - Bias: Bias tensor with shape (1, N).
@@ -201,15 +169,10 @@ def gemm_a8w8(
     """
 
     # Check constraints.
-    assert x.shape[1] == w.shape[1], "Incompatible dimensions!!!"
-
-    # Transpose w
-    w = w.T
+    assert x.shape[1] == w.shape[0], "Incompatible dimensions!!!"
 
     M, K = x.shape
     K, N = w.shape
-
-    y = torch.empty((M, N), dtype=dtype, device=x.device)
 
     BLOCK_SIZE_M = 128
     BLOCK_SIZE_N = 128

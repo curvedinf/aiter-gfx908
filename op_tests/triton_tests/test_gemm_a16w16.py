@@ -49,10 +49,11 @@ def get_x_vals():
 @pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
 def test_gemm_a16_w16(M: int, N: int, K: int, dtype):
     x, w = generate_gemm_a16w16_inputs(M, N, K, dtype)
+    out = torch.empty(x.shape[0], w.shape[1], device=x.device, dtype=x.dtype)
 
     torch_out = torch.matmul(x,w)
 
-    triton_out = gemm_a16w16(x, w, dtype)
+    triton_out = gemm_a16w16(x, w, out)
 
     triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
 

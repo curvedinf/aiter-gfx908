@@ -74,7 +74,7 @@ def get_x_vals():
 
 def generate_gemm_a8w8_inputs(M, N, K, dtype):
     x = torch.randint(-20, 20, (M, K), dtype=torch.int8).cuda()
-    weight = torch.randint(-20, 20, (N, K), dtype=torch.int8).cuda()
+    weight = torch.randint(-20, 20, (K, N), dtype=torch.int8).cuda()
     x_scale = torch.rand([M, 1], dtype=torch.float32).cuda() + 1e-6
     w_scale = torch.rand([1, N], dtype=torch.float32).cuda() + 1e-6
     bias = torch.rand([1, N], dtype=dtype).cuda() * 10
@@ -88,8 +88,9 @@ def generate_gemm_a8w8_inputs(M, N, K, dtype):
 def test_gemm(dtype, m, n, k):
     dtype = name_to_torch_types[dtype]
     x, weight, x_scale, w_scale, bias = generate_gemm_a8w8_inputs(m, n, k, dtype)
+    out = torch.empty(x.shape[0], weight.shape[1], device=x.device, dtype=dtype)
 
     a = run_torch(x, weight, x_scale, w_scale, bias, dtype)
-    b = run_triton(x, weight, x_scale, w_scale, bias, dtype)
+    b = run_triton(x, weight, out, x_scale, w_scale, bias)
 
     triton.testing.assert_close(a, b, atol=0.01, rtol=1e-2)

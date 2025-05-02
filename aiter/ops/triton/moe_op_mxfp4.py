@@ -230,7 +230,7 @@ def _fused_moe_kernel(
                 mx_scale_ptrs += MX_SCALE_BLOCK_K * stride_mx_k
         # Advance the ptrs to the next K block.
         a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
+        b_ptrs += PACKED_BLOCK_K_B * stride_bk
 
     # Multiply with the scalar weight
     accumulator *= a_scale * b_scale

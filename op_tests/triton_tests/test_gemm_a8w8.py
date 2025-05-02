@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 
 def run_torch(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16):
-    x = F.linear(x.to(torch.float32), weight.to(torch.float32))
+    x = F.linear(x.to(torch.float32), weight.to(torch.float32).T)
     scale = torch.matmul(x_scale, w_scale)
     out = torch.mul(x, scale)
     if bias is not None:
@@ -15,8 +15,8 @@ def run_torch(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16):
     return out.to(dtype)
 
 
-def run_triton(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16):
-    return gemm_a8w8(x, weight, x_scale, w_scale, bias)
+def run_triton(x, weight, out, x_scale, w_scale, bias=None):
+    return gemm_a8w8(x, weight, x_scale, w_scale, out, bias)
 
 
 def is_cdna4():

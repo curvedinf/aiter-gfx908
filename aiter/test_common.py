@@ -6,25 +6,40 @@ import torch.profiler as tpf
 import os
 import copy
 import numpy as np
+import csv
+import datetime
 import pandas as pd
 from aiter import logger
 
 pd.set_option("display.max_rows", 200)
 
 
+SUMMARY_CSV = "./aiter_perf_summary.csv"
+OPS_CSV = "./aiter_perf_ops.csv"
+
+def write_csv_header_if_needed(file, headers):
+    if not os.path.exists(file):
+        with open(file, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+
+def append_row(file, row):
+    with open(file, "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(row)
+
 def perftest(
     num_iters=101, num_warmup=2, testGraph=False, num_rotate_args=0, needTrace=False
 ):
     def decorator(func):
         def wrapper(*args, **kwargs):
+            log_level = int(os.environ.get("AITER_LOG_MORE", 0))
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             num = num_rotate_args
             if num < 1:
                 gpu_id = torch.cuda.current_device()
-
-                iter_used_memory, inputSize, _, _ = device_memory_profiling(
-                    func, *args, **kwargs
-                )
-
+                iter_used_memory, inputSize, _, _ = device_memory_profiling(func, *args, **kwargs)
                 properties = torch.cuda.get_device_properties(gpu_id)
                 free_memory = torch.cuda.mem_get_info(gpu_id)[0]
                 cache_size = min(
@@ -33,7 +48,6 @@ def perftest(
                 )
                 cache_size = max(cache_size, 0)
                 num = int((cache_size + inputSize - 1) // inputSize)
-                # print(f"{iter_used_memory=}, {inputSize=}, {cache_size=}, {free_memory=}, {num=}")
             num = min(num, num_iters)
 
             rotate_args = [
@@ -41,7 +55,27 @@ def perftest(
             ] + [(args, kwargs)]
 
             run_iters(num_warmup, func, *args, **kwargs)
-            if int(os.environ.get("AITER_LOG_MORE", 0)):
+
+            input_summary = []
+            if log_level >= 3:
+                print(f"\n[PerfTest][ARGS] Function: {func.__name__}")
+            for i, a in enumerate(args):
+                if isinstance(a, torch.Tensor):
+                    shape = list(a.shape)
+                    input_summary.extend([str(shape), str(a.dtype), str(a.device)])
+                    if log_level >= 3:
+                        print(f"  Arg[{i}] shape={shape}, dtype={a.dtype}, device={a.device}, requires_grad={a.requires_grad}")
+
+            for k, v in kwargs.items():
+                if isinstance(v, torch.Tensor):
+                    shape = list(v.shape)
+                    input_summary.extend([str(shape), str(v.dtype), str(v.device)])
+                    if log_level >= 3:
+                        print(f"  Kwarg[{k}] shape={shape}, dtype={v.dtype}, device={v.device}, requires_grad={v.requires_grad}")
+
+            # CUDA Event Timing
+            avg_event_us = None
+            if log_level >= 1:
                 latencies = []
                 start_event = torch.cuda.Event(enable_timing=True)
                 end_event = torch.cuda.Event(enable_timing=True)
@@ -51,9 +85,13 @@ def perftest(
                     end_event.record()
                     end_event.synchronize()
                     latencies.append(start_event.elapsed_time(end_event))
-                avg = np.mean(latencies) * 1000
-                logger.info(f"avg: {avg} us/iter from cuda.Event")
+                avg_event_us = np.mean(latencies) * 1000
+                logger.info(f"[Perf] avg: {avg_event_us:.3f} us/iter [via CUDA Event Timing]")
+                if log_level >= 3:
+                    print(f"[PerfTest][CUDA EVENT] Latencies (us): {[f'{l*1000:.2f}' for l in latencies]}")
 
+            # CUDA Graph (optional)
+            avg_graph_us = None
             if testGraph:
                 graph = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(graph):
@@ -65,25 +103,79 @@ def perftest(
                     with_modules=True,
                 ) as prof:
                     run_iters(1, graph.replay)
-                avg = get_trace_perf(prof, num_iters)
-                logger.info(f"avg: {avg} us/iter with hipgraph")
+                avg_graph_us = get_trace_perf(prof, num_iters)
+                logger.info(f"[Perf] avg: {avg_graph_us:.3f} us/iter [via CUDA Graph]")
+
+            # Torch Profiler
             with tpf.profile(
                 activities=[tpf.ProfilerActivity.CPU, tpf.ProfilerActivity.CUDA],
                 profile_memory=True,
                 with_stack=True,
                 with_modules=True,
-                #  record_shapes=True,
                 on_trace_ready=(
                     tpf.tensorboard_trace_handler("./aiter_logs/")
-                    if needTrace
-                    else None
+                    if needTrace else None
                 ),
             ) as prof:
                 data = run_iters_rotate(num_iters, func, rotate_args)
 
-            avg = get_trace_perf(prof, num_iters)
+            avg_prof_us = get_trace_perf(prof, num_iters)
+            logger.info(f"[Perf] avg: {avg_prof_us:.3f} us/iter [via Torch Profiler]")
 
-            return data, avg
+            # Output summary
+            output_summary = []
+            if isinstance(data, tuple):
+                for i, t in enumerate(data):
+                    if isinstance(t, torch.Tensor):
+                        output_summary.extend([str(list(t.shape)), str(t.dtype), str(t.device)])
+            elif isinstance(data, torch.Tensor):
+                output_summary.extend([str(list(data.shape)), str(data.dtype), str(data.device)])
+            else:
+                output_summary.append(str(type(data)))
+
+            if log_level >= 3:
+                print(f"\n[PerfTest][RESULT] Function: {func.__name__}")
+                if len(output_summary) % 3 != 0:
+                    print("[PerfTest][WARNING] Unexpected output format, skipping detailed print")
+                else :
+                    for i in range(0, len(output_summary), 3):
+                        print(f"  Out[{i//3}]: shape={output_summary[i]}, dtype={output_summary[i+1]}, device={output_summary[i+2]}")
+
+            # === CSV write (summary) ===
+            write_csv_header_if_needed(SUMMARY_CSV, [
+                "timestamp", "function_name", "avg_time_cuda_event_us",
+                "avg_time_graph_us", "avg_time_profiler_us",
+                "input_summary", "output_summary"
+            ])
+            append_row(SUMMARY_CSV, [
+                timestamp, func.__name__, avg_event_us, avg_graph_us, avg_prof_us,
+                "|".join(input_summary), "|".join(output_summary)
+            ])
+
+            # === CSV write (op-level breakdown) ===
+            if log_level >= 3:
+                write_csv_header_if_needed(OPS_CSV, [
+                    "timestamp", "function_name", "op_name",
+                    "cuda_time_avg_us", "cuda_total_time_us", "self_cpu_time_us"
+                ])
+                for evt in prof.key_averages():
+                    # print([d for d in dir(evt)])
+                    append_row(OPS_CSV, [
+                        timestamp, func.__name__, evt.key,
+                        # getattr(evt, "self_cuda_time_total", 0),
+                        # getattr(evt, "cuda_time_total", 0),
+                        getattr(evt, "cuda_time", 0),
+                        getattr(evt, "device_time_total", 0),
+                        getattr(evt, "self_cpu_time_total", 0)
+                    ])
+
+                print("\n[PerfTest][Profiler Breakdown] Top Ops (by CUDA time):")
+                top_ops = prof.key_averages().table(
+                    sort_by="self_cuda_time_total", row_limit=10
+                )
+                print(top_ops)
+
+            return data, avg_prof_us
 
         return wrapper
 

@@ -93,7 +93,7 @@ def run_benchmark(args):
 
         # Return exactly one scalar depending on which metric is active
         if metric == 'time':
-            return ms
+            return ms*1000
         elif metric == 'throughput':
             tflops = flops / ms * 1e-9
             return tflops
@@ -115,7 +115,7 @@ def parse_args():
     available_models = get_available_models()  # Dynamically load model names
     model_help = ("Model name to benchmark. Select from: [" + ", ".join(available_models) +
                   "]. Use 'all' to benchmark all models or leave blank for the default benchmark script.")
-    parser.add_argument('--model-configs', type=str, default="utils/model_configs.json", help="Model config json file.")
+    parser.add_argument('--model-configs', type=str, default="utils/model_configs_blockScale.json", help="Model config json file.")
     parser.add_argument('--model', type=str, help=model_help)
     parser.add_argument('-M', type=int, default=4096, help="M dim of model benchmark if only one model is under test")
     parser.add_argument("--shape", type=int, nargs=3, metavar=("M", "N", "K"), help="user-defined shape to benchmark")

@@ -6,13 +6,14 @@ from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4
 
 
 def generate_gemm_afp4wfp4_inputs(M, N, K):
+    # 119 is two packed e2m1 values 0111 which is 6.0.
+    x = torch.full((M, K//2), 119, dtype=torch.uint8, device='cuda')
     # 34 is two packed e2m1 values 0010 which is 1.0.
-    x = torch.full((M, K//2), 34, dtype=torch.uint8, device='cuda')
     w = torch.full((N, K//2), 34, dtype=torch.uint8, device='cuda')
     w = w.T
-    # Scale of 1.0 in e8m0, bias 127.
-    x_scales = torch.full((K//32, M), 127, dtype=torch.uint8, device='cuda')
-    w_scales = torch.full((K//32, N), 127, dtype=torch.uint8, device='cuda')
+    # Scales of 0.5 in e8m0, bias 127.
+    x_scales = torch.full((K//32, M), 126, dtype=torch.uint8, device='cuda')
+    w_scales = torch.full((K//32, N), 126, dtype=torch.uint8, device='cuda')
     x_scales = x_scales.T
     w_scales = w_scales.T
 
@@ -50,17 +51,12 @@ def get_x_vals():
     #     (8192, 8192, 1024),
     #     (16384, 8192, 1024),
     # ]
-    x_vals = [(8192, 8192, 8192)]
+    x_vals = [(8192, 8192, 8192), (4096, 5120, 8192)]
     return x_vals
 
 @pytest.mark.parametrize("M, N, K", get_x_vals())
 @pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
 def test_gemm_a16_w16(M: int, N: int, K: int, dtype):
     x, w, x_scales, w_scales = generate_gemm_afp4wfp4_inputs(M, N, K)
-
-    #torch_out = torch.matmul(x,w)
-
     triton_out = gemm_afp4wfp4(x, w, x_scales, w_scales, dtype)
-
-    print(f"triton_out = {triton_out[0][0]}")
-
+    assert torch.all(triton_out == 6/4*K).item()

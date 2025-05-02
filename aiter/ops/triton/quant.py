@@ -192,20 +192,20 @@ def _dynamic_mxfp4_quant_kernel(x_ptr,
     x = tl.load(x_ptr + x_offs, mask=x_mask).to(tl.float32)
 
     #Calculate scale
-    amax = tl.max(tl.abs(x), axis=1, keep_dims=True) 
-    amax = tl.floor(amax + 0.5) #Rounding to nearest
-    dequant_scale = amax / 6.0
-    dequant_scale_rounded = dequant_scale.to(tl.float32, bitcast=True) 
-
-    # Reciprocal of scale ie quant scale
-    quant_scale = tl.where(dequant_scale_rounded == 0, 0, 1.0 / dequant_scale_rounded)
+    amax = tl.max(tl.abs(x), axis=1, keep_dims=True)
+    eps =  tl.where(amax == 0.0, 2**(-126), 0.0)
+    amax = amax.to(tl.int32, bitcast=True)
+    amax = (amax + 0x200000).to(tl.uint32, bitcast=True) & 0xff800000
+    amax = amax.to(tl.float32, bitcast=True)
+    scale_e8m0_unbiased = tl.log2(amax + eps).floor() - 2
+    scale_e8m0_unbiased = tl.clamp(scale_e8m0_unbiased, min=-127, max=127)
+    quant_scale = tl.exp2(-scale_e8m0_unbiased)
 
     #Compute quantized x
     qx = x * quant_scale
 
     # blockscale_e8m0
-    bs_e8m0 = dequant_scale.to(tl.uint32, bitcast=True) & 0x7F800000
-    bs_e8m0 = (bs_e8m0 >> 23).to(tl.uint8)
+    bs_e8m0 = scale_e8m0_unbiased.to(tl.uint8) + 127
 
     # Convert quantized fp32 tensor to uint32 before converting to mxfp4 format
     # Note: MXFP4  S:1-bit, E:2-bit, M:1-bit

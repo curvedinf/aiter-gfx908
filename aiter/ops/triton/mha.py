@@ -204,6 +204,7 @@ def _attn_fwd_inner(
     FP8_MAX: tl.constexpr,
 ):
     RCP_LN2: tl.constexpr = 1.4426950408889634
+    QK_SCALE: tl.constexpr = SM_SCALE * RCP_LN2
 
     # loop over k, v, and update accumulator
 
@@ -267,10 +268,10 @@ def _attn_fwd_inner(
             qk += alibi_block / SM_SCALE
         # get max scores so far
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
-        m_ij_scaled = m_ij * SM_SCALE * RCP_LN2
+        m_ij_scaled = m_ij * QK_SCALE
 
         # scale and subtract max
-        q_shifted = qk * SM_SCALE * RCP_LN2 - m_ij_scaled[:, None]
+        q_shifted = qk * QK_SCALE - m_ij_scaled[:, None]
 
         # Compute scaled QK and softmax probabilities
         p = tl.math.exp2(q_shifted)
@@ -295,7 +296,7 @@ def _attn_fwd_inner(
         # -- update output accumulator --
         # alpha is an adjustment factor for acc and li as we loop and find new maxes
         # store the diff in maxes to adjust acc and li as we discover new maxes
-        m_diff_scaled = m_i * SM_SCALE * RCP_LN2 - m_ij_scaled
+        m_diff_scaled = m_i * QK_SCALE - m_ij_scaled
         alpha = tl.math.exp2(m_diff_scaled)
         acc = acc * alpha[:, None]
         v = load_fn(v_ptrs, k_offs_n, k_offs_k, seqlen_k, BLOCK_DMODEL)

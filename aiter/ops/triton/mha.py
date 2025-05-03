@@ -363,6 +363,36 @@ def _attn_fwd(q_ptr: torch.Tensor,
             FP8_MAX: tl.constexpr,
             VARLEN: tl.constexpr,
 ):
+    tl.assume(stride_qz >= 0)
+    tl.assume(stride_qh >= 0)
+    tl.assume(stride_qm >= 0)
+    tl.assume(stride_qk >= 0)
+    tl.assume(stride_kz >= 0)
+    tl.assume(stride_kh >= 0)
+    tl.assume(stride_kn >= 0)
+    tl.assume(stride_kk >= 0)
+    # tl.assume(stride_bz >= 0)
+    # tl.assume(stride_bh >= 0)
+    # tl.assume(stride_bm >= 0)
+    # tl.assume(stride_bn >= 0)
+    tl.assume(stride_vz >= 0)
+    tl.assume(stride_vh >= 0)
+    tl.assume(stride_vk >= 0)
+    tl.assume(stride_vn >= 0)
+    tl.assume(stride_oz >= 0)
+    tl.assume(stride_oh >= 0)
+    tl.assume(stride_om >= 0)
+    tl.assume(stride_on >= 0)
+    tl.assume(stride_alibi_z >= 0)
+    tl.assume(stride_alibi_h >= 0)
+    tl.assume(stride_sd_z >= 0)
+    tl.assume(stride_sd_h >= 0)
+    tl.assume(stride_sd_m >= 0)
+    tl.assume(stride_sd_n >= 0)
+    tl.assume(stride_lse_z >= 0)
+    tl.assume(stride_lse_h >= 0)
+    tl.assume(stride_lse_m >= 0)
+
     #calculate offsets
     off_z = tl.program_id(0) #batch
     off_q_head = tl.program_id(1)  #num_q_heads

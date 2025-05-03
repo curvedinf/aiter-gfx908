@@ -770,12 +770,12 @@ def _flash_attn_forward(
     # BLOCK_N=64 spills but has higher performance
     # Tuned for MI300x
     config = {
-        'BLOCK_M': 128,
+        'BLOCK_M': 256,
         'BLOCK_N': 64,
         'waves_per_eu': 2,
-        'num_warps': 4,
+        'num_warps': 8,
         'num_ctas': 1,
-        'num_stages': 1,
+        'num_stages': 4,
     }
 
     grid = lambda META:(batch, num_q_heads, triton.cdiv(seqlen_q, META['BLOCK_M']))

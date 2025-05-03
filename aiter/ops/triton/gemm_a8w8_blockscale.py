@@ -11,6 +11,33 @@ from typing import Optional
 def get_arch():
     return triton.runtime.driver.active.get_current_target().arch
 
+@triton.jit
+def swizzle_pid(pid, GRID_MN, NUM_XCDS):
+    ## pid remapping on xcds
+    # Number of pids per XCD in the new arrangement
+    pids_per_xcd = (GRID_MN + NUM_XCDS - 1) // NUM_XCDS
+    # When GRID_MN cannot divide NUM_XCDS, some xcds will have
+    # pids_per_xcd pids, the other will have pids_per_xcd - 1 pids.
+    # We calculate the number of xcds that have pids_per_xcd pids as
+    # tall_xcds
+    tall_xcds = GRID_MN % NUM_XCDS
+    tall_xcds = NUM_XCDS if tall_xcds == 0 else tall_xcds
+    # Compute current XCD and local pid within the XCD
+    xcd = pid % NUM_XCDS
+    local_pid = pid // NUM_XCDS
+    # Calculate new pid based on the new grouping
+    # Note that we need to consider the following two cases:
+    # 1. the current pid is on a tall xcd
+    # 2. the current pid is on a short xcd
+    if xcd < tall_xcds:
+        pid = xcd * pids_per_xcd + local_pid
+    else:
+        pid = (
+            tall_xcds * pids_per_xcd
+            + (xcd - tall_xcds) * (pids_per_xcd - 1)
+            + local_pid
+        )
+    return pid
 
 @triton.heuristics(
     {
@@ -92,30 +119,7 @@ def _gemm_a8w8_blockscale_kernel(
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
-    ## pid remapping on xcds
-    # Number of pids per XCD in the new arrangement
-    pids_per_xcd = (GRID_MN + NUM_XCDS - 1) // NUM_XCDS
-    # When GRID_MN cannot divide NUM_XCDS, some xcds will have
-    # pids_per_xcd pids, the other will have pids_per_xcd - 1 pids.
-    # We calculate the number of xcds that have pids_per_xcd pids as
-    # tall_xcds
-    tall_xcds = GRID_MN % NUM_XCDS
-    tall_xcds = NUM_XCDS if tall_xcds == 0 else tall_xcds
-    # Compute current XCD and local pid within the XCD
-    xcd = pid % NUM_XCDS
-    local_pid = pid // NUM_XCDS
-    # Calculate new pid based on the new grouping
-    # Note that we need to consider the following two cases:
-    # 1. the current pid is on a tall xcd
-    # 2. the current pid is on a short xcd
-    if xcd < tall_xcds:
-        pid = xcd * pids_per_xcd + local_pid
-    else:
-        pid = (
-            tall_xcds * pids_per_xcd
-            + (xcd - tall_xcds) * (pids_per_xcd - 1)
-            + local_pid
-        )
+    #pid = swizzle_pid(pid, GRID_MN, NUM_XCDS)
 
     if GROUP_SIZE_M == 1:
         pid_m = pid // num_pid_n
@@ -170,9 +174,12 @@ def _gemm_a8w8_blockscale_kernel(
         a_ptrs += BLOCK_SIZE_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * stride_bk
 
-        k_cur = k * BLOCK_SIZE_K // GROUP_K
-        k_nxt = (k + 1) * BLOCK_SIZE_K // GROUP_K
-        offs_ks = k_nxt - k_cur
+        if BLOCK_SIZE_K >= GROUP_K:
+            offs_ks = BLOCK_SIZE_K // GROUP_K
+        else:
+            k_cur = k * BLOCK_SIZE_K // GROUP_K
+            k_nxt = (k + 1) * BLOCK_SIZE_K // GROUP_K
+            offs_ks = k_nxt - k_cur
         a_scale_ptrs += offs_ks * stride_ascale_k
         b_scale_ptrs += offs_ks * stride_bscale_k
 
@@ -226,10 +233,10 @@ def gemm_a8w8_blockscale(
 
     y = torch.empty((M, N), dtype=dtype, device=x.device)
 
-    BLOCK_SIZE_M = 128
+    BLOCK_SIZE_M = 32
     BLOCK_SIZE_N = 128
     BLOCK_SIZE_K = 128
-    GROUP_SIZE_M = 4
+    GROUP_SIZE_M = 1
     waves_per_eu = 2
     kpack = 1 if get_arch() in ('gfx950') else 2
     matrix_instr_nonkdim = 16

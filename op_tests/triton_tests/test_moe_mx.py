@@ -41,6 +41,7 @@ def alloc_rand(shape, device, dtype, requires_grad=True):
     ("mxfp4_e2m1", "mxfp4_e2m1"),
     # Software emulation that upcasts mxfp4 to fp16
     ("fp16", "mxfp4_e2m1"),
+    ("bf16", "mxfp4_e2m1"),
 ])
 @pytest.mark.parametrize('routed_weight', [False, True])
 @pytest.mark.parametrize('swizzle_mx_scale', [False, True])
@@ -50,10 +51,12 @@ def test_fused_moe(M: int, N: int, K: int, top_k: int, E: int, a_dtype_str: str,
     is_b_mixed_input = b_dtype_str.startswith("mx")
     a_dtype = str_to_torch_dtype[a_dtype_str]
     b_dtype = str_to_torch_dtype[b_dtype_str]
-    a_tri = alloc_rand((M, K) , dtype=torch.bfloat16, device='cuda', requires_grad=False)
-    b_tri = alloc_rand((E, N, K), dtype=torch.bfloat16, device='cuda', requires_grad=False)
+    c_dtype = torch.bfloat16 if is_a_mixed_input else a_dtype
+    fp16_dtype = torch.float16 if a_dtype_str == "fp16" else torch.bfloat16
+    a_tri = alloc_rand((M, K) , dtype=fp16_dtype, device='cuda', requires_grad=False)
+    b_tri = alloc_rand((E, N, K), dtype=fp16_dtype, device='cuda', requires_grad=False)
     # TODO: what is the output dtype
-    c_tri = torch.zeros((M, top_k, N), dtype=a_dtype, device='cuda', requires_grad=False)
+    c_tri = torch.zeros((M, top_k, N), dtype=c_dtype, device='cuda', requires_grad=False)
     a_scale = torch.tensor([1.00], dtype=torch.float32, device="cuda")
     b_scale = torch.tensor([1.00] * E, dtype=torch.float32, device="cuda")
     # Reference inputs
@@ -77,15 +80,15 @@ def test_fused_moe(M: int, N: int, K: int, top_k: int, E: int, a_dtype_str: str,
     if is_a_mixed_input:
         swizzle_axis = 0 if swizzle_mx_scale else None
         a_tri, a_mx_scales, _ = downcast_to_mxfp(a_tri, a_dtype, axis=1, swizzle_axis=swizzle_axis)
-        a_ref = upcast_from_mxfp(a_tri, a_mx_scales, torch.bfloat16, axis=1, swizzle_axis=swizzle_axis)
+        a_ref = upcast_from_mxfp(a_tri, a_mx_scales, fp16_dtype, axis=1, swizzle_axis=swizzle_axis)
     else:
-        a_ref = a_ref.to(torch.bfloat16)
+        a_ref = a_ref.to(fp16_dtype)
         a_mx_scales = None
     # Downcast b tensor to mxfp4 and upcast back for reference
     if is_b_mixed_input:
         swizzle_axis = 1 if swizzle_mx_scale else None
         b_tri, b_mx_scales, _ = downcast_to_mxfp(b_tri, b_dtype, axis=2, swizzle_axis=swizzle_axis)
-        b_ref = upcast_from_mxfp(b_tri, b_mx_scales, torch.bfloat16, axis=2, swizzle_axis=swizzle_axis)
+        b_ref = upcast_from_mxfp(b_tri, b_mx_scales, fp16_dtype, axis=2, swizzle_axis=swizzle_axis)
     # Triton
     fused_moe_mxfp4(a_tri, b_tri, c_tri,
                     a_scale, b_scale,
@@ -103,4 +106,4 @@ def test_fused_moe(M: int, N: int, K: int, top_k: int, E: int, a_dtype_str: str,
               dtype=torch.float16, fp8_w8a8=False, int8_w8a16=False,
               int4_w4a16=False, gelu=False)
 
-    torch.testing.assert_close(c_tri.to(torch.bfloat16), c_ref.to(torch.bfloat16))
+    torch.testing.assert_close(c_tri.to(fp16_dtype), c_ref.to(fp16_dtype))

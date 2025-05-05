@@ -157,7 +157,7 @@ def _gemm_a8w8_blockscale_kernel(
         # If it is out of bounds, set it to 0.
         if EVEN_K:
             a = tl.load(a_ptrs)
-            b = tl.load(b_ptrs)
+            b = tl.load(b_ptrs, cache_modifier='.cg')
         else:
             a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
             b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
@@ -234,9 +234,9 @@ def gemm_a8w8_blockscale(
     y = torch.empty((M, N), dtype=dtype, device=x.device)
 
     BLOCK_SIZE_M = 32
-    BLOCK_SIZE_N = 128
+    BLOCK_SIZE_N = 16
     BLOCK_SIZE_K = 128
-    GROUP_SIZE_M = 1
+    GROUP_SIZE_M = 2
     waves_per_eu = 2
     kpack = 1 if get_arch() in ('gfx950') else 2
     matrix_instr_nonkdim = 16

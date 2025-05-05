@@ -6,24 +6,6 @@ from aiter.ops.triton.quant import dynamic_per_tensor_fp8_quant
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 from triton_bench.numerics_details.mxfp import _unswizzle_mx_block, get_scaled_dot_format_string
 
-#Source:
-#MoE Kernel adapted from VLLM
-
-_PADDING_SIZE = 0
-
-_USE_MOE_PERSISTENT_KERNEL = False
-
-def moe_set_use_persistent_kernel(value: bool):
-    global _USE_MOE_PERSISTENT_KERNEL
-    _USE_MOE_PERSISTENT_KERNEL = value
-
-def moe_set_padding_size(size: int):
-    """
-    Override padding size
-    """
-    global _PADDING_SIZE
-    _PADDING_SIZE = size
-
 
 @triton.jit
 def _write_zeros_to_output(c_ptr, stride_cm, stride_cn, pid_n, N, offs_token,
@@ -35,28 +17,6 @@ def _write_zeros_to_output(c_ptr, stride_cm, stride_cn, pid_n, N, offs_token,
         None, :]
     c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
     tl.store(c_ptrs, accumulator, mask=c_mask)
-
-
-SWIZZLE_ALIGN_INNER = 8
-SWIZZLE_SIZE_INNER = 4
-SWIZZLE_SIZE_OUTER = 128
-
-def swizzle_mx(tensor: torch.Tensor):
-    """
-    Swizzle the input tensor of shape (A, B, ... N, K) to (A, B, ... N // 128, K // 4, 32, 4, 4).
-    Padding is applied if N and K are not multiples of 128 and 4 respectively.
-    Returns the swizzled tensor repacked as (A, B, ... N, K), with padding.
-    """
-    *leading_shape, N, K, = tensor.shape
-    pad_k = (SWIZZLE_ALIGN_INNER - (K % SWIZZLE_ALIGN_INNER)) % SWIZZLE_ALIGN_INNER
-    pad_n = (SWIZZLE_SIZE_OUTER - (N % SWIZZLE_SIZE_OUTER)) % SWIZZLE_SIZE_OUTER
-    if pad_k > 0 or pad_n > 0:
-        tensor = torch.nn.functional.pad(tensor, (0, pad_k, 0, pad_n))
-    padded_shape = tensor.shape
-    tensor = tensor.reshape(*leading_shape, padded_shape[-2] // SWIZZLE_SIZE_OUTER, SWIZZLE_SIZE_OUTER // 32, 32, padded_shape[-1] // SWIZZLE_SIZE_INNER, SWIZZLE_SIZE_INNER)
-    permute_order = list(range(len(tensor.shape)))
-    permute_order[-2], permute_order[-4] = permute_order[-4], permute_order[-2]
-    return tensor.permute(permute_order).reshape(*padded_shape)
 
 
 @triton.heuristics({
@@ -269,7 +229,8 @@ def _fused_moe_kernel(
                 mask_bk_scale = offs_scale_bk < (K - k * BLOCK_SIZE_K) // MX_PACK_DIVISOR
                 b_mx_scales = tl.load(b_mx_scale_ptrs, mask=mask_bk_scale[None, :], other=0.0)
 
-            accumulator = tl.dot_scaled(a, a_mx_scales, a_format, b, b_mx_scales, b_format, acc=accumulator, fast_math=True)
+            accumulator = tl.dot_scaled(a, a_mx_scales, a_format, b, b_mx_scales, b_format,
+                                        acc=accumulator, fast_math=True)
 
             if is_a_microscaled_format:
                 if SWIZZLE_MX_A:
@@ -349,7 +310,7 @@ def fused_moe_mxfp4(A: torch.Tensor,
     _fused_moe_kernel[grid](
         A, B, C, A_scale, B_scale, A_mx_scale, B_mx_scale,
         topk_weights, sorted_token_ids, expert_ids, num_tokens_post_padded,
-        B.shape[1], A.shape[1] - _PADDING_SIZE, EM, topk_ids.numel(),
+        B.shape[1], A.shape[1], EM, topk_ids.numel(),
         A.stride(0), A.stride(1),
         B.stride(0), B.stride(2), B.stride(1),
         C.stride(1), C.stride(2),

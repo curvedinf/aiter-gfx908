@@ -66,7 +66,9 @@ def swizzle_mx(tensor: torch.Tensor):
 @triton.jit
 def _fused_moe_kernel(
         # Pointers to matrices
-        a_ptr, b_ptr, c_ptr, a_scale_ptr, b_scale_ptr, mx_scale_ptr,
+        a_ptr, b_ptr, c_ptr,
+        a_scale_ptr, b_scale_ptr,
+        a_mx_scale_ptr, b_mx_scale_ptr,
         topk_weights_ptr, sorted_token_ids_ptr, expert_ids_ptr,
         num_tokens_post_padded_ptr,
         # Matrix dimensions
@@ -75,7 +77,8 @@ def _fused_moe_kernel(
         stride_am, stride_ak,
         stride_be, stride_bk, stride_bn,
         stride_cm, stride_cn,
-        stride_mx_e, stride_mx_k, stride_mx_n,
+        stride_amxm, stride_amxk,
+        stride_bmxe, stride_bmxk, stride_bmxn,
         # Meta-parameters
         BLOCK_SIZE_M: tl.constexpr,
         BLOCK_SIZE_N: tl.constexpr,
@@ -85,7 +88,8 @@ def _fused_moe_kernel(
         top_k: tl.constexpr,
         compute_type: tl.constexpr,
         GRID_MN: tl.constexpr,
-        SWIZZLE_MX: tl.constexpr,
+        SWIZZLE_MX_A: tl.constexpr,
+        SWIZZLE_MX_B: tl.constexpr,
     ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -113,13 +117,20 @@ def _fused_moe_kernel(
     BLOCK_SIZE_M, which is necessary to maintain consistency in block matrix
     multiplication across different blocks processed by the same expert.
     """
-    is_microscaled_format: tl.constexpr = mx_scale_ptr is not None
+    is_a_microscaled_format: tl.constexpr = a_mx_scale_ptr is not None
+    is_b_microscaled_format: tl.constexpr = b_mx_scale_ptr is not None
     MX_PACK_DIVISOR: tl.constexpr = 32
-    if is_microscaled_format:
+    if is_a_microscaled_format:
+        a_type: tl.constexpr = a_ptr.dtype.element_ty
+        tl.static_assert(a_type == tl.uint8 or (a_type == tl.float8e4nv or a_type == tl.float8e5),
+                         "mx_weight_ptr must be 1 byte")
+        tl.static_assert(a_mx_scale_ptr.dtype.element_ty == tl.uint8, "a_mx_scale_ptr must be uint8")
+        tl.static_assert(BLOCK_SIZE_K % MX_PACK_DIVISOR == 0, "BLOCK_SIZE_K must be a multiple of MX_PACK_DIVISOR")
+    if is_b_microscaled_format:
         b_type: tl.constexpr = b_ptr.dtype.element_ty
         tl.static_assert(b_type == tl.uint8 or (b_type == tl.float8e4nv or b_type == tl.float8e5),
                          "mx_weight_ptr must be 1 byte")
-        tl.static_assert(mx_scale_ptr.dtype.element_ty == tl.uint8, "mx_scale_ptr must be uint8")
+        tl.static_assert(b_mx_scale_ptr.dtype.element_ty == tl.uint8, "b_mx_scale_ptr must be uint8")
         tl.static_assert(BLOCK_SIZE_K % MX_PACK_DIVISOR == 0, "BLOCK_SIZE_K must be a multiple of MX_PACK_DIVISOR")
 
     # -----------------------------------------------------------
@@ -159,43 +170,70 @@ def _fused_moe_kernel(
     # Load a_scale, b_scale
     a_scale = tl.load(a_scale_ptr)
     b_scale = tl.load(b_scale_ptr + off_expert)
-    # NOTE: this is the vllm way of offs_bn, check the diff later
-    # offs_bn = (pid_n * BLOCK_SIZE_N +
-    #            tl.arange(0, BLOCK_SIZE_N).to(tl.int64)) % N
+    # Set offsets of B on dim N
     offs_b_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     offs_b_n = tl.max_contiguous(tl.multiple_of(offs_b_n % N, BLOCK_SIZE_N), BLOCK_SIZE_N)
+    # Load a_mx_scale
+    if is_a_microscaled_format:
+        # We have pack 2 fp4 values in a byte
+        A_PACK_DIVISOR: tl.constexpr = 2 if a_ptr.dtype.element_ty == tl.uint8 else 1
+        PACKED_BLOCK_K_A: tl.constexpr = BLOCK_SIZE_K // A_PACK_DIVISOR  # 64
+        MX_SCALE_BLOCK_K_A: tl.constexpr = BLOCK_SIZE_K // MX_PACK_DIVISOR  # 4
+
+        if SWIZZLE_MX_A:
+            tl.static_assert(BLOCK_SIZE_M % 128 == 0)
+            tl.static_assert(MX_SCALE_BLOCK_K_A % 4 == 0)
+            PACKED_MX_BLOCK_A: tl.constexpr = (MX_SCALE_BLOCK_K_A // 4) * 32 * 4 * 4
+            offs_inner = tl.arange(0, PACKED_MX_BLOCK_A)
+            offs_scale_m = (pid_m * (BLOCK_SIZE_M // 128) + tl.arange(0, BLOCK_SIZE_M // 128)) % N
+            offs_scale_m = tl.max_contiguous(tl.multiple_of(offs_scale_m, BLOCK_SIZE_M // 128), BLOCK_SIZE_M // 128)
+
+            a_mx_scale_ptrs = a_mx_scale_ptr + offs_scale_m.to(tl.int64)[:, None] * stride_amxm + offs_inner[None, :]
+        else:
+            offs_scale_ak = tl.arange(0, MX_SCALE_BLOCK_K_A)
+            offs_scale_m = offs_token
+            # K dimension must be the last dimension for the scales
+            a_mx_scale_ptrs = a_mx_scale_ptr + offs_scale_ak.to(tl.int64)[None, :] * stride_amxk + \
+                offs_scale_m.to(tl.int64)[:, None] * stride_amxm
+    else:
+        a_mx_scale_ptrs = None
+        A_PACK_DIVISOR: tl.constexpr = 1
+        MX_SCALE_BLOCK_K_A: tl.constexpr = 1
+        PACKED_BLOCK_K_A: tl.constexpr = BLOCK_SIZE_K
     # Load b_mx_scale
-    if is_microscaled_format:
+    if is_b_microscaled_format:
         # We have pack 2 fp4 values in a byte
         B_PACK_DIVISOR: tl.constexpr = 2 if b_ptr.dtype.element_ty == tl.uint8 else 1
         PACKED_BLOCK_K_B: tl.constexpr = BLOCK_SIZE_K // B_PACK_DIVISOR  # 64
-        MX_SCALE_BLOCK_K: tl.constexpr = BLOCK_SIZE_K // MX_PACK_DIVISOR  # 4
+        MX_SCALE_BLOCK_K_B: tl.constexpr = BLOCK_SIZE_K // MX_PACK_DIVISOR  # 4
 
-        mx_scale_ptr += off_expert * stride_mx_e
+        b_mx_scale_ptr += off_expert * stride_bmxe
 
-        if SWIZZLE_MX:
+        if SWIZZLE_MX_B:
             tl.static_assert(BLOCK_SIZE_N % 128 == 0)
-            tl.static_assert(MX_SCALE_BLOCK_K % 4 == 0)
-            PACKED_MX_BLOCK: tl.constexpr = (MX_SCALE_BLOCK_K // 4) * 32 * 4 * 4
-            offs_inner = tl.arange(0, PACKED_MX_BLOCK)
+            tl.static_assert(MX_SCALE_BLOCK_K_B % 4 == 0)
+            PACKED_MX_BLOCK_B: tl.constexpr = (MX_SCALE_BLOCK_K_B // 4) * 32 * 4 * 4
+            offs_inner = tl.arange(0, PACKED_MX_BLOCK_B)
             offs_scale_n = (pid_n * (BLOCK_SIZE_N // 128) + tl.arange(0, BLOCK_SIZE_N // 128)) % N
             offs_scale_n = tl.max_contiguous(tl.multiple_of(offs_scale_n, BLOCK_SIZE_N // 128), BLOCK_SIZE_N // 128)
 
-            mx_scale_ptrs = mx_scale_ptr + offs_scale_n.to(tl.int64)[:, None] * stride_mx_n + offs_inner[None, :]
+            b_mx_scale_ptrs = b_mx_scale_ptr + offs_scale_n.to(tl.int64)[:, None] * stride_bmxn + offs_inner[None, :]
         else:
-            offs_scale_k = tl.arange(0, MX_SCALE_BLOCK_K)
+            offs_scale_bk = tl.arange(0, MX_SCALE_BLOCK_K_B)
             offs_scale_n = offs_b_n
             # K dimension must be the last dimension for the scales
-            mx_scale_ptrs = mx_scale_ptr + offs_scale_k.to(tl.int64)[None, :] * stride_mx_k + offs_scale_n.to(tl.int64)[:, None] * stride_mx_n
+            b_mx_scale_ptrs = b_mx_scale_ptr + offs_scale_bk.to(tl.int64)[None, :] * stride_bmxk + \
+                offs_scale_n.to(tl.int64)[:, None] * stride_bmxn
+    else:
+        b_mx_scale_ptrs = None
+        B_PACK_DIVISOR: tl.constexpr = 1
+        MX_SCALE_BLOCK_K_B: tl.constexpr = 1
+        PACKED_BLOCK_K_B: tl.constexpr = BLOCK_SIZE_K
 
+    offs_a_k = tl.arange(0, PACKED_BLOCK_K_A)
     offs_b_k = tl.arange(0, PACKED_BLOCK_K_B)
-    offs_a_k = tl.arange(0, BLOCK_SIZE_K)
-
-    a_ptrs = a_ptr + (offs_token[:, None] // top_k * stride_am +
-                      offs_a_k[None, :] * stride_ak)
-
-    b_ptrs = b_ptr + off_expert * stride_be + (offs_b_k[:, None] * stride_bk +
-                                                offs_b_n[None, :] * stride_bn)
+    a_ptrs = a_ptr + (offs_token[:, None] // top_k * stride_am + offs_a_k[None, :] * stride_ak)
+    b_ptrs = b_ptr + off_expert * stride_be + (offs_b_k[:, None] * stride_bk + offs_b_n[None, :] * stride_bn)
 
     # -----------------------------------------------------------
     # Iterate to compute a block of the C matrix.
@@ -208,28 +246,42 @@ def _fused_moe_kernel(
         # K dimension.
         a = tl.load(a_ptrs,
                     mask=token_mask[:, None] &
-                    (offs_a_k[None, :] < K - k * BLOCK_SIZE_K),
+                    (offs_a_k[None, :] < (K - k * BLOCK_SIZE_K) // A_PACK_DIVISOR),
                     other=0.0)
         b = tl.load(b_ptrs,
                     mask=offs_b_k[:, None] < (K - k * BLOCK_SIZE_K) // B_PACK_DIVISOR,
                     other=0.0)
         # We accumulate along the K dimension.
-        if is_microscaled_format:
-            x_format: tl.constexpr = get_scaled_dot_format_string(a.dtype)
-            mx_format: tl.constexpr = get_scaled_dot_format_string(b.dtype)
-            a_scales = tl.full((BLOCK_SIZE_M, BLOCK_SIZE_K // MX_PACK_DIVISOR), 127, dtype=tl.uint8)
-            if SWIZZLE_MX:
-                b_mx_scales = _unswizzle_mx_block(tl.load(mx_scale_ptrs))
+        if is_a_microscaled_format or is_b_microscaled_format:
+            a_format: tl.constexpr = get_scaled_dot_format_string(a.dtype)
+            b_format: tl.constexpr = get_scaled_dot_format_string(b.dtype)
+            if is_a_microscaled_format:
+                if SWIZZLE_MX_A:
+                    a_mx_scales = _unswizzle_mx_block(tl.load(a_mx_scale_ptrs))
+                else:
+                    mask_ak_scale = offs_scale_ak < (K - k * BLOCK_SIZE_K) // MX_PACK_DIVISOR
+                    a_mx_scales = tl.load(a_mx_scale_ptrs, mask=mask_ak_scale[None, :], other=0.0)
             else:
-                mask_k_scale = offs_scale_k < (K - k * BLOCK_SIZE_K) // MX_PACK_DIVISOR
-                b_mx_scales = tl.load(mx_scale_ptrs, mask=mask_k_scale[None, :], other=0.0)
-            accumulator = tl.dot_scaled(a, a_scales, x_format, b, b_mx_scales, mx_format, acc=accumulator, fast_math=True)
-            if SWIZZLE_MX:
-                mx_scale_ptrs += MX_SCALE_BLOCK_K // 4 * stride_mx_k
+                a_mx_scales = None
+            if SWIZZLE_MX_B:
+                b_mx_scales = _unswizzle_mx_block(tl.load(b_mx_scale_ptrs))
             else:
-                mx_scale_ptrs += MX_SCALE_BLOCK_K * stride_mx_k
+                mask_bk_scale = offs_scale_bk < (K - k * BLOCK_SIZE_K) // MX_PACK_DIVISOR
+                b_mx_scales = tl.load(b_mx_scale_ptrs, mask=mask_bk_scale[None, :], other=0.0)
+
+            accumulator = tl.dot_scaled(a, a_mx_scales, a_format, b, b_mx_scales, b_format, acc=accumulator, fast_math=True)
+
+            if is_a_microscaled_format:
+                if SWIZZLE_MX_A:
+                    a_mx_scale_ptrs += MX_SCALE_BLOCK_K_A // 4 * stride_amxk
+                else:
+                    a_mx_scale_ptrs += MX_SCALE_BLOCK_K_A * stride_amxk
+            if SWIZZLE_MX_B:
+                b_mx_scale_ptrs += MX_SCALE_BLOCK_K_B // 4 * stride_bmxk
+            else:
+                b_mx_scale_ptrs += MX_SCALE_BLOCK_K_B * stride_bmxk
         # Advance the ptrs to the next K block.
-        a_ptrs += BLOCK_SIZE_K * stride_ak
+        a_ptrs += PACKED_BLOCK_K_A * stride_ak
         b_ptrs += PACKED_BLOCK_K_B * stride_bk
 
     # Multiply with the scalar weight
@@ -254,6 +306,7 @@ def fused_moe_mxfp4(A: torch.Tensor,
                     C: torch.Tensor,
                     A_scale: torch.Tensor,
                     B_scale: torch.Tensor,
+                    A_mx_scale: torch.Tensor,
                     B_mx_scale: torch.Tensor,
                     topk_weights: torch.Tensor,
                     topk_ids: torch.Tensor,
@@ -273,6 +326,13 @@ def fused_moe_mxfp4(A: torch.Tensor,
 
     assert A_scale is not None
     assert B_scale is not None
+    if A.dtype == torch.uint8:
+        assert A_mx_scale is not None, "A_mx_scale should exist when A is mxfp4"
+        A_mx_scale_strid_m, A_mx_scale_strid_k = A_mx_scale.stride()
+    else:
+        assert A_mx_scale is None, "A_mx_scale should not exist when A is not mxfp4"
+        A_mx_scale_strid_m, A_mx_scale_strid_k = None, None
+    # NOTE: Only supports B_mx_scale
     assert B_mx_scale is not None
 
     EM = sorted_token_ids.shape[0]
@@ -287,16 +347,18 @@ def fused_moe_mxfp4(A: torch.Tensor,
     grid = lambda META: (triton.cdiv(EM, META['BLOCK_SIZE_M']) * triton.cdiv(
         B.shape[1], META['BLOCK_SIZE_N']), )
     _fused_moe_kernel[grid](
-        A, B, C, A_scale, B_scale, B_mx_scale,
+        A, B, C, A_scale, B_scale, A_mx_scale, B_mx_scale,
         topk_weights, sorted_token_ids, expert_ids, num_tokens_post_padded,
         B.shape[1], A.shape[1] - _PADDING_SIZE, EM, topk_ids.numel(),
         A.stride(0), A.stride(1),
         B.stride(0), B.stride(2), B.stride(1),
         C.stride(1), C.stride(2),
+        A_mx_scale_strid_m, A_mx_scale_strid_k,
         B_mx_scale.stride(0), B_mx_scale.stride(2), B_mx_scale.stride(1),
         MUL_ROUTED_WEIGHT=mul_routed_weight,
         top_k=top_k,
         compute_type=compute_type,
-        SWIZZLE_MX=swizzle_mx,
+        SWIZZLE_MX_A=swizzle_mx,
+        SWIZZLE_MX_B=swizzle_mx,
         **config,
     )

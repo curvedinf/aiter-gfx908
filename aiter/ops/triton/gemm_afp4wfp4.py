@@ -22,8 +22,8 @@ def _gemm_afp4_wfp4_kernel(
     K,
     stride_am,
     stride_ak,
-    stride_bn,
     stride_bk,
+    stride_bn,
     stride_cm,
     stride_cn,
     stride_asm,
@@ -121,6 +121,7 @@ def _gemm_afp4_wfp4_kernel(
 # Wrapper for gemm kernel.
 def gemm_afp4wfp4(x,
                 w,
+                y,
                 x_scales,
                 w_scales,
                 dtype: Optional[float] = torch.bfloat16,
@@ -134,7 +135,7 @@ def gemm_afp4wfp4(x,
 
     Key parameters:
     - X: Matrix X with shape (M, K).
-    - W: Matrix W with shape (N, K).
+    - W: Matrix W with shape (K, N).
     - X_scales: Matrix with shape (M, K // 32)
     - W_scales: Matrix with shape (N, K // 32)
 
@@ -143,9 +144,7 @@ def gemm_afp4wfp4(x,
     """
     
     M, K = x.shape
-    N, K = w.shape
-
-    y = torch.empty((M, N), dtype=dtype, device=x.device)
+    K, N = w.shape
 
     BLOCK_SIZE_M = 256
     BLOCK_SIZE_N = 256
@@ -187,6 +186,4 @@ def gemm_afp4wfp4(x,
         num_stages=num_stages,
         matrix_instr_nonkdim=matrix_instr_nonkdim,
     )
-
-    return y
 

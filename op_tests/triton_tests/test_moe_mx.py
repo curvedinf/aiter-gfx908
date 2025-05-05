@@ -55,7 +55,6 @@ def test_fused_moe(M: int, N: int, K: int, top_k: int, E: int, a_dtype_str: str,
     fp16_dtype = torch.float16 if a_dtype_str == "fp16" else torch.bfloat16
     a_tri = alloc_rand((M, K) , dtype=fp16_dtype, device='cuda', requires_grad=False)
     b_tri = alloc_rand((E, N, K), dtype=fp16_dtype, device='cuda', requires_grad=False)
-    # TODO: what is the output dtype
     c_tri = torch.zeros((M, top_k, N), dtype=c_dtype, device='cuda', requires_grad=False)
     a_scale = torch.tensor([1.00], dtype=torch.float32, device="cuda")
     b_scale = torch.tensor([1.00] * E, dtype=torch.float32, device="cuda")

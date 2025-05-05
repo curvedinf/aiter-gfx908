@@ -15,6 +15,7 @@ import logging
 import json
 import multiprocessing
 from packaging.version import parse, Version
+import subprocess
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, f'{this_dir}/utils/')
@@ -119,6 +120,38 @@ def validate_and_update_archs():
         arch in allowed_archs for arch in archs
     ), f"One of GPU archs of {archs} is invalid or not supported"
     return archs
+
+@functools.lru_cache()
+def check_flags_hip(flag:str):
+    hipcc_path = shutil.which("hipcc")
+    with open(f"{bd_dir}/tmp.hip", 'w') as f:
+        f.write("int main() { return 0; }")
+    cmd = f"{hipcc_path} {flag} -o {bd_dir}/tmp.out {bd_dir}/tmp.hip"
+
+    out= os.system(cmd)
+    print(" --------",out)
+
+    result = subprocess.run(
+        [hipcc_path, flag, "-o", f"{bd_dir}/tmp.out", f"{bd_dir}/tmp.hip"],
+        shell=True,
+        executable="/bin/sh"
+    )
+
+    print(" ++++++++",result)
+
+    print(os.system("echo $SHELL") ) # 通常显示 /bin/sh
+    print(subprocess.run("echo $SHELL", shell=True) ) # 通常显示 /bin/bash
+
+
+
+    # remove the temporary files
+    os.remove(f"{bd_dir}/tmp.hip")
+    if os.path.exists(f"{bd_dir}/tmp.out"):
+        os.remove(f"{bd_dir}/tmp.out")
+
+    # print("return code: ", ret)
+
+    return [] if result.returncode == 0 else [flag]
 
 
 def check_and_set_ninja_worker():
@@ -256,18 +289,16 @@ def build_module(
         # Imitate https://github.com/ROCm/composable_kernel/blob/c8b6b64240e840a7decf76dfaa13c37da5294c4a/CMakeLists.txt#L190-L214
         hip_version = parse(get_hip_version().split()[-1].rstrip("-").replace("-", "+"))
         if hip_version > Version("5.7.23302"):
-            flags_hip += ["-fno-offload-uniform-block"]
+            flags_hip += check_flags_hip("-fno-offload-uniform-block")
         if hip_version > Version("6.1.40090"):
-            flags_hip += ["-mllvm", "-enable-post-misched=0"]
+            flags_hip += check_flags_hip("-mllvm -enable-post-misched=0")
         if hip_version > Version("6.2.41132"):
-            flags_hip += [
-                "-mllvm",
-                "-amdgpu-early-inline-all=true",
-                "-mllvm",
-                "-amdgpu-function-calls=false",
-            ]
+            flags_hip += check_flags_hip(
+                "-mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false")
         if hip_version > Version("6.2.41133"):
-            flags_hip += ["-mllvm", "-amdgpu-coerce-illegal-types=1"]
+            flags_hip += check_flags_hip(" -amdgpu-coerce-illegal-types=1")
+
+        sys.exit(0)
 
         flags_cc += flags_extra_cc
         flags_hip += flags_extra_hip

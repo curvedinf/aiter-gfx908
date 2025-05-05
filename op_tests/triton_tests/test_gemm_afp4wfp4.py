@@ -94,7 +94,7 @@ def run_torch(x, w, x_scales, w_scales, dtype):
 
 @pytest.mark.parametrize("M, N, K", get_x_vals())
 @pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
-def test_gemm_a16_w16(M: int, N: int, K: int, dtype):
+def test_gemm_afp4_wfp4(M: int, N: int, K: int, dtype):
     x, w, x_scales, w_scales = generate_gemm_afp4wfp4_inputs(M, N, K)
     out = torch.empty(x.shape[0], w.shape[1], device=x.device, dtype=dtype)
 

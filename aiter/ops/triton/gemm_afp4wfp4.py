@@ -97,8 +97,8 @@ def _gemm_afp4_wfp4_kernel(
             a = tl.load(a_ptrs)
             b = tl.load(b_ptrs)
         else:
-            a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0)
-            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0)
+            a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * (BLOCK_SIZE_K // 2), other=0)
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0)
 
         accumulator += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
 

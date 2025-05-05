@@ -26,7 +26,7 @@ str_to_torch_dtype = {
     "fp16": torch.float16,
     "fp8_e4m3": torch.float8_e4m3fn if get_cdna_version() == 4 else torch.float8_e4m3fnuz,
     "fp8_e5m2": torch.float8_e5m2 if get_cdna_version() == 4 else torch.float8_e5m2fnuz,
-    "mxfp4": torch.uint8,
+    "mxfp4_e2m1": torch.uint8,
 }
 
 

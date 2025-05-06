@@ -322,6 +322,31 @@ def _attn_fwd_inner(
 
 
 @triton.jit
+def permute_seqlen_id(seqlen_id, seqlen, num_xcd: tl.constexpr):
+    """
+    We divide that seqlen q dim into 16 segments
+    XCD 0 takes the first and the last segment. XCD1 takes the second and second from the last segment, so and so forth. So we ensure the access to sequence is continuous and the workload is balanced
+    Args:
+        seqlen_id: Current sequence index (0 to seqlen-1).
+        seqlen: Total sequence length // block_size.
+        num_xcd: Number of XCDs.
+
+    Returns:
+        Permuted sequence index.
+    """
+    segment_size = seqlen // (num_xcd * 2)
+
+    xcd = seqlen_id % num_xcd
+    local_pid = seqlen_id // num_xcd
+
+    second_segment = local_pid // segment_size
+    segment_offset = xcd * segment_size + second_segment * ((num_xcd - xcd) * 2 - 1) * segment_size
+    mapped_seqlen_id = segment_offset + (local_pid % segment_size)
+
+    return mapped_seqlen_id
+
+
+@triton.jit
 def _attn_fwd(q_ptr: torch.Tensor, 
             k_ptr: torch.Tensor, 
             v_ptr: torch.Tensor,
@@ -362,10 +387,13 @@ def _attn_fwd(q_ptr: torch.Tensor,
             FP8_MAX: tl.constexpr,
             VARLEN: tl.constexpr,
 ):
+    NUM_XCDS :tl.constexpr = 8
     #calculate offsets
     off_z = tl.program_id(0) #batch
     off_q_head = tl.program_id(1)  #num_q_heads
     start_m = tl.program_id(2) #seqlen_q
+    # if (SEQLEN_Q // BLOCK_M) % NUM_XCDS == 0:
+    #     start_m = permute_seqlen_id(start_m, SEQLEN_Q // BLOCK_M, NUM_XCDS)
 
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)

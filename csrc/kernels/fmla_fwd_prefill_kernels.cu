@@ -1510,106 +1510,103 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
 
     const int32_t num_splits   = params.num_splits;
     const int32_t split_offset = bidx * params.num_splits;
-    assert(num_splits <= kMaxSplits);
+    assert((num_splits > 1) && (num_splits <= kMaxSplits));
 
-    if (num_splits > 1)
+    const int32_t lane_id          = ck_tile::get_lane_id();
+    const int32_t hidx             = blockIdx.y;
+    const int32_t sidx             = blockIdx.x;
+    const int32_t hsidx            = hidx * params.size_s + sidx;
+    const int32_t size_hs          = params.size_h * params.size_s;
+    const index_t offset_lse_accum = split_offset * size_hs + hsidx;
+    const index_t offset_lse       = bidx * size_hs + hsidx;
+
+    if (ck_tile::get_warp_id() == 0)
     {
-        const int32_t lane_id          = ck_tile::get_lane_id();
-        const int32_t hidx             = blockIdx.y;
-        const int32_t sidx             = blockIdx.x;
-        const int32_t hsidx            = hidx * params.size_s + sidx;
-        const int32_t size_hs          = params.size_h * params.size_s;
-        const index_t offset_lse_accum = split_offset * size_hs + hsidx;
-        const index_t offset_lse       = bidx * size_hs + hsidx;
+        const acc_t* p_lse_accum = reinterpret_cast<acc_t*>(params.p_softmax_lseaccum) + offset_lse_accum;
+        acc_t* p_lse             = reinterpret_cast<acc_t*>(params.p_softmax_lse) + offset_lse;
 
-        if (ck_tile::get_warp_id() == 0)
+        constexpr int32_t kNumLsePerThr = ck_tile::integer_divide_ceil(kMaxSplits, ck_tile::get_warp_size());
+        acc_t local_lse[kNumLsePerThr];
+
+        // Load thread local LSE and get local max LSE
+        acc_t max_lse = -ck_tile::numeric<acc_t>::infinity();
+        #pragma unroll
+        for (int32_t i = 0; i < kNumLsePerThr; ++i)
         {
-            const acc_t* p_lse_accum = reinterpret_cast<acc_t*>(params.p_softmax_lseaccum) + offset_lse_accum;
-            acc_t* p_lse             = reinterpret_cast<acc_t*>(params.p_softmax_lse) + offset_lse;
-
-            constexpr int32_t kNumLsePerThr = ck_tile::integer_divide_ceil(kMaxSplits, ck_tile::get_warp_size());
-            acc_t local_lse[kNumLsePerThr];
-
-            // Load thread local LSE and get local max LSE
-            acc_t max_lse = -ck_tile::numeric<acc_t>::infinity();
-            #pragma unroll
-            for (int32_t i = 0; i < kNumLsePerThr; ++i)
-            {
-                const int32_t split_idx = i * ck_tile::get_warp_size() + lane_id;
-                const acc_t lse =
-                    (split_idx < num_splits) ? p_lse_accum[split_idx * size_hs] : -ck_tile::numeric<acc_t>::infinity();
-                local_lse[i] = lse;
-                max_lse = ck_tile::max(max_lse, lse);
-            }
-
-            // Get global max LSE
-            #pragma unroll
-            for (int32_t offset = ck_tile::get_warp_size() / 2; offset > 0; offset /= 2)
-            {
-                max_lse = ck_tile::max(max_lse, __shfl_xor(max_lse, offset));
-            }
-
-            // Get sum of LSE
-            acc_t sum_lse = 0.f;
-            #pragma unroll
-            for (int32_t i = 0; i < kNumLsePerThr; ++i)
-            {
-                sum_lse += ck_tile::exp(local_lse[i] - max_lse);
-            }
-            #pragma unroll
-            for (int32_t offset = ck_tile::get_warp_size() / 2; offset > 0; offset /= 2)
-            {
-                sum_lse += __shfl_xor(sum_lse, offset);
-            }
-
-            // Get global LSE
-            acc_t global_lse = ((sum_lse == 0.f) || (sum_lse != sum_lse)) ?
-                ck_tile::numeric<acc_t>::infinity() : (ck_tile::log(sum_lse) + max_lse);
-            if (lane_id == 0)
-            {
-                *p_lse = global_lse;
-            }
-
-            // Write LSE to LDS
-            #pragma unroll
-            for (int32_t i = 0; i < kNumLsePerThr; ++i)
-            {
-                const int32_t split_idx = i * ck_tile::get_warp_size() + lane_id;
-                if (split_idx < num_splits)
-                {
-                    lds_lse_scale[split_idx] = ck_tile::exp(local_lse[i] - global_lse);
-                }
-            }
+            const int32_t split_idx = i * ck_tile::get_warp_size() + lane_id;
+            const acc_t lse =
+                (split_idx < num_splits) ? p_lse_accum[split_idx * size_hs] : -ck_tile::numeric<acc_t>::infinity();
+            local_lse[i] = lse;
+            max_lse = ck_tile::max(max_lse, lse);
         }
 
-        __builtin_amdgcn_sched_barrier(0);
-        ck_tile::block_sync_lds();
-
-        static_assert(Traits::kSizeDV % Traits::kNumThreadsCombine == 0);
-
-        auto oaccu_window =
-            Policy::MakeOaccuTileWindow(params.p_output_accum, hsidx, size_hs, split_offset, num_splits);
-
-        auto reg_out = ck_tile::make_static_distributed_tensor<acc_t>(
-            decltype(ck_tile::load_tile(oaccu_window))::get_tile_distribution());
-        ck_tile::set_tile(reg_out, 0.f);
-
-        for (int32_t split_idx = 0; split_idx < num_splits; ++split_idx)
+        // Get global max LSE
+        #pragma unroll
+        for (int32_t offset = ck_tile::get_warp_size() / 2; offset > 0; offset /= 2)
         {
-            const acc_t lse_scale = lds_lse_scale[split_idx];
-            auto oaccu = ck_tile::load_tile(oaccu_window);
-            ck_tile::sweep_tile(oaccu, [&](auto idx) {
-                reg_out(idx) += lse_scale * oaccu(idx);
-            });
-            ck_tile::move_tile_window(oaccu_window, {size_hs, 0});
+            max_lse = ck_tile::max(max_lse, __shfl_xor(max_lse, offset));
         }
 
-        auto dram_out = Policy::MakeOutputTileWindow(params.p_output,
-                                                     bidx * params.stride_b_o,
-                                                     hidx * params.stride_h_o,
-                                                     sidx * params.stride_s_o);
-        ck_tile::store_tile(dram_out, ck_tile::cast_tile<scalar_t>(reg_out));
+        // Get sum of LSE
+        acc_t sum_lse = 0.f;
+        #pragma unroll
+        for (int32_t i = 0; i < kNumLsePerThr; ++i)
+        {
+            sum_lse += ck_tile::exp(local_lse[i] - max_lse);
+        }
+        #pragma unroll
+        for (int32_t offset = ck_tile::get_warp_size() / 2; offset > 0; offset /= 2)
+        {
+            sum_lse += __shfl_xor(sum_lse, offset);
+        }
+
+        // Get global LSE
+        acc_t global_lse = ((sum_lse == 0.f) || (sum_lse != sum_lse)) ?
+            ck_tile::numeric<acc_t>::infinity() : (ck_tile::log(sum_lse) + max_lse);
+        if (lane_id == 0)
+        {
+            *p_lse = global_lse;
+        }
+
+        // Write LSE to LDS
+        #pragma unroll
+        for (int32_t i = 0; i < kNumLsePerThr; ++i)
+        {
+            const int32_t split_idx = i * ck_tile::get_warp_size() + lane_id;
+            if (split_idx < num_splits)
+            {
+                lds_lse_scale[split_idx] = ck_tile::exp(local_lse[i] - global_lse);
+            }
+        }
     }
+
+    __builtin_amdgcn_sched_barrier(0);
+    ck_tile::block_sync_lds();
+
+    static_assert(Traits::kSizeDV % Traits::kNumThreadsCombine == 0);
+
+    auto oaccu_window =
+        Policy::MakeOaccuTileWindow(params.p_output_accum, hsidx, size_hs, split_offset, num_splits);
+
+    auto reg_out = ck_tile::make_static_distributed_tensor<acc_t>(
+        decltype(ck_tile::load_tile(oaccu_window))::get_tile_distribution());
+    ck_tile::set_tile(reg_out, 0.f);
+
+    for (int32_t split_idx = 0; split_idx < num_splits; ++split_idx)
+    {
+        const acc_t lse_scale = lds_lse_scale[split_idx];
+        auto oaccu = ck_tile::load_tile(oaccu_window);
+        ck_tile::sweep_tile(oaccu, [&](auto idx) {
+            reg_out(idx) += lse_scale * oaccu(idx);
+        });
+        ck_tile::move_tile_window(oaccu_window, {size_hs, 0});
+    }
+
+    auto dram_out = Policy::MakeOutputTileWindow(params.p_output,
+                                                    bidx * params.stride_b_o,
+                                                    hidx * params.stride_h_o,
+                                                    sidx * params.stride_s_o);
+    ck_tile::store_tile(dram_out, ck_tile::cast_tile<scalar_t>(reg_out));
 }
 
 // =====================================================================================================================
@@ -1628,8 +1625,11 @@ void dispatch_fmla_fwd_splictkv_prefill(
     const dim3 grid_attn = dim3(num_blk, params.size_h, params.size_b);
     const dim3 grid_comb = dim3(params.size_s, params.size_h, params.size_b);
 
+    printf("[RJM] grid_attn=(%d, %d, %d)\n", grid_attn.x, grid_attn.y, grid_attn.z);
+
     if (params.num_splits > 1)
     {
+        printf("[RJM] grid_comb=(%d, %d, %d)\n", grid_comb.x, grid_comb.y, grid_comb.z);
         auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, true>;
         auto kn_comb =
             (params.num_splits <= 32)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 32,  scalar_t, acc_t> :
@@ -1761,6 +1761,8 @@ int32_t calculate_num_splits(
 
     const int32_t num_m_blocks = ck_tile::integer_divide_ceil(size_s, Traits::kBlockM);
     const int32_t num_n_blocks = ck_tile::integer_divide_ceil(Traits::kSizeDV, Traits::kBlockN1);
+
+    printf("[RJM] cu_count=%d, kCuReuse=%d\n", cu_count, Traits::kCuReuse);
 
     return num_splits_heuristic(size_b * size_h * num_m_blocks, cu_count * Traits::kCuReuse, num_n_blocks, 128);
 }

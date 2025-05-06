@@ -1846,8 +1846,8 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.stride_sp_oacc = (num_splits > 1) ? output_accum.stride(1) : 0;
     params.stride_s_oacc = (num_splits > 1) ? output_accum.stride(2) : 0;
     params.stride_b_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(0) : 0;
-    params.stride_h_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(1) : 0;
-    params.stride_sp_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(2) : 0;
+    params.stride_h_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(2) : 0;
+    params.stride_sp_lseacc = (num_splits > 1) ? softmax_lseaccum.stride(1) : 0;
 
 	using acc_t = float;
     DISPATCH_FMLA_TYPES(

@@ -320,6 +320,17 @@ def _attn_fwd_inner(
     
     return acc, l_i, m_i
 
+@triton.jit
+def map_index(k, N):
+    r = k % 8
+    m = k // 8
+    q = N // 8
+    t = N - 8 * q
+    u = min(r, t + 1)
+    new_index = u * q + (r - u) * (q - 1) + r + m
+    return new_index
+
+
 
 @triton.jit
 def _attn_fwd(q_ptr: torch.Tensor, 
@@ -361,11 +372,30 @@ def _attn_fwd(q_ptr: torch.Tensor,
             IS_FP8: tl.constexpr,
             FP8_MAX: tl.constexpr,
             VARLEN: tl.constexpr,
+            BATCH,
+            NUM_XCD: tl.constexpr,
 ):
     #calculate offsets
-    off_z = tl.program_id(0) #batch
-    off_q_head = tl.program_id(1)  #num_q_heads
-    start_m = tl.program_id(2) #seqlen_q
+    wid = tl.program_id(0) # 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
+    
+    NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
+    CHUNK_BLOCKS_SIZE: tl.constexpr = 4
+
+    # 1. fastest changing dim is the q_head dim. At every <CHUNK_BLOCKS_SIZE>th wid, change the sequence block (start_m).
+    # 2. When we are done with <CHUNK_BLOCKS_SIZE> blocks, we move to the next set of <NUM_XCD> q_heads.
+    # 3. Batch changes last.
+    # 
+    # This ensures equal workload workgroups being sent to the XCDs in a "round robin" round, since they have the same start_m and only a different q_head id.
+    # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 cache reuse.
+    off_q_head = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_Q_HEADS
+
+    # remap the q_head indices so that the ones that share the same k head are on the same XCD (0,8,16,... should map to 0,1,2...)
+    off_q_head = map_index(off_q_head, NUM_Q_HEADS-1)
+
+
+    start_m = ((wid // NUM_XCD ) % CHUNK_BLOCKS_SIZE + wid // (CHUNK_BLOCKS_SIZE * NUM_Q_HEADS) * CHUNK_BLOCKS_SIZE) % NUM_BLOCKS
+    off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH
+
 
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
@@ -747,7 +777,9 @@ def _flash_attn_forward(
         'num_stages': 1,
     }
 
-    grid = lambda META:(batch, num_q_heads, triton.cdiv(seqlen_q, META['BLOCK_M']))
+    # grid = lambda META:(batch, num_q_heads, triton.cdiv(seqlen_q, META['BLOCK_M']))
+    grid = lambda META:(batch*num_q_heads*triton.cdiv(seqlen_q, META['BLOCK_M']),)
+    # print("Changes applied")
     _attn_fwd[grid](q,
                     k,
                     v,
@@ -793,6 +825,8 @@ def _flash_attn_forward(
                     IS_FP8=IS_FP8,
                     FP8_MAX=FP8_MAX,
                     VARLEN=is_varlen,
+                    BATCH=batch,
+                    NUM_XCD=8,
                     **config
     )
 

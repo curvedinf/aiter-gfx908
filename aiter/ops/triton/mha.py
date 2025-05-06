@@ -392,8 +392,8 @@ def _attn_fwd(q_ptr: torch.Tensor,
     off_z = tl.program_id(0) #batch
     off_q_head = tl.program_id(1)  #num_q_heads
     start_m = tl.program_id(2) #seqlen_q
-    # if (SEQLEN_Q // BLOCK_M) % NUM_XCDS == 0:
-    #     start_m = permute_seqlen_id(start_m, SEQLEN_Q // BLOCK_M, NUM_XCDS)
+    if (SEQLEN_Q // BLOCK_M) % NUM_XCDS == 0:
+        start_m = permute_seqlen_id(start_m, SEQLEN_Q // BLOCK_M, NUM_XCDS)
 
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)

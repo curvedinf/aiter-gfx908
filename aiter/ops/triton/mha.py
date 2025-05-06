@@ -321,11 +321,11 @@ def _attn_fwd_inner(
     return acc, l_i, m_i
 
 @triton.jit
-def map_index(k, N):
-    r = k % 8
-    m = k // 8
-    q = N // 8
-    t = N - 8 * q
+def _remap_XCD(k, N, NUM_XCD):
+    r = k % NUM_XCD
+    m = k // NUM_XCD
+    q = N // NUM_XCD
+    t = N - NUM_XCD * q
     u = min(r, t + 1)
     new_index = u * q + (r - u) * (q - 1) + r + m
     return new_index
@@ -379,22 +379,32 @@ def _attn_fwd(q_ptr: torch.Tensor,
     wid = tl.program_id(0) # 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
     
     NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
-    CHUNK_BLOCKS_SIZE: tl.constexpr = 4
 
-    # 1. fastest changing dim is the q_head dim. At every <CHUNK_BLOCKS_SIZE>th wid, change the sequence block (start_m).
+    CHUNK_BLOCKS_SIZE: tl.constexpr = 38 // (NUM_Q_HEADS // NUM_K_HEADS)
+
+    # 1. Fastest changing dim is the q_head dim. At every <NUM_XCD>th wid, increase the sequence block id (start_m).
     # 2. When we are done with <CHUNK_BLOCKS_SIZE> blocks, we move to the next set of <NUM_XCD> q_heads.
     # 3. Batch changes last.
     # 
     # This ensures equal workload workgroups being sent to the XCDs in a "round robin" round, since they have the same start_m and only a different q_head id.
-    # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 cache reuse.
+    # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
     off_q_head = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_Q_HEADS
-
-    # remap the q_head indices so that the ones that share the same k head are on the same XCD (0,8,16,... should map to 0,1,2...)
-    off_q_head = map_index(off_q_head, NUM_Q_HEADS-1)
-
 
     start_m = ((wid // NUM_XCD ) % CHUNK_BLOCKS_SIZE + wid // (CHUNK_BLOCKS_SIZE * NUM_Q_HEADS) * CHUNK_BLOCKS_SIZE) % NUM_BLOCKS
     off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH
+
+    # so XCD 0 should get workgroups with indices (batch, head q idx, start_m)
+    # (0, 0, 0), (0, 0, 1), (0, 0, 2), ..., (0, 0, CHUNK_BLOCKS_SIZE), (0, NUM_XCD, 0)
+    # XCD 2
+    # (0, 1, 0), (0, 1, 1), (0, 1, 2), ..., (0, 1, CHUNK_BLOCKS_SIZE), (0, NUM_XCD+1, 0)
+    # ...
+    # XCD <NUM_XCD - 1>
+    # (0, NUM_XCD-1, 0), (0, NUM_XCD-1, 1), (0, NUM_XCD-1, 2), ..., (0, NUM_XCD-1, CHUNK_BLOCKS_SIZE), (0, 2 * NUM_XCD-1, 0)
+
+    # Notice that on the same round robin turn, XCDs get the same start_m, i.e. workgroups with equal workloads.
+
+    # TODO: remap the q_head indices so that the ones that share the same k head are on the same XCD (0,NUM_XCD,NUM_XCD*2,... should map to 0,1,2...)
+    # off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS-1, NUM_XCD)
 
 
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)

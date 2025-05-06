@@ -12,9 +12,9 @@
 // Utils
 //
 
-CK_TILE_DEVICE bool IsDebugThreadBlock()
+CK_TILE_DEVICE bool IsDebugThreadBlock(const int x = 0, const int y = 0, const int z = 0)
 {
-    return blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z==0;
+    return blockIdx.x == x && blockIdx.y == y && blockIdx.z == z;
 }
 
 // Returns count of warps which don't contain any idle thread.
@@ -1515,7 +1515,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
     const int32_t lane_id          = ck_tile::get_lane_id();
     const int32_t hidx             = blockIdx.y;
     const int32_t sidx             = blockIdx.x;
-    const int32_t hsidx            = hidx * params.size_s + sidx;
+    const int32_t hsidx            = hidx + sidx * params.size_h;
     const int32_t size_hs          = params.size_h * params.size_s;
     const index_t offset_lse_accum = split_offset * size_hs + hsidx;
     const index_t offset_lse       = bidx * size_hs + hsidx;
@@ -1603,9 +1603,9 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
     }
 
     auto dram_out = Policy::MakeOutputTileWindow(params.p_output,
-                                                    bidx * params.stride_b_o,
-                                                    hidx * params.stride_h_o,
-                                                    sidx * params.stride_s_o);
+                                                 bidx * params.stride_b_o,
+                                                 hidx * params.stride_h_o,
+                                                 sidx * params.stride_s_o);
     ck_tile::store_tile(dram_out, ck_tile::cast_tile<scalar_t>(reg_out));
 }
 

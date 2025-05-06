@@ -111,8 +111,8 @@ def _gemm_afp4_wfp4_kernel(
     c = accumulator.to(c_ptr.type.element_ty)
 
     # Write back the block of the output matrix C with masks.
-    offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+    offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
+    offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     tl.store(c_ptrs, c, mask=c_mask)
@@ -148,13 +148,13 @@ def gemm_afp4wfp4(x,
 
     BLOCK_SIZE_M = 256
     BLOCK_SIZE_N = 256
-    BLOCK_SIZE_K = 64
+    BLOCK_SIZE_K = 256
     GROUP_SIZE_M = 4
     waves_per_eu = 1
     kpack = 1
-    num_warps = 4
+    num_warps = 8
     num_stages = 2
-    matrix_instr_nonkdim = 16
+    matrix_instr_nonkdim = 32
 
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), )
     _gemm_afp4_wfp4_kernel[grid](

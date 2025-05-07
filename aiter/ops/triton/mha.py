@@ -333,14 +333,14 @@ def _attn_fwd(q_ptr: torch.Tensor,
             s_dmask_ptr: torch.Tensor,
             dropout_mask_ptr: torch.Tensor,
             softmax_lse_ptr: torch.Tensor,
-            stride_qz, stride_qh, stride_qm, stride_qk,
-            stride_kz, stride_kh, stride_kn, stride_kk,
-            stride_vz, stride_vh, stride_vn, stride_vk,
-            stride_descale_q_z, stride_descale_k_z, stride_descale_v_z,
-            stride_oz, stride_oh, stride_om, stride_on,
-            stride_alibi_z, stride_alibi_h,
-            stride_sd_z, stride_sd_h, stride_sd_m, stride_sd_n,
-            stride_lse_z, stride_lse_h, stride_lse_m,
+            stride_qz: tl.int64, stride_qh: tl.int64, stride_qm: tl.int64, stride_qk: tl.int64,
+            stride_kz: tl.int64, stride_kh: tl.int64, stride_kn: tl.int64, stride_kk: tl.int64,
+            stride_vz: tl.int64, stride_vh: tl.int64, stride_vn: tl.int64, stride_vk: tl.int64,
+            stride_descale_q_z: tl.int64, stride_descale_k_z: tl.int64, stride_descale_v_z: tl.int64,
+            stride_oz: tl.int64, stride_oh: tl.int64, stride_om: tl.int64, stride_on: tl.int64,
+            stride_alibi_z: tl.int64, stride_alibi_h: tl.int64,
+            stride_sd_z: tl.int64, stride_sd_h: tl.int64, stride_sd_m: tl.int64, stride_sd_n: tl.int64,
+            stride_lse_z: tl.int64, stride_lse_h: tl.int64, stride_lse_m: tl.int64,
             sm_scale,
             cu_seqlens_q,
             cu_seqlens_k,
@@ -363,13 +363,13 @@ def _attn_fwd(q_ptr: torch.Tensor,
             VARLEN: tl.constexpr,
 ):
     #calculate offsets
-    off_z = tl.program_id(0) #batch
-    off_q_head = tl.program_id(1)  #num_q_heads
-    start_m = tl.program_id(2) #seqlen_q
+    off_z: tl.int64 = tl.program_id(0) #batch
+    off_q_head: tl.int64 = tl.program_id(1)  #num_q_heads
+    start_m: tl.int64 = tl.program_id(2) #seqlen_q
 
-    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    offs_n = tl.arange(0, BLOCK_N)
-    offs_d = tl.arange(0, BLOCK_DMODEL_POW2)
+    offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M).to(tl.int64)
+    offs_n = tl.arange(0, BLOCK_N).to(tl.int64)
+    offs_d = tl.arange(0, BLOCK_DMODEL_POW2).to(tl.int64)
 
     if VARLEN:
         cu_seqlens_q_start = tl.load(cu_seqlens_q + off_z)
@@ -419,7 +419,7 @@ def _attn_fwd(q_ptr: torch.Tensor,
                         offs_m[:, None] * stride_om + 
                         offs_d[None, :] * stride_on)
             acc = tl.zeros([BLOCK_M, BLOCK_DMODEL_POW2], dtype=out_ptr.type.element_ty)
-            out_mask = (offs_m[:, None] < seqlen_q) & (offs_d < BLOCK_DMODEL)
+            out_mask = (offs_m[:, None] < seqlen_q) & (offs_d[None, :] < BLOCK_DMODEL)
             tl.store(out_ptr + offs_out, acc, mask=out_mask)
 
             if softmax_lse_ptr is not None:

@@ -8,7 +8,7 @@ from aiter.test_common import checkAllclose, perftest
 from aiter import dtypes
 
 
-# @perftest()
+@perftest()
 def run_torch(input, weight, bias, eps, residual=None, x_bias=None):
     if x_bias is not None:
         input = input + x_bias
@@ -33,7 +33,7 @@ def run_torch(input, weight, bias, eps, residual=None, x_bias=None):
     return output, residual_out
 
 
-# @perftest()
+@perftest()
 def run_ck(input, weight, bias, eps, residual=None, x_bias=None):
     if residual is None:
         residual_out = None
@@ -55,7 +55,7 @@ def run_ck(input, weight, bias, eps, residual=None, x_bias=None):
     return output, residual_out
 
 
-# @perftest()
+@perftest()
 def run_asm(input, weight, bias, eps, residual=None):
     if residual is None:
         residual_out = None
@@ -98,11 +98,11 @@ def test_layernorm2d_fuseAdd(dtype, m, n):
     (b, res_b, *_), avg_b = run_ck(input, weight, bias, 1e-5, residual=res)
     (c, res_c, *_), avg_c = run_asm(input, weight, bias, 1e-5, residual=res)
 
-    #msg = f"[perf] dim: {str(dim):<20}, dtype: {dtype}, torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, asm avg: {avg_c:<8.2f} us,uplift: {avg_a/avg_b-1:<5.1%}"
-    #checkAllclose(a, b, atol=0.03, msg=msg)
-    #checkAllclose(res_a, res_b, msg="res check")
-    #checkAllclose(a, c, atol=0.03, msg="asm")
-    #checkAllclose(res_a, res_c, atol=0.01, msg="asm res")
+    msg = f"[perf] dim: {str(dim):<20}, dtype: {dtype}, torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, asm avg: {avg_c:<8.2f} us,uplift: {avg_a/avg_b-1:<5.1%}"
+    checkAllclose(a, b, atol=0.03, msg=msg)
+    checkAllclose(res_a, res_b, msg="res check")
+    checkAllclose(a, c, atol=0.03, msg="asm")
+    checkAllclose(res_a, res_c, atol=0.01, msg="asm res")
 
 
 # for dtype in [dtypes.fp16, dtypes.bf16]:

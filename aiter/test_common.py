@@ -9,10 +9,9 @@ import numpy as np
 import csv
 import datetime
 import json
+import threading
 import pandas as pd
 from aiter import logger
-
-import threading
 
 _PERFTEST_CONTEXT = threading.local()
 
@@ -187,9 +186,7 @@ def perftest(
                         # print([d for d in dir(evt)])
                         append_row(OPS_CSV, [
                             timestamp, func.__name__, evt.key,
-                            # getattr(evt, "self_cuda_time_total", 0),
-                            # getattr(evt, "cuda_time_total", 0),
-                            getattr(evt, "cuda_time", 0),
+                            getattr(evt, "device_time", 0),
                             getattr(evt, "device_time_total", 0),
                             getattr(evt, "self_cpu_time_total", 0)
                         ])

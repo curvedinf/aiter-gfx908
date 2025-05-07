@@ -28,7 +28,6 @@ except Exception:
     QuantType = None
     NO = None
 
-
 @compile_ops("module_moe_asm")
 def topk_softmax(
     topk_weights: Tensor,
@@ -83,7 +82,6 @@ def fmoe_int8_g1u0(
     fc1_scale: Tensor,
     fc2_scale: Tensor,
     fc2_smooth_scale: Tensor,
-    # activation: Optional[Enum] = ActivationType.Silu,
     activation: Optional[Enum] = SILU,
 ): ...
 
@@ -103,7 +101,6 @@ def fmoe_g1u1(
     fc1_scale: Tensor,
     fc2_scale: Tensor,
     fc2_smooth_scale: Optional[Tensor] = None,
-    # activation: Optional[Enum] = ActivationType.Silu,
     activation: Optional[Enum] = SILU,
 ): ...
 
@@ -123,7 +120,6 @@ def fmoe_g1u1_tkw1(
     fc1_scale: Tensor,
     fc2_scale: Tensor,
     fc2_smooth_scale: Optional[Tensor] = None,
-    # activation: Optional[Enum] = ActivationType.Silu,
     activation: Optional[Enum] = SILU,
 ): ...
 
@@ -181,7 +177,6 @@ def fmoe_fp8_blockscale_g1u1(
     fc_scale_blkn: int = 128,
     fc_scale_blkk: int = 128,
     fc2_smooth_scale: Optional[Tensor] = None,
-    # activation: ActivationType = ActivationType.Silu,
     activation: ActivationType = SILU,
 ): ...
 
@@ -199,9 +194,7 @@ def moe_stage1_g1u1(
     kernelName: str,
     block_m: int,
     ksplit: int = 0,
-    # activation: ActivationType = ActivationType.Silu,
     activation: ActivationType = SILU,
-    # quant_type: QuantType = QuantType.No,
     quant_type: QuantType = NO,
     a1_scale: Optional[torch.Tensor] = None,
     w1_scale: Optional[torch.Tensor] = None,

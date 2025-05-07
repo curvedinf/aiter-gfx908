@@ -376,37 +376,39 @@ def _attn_fwd(q_ptr: torch.Tensor,
             NUM_XCD: tl.constexpr,
 ):
     #calculate offsets
-    wid = tl.program_id(0) # 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
-    
+    wid = tl.program_id(0) # workgroup id ranging: 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
+    # num blocks along seqlen
     NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
 
-    CHUNK_BLOCKS_SIZE: tl.constexpr = (38 // (NUM_Q_HEADS // NUM_K_HEADS)) * 2
+    # We have 38 CUs per XCD (i.e. can fit 38 workgroups concurrently at the XCD)
+    # CHUNK_BLOCKS_SIZE tells us how many consecutive sequence length blocks we can process while also fitting the whole group of q heads (who share the same k head).
+    NUM_CUs_PER_XCD: tl.constexpr = 38
+    CHUNK_BLOCKS_SIZE: tl.constexpr = (NUM_CUs_PER_XCD // (NUM_Q_HEADS // NUM_K_HEADS)) 
 
+    # Traversal strategy along dims: seqlen, q_head, batch
     # 1. Fastest changing dim is the q_head dim. At every <NUM_XCD>th wid, increase the sequence block id (start_m).
-    # 2. When we are done with <CHUNK_BLOCKS_SIZE> blocks, we move to the next set of <NUM_XCD> q_heads.
+    # 2. When we are done with <CHUNK_BLOCKS_SIZE> blocks along seqlen, we move to the next set of <NUM_XCD> q_heads.
     # 3. Batch changes last.
-    # 
-    # This ensures equal workload workgroups being sent to the XCDs in a "round robin" round, since they have the same start_m and only a different q_head id.
-    # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
-    off_q_head = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_Q_HEADS
-
-    start_m = ((wid // NUM_XCD ) % CHUNK_BLOCKS_SIZE + wid // (CHUNK_BLOCKS_SIZE * NUM_Q_HEADS) * CHUNK_BLOCKS_SIZE) % NUM_BLOCKS
-    off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH
 
     # so XCD 0 should get workgroups with indices (batch, head q idx, start_m)
     # (0, 0, 0), (0, 0, 1), (0, 0, 2), ..., (0, 0, CHUNK_BLOCKS_SIZE), (0, NUM_XCD, 0)
-    # XCD 2
+    # XCD 1
     # (0, 1, 0), (0, 1, 1), (0, 1, 2), ..., (0, 1, CHUNK_BLOCKS_SIZE), (0, NUM_XCD+1, 0)
     # ...
     # XCD <NUM_XCD - 1>
     # (0, NUM_XCD-1, 0), (0, NUM_XCD-1, 1), (0, NUM_XCD-1, 2), ..., (0, NUM_XCD-1, CHUNK_BLOCKS_SIZE), (0, 2 * NUM_XCD-1, 0)
 
     # Notice that on the same round robin turn, XCDs get the same start_m, i.e. workgroups with equal workloads.
+    # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
+    
+    off_q_head = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_Q_HEADS
+    start_m = ((wid // NUM_XCD ) % CHUNK_BLOCKS_SIZE + wid // (CHUNK_BLOCKS_SIZE * NUM_Q_HEADS) * CHUNK_BLOCKS_SIZE) % NUM_BLOCKS
+    off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH
 
-    # Remap the q_head indices so that the ones that are on the same XCD should share the same k (e.g 0,NUM_XCD,NUM_XCD*2,... should map to 0,1,2...)
+    # Remap the q head indices so that the ones that are on the same XCD map to indices sharing the same k head (e.g 0,NUM_XCD,NUM_XCD*2,... should map to 0,1,2...)
     off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS-1, NUM_XCD)
 
-
+    # offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
     offs_d = tl.arange(0, BLOCK_DMODEL_POW2)

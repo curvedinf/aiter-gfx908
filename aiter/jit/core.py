@@ -597,12 +597,7 @@ def compile_ops(_md_name: str, fc_name: Optional[str] = None):
                         return op(*args_inner, **kwargs_inner)
 
                     wrapped_op.__name__ = loadName
-                    return perftest()(wrapped_op)(*args, **kwargs)
-                    #perf_wrapped_op = perftest()(wrapped_op)
-                    # result = perf_wrapped_op(*args, **kwargs)
-                    #return perf_wrapped_op(*args, **kwargs)
-               # else:
-               #     return op(*args, **kwargs)
+                    perftest(1, 1)(wrapped_op)(*args, **kwargs)
 
             return op(*args, **kwargs)
 

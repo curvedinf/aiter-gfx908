@@ -380,7 +380,7 @@ def _attn_fwd(q_ptr: torch.Tensor,
     
     NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
 
-    CHUNK_BLOCKS_SIZE: tl.constexpr = 38 // (NUM_Q_HEADS // NUM_K_HEADS)
+    CHUNK_BLOCKS_SIZE: tl.constexpr = (38 // (NUM_Q_HEADS // NUM_K_HEADS)) * 2
 
     # 1. Fastest changing dim is the q_head dim. At every <NUM_XCD>th wid, increase the sequence block id (start_m).
     # 2. When we are done with <CHUNK_BLOCKS_SIZE> blocks, we move to the next set of <NUM_XCD> q_heads.
@@ -403,8 +403,8 @@ def _attn_fwd(q_ptr: torch.Tensor,
 
     # Notice that on the same round robin turn, XCDs get the same start_m, i.e. workgroups with equal workloads.
 
-    # TODO: remap the q_head indices so that the ones that share the same k head are on the same XCD (0,NUM_XCD,NUM_XCD*2,... should map to 0,1,2...)
-    # off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS-1, NUM_XCD)
+    # Remap the q_head indices so that the ones that are on the same XCD should share the same k (e.g 0,NUM_XCD,NUM_XCD*2,... should map to 0,1,2...)
+    off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS-1, NUM_XCD)
 
 
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)

@@ -349,7 +349,7 @@ def _balance_attn_workload(wid, NUM_CUs_PER_XCD: tl.constexpr, NUM_XCD: tl.const
     # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
 
     NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
-    CHUNK_BLOCKS_SIZE: tl.constexpr = (NUM_CUs_PER_XCD // (NUM_Q_HEADS // NUM_K_HEADS))
+    CHUNK_BLOCKS_SIZE = 1 # (NUM_CUs_PER_XCD // (NUM_Q_HEADS // NUM_K_HEADS))
     off_q_head = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_Q_HEADS
     start_m = ((wid // NUM_XCD ) % CHUNK_BLOCKS_SIZE + wid // (CHUNK_BLOCKS_SIZE * NUM_Q_HEADS) * CHUNK_BLOCKS_SIZE) % NUM_BLOCKS
     off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH

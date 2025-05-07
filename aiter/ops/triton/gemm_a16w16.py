@@ -95,6 +95,7 @@ def _gemm_a16_w16_kernel(
 # Wrapper for gemm kernel.
 def gemm_a16w16(x, 
                 w, 
+                y,
                 dtype: Optional[float] = torch.bfloat16,
                 ):
     """
@@ -111,7 +112,7 @@ def gemm_a16w16(x,
     M, K = x.shape
     K, N = w.shape
 
-    y = torch.empty((M, N), dtype=dtype, device=x.device)
+    #y = torch.empty((M, N), dtype=dtype, device=x.device)
 
     BLOCK_SIZE_M = 256
     BLOCK_SIZE_N = 256

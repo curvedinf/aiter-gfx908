@@ -6,6 +6,7 @@ import aiter
 from torch.profiler import profile, ProfilerActivity
 
 
+
 shapes0 = [
         (512,), (1280, 232, 256), (256, 256), (256, 8192), (256,), (1280, 32, 256),
         (384, 256), (384,), (65536,), (65536, 256), (1, 8, 256), (512, 256),
@@ -68,6 +69,7 @@ class TestAiterAdd:
                 torch_out = torch.add(tensor0, tensor1)
         ret += prof_torch.key_averages().table(sort_by="cuda_time_total", row_limit=10)
         ret += "\n"
+
 
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], profile_memory=True,
             with_stack=True, with_modules=True, record_shapes=True) as prof_aiter:

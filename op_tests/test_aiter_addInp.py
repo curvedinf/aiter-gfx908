@@ -25,6 +25,7 @@ class TestAiterAddInp:
         ret += f"Size: {tensor0.size()}, Stride: {tensor0.stride()}\n"
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], profile_memory=True,
             with_stack=True, with_modules=True, record_shapes=True) as prof_torch:
+
             torch_add_a_ = tensor0.clone()
             torch_add_b_ = tensor1.clone()
             for _ in range(100):
@@ -32,6 +33,7 @@ class TestAiterAddInp:
                 torch_out = torch_add_a_
         ret += prof_torch.key_averages().table(sort_by="cuda_time_total", row_limit=10)
         ret += "\n"
+
 
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], profile_memory=True,
             with_stack=True, with_modules=True, record_shapes=True) as prof_aiter:

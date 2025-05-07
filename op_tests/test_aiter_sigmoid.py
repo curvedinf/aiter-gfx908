@@ -3,14 +3,21 @@
 
 import torch
 import aiter
-from torch.profiler import profile, ProfilerActivity
 
+from torch.profiler import profile, ProfilerActivity
 shape0 = (4096, 880)
 stride0 = (880, 1)
+
+# from ater.test_common import checkAllclose, perftest
+from torch.profiler import profile, record_function, ProfilerActivity
+
+# input shape: torch.Size([4096, 64, 160]) (20480, 1, 128)
+# other shape: torch.Size([4096, 64, 160]) (10240, 160, 1)
 
 class TestAiterSigmoid:
     def __init__(self):
         self.collections = []
+
 
     def exec(self):
         tensor0 = torch.empty_strided(shape0, stride0, dtype=torch.float16, device='cuda')
@@ -25,6 +32,7 @@ class TestAiterSigmoid:
                 torch_out = torch.sigmoid(tensor0)
         ret += torch_prof.key_averages().table(sort_by="cuda_time_total", row_limit=10)
         ret += "\n"
+
 
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], profile_memory=True,
             with_stack=True, with_modules=True, record_shapes = True) as aiter_prof:
@@ -47,3 +55,4 @@ if __name__ == "__main__":
     aiter_sigmoid = TestAiterSigmoid()
     aiter_sigmoid.exec()
     aiter_sigmoid.analysis()
+    

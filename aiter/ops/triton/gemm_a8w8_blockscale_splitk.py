@@ -282,7 +282,7 @@ def gemm_a8w8_blockscale_splitk(
     assert x.shape[1] == w.shape[0], "Incompatible dimensions!!!"
 
     BLOCK_SIZE_M = 16
-    BLOCK_SIZE_N = 64
+    BLOCK_SIZE_N = 128
     BLOCK_SIZE_K = 128
     GROUP_SIZE_M = 4
     waves_per_eu = 2
@@ -294,7 +294,7 @@ def gemm_a8w8_blockscale_splitk(
     NUM_KSPLIT = 4
     SPLITK_BLOCK_SIZE = triton.cdiv(triton.cdiv(K, NUM_KSPLIT), BLOCK_SIZE_K) * BLOCK_SIZE_K
 
-    y_temp = torch.randn((NUM_KSPLIT, M, N), dtype=torch.float32, device=x.device)
+    y_temp = torch.randn((NUM_KSPLIT, M, N), dtype=dtype, device=x.device)
     y = torch.empty((M, N), dtype=dtype, device=x.device)
 
     grid = (NUM_KSPLIT, triton.cdiv(M, BLOCK_SIZE_M) * triton.cdiv(N, BLOCK_SIZE_N),)

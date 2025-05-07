@@ -384,7 +384,7 @@ def run_benchmark(custom, args):
             return mem / ms * 1e-3
 
 
-    bench_flash_attention.run(save_path=None, print_data=True, show_plots=False)
+    bench_flash_attention.run(save_path=".", print_data=True, show_plots=True)
 
 
 def supported_layouts():

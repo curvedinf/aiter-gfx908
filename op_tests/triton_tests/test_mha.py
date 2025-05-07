@@ -400,9 +400,3 @@ def test_mha_backward_varlen(BATCH: int, SEQLEN_Q: int, SEQLEN_K: int, NUM_Q_HEA
     torch.testing.assert_close(triton_dv, torch_dv.to(triton_out.dtype),atol=1e-2, rtol=1e-2)  
     torch.testing.assert_close(triton_dk, torch_dk.to(triton_out.dtype),atol=1e-2, rtol=1e-2)  
     torch.testing.assert_close(triton_dq, torch_dq.to(triton_out.dtype),atol=1e-2, rtol=1e-2)  
-
-
-if __name__ == "__main__":
-    print("Running test: test_mha_varlen(1, 8192, 8192, 32, 8, 128, 0.0, False, False, True, False, torch.float16)")
-    test_mha_varlen(1, 8192, 8192, 32, 8, 128, 0.0, False, False, True, False, torch.float16)
-    print("Triton output matches Torch output!")

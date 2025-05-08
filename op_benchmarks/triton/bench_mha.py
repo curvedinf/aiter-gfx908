@@ -44,9 +44,11 @@ def mha_varlen_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_se
     total_q = cu_seqlens_q[-1].item()
     total_k = cu_seqlens_k[-1].item()
 
-    q = torch.randn((total_q, HQ, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_(requires_grad)
+    q_dummy = torch.empty((total_q, HQ, 1024*1024*64), dtype=dtype, device="cuda").requires_grad_(requires_grad)
+    q = q_dummy[:total_q, :HQ, :D_HEAD]
     k = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_(requires_grad)
     v = torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda").normal_(mean=0., std=0.5).requires_grad_(requires_grad)
+
     sm_scale = D_HEAD**-0.5
     return q, k, v, cu_seqlens_q, cu_seqlens_k, sm_scale
 

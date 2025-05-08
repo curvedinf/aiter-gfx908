@@ -349,14 +349,18 @@ def _balance_attn_workload(wid, NUM_CUs_PER_XCD: tl.constexpr, NUM_XCD: tl.const
     # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
 
     NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
-    CHUNK_BLOCKS_SIZE = 1 # (NUM_CUs_PER_XCD // (NUM_Q_HEADS // NUM_K_HEADS))
-    off_q_head = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_Q_HEADS
-    start_m = ((wid // NUM_XCD ) % CHUNK_BLOCKS_SIZE + wid // (CHUNK_BLOCKS_SIZE * NUM_Q_HEADS) * CHUNK_BLOCKS_SIZE) % NUM_BLOCKS
+    grouped_head = NUM_Q_HEADS // NUM_K_HEADS
+    off_q_head = (wid % grouped_head + (wid // (NUM_BLOCKS * grouped_head) % NUM_Q_HEADS) * grouped_head) % NUM_Q_HEADS
+    start_m = (wid // NUM_Q_HEADS) % NUM_BLOCKS
+
+    # off_q_head = (wid % NUM_XCD + wid) % NUM_Q_HEADS
+    # start_m = ((wid // NUM_XCD) + wid // (NUM_Q_HEADS)) % NUM_BLOCKS
+
     off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH
     off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS-1, NUM_XCD)
+    start_m = _remap_XCD(start_m, NUM_BLOCKS-1, NUM_XCD)
 
     return off_z, off_q_head, start_m
-
 
 
 @triton.jit

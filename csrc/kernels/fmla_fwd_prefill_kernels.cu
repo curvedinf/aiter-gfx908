@@ -648,16 +648,11 @@ public:
     }
 
     CK_TILE_DEVICE static auto MakeOutputTileWindow(
-        void* p_output,
-        const int32_t offset_b,
-        const int32_t offset_s,
-        const int32_t offset_h)
+        scalar_t* p_output)
     {
-        scalar_t* p_out = reinterpret_cast<scalar_t*>(p_output) + offset_b + offset_s + offset_h;
-
         const auto naive_view =
             ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-                p_out,
+                p_output,
                 ck_tile::make_tuple(1, Traits::kSizeDV),    // lengths
                 ck_tile::make_tuple(Traits::kSizeDV, 1),    // strides
                 ck_tile::number<Traits::kSizeDV>{},         // last dim alignment
@@ -1032,9 +1027,12 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
         mask.GetTileRangeAlongX(q_origin.at(ck_tile::number<0>{}),
                                 ck_tile::number<Traits::kBlockM>{},
                                 ck_tile::number<Traits::kBlockN0>{});
-    const int32_t x_per_split    = ck_tile::max(Traits::kBlockN0, ck_tile::integer_divide_ceil(seqlen_k, num_splits));
+    const int32_t aligned_seqlen = Traits::kBlockN0 * ck_tile::integer_divide_floor(seqlen_k, Traits::kBlockN0);
+    const int32_t x_per_split    = ck_tile::max(Traits::kBlockN0,
+                                                ck_tile::integer_divide_ceil(aligned_seqlen, num_splits));
     const int32_t split_start    = x_per_split * split_id;
-    const int32_t split_end      = ck_tile::min(seqlen_k, split_start + x_per_split);
+    const int32_t split_workload = (split_id >= (num_splits - 1)) ? (2 * x_per_split) : x_per_split;
+    const int32_t split_end      = ck_tile::min(seqlen_k, split_start + split_workload);
     const int32_t seqlen_k_start = ck_tile::max(origin_start, split_start);
     const int32_t seqlen_k_end   = ck_tile::min(origin_end, split_end);
 
@@ -1515,9 +1513,10 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
     const int32_t lane_id          = ck_tile::get_lane_id();
     const int32_t hidx             = blockIdx.y;
     const int32_t sidx             = blockIdx.x;
-    const int32_t hsidx            = hidx + sidx * params.size_h;
+    const int32_t hsidx            = hidx * params.size_s + sidx;
+    const int32_t shidx            = hidx + sidx * params.size_h;
     const int32_t size_hs          = params.size_h * params.size_s;
-    const index_t offset_lse_accum = split_offset * size_hs + hsidx;
+    const index_t offset_lse_accum = split_offset * size_hs + hsidx; // offset to split 0
     const index_t offset_lse       = bidx * size_hs + hsidx;
 
     if (ck_tile::get_warp_id() == 0)
@@ -1586,7 +1585,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
     static_assert(Traits::kSizeDV % Traits::kNumThreadsCombine == 0);
 
     auto oaccu_window =
-        Policy::MakeOaccuTileWindow(params.p_output_accum, hsidx, size_hs, split_offset, num_splits);
+        Policy::MakeOaccuTileWindow(params.p_output_accum, shidx, size_hs, split_offset, num_splits);
 
     auto reg_out = ck_tile::make_static_distributed_tensor<acc_t>(
         decltype(ck_tile::load_tile(oaccu_window))::get_tile_distribution());
@@ -1602,10 +1601,9 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
         ck_tile::move_tile_window(oaccu_window, {size_hs, 0});
     }
 
-    auto dram_out = Policy::MakeOutputTileWindow(params.p_output,
-                                                 bidx * params.stride_b_o,
-                                                 hidx * params.stride_h_o,
-                                                 sidx * params.stride_s_o);
+    auto dram_out = Policy::MakeOutputTileWindow(
+        static_cast<scalar_t*>(params.p_output) +
+        bidx * params.stride_b_o + hidx * params.stride_h_o + sidx * params.stride_s_o);
     ck_tile::store_tile(dram_out, ck_tile::cast_tile<scalar_t>(reg_out));
 }
 
@@ -1801,7 +1799,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     torch::Tensor softmax_lseaccum;
     torch::Tensor output_accum;
     int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads_q, seqlen_q_ori);
-    if (num_splits > 1)
+        if (num_splits > 1)
     {
         output_accum = torch::empty({batch_size, num_splits, seqlen_q_ori, num_heads_q, head_size_v}, opts.dtype(torch::kFloat32));
         softmax_lseaccum = torch::empty({batch_size, num_splits, num_heads_q, seqlen_q_ori}, opts.dtype(torch::kFloat32));

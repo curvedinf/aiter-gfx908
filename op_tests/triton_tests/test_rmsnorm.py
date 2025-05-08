@@ -1,7 +1,6 @@
 import torch
 import pytest
 import triton
-import torch.nn.functional as F
 from aiter.ops.triton.rmsnorm import rms_norm
 from aiter.ops.triton.rmsnorm import rmsnorm2d_fwd_with_add
 
@@ -11,6 +10,7 @@ def generate_rmsnorm_inputs(M, N, dtype):
     weight = torch.randn(N, dtype=dtype).cuda()
 
     return x, weight
+
 
 def torch_rmsnorm(x, g, out_dtype=torch.float16, epsilon=1e-6):
     M, N = x.shape

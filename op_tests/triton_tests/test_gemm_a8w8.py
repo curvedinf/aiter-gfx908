@@ -1,6 +1,5 @@
 import torch
 import triton
-import triton.language as tl
 import pytest
 from aiter.ops.triton.gemm_a8w8 import gemm_a8w8
 import torch.nn.functional as F

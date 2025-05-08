@@ -379,7 +379,6 @@ def test_correctness(M: int, N: int, K: int, top_k: int, E: int, routed_weight: 
     torch_out = torch_moe(a, b, torch_out, a_scale, b_scale, None, 0, topk_ids, topk_weights, routed_weight, sorted_token_ids, expert_ids,
                         num_tokens_post_padded, dtype, fp8_w8a8, int8_w8a16, False)
     if silu_fused:
-        # torch_out_silu = torch.empty_like(triton_out_silu)
         torch_out_silu = silu_and_mul(torch_out.view(-1, N))
 
     if DEBUG_MODE:

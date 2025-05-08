@@ -949,7 +949,7 @@ CK_TILE_DEVICE static auto MakePageBlockNavigator(
     const int32_t   stride_b_block_table,
     const int32_t   page_block_size)
 {
-    const auto* p_block_indices = p_block_table + bid * stride_b_block_table;
+    const auto* p_block_indices = p_block_table + int64_t(bid) * stride_b_block_table;
     const int32_t num_blocks = ck_tile::integer_divide_ceil(seqlen_k, page_block_size);
 
     const int64_t fixed_offset = static_cast<int64_t>(hid) * stride_h;
@@ -1400,7 +1400,6 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
     const int32_t seqlen_k            = params.p_seqlens_k[bid];
     const int32_t num_blocks          = ck_tile::integer_divide_ceil(seqlen_k, params.page_block_size);
     const int32_t last_block_size     = seqlen_k - (num_blocks - 1) * params.page_block_size;
-    const int64_t batch_offset_lseacc = bid * params.stride_b_o;
 
     auto q_dram_reg_window_lengths =
         ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kK0InReg>{});
@@ -1409,8 +1408,8 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
 
 
     const scalar_t* p_query = reinterpret_cast<const scalar_t*>(params.p_query) +
-                              int64_t(hqid * params.stride_h_q) +   // head offset
-                              int64_t(bid * params.stride_b_q);     // batch offset
+                              int64_t(hqid) * params.stride_h_q +   // head offset
+                              int64_t(bid) * params.stride_b_q;     // batch offset
 
     const auto q_dram_complete = MakeQDram<Policy>(p_query, params.size_s,    params.stride_s_q);
     const auto k_dram_complete = MakeKDram<Policy, scalar_t>(nullptr, params.page_block_size, params.stride_s_k);

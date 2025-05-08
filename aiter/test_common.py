@@ -112,7 +112,7 @@ def perftest(
                     avg_event_us = np.mean(latencies) * 1000
                     logger.info(f"[Perf] avg: {avg_event_us:.3f} us/iter [via CUDA Event Timing]")
                     if log_level >= 3:
-                        print(f"[PerfTest][CUDA EVENT] Latencies (us): {[f'{l*1000:.2f}' for l in latencies]}")
+                        print(f"[PerfTest][CUDA EVENT] Latencies (us): {[f'{latency*1000:.2f}' for latency in latencies]}")
 
                 # CUDA Graph (optional)
                 avg_graph_us = None

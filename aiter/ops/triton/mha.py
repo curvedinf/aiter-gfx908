@@ -168,9 +168,9 @@ def _attn_fwd_inner(
     q,
     k_ptrs,
     v_ptrs,
-    stride_kn,
-    stride_vk,
-    stride_sn,
+    stride_kn_in,
+    stride_vk_in,
+    stride_sn_in,
     start_m,
     seqlen_k,
     seqlen_q, 
@@ -204,6 +204,10 @@ def _attn_fwd_inner(
     FP8_MAX: tl.constexpr,
 ):
     RCP_LN2: tl.constexpr = 1.4426950408889634
+
+    stride_kn: tl.int64 = stride_kn_in
+    stride_vk: tl.int64 = stride_vk_in
+    stride_sn: tl.int64 = stride_sn_in
 
     # loop over k, v, and update accumulator
 
@@ -333,14 +337,14 @@ def _attn_fwd(q_ptr: torch.Tensor,
             s_dmask_ptr: torch.Tensor,
             dropout_mask_ptr: torch.Tensor,
             softmax_lse_ptr: torch.Tensor,
-            stride_qz: tl.int64, stride_qh: tl.int64, stride_qm: tl.int64, stride_qk: tl.int64,
-            stride_kz: tl.int64, stride_kh: tl.int64, stride_kn: tl.int64, stride_kk: tl.int64,
-            stride_vz: tl.int64, stride_vh: tl.int64, stride_vn: tl.int64, stride_vk: tl.int64,
-            stride_descale_q_z: tl.int64, stride_descale_k_z: tl.int64, stride_descale_v_z: tl.int64,
-            stride_oz: tl.int64, stride_oh: tl.int64, stride_om: tl.int64, stride_on: tl.int64,
-            stride_alibi_z: tl.int64, stride_alibi_h: tl.int64,
-            stride_sd_z: tl.int64, stride_sd_h: tl.int64, stride_sd_m: tl.int64, stride_sd_n: tl.int64,
-            stride_lse_z: tl.int64, stride_lse_h: tl.int64, stride_lse_m: tl.int64,
+            stride_qz_in, stride_qh_in, stride_qm_in, stride_qk_in,
+            stride_kz_in, stride_kh_in, stride_kn_in, stride_kk_in,
+            stride_vz_in, stride_vh_in, stride_vn_in, stride_vk_in,
+            stride_descale_q_z_in, stride_descale_k_z_in, stride_descale_v_z_in,
+            stride_oz_in, stride_oh_in, stride_om_in, stride_on_in,
+            stride_alibi_z_in, stride_alibi_h_in,
+            stride_sd_z_in, stride_sd_h_in, stride_sd_m_in, stride_sd_n_in,
+            stride_lse_z_in, stride_lse_h_in, stride_lse_m_in,
             sm_scale,
             cu_seqlens_q,
             cu_seqlens_k,
@@ -370,6 +374,35 @@ def _attn_fwd(q_ptr: torch.Tensor,
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M).to(tl.int64)
     offs_n = tl.arange(0, BLOCK_N).to(tl.int64)
     offs_d = tl.arange(0, BLOCK_DMODEL_POW2).to(tl.int64)
+
+    stride_qz: tl.int64          = stride_qz_in
+    stride_qh: tl.int64          = stride_qh_in
+    stride_qm: tl.int64          = stride_qm_in
+    stride_qk: tl.int64          = stride_qk_in
+    stride_kz: tl.int64          = stride_kz_in
+    stride_kh: tl.int64          = stride_kh_in
+    stride_kn: tl.int64          = stride_kn_in
+    stride_kk: tl.int64          = stride_kk_in
+    stride_vz: tl.int64          = stride_vz_in
+    stride_vh: tl.int64          = stride_vh_in
+    stride_vn: tl.int64          = stride_vn_in
+    stride_vk: tl.int64          = stride_vk_in
+    stride_descale_q_z: tl.int64 = stride_descale_q_z_in
+    stride_descale_k_z: tl.int64 = stride_descale_k_z_in
+    stride_descale_v_z: tl.int64 = stride_descale_v_z_in
+    stride_oz: tl.int64          = stride_oz_in
+    stride_oh: tl.int64          = stride_oh_in
+    stride_om: tl.int64          = stride_om_in
+    stride_on: tl.int64          = stride_on_in
+    stride_alibi_z: tl.int64     = stride_alibi_z_in
+    stride_alibi_h: tl.int64     = stride_alibi_h_in
+    stride_sd_z: tl.int64        = stride_sd_z_in
+    stride_sd_h: tl.int64        = stride_sd_h_in
+    stride_sd_m: tl.int64        = stride_sd_m_in
+    stride_sd_n: tl.int64        = stride_sd_n_in
+    stride_lse_z: tl.int64       = stride_lse_z_in
+    stride_lse_h: tl.int64       = stride_lse_h_in
+    stride_lse_m: tl.int64       = stride_lse_m_in
 
     if VARLEN:
         cu_seqlens_q_start = tl.load(cu_seqlens_q + off_z)

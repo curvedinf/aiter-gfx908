@@ -354,8 +354,11 @@ def _attn_fwd(q_ptr: torch.Tensor,
             VARLEN: tl.constexpr,
 ):
     #calculate offsets
-    off_z = tl.program_id(0) #batch
-    off_q_head = tl.program_id(1) #num_q_heads
+    off_q_head = tl.program_id(0) #num_q_heads
+    # tl.static_print("compiling...")
+    off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS-1, 8)
+
+    off_z = tl.program_id(1) #batch
     start_m = tl.program_id(2) #seqlen_q
 
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -737,7 +740,7 @@ def _flash_attn_forward(
         'num_stages': 1,
     }
 
-    grid = lambda META:(batch, num_q_heads, triton.cdiv(seqlen_q, META['BLOCK_M']))
+    grid = lambda META:(num_q_heads, batch, triton.cdiv(seqlen_q, META['BLOCK_M']))
     _attn_fwd[grid](q,
                     k,
                     v,

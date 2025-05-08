@@ -159,8 +159,8 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
         return aiter.flash_mla_fwd_prefill_with_kvcache(q, blocked_k, block_table, cache_seqlens, dv, causal=causal)
 
     def ref_mla():
-        out = torch.empty(b, s_q, h_q, dv, dtype=torch.float32)
-        lse = torch.empty(b, h_q, s_q, dtype=torch.float32)
+        out = torch.empty(b, s_q, h_q, dv, dtype=torch.float32, device="cuda")
+        lse = torch.empty(b, h_q, s_q, dtype=torch.float32, device="cuda")
         for i in range(b):
             begin = i * max_seqlen_pad
             end = begin + cache_seqlens[i]
@@ -179,8 +179,8 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     out_torch, lse_torch = ref_mla()
     out_flash, lse_flash = flash_mla()
 
-    checkAllclose(lse_flash, lse_torch.cuda(), msg="lse")
-    checkAllclose(out_flash, out_torch.cuda().to(dtype=dtype), msg="out")
+    checkAllclose(lse_flash, lse_torch, msg="lse")
+    checkAllclose(out_flash, out_torch.to(dtype=dtype), msg="out")
 
     _, t = run_perftest(flash_mla,
                          num_iters=2,

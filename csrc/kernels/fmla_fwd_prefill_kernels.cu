@@ -752,6 +752,35 @@ CK_TILE_DEVICE static auto GetTileIndex(const int32_t num_splits)
     return ck_tile::make_tuple(mid, nid, split_id, hid, bid);
 }
 
+// This function get the range of seqlen for the specified `split_idx`. `granularity` is the granularity of group of
+// workload which cannot be further subdivded.
+// The workload is divided as evenly as possible. When the workload cannot be evenly divided by num_splits, the
+// high-ranking splits will get 1 additional `granularity` of tasks.
+// E.g. when `num_seqlen` is `28`, `granularity` is `2` and `num_splits` is `3`, the 3 splits will be assigned the
+// following tasks:
+// split.0: [0, 10)  // 10 workloads
+// split.1: [10, 20) // 10 workloads
+// split.2: [20, 28) //  8 workloads
+// split.3: [28, 36) // Note that this may not be what you're expecting. upper_bound may be helpful in this case.
+CK_TILE_DEVICE static auto GetSeqlenRange(
+    const int32_t num_seqlen,
+    const int32_t granularity,
+    const int32_t num_splits,
+    const int32_t split_idx,
+    const int32_t lower_bound,
+    const int32_t upper_bound)
+{
+    const int32_t num_workload = ck_tile::integer_divide_ceil(num_seqlen, granularity);
+    const int32_t base_workload = ck_tile::integer_divide_floor(num_workload, num_splits);
+    const int32_t addition_threshold = num_workload % num_splits;
+    const int32_t start = base_workload * split_idx + ck_tile::min(addition_threshold, split_idx);
+    const int32_t count = base_workload + ((split_idx < addition_threshold) ? 1 : 0);
+    const int32_t end = start + count;
+
+    return ck_tile::make_tuple(ck_tile::max(lower_bound, start * granularity),
+                               ck_tile::min(upper_bound, end * granularity));
+}
+
 template <typename Policy, typename scalar_t = typename Policy::InOutType>
 CK_TILE_DEVICE static auto MakeQDram(
     const scalar_t* p_data,
@@ -1027,14 +1056,9 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
         mask.GetTileRangeAlongX(q_origin.at(ck_tile::number<0>{}),
                                 ck_tile::number<Traits::kBlockM>{},
                                 ck_tile::number<Traits::kBlockN0>{});
-    const int32_t aligned_seqlen = Traits::kBlockN0 * ck_tile::integer_divide_floor(seqlen_k, Traits::kBlockN0);
-    const int32_t x_per_split    = ck_tile::max(Traits::kBlockN0,
-                                                ck_tile::integer_divide_ceil(aligned_seqlen, num_splits));
-    const int32_t split_start    = x_per_split * split_id;
-    const int32_t split_workload = (split_id >= (num_splits - 1)) ? (2 * x_per_split) : x_per_split;
-    const int32_t split_end      = ck_tile::min(seqlen_k, split_start + split_workload);
-    const int32_t seqlen_k_start = ck_tile::max(origin_start, split_start);
-    const int32_t seqlen_k_end   = ck_tile::min(origin_end, split_end);
+    auto [seqlen_k_start, seqlen_k_end] =
+        GetSeqlenRange(seqlen_k, Traits::kBlockN0, num_splits, split_id, origin_start, origin_end);
+
 
     // 3. Quick exit if no work to do
     //
@@ -1623,11 +1647,8 @@ void dispatch_fmla_fwd_splictkv_prefill(
     const dim3 grid_attn = dim3(num_blk, params.size_h, params.size_b);
     const dim3 grid_comb = dim3(params.size_s, params.size_h, params.size_b);
 
-    printf("[RJM] grid_attn=(%d, %d, %d)\n", grid_attn.x, grid_attn.y, grid_attn.z);
-
     if (params.num_splits > 1)
     {
-        printf("[RJM] grid_comb=(%d, %d, %d)\n", grid_comb.x, grid_comb.y, grid_comb.z);
         auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, true>;
         auto kn_comb =
             (params.num_splits <= 32)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 32,  scalar_t, acc_t> :
@@ -1760,8 +1781,6 @@ int32_t calculate_num_splits(
     const int32_t num_m_blocks = ck_tile::integer_divide_ceil(size_s, Traits::kBlockM);
     const int32_t num_n_blocks = ck_tile::integer_divide_ceil(Traits::kSizeDV, Traits::kBlockN1);
 
-    printf("[RJM] cu_count=%d, kCuReuse=%d\n", cu_count, Traits::kCuReuse);
-
     return num_splits_heuristic(size_b * size_h * num_m_blocks, cu_count * Traits::kCuReuse, num_n_blocks, 128);
 }
 
@@ -1799,7 +1818,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     torch::Tensor softmax_lseaccum;
     torch::Tensor output_accum;
     int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads_q, seqlen_q_ori);
-        if (num_splits > 1)
+    if (num_splits > 1)
     {
         output_accum = torch::empty({batch_size, num_splits, seqlen_q_ori, num_heads_q, head_size_v}, opts.dtype(torch::kFloat32));
         softmax_lseaccum = torch::empty({batch_size, num_splits, num_heads_q, seqlen_q_ori}, opts.dtype(torch::kFloat32));

@@ -1279,6 +1279,49 @@ def _bwd_dkdvdq_inner(
 
     return dk, dv
 
+@triton.jit
+def _remap_XCD(k, N, NUM_XCD):
+    r = k % NUM_XCD
+    m = k // NUM_XCD
+    q = N // NUM_XCD
+    t = N - NUM_XCD * q
+    u = min(r, t + 1)
+    new_index = u * q + (r - u) * (q - 1) + r + m
+    return new_index
+
+
+@triton.jit
+def _balance_attn_workload(wid, BATCH, NUM_HEAD_PIDS, NUM_SEQ_PIDS, HEAD_GROUP_SIZE, NUM_SMS: tl.constexpr = 304, NUM_XCD: tl.constexpr = 38):
+    # Traversal strategy along dims: seqlen, q_head, batch
+    # 1. Fastest changing dim is the q_head dim. At every <NUM_XCD>th wid, increase the sequence block id (start_m).
+    # 2. When we are done with <CHUNK_BLOCKS_SIZE> blocks along seqlen, we move to the next set of <NUM_XCD> q_heads.
+    # 3. Batch changes last.
+
+    # so XCD 0 should get workgroups with indices (batch, head q idx, start_m)
+    # (0, 0, 0), (0, 0, 1), (0, 0, 2), ..., (0, 0, CHUNK_BLOCKS_SIZE), (0, NUM_XCD, 0)
+    # XCD 1
+    # (0, 1, 0), (0, 1, 1), (0, 1, 2), ..., (0, 1, CHUNK_BLOCKS_SIZE), (0, NUM_XCD+1, 0)
+    # ...
+    # XCD <NUM_XCD - 1>
+    # (0, NUM_XCD-1, 0), (0, NUM_XCD-1, 1), (0, NUM_XCD-1, 2), ..., (0, NUM_XCD-1, CHUNK_BLOCKS_SIZE), (0, 2 * NUM_XCD-1, 0)
+
+    # Notice that on the same round robin turn, XCDs get the same start_m, i.e. workgroups with equal workloads.
+    # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
+
+    # CHUNK_BLOCKS_SIZE: how many blocks we traverse along seqlen before moving to the next set of NUM_XCD q_heads?
+    # one option would be (NUM_CUs_PER_XCD // HEAD_GROUP_SIZE): max number of blocks so we can still fit grouped q heads inside the same XCD
+    # setting to 1 maximizes for multiple grouped q heads fitting concurrently inside the same XCD
+    CHUNK_BLOCKS_SIZE = 1 
+     
+    off_head = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_HEAD_PIDS
+    seq_blk_idx = ((wid // NUM_XCD ) % CHUNK_BLOCKS_SIZE + wid // (CHUNK_BLOCKS_SIZE * NUM_HEAD_PIDS) * CHUNK_BLOCKS_SIZE) % NUM_SEQ_PIDS
+    off_z = wid // (NUM_SEQ_PIDS * NUM_HEAD_PIDS) % BATCH
+    
+    # remaps q_head so that workgroups that are on the same XCD handle consecutive q heads (potential to benefit from loading the shared key head to L2 only once)
+    off_head = _remap_XCD(off_head, NUM_HEAD_PIDS-1, NUM_XCD)
+
+    return off_z, off_head, seq_blk_idx
+
 
 @triton.jit
 def _bwd_kernel_dkdvdq_causal(
@@ -1348,11 +1391,13 @@ def _bwd_kernel_dkdvdq_causal(
     
     GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
 
-    batch_idx = wid % BATCH 
-    head_q_idx = wid // BATCH % NUM_Q_HEADS 
-    head_k_idx = head_q_idx // GROUP_SIZE
+    batch_idx, head_q_idx, seq_k_blk_idx = _balance_attn_workload(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, GROUP_SIZE)
+    tl.static_print("Compiling...")
+    # batch_idx = wid % BATCH 
+    # head_q_idx = wid // BATCH % NUM_Q_HEADS 
+    # seq_k_blk_idx = wid // (BATCH * NUM_Q_HEADS) % NUM_K_PIDS
 
-    seq_k_blk_idx = wid // (BATCH * NUM_Q_HEADS) % NUM_K_PIDS
+    head_k_idx = head_q_idx // GROUP_SIZE
 
     #Determine q and k start along with seqlen_q and seqlen_k
     q_start = 0

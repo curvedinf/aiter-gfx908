@@ -356,10 +356,9 @@ def _attn_fwd(q_ptr: torch.Tensor,
     #calculate offsets
     off_q_head = tl.program_id(0) #num_q_heads
     # tl.static_print("compiling...")
-    off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS-1, 8)
-
-    off_z = tl.program_id(1) #batch
-    start_m = tl.program_id(2) #seqlen_q
+    off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS, 8)
+    start_m = tl.program_id(1) #seqlen_q
+    off_z = tl.program_id(2) #batch
 
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
@@ -740,7 +739,7 @@ def _flash_attn_forward(
         'num_stages': 1,
     }
 
-    grid = lambda META:(num_q_heads, batch, triton.cdiv(seqlen_q, META['BLOCK_M']))
+    grid = lambda META:(num_q_heads, triton.cdiv(seqlen_q, META['BLOCK_M']), batch)
     _attn_fwd[grid](q,
                     k,
                     v,
@@ -1283,47 +1282,60 @@ def _bwd_dkdvdq_inner(
     return dk, dv
 
 @triton.jit
-def _remap_XCD(k, N, NUM_XCD):
+def _remap_XCD(k, last_k, NUM_XCD):
+    """
+    Parameters:
+        NUM_XCD: number of XCDs in the GPU, e.g. 38 for MI300x.
+        last_k: the last index of the set, i.e. len(set) - 1
+        k: the index to be remapped
+    Function maps indices k = 0, ..., last_k so that [multiples of NUM_XCD] come first (those present in the set),
+    then [multiples of NUM_XCD] + 1, ..., until [multiples of NUM_XCD] + NUM_XCD - 1
+    As indices are distributed to the XCDs in a round robin fashion, this remaps the indices at the XCDs back to consecutive indices.
+    """"
     r = k % NUM_XCD
     m = k // NUM_XCD
-    q = N // NUM_XCD
-    t = N - NUM_XCD * q
+    q = last_k // NUM_XCD
+    t = last_k - NUM_XCD * q
     u = min(r, t + 1)
     new_index = u * q + (r - u) * (q - 1) + r + m
     return new_index
 
 
 @triton.jit
-def _balance_attn_workload(wid, BATCH, NUM_HEAD_PIDS, NUM_SEQ_PIDS, HEAD_GROUP_SIZE, NUM_SMS: tl.constexpr = 304, NUM_XCD: tl.constexpr = 38):
-    # Traversal strategy along dims: seqlen, q_head, batch
-    # 1. Fastest changing dim is the q_head dim. At every <NUM_XCD>th wid, increase the sequence block id (start_m).
-    # 2. When we are done with <CHUNK_BLOCKS_SIZE> blocks along seqlen, we move to the next set of <NUM_XCD> q_heads.
-    # 3. Batch changes last.
+def _wid2pid(wid, BATCH_SIZE, NUM_HEAD_PIDS, NUM_SEQ_PIDS, HEAD_GROUP_SIZE, NUM_SMS: tl.constexpr = 304, NUM_XCD: tl.constexpr = 38):
+    """
+    This function is a mapping from workgroup id (wid) -> (batch idx, head_idx, seq_blk_idx) 
+    i.e. its a traversal strategy of a attention kernel launch grid with dims: (BATCH_SIZE * NUM_HEAD_PIDS * NUM_SEQ_PIDS, )
+    1. Fastest changing dim is the head dim. At every <NUM_XCD>th wid, increase the sequence block id (start_m).
+    2. When we are done with <CHUNK_BLOCKS_SIZE> blocks along seqlen, we move to the next set of <NUM_XCD> q_heads.
+    3. Batch changes last.
 
-    # so XCD 0 should get workgroups with indices (batch, head q idx, start_m)
-    # (0, 0, 0), (0, 0, 1), (0, 0, 2), ..., (0, 0, CHUNK_BLOCKS_SIZE), (0, NUM_XCD, 0)
-    # XCD 1
-    # (0, 1, 0), (0, 1, 1), (0, 1, 2), ..., (0, 1, CHUNK_BLOCKS_SIZE), (0, NUM_XCD+1, 0)
-    # ...
-    # XCD <NUM_XCD - 1>
-    # (0, NUM_XCD-1, 0), (0, NUM_XCD-1, 1), (0, NUM_XCD-1, 2), ..., (0, NUM_XCD-1, CHUNK_BLOCKS_SIZE), (0, 2 * NUM_XCD-1, 0)
+    so XCD 0 should get workgroups with indices (batch, head q idx, start_m)
+    (0, 0, 0), (0, 0, 1), (0, 0, 2), ..., (0, 0, CHUNK_BLOCKS_SIZE), (0, NUM_XCD, 0)
+    XCD 1
+    (0, 1, 0), (0, 1, 1), (0, 1, 2), ..., (0, 1, CHUNK_BLOCKS_SIZE), (0, NUM_XCD+1, 0)
+    ...
+    XCD <NUM_XCD - 1>
+    (0, NUM_XCD-1, 0), (0, NUM_XCD-1, 1), (0, NUM_XCD-1, 2), ..., (0, NUM_XCD-1, CHUNK_BLOCKS_SIZE), (0, 2 * NUM_XCD-1, 0)
 
-    # Notice that on the same round robin turn, XCDs get the same start_m, i.e. workgroups with equal workloads.
-    # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
+    Notice that on the same round robin turn, XCDs get the same start_m, i.e. workgroups with equal workloads.
+    But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
 
-    # CHUNK_BLOCKS_SIZE: how many blocks we traverse along seqlen before moving to the next set of NUM_XCD q_heads?
-    # one option would be (NUM_CUs_PER_XCD // HEAD_GROUP_SIZE): max number of blocks so we can still fit grouped q heads inside the same XCD
-    # setting to 1 maximizes for multiple grouped q heads fitting concurrently inside the same XCD
+    CHUNK_BLOCKS_SIZE: how many blocks we traverse along seqlen before moving to the next set of NUM_XCD q_heads?
+    one option would be (NUM_CUs_PER_XCD // HEAD_GROUP_SIZE): max number of blocks so we can still fit grouped q heads inside the same XCD
+    setting to 1 maximizes for as many as possible grouped q heads fitting concurrently inside the same XCD
+    """
+    
     CHUNK_BLOCKS_SIZE = 1 
      
-    off_head = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_HEAD_PIDS
+    head_idx = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_HEAD_PIDS
     seq_blk_idx = ((wid // NUM_XCD ) % CHUNK_BLOCKS_SIZE + wid // (CHUNK_BLOCKS_SIZE * NUM_HEAD_PIDS) * CHUNK_BLOCKS_SIZE) % NUM_SEQ_PIDS
-    off_z = wid // (NUM_SEQ_PIDS * NUM_HEAD_PIDS) % BATCH
+    batch_idx = wid // (NUM_SEQ_PIDS * NUM_HEAD_PIDS) % BATCH_SIZE
     
     # remaps q_head so that workgroups that are on the same XCD handle consecutive q heads (potential to benefit from loading the shared key head to L2 only once)
-    off_head = _remap_XCD(off_head, NUM_HEAD_PIDS-1, NUM_XCD)
+    head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_XCD)
 
-    return off_z, off_head, seq_blk_idx
+    return batch_idx, head_idx, seq_blk_idx
 
 
 @triton.jit
@@ -1394,8 +1406,9 @@ def _bwd_kernel_dkdvdq_causal(
     
     GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
 
-    batch_idx, head_q_idx, seq_k_blk_idx = _balance_attn_workload(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, GROUP_SIZE)
-    tl.static_print("Compiling...")
+    batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, GROUP_SIZE)
+    
+    # tl.static_print("Compiling...")
     # batch_idx = wid % BATCH 
     # head_q_idx = wid // BATCH % NUM_Q_HEADS 
     # seq_k_blk_idx = wid // (BATCH * NUM_Q_HEADS) % NUM_K_PIDS

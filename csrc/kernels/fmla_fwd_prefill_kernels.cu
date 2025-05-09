@@ -68,13 +68,13 @@ struct FlashMlaPrefillKernelTrait
     static constexpr int32_t kBlockN0                   = kBlockN0_;
     static constexpr int32_t kBlockN1                   = kBlockN1_;
     static constexpr int32_t kBlockK0                   = 32;
-    static constexpr int32_t kBlockK1                   = 32;
+    static constexpr int32_t kBlockK1                   = 16;
     static constexpr int32_t kFixedOverheadNumBlocks    = 5;
     static constexpr int32_t kMaxBatchSize              = 4096;
     static constexpr int32_t kCuReuse                   = 2;
     static constexpr int32_t kMaxSplits                 = 128;
-    static constexpr bool    kPadHeadDimQ               = true;
-    static constexpr bool    kPadHeadDimV               = true;
+    static constexpr bool    kPadHeadDimQ               = false;
+    static constexpr bool    kPadHeadDimV               = false;
     static constexpr bool    kPadSeqLenQ                = true;
     static constexpr bool    kPadSeqLenK                = true;
 

@@ -352,13 +352,18 @@ def _attn_fwd(q_ptr: torch.Tensor,
             IS_FP8: tl.constexpr,
             FP8_MAX: tl.constexpr,
             VARLEN: tl.constexpr,
+            BATCH,
 ):
     #calculate offsets
-    off_q_head = tl.program_id(0) #num_q_heads
-    # tl.static_print("compiling...")
-    off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS - 1, 8)
-    start_m = tl.program_id(1) #seqlen_q
-    off_z = tl.program_id(2) #batch
+    # off_q_head = tl.program_id(0) #num_q_heads
+    # off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS - 1, 8)
+    # start_m = tl.program_id(1) #seqlen_q
+    # off_z = tl.program_id(2) #batch
+
+    wid = tl.program_id(0)
+    NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
+    off_z, off_q_head, start_m = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_BLOCKS)
+
 
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
@@ -739,7 +744,7 @@ def _flash_attn_forward(
         'num_stages': 1,
     }
 
-    grid = lambda META:(num_q_heads, triton.cdiv(seqlen_q, META['BLOCK_M']), batch)
+    grid = lambda META:(num_q_heads * triton.cdiv(seqlen_q, META['BLOCK_M']) * batch,)
     _attn_fwd[grid](q,
                     k,
                     v,
@@ -785,6 +790,7 @@ def _flash_attn_forward(
                     IS_FP8=IS_FP8,
                     FP8_MAX=FP8_MAX,
                     VARLEN=is_varlen,
+                    BATCH=batch,
                     **config
     )
 
@@ -1302,38 +1308,42 @@ def _remap_XCD(k, last_k, NUM_XCD):
 
 
 @triton.jit
-def _wid2pid(wid, BATCH_SIZE, NUM_HEAD_PIDS, NUM_SEQ_PIDS, HEAD_GROUP_SIZE, NUM_SMS: tl.constexpr = 304, NUM_XCD: tl.constexpr = 38):
+def _wid2pid(wid, BATCH_SIZE, NUM_HEAD_PIDS, NUM_SEQ_PIDS, NUM_XCD: tl.constexpr = 8):
     """
+    Parameters:
+        wid: workgroup id
+        BATCH_SIZE: batch size
+        NUM_HEAD_PIDS: number of head partitions
+        NUM_SEQ_PIDS: number of sequence partitions
+        NUM_XCD: number of XCDs in the GPU, e.g. 8 for MI300x.
+    Returns:
+        batch_idx: batch index
+        head_idx: head index
+        seq_blk_idx: sequence block index
+
     This function is a mapping from workgroup id (wid) -> (batch idx, head_idx, seq_blk_idx) 
     i.e. its a traversal strategy of a attention kernel launch grid with dims: (BATCH_SIZE * NUM_HEAD_PIDS * NUM_SEQ_PIDS, )
-    1. Fastest changing dim is the head dim. At every <NUM_XCD>th wid, increase the sequence block id (start_m).
-    2. When we are done with <CHUNK_BLOCKS_SIZE> blocks along seqlen, we move to the next set of <NUM_XCD> q_heads.
-    3. Batch changes last.
+    1. Fastest changing dim is the head dim. Then seq_blk dim. Then batch dim.
+    2. Since workgroups are distributed across the XCDs in a round robin fashion, we do remapping to have consequent head indices being processed at the same XCD.
 
-    so XCD 0 should get workgroups with indices (batch, head q idx, start_m)
-    (0, 0, 0), (0, 0, 1), (0, 0, 2), ..., (0, 0, CHUNK_BLOCKS_SIZE), (0, NUM_XCD, 0)
-    XCD 1
-    (0, 1, 0), (0, 1, 1), (0, 1, 2), ..., (0, 1, CHUNK_BLOCKS_SIZE), (0, NUM_XCD+1, 0)
-    ...
-    XCD <NUM_XCD - 1>
-    (0, NUM_XCD-1, 0), (0, NUM_XCD-1, 1), (0, NUM_XCD-1, 2), ..., (0, NUM_XCD-1, CHUNK_BLOCKS_SIZE), (0, 2 * NUM_XCD-1, 0)
+    The exception is when NUM_HEAD_PIDS < NUM_XCD, in which case we traverse <BATCH_RESIDUE = NUM_XCD // NUM_HEAD_PIDS> amount of batch samples before moving to the seq_blk idx.
 
-    Notice that on the same round robin turn, XCDs get the same start_m, i.e. workgroups with equal workloads.
-    But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
-
-    CHUNK_BLOCKS_SIZE: how many blocks we traverse along seqlen before moving to the next set of NUM_XCD q_heads?
-    one option would be (NUM_CUs_PER_XCD // HEAD_GROUP_SIZE): max number of blocks so we can still fit grouped q heads inside the same XCD
-    setting to 1 maximizes for as many as possible grouped q heads fitting concurrently inside the same XCD
+    The goal here is that for each round robin iteration of assigning workgroups to the XCDs:
+    - the workgroups have equal amount of work (they do, because only head or batch changes during round robin iteration)
+    - the workgroups inside a XCD process grouped heads (they do, because of the remapping) or consecutive sequence blocks (prioritized after consecutive heads)
     """
-    
-    CHUNK_BLOCKS_SIZE = 1 
-     
-    head_idx = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_HEAD_PIDS
-    seq_blk_idx = ((wid // NUM_XCD ) % CHUNK_BLOCKS_SIZE + wid // (CHUNK_BLOCKS_SIZE * NUM_HEAD_PIDS) * CHUNK_BLOCKS_SIZE) % NUM_SEQ_PIDS
-    batch_idx = wid // (NUM_SEQ_PIDS * NUM_HEAD_PIDS) % BATCH_SIZE
-    
-    # remaps q_head so that workgroups that are on the same XCD handle consecutive q heads (potential to benefit from loading the shared key head to L2 only once)
-    head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_XCD)
+
+    if NUM_HEAD_PIDS < NUM_XCD:
+        BATCH_RESIDUE = NUM_XCD // NUM_HEAD_PIDS
+        head_idx = wid % NUM_HEAD_PIDS
+        batch_idx = ((wid // NUM_HEAD_PIDS) % BATCH_RESIDUE + wid // (NUM_HEAD_PIDS * BATCH_RESIDUE * NUM_SEQ_PIDS) * BATCH_RESIDUE) % BATCH_SIZE
+        seq_blk_idx = (wid // (NUM_HEAD_PIDS * BATCH_RESIDUE)) % NUM_SEQ_PIDS
+        head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_HEAD_PIDS)
+    else:
+        head_idx = wid % NUM_HEAD_PIDS
+        head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_XCD)
+        seq_blk_idx = (wid // NUM_HEAD_PIDS) % NUM_SEQ_PIDS
+        batch_idx = (wid // (NUM_SEQ_PIDS * NUM_HEAD_PIDS)) % BATCH_SIZE
 
     return batch_idx, head_idx, seq_blk_idx
 
@@ -1401,7 +1411,11 @@ def _bwd_kernel_dkdvdq_causal(
     GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
     
     wid = tl.program_id(0) # workgoup id: 0, ..., NUM_Q_PIDS * BATCH * NUM_K_HEADS - 1
-    batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, GROUP_SIZE)
+    batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, NUM_XCD=NUM_Q_HEADS)
+    # In the backward we dont want concurrent workgroups to handle consecutive heads or blocks, so remap them to be far apart.
+    # head_q_idx = head_q_idx * 29 % NUM_Q_HEADS
+    # seq_k_blk_idx = seq_k_blk_idx * 29 % NUM_K_PIDS
+
 
     head_k_idx = head_q_idx // GROUP_SIZE
     num_atomics_concurrent = NUM_SMS // (NUM_Q_HEADS *  BATCH)

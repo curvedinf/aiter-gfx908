@@ -206,7 +206,7 @@ def _attn_fwd_inner(
     RCP_LN2: tl.constexpr = 1.4426950408889634
 
     # NOTE:
-    # Workaround for int64 strides, In the absence of strides being int64 parts of offset
+    # Workaround for int64 strides, In the absence of strides being int64, parts of offset
     # computation is done in 32 bit and overflows resulting in segfaults
     # If input strides are defined as int64, it disables vectorized loads which drops perf
     # If we define new strides as stride_x = stride_x_in.to(tl.int64), that does not work
@@ -385,7 +385,7 @@ def _attn_fwd(q_ptr: torch.Tensor,
     offs_d = tl.arange(0, BLOCK_DMODEL_POW2).to(tl.int64)
 
     # NOTE:
-    # Workaround for int64 strides, In the absence of strides being int64 parts of offset
+    # Workaround for int64 strides, In the absence of strides being int64, parts of the offset
     # computation is done in 32 bit and overflows resulting in segfaults
     # If input strides are defined as int64, it disables vectorized loads which drops perf
     # If we define new strides as stride_x = stride_x_in.to(tl.int64), that does not work

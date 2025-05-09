@@ -37,6 +37,7 @@ def _gemm_afp4_wfp4_kernel(
     GROUP_SIZE_M: tl.constexpr,
     EVEN_K: tl.constexpr,
     GRID_MN: tl.constexpr,
+    cache_modifier: tl.constexpr,
 ):
     """Kernel for computing the matmul C = A x B.
     A and B inputs are in the microscale fp4 (mxfp4) format.
@@ -95,10 +96,10 @@ def _gemm_afp4_wfp4_kernel(
         # If it is out of bounds, set it to 0.
         if EVEN_K:
             a = tl.load(a_ptrs)
-            b = tl.load(b_ptrs)
+            b = tl.load(b_ptrs, cache_modifier=cache_modifier)
         else:
-            a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0)
-            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0)
+            a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * (BLOCK_SIZE_K // 2), other=0)
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0)
 
         accumulator += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
 
@@ -111,8 +112,8 @@ def _gemm_afp4_wfp4_kernel(
     c = accumulator.to(c_ptr.type.element_ty)
 
     # Write back the block of the output matrix C with masks.
-    offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+    offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
+    offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     tl.store(c_ptrs, c, mask=c_mask)
@@ -121,6 +122,7 @@ def _gemm_afp4_wfp4_kernel(
 # Wrapper for gemm kernel.
 def gemm_afp4wfp4(x,
                 w,
+                y,
                 x_scales,
                 w_scales,
                 dtype: Optional[float] = torch.bfloat16,
@@ -134,7 +136,7 @@ def gemm_afp4wfp4(x,
 
     Key parameters:
     - X: Matrix X with shape (M, K).
-    - W: Matrix W with shape (N, K).
+    - W: Matrix W with shape (K, N).
     - X_scales: Matrix with shape (M, K // 32)
     - W_scales: Matrix with shape (N, K // 32)
 
@@ -145,17 +147,28 @@ def gemm_afp4wfp4(x,
     M, K = x.shape
     K, N = w.shape
 
-    y = torch.empty((M, N), dtype=dtype, device=x.device)
-
-    BLOCK_SIZE_M = 256
-    BLOCK_SIZE_N = 256
-    BLOCK_SIZE_K = 64
-    GROUP_SIZE_M = 4
-    waves_per_eu = 1
-    kpack = 1
-    num_warps = 4
-    num_stages = 2
-    matrix_instr_nonkdim = 16
+    if M <= 256:
+        BLOCK_SIZE_M = 32
+        BLOCK_SIZE_N = 64
+        BLOCK_SIZE_K = 256
+        GROUP_SIZE_M = 2
+        waves_per_eu = 6
+        kpack = 1
+        num_warps = 4
+        num_stages = 2
+        matrix_instr_nonkdim = 16
+        cache_modifier = '.cg'
+    else:
+        BLOCK_SIZE_M = 256
+        BLOCK_SIZE_N = 256
+        BLOCK_SIZE_K = 256
+        GROUP_SIZE_M = 4
+        waves_per_eu = 1
+        kpack = 1
+        num_warps = 8
+        num_stages = 2
+        matrix_instr_nonkdim = 32
+        cache_modifier = None
 
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), )
     _gemm_afp4_wfp4_kernel[grid](
@@ -186,7 +199,6 @@ def gemm_afp4wfp4(x,
         num_warps=num_warps,
         num_stages=num_stages,
         matrix_instr_nonkdim=matrix_instr_nonkdim,
+        cache_modifier=cache_modifier,
     )
-
-    return y
 

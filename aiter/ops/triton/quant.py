@@ -185,7 +185,7 @@ def _dynamic_mxfp4_quant_kernel(x_ptr,
     pid_m = tl.program_id(0)
     pid_n = tl.program_id(1)
 
-    x_offs_m = pid_m * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE) 
+    x_offs_m = pid_m * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE).to(tl.int64) 
     x_offs_n = pid_n * MXFP4_QUANT_BLOCK_SIZE + tl.arange(0, MXFP4_QUANT_BLOCK_SIZE)
     x_offs = x_offs_m[:, None] * stride_x_m + x_offs_n[None, :] * stride_x_n
     x_mask = (x_offs_m < M)[:,None] & (x_offs_n < N)[None, :]
@@ -246,7 +246,7 @@ def _dynamic_mxfp4_quant_kernel(x_ptr,
     evens, odds = tl.split(e2m1_value)
     out_tensor = evens | (odds << 4)
 
-    out_offs_m = pid_m * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE) 
+    out_offs_m = pid_m * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE).to(tl.int64)
     out_offs_n = pid_n * MXFP4_QUANT_BLOCK_SIZE // 2  + tl.arange(0, MXFP4_QUANT_BLOCK_SIZE // 2) 
     out_offs = out_offs_m[:, None] * stride_x_fp4_m + out_offs_n[None, :] * stride_x_fp4_n
     out_mask = (out_offs_m < M)[:, None] & (out_offs_n < (N // 2))[None, :]
@@ -281,7 +281,7 @@ def dynamic_mxfp4_quant(x: torch.Tensor, scaling_mode: str = "even") -> tuple[to
     MXFP4_QUANT_BLOCK_SIZE = 32 
 
     x_fp4 = torch.empty((M, N // 2), dtype=torch.uint8, device=x.device)
-    blockscale_e8m0 = torch.empty((M, (N + MXFP4_QUANT_BLOCK_SIZE - 1) // MXFP4_QUANT_BLOCK_SIZE), dtype=torch.uint8, device=x.device)
+    blockscale_e8m0 = torch.empty(((N + MXFP4_QUANT_BLOCK_SIZE - 1) // MXFP4_QUANT_BLOCK_SIZE, M), dtype=torch.uint8, device=x.device).T
 
 
     BLOCK_SIZE = 128

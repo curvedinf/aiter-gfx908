@@ -741,7 +741,7 @@ def _flash_attn_forward(
     # Tuned for MI300x
     config = {
         'BLOCK_M': 128,
-        'BLOCK_N': 64,
+        'BLOCK_N': 128,
         'waves_per_eu': 2,
         'num_warps': 4,
         'num_ctas': 1,

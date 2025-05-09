@@ -80,7 +80,7 @@ struct FlashMlaPrefillKernelTrait
 
     // For QS+QR mixed implementation, VGPR always store 256 elements in row/along K0.
     // So the rest are stored in SMEM.
-    static constexpr int32_t kK0InReg  = 256;
+    static constexpr int32_t kK0InReg  = kSizeD;
     static constexpr int32_t kK0InSmem = kSizeD - kK0InReg;
     static constexpr int32_t kNumPrefetchK  = 1;
     static constexpr int32_t kNumPrefetchV  = 1;
@@ -103,7 +103,7 @@ public:
     {
         constexpr int32_t kBlockSize = Traits::kNumThreads;
         constexpr int32_t kMPerBlock = Traits::kBlockM;
-        constexpr int32_t kKPerBlock = Traits::kK0InSmem;
+        constexpr int32_t kKPerBlock = Traits::kBlockK0;
 
         constexpr int32_t MaxVectorSize = 16 / sizeof(scalar_t);
 
@@ -200,7 +200,7 @@ public:
     {
         constexpr int32_t kMPerBlock = Traits::kBlockM;
         // #elements store in SMEM along K0 for query.
-        constexpr int32_t kKPerBlock = Traits::kK0InSmem;
+        constexpr int32_t kKPerBlock = ck_tile::max(Traits::kK0InSmem, 64);
         constexpr int32_t kKPack     = 16 / sizeof(scalar_t);
 
         constexpr auto q_lds_block_desc_0 = ck_tile::make_naive_tensor_descriptor(
@@ -209,7 +209,7 @@ public:
             ck_tile::number<8>{},
             ck_tile::number<1>{});
 
-        constexpr auto q_lds_block_desc = transform_tensor_descriptor(
+        constexpr auto q_lds_block_desc = ck_tile::transform_tensor_descriptor(
             q_lds_block_desc_0,
             ck_tile::make_tuple(ck_tile::make_pass_through_transform(kMPerBlock),
                                 ck_tile::make_merge_transform(ck_tile::make_tuple(kKPerBlock / kKPack, kKPack))),
@@ -282,12 +282,15 @@ public:
 
     CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSizeQ()
     {
-        constexpr int32_t lds_alignment = 16; // optional
-        constexpr int32_t q_smem_size =
-            ck_tile::integer_divide_ceil(
+        int32_t q_smem_size = 0;
+        if constexpr (Traits::kK0InSmem > 0)
+        {
+            constexpr int32_t lds_alignment = 16; // optional
+            q_smem_size = ck_tile::integer_divide_ceil(
                 sizeof(scalar_t) * MakeQLdsBlockDescriptor().get_element_space_size(),
                 lds_alignment) *
-            lds_alignment;
+                lds_alignment;
+        }
         return q_smem_size;
     }
 
@@ -455,7 +458,7 @@ public:
     {
         constexpr int32_t kBlockSize = Traits::kNumThreads;
         constexpr int32_t kMPerBlock = Traits::kBlockM;
-        constexpr int32_t kKPerBlock = Traits::kK0InSmem;
+        constexpr int32_t kKPerBlock = Traits::kBlockK0;
 
         constexpr int32_t MaxVectorSize = 16 / sizeof(scalar_t);
 
@@ -1116,6 +1119,9 @@ CK_TILE_DEVICE static auto kn_fmla_fwd_splitkv_prefill_tile(
     constexpr int32_t k1_loops  = Traits::kBlockN0 / Traits::kBlockK1;
     static_assert(k00_loops >= 2);
     static_assert(k1_loops  >= 1);
+    static_assert((Traits::kK0InReg % Traits::kBlockK0) == 0);
+    static_assert((Traits::kK0InSmem % Traits::kBlockK0) == 0);
+    static_assert((Traits::kBlockN0 % Traits::kBlockK1) == 0);
 
     for (int32_t loop_idx = 0; loop_idx < num_total_loop; ++loop_idx)
     {
@@ -1651,9 +1657,9 @@ void dispatch_fmla_fwd_splictkv_prefill(
         auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, kIsCausal, true>;
         auto kn_comb =
             (params.num_splits <= 32)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 32,  scalar_t, acc_t> :
-            (params.num_splits <= 64)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 64,  scalar_t, acc_t> :
-            (params.num_splits <= 96)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 96,  scalar_t, acc_t> :
-            (params.num_splits <= 128) ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 128, scalar_t, acc_t> :
+            // (params.num_splits <= 64)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 64,  scalar_t, acc_t> :
+            // (params.num_splits <= 96)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 96,  scalar_t, acc_t> :
+            // (params.num_splits <= 128) ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 128, scalar_t, acc_t> :
             static_cast<decltype(kn_fmla_fwd_splictkv_prefill_combine<Traits, 32, scalar_t, acc_t>)*>(nullptr);
         TORCH_CHECK(kn_comb != nullptr, "num_splits is larger than expected (<=128) !");
         kn_attn<<<grid_attn, Traits::kNumThreads, 0, stream>>>(params);

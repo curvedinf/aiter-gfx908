@@ -205,9 +205,11 @@ def _attn_fwd_inner(
 ):
     RCP_LN2: tl.constexpr = 1.4426950408889634
 
-    stride_kn: tl.int64 = stride_kn_in
-    stride_vk: tl.int64 = stride_vk_in
-    stride_sn: tl.int64 = stride_sn_in
+    M = 10
+
+    stride_kn = M.to(tl.int64) * 0 + stride_kn_in
+    stride_vk = M.to(tl.int64) * 0 + stride_vk_in
+    stride_sn = M.to(tl.int64) * 0 + stride_sn_in
 
     # loop over k, v, and update accumulator
 

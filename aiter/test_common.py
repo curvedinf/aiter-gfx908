@@ -10,6 +10,7 @@ import csv
 import datetime
 import json
 import threading
+import atexit
 import pandas as pd
 from aiter import logger
 
@@ -19,13 +20,24 @@ pd.set_option("display.max_rows", 200)
 
 SUMMARY_CSV = "./aiter_perf_summary.csv"
 OPS_CSV = "./aiter_perf_ops.csv"
-
-DEFAULT_CONTROL_LOG_LEVEL = 0
-CONTROL_LOG_MORE = DEFAULT_CONTROL_LOG_LEVEL
-
 CONFIG_PATH = "ctl_log_config.json"
-with open(CONFIG_PATH, "w") as f:
-    json.dump({"log_level": DEFAULT_CONTROL_LOG_LEVEL}, f)
+
+def cleanup():
+    try:
+        os.remove(CONFIG_PATH)
+        print(f"{CONFIG_PATH} has been deleted.")
+    except OSError as e:
+        print(f"Error deleting {CONFIG_PATH}: {e}")
+
+if int(os.environ.get("AITER_LOG_MORE", 0)) == 3:
+    DEFAULT_CONTROL_LOG_LEVEL = 0
+    CONTROL_LOG_MORE = DEFAULT_CONTROL_LOG_LEVEL
+
+    with open(CONFIG_PATH, "w") as f:
+        json.dump({"log_level": DEFAULT_CONTROL_LOG_LEVEL}, f)
+
+    atexit.register(cleanup)
+
 
 def write_csv_header_if_needed(file, headers):
     if not os.path.exists(file):
@@ -46,12 +58,12 @@ def perftest(
             if getattr(_PERFTEST_CONTEXT, "active", False):
                 return func(*args, **kwargs)
 
-            with open(CONFIG_PATH) as f:
-                cfg = json.load(f)
-                CONTROL_LOG_MORE = cfg.get("log_level", DEFAULT_CONTROL_LOG_LEVEL)
-
-            if CONTROL_LOG_MORE == 0:
-                return func(*args, **kwargs)
+            if os.path.exists(CONFIG_PATH):
+                with open(CONFIG_PATH) as f:
+                    cfg = json.load(f)
+                    CONTROL_LOG_MORE = cfg.get("log_level", DEFAULT_CONTROL_LOG_LEVEL)
+                    if CONTROL_LOG_MORE == 0:
+                        return func(*args, **kwargs)
 
             _PERFTEST_CONTEXT.active = True
 

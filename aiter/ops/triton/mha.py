@@ -205,11 +205,12 @@ def _attn_fwd_inner(
 ):
     RCP_LN2: tl.constexpr = 1.4426950408889634
 
-    M = 10
+    # Workaround for int64 strides
+    dummy_M = 10
 
-    stride_kn = M.to(tl.int64) * 0 + stride_kn_in
-    stride_vk = M.to(tl.int64) * 0 + stride_vk_in
-    stride_sn = M.to(tl.int64) * 0 + stride_sn_in
+    stride_kn = dummy_M.to(tl.int64) * 0 + stride_kn_in
+    stride_vk = dummy_M.to(tl.int64) * 0 + stride_vk_in
+    stride_sn = dummy_M.to(tl.int64) * 0 + stride_sn_in
 
     # loop over k, v, and update accumulator
 
@@ -377,36 +378,37 @@ def _attn_fwd(q_ptr: torch.Tensor,
     offs_n = tl.arange(0, BLOCK_N).to(tl.int64)
     offs_d = tl.arange(0, BLOCK_DMODEL_POW2).to(tl.int64)
 
-    M = 10
+    # Workaround for int64 strides
+    dummy_M = 10
 
-    stride_qz           = M.to(tl.int64) * 0 + stride_qz_in
-    stride_qh           = M.to(tl.int64) * 0 + stride_qh_in
-    stride_qm           = M.to(tl.int64) * 0 + stride_qm_in
-    stride_qk           = M.to(tl.int64) * 0 + stride_qk_in
-    stride_kz           = M.to(tl.int64) * 0 + stride_kz_in
-    stride_kh           = M.to(tl.int64) * 0 + stride_kh_in
-    stride_kn           = M.to(tl.int64) * 0 + stride_kn_in
-    stride_kk           = M.to(tl.int64) * 0 + stride_kk_in
-    stride_vz           = M.to(tl.int64) * 0 + stride_vz_in
-    stride_vh           = M.to(tl.int64) * 0 + stride_vh_in
-    stride_vn           = M.to(tl.int64) * 0 + stride_vn_in
-    stride_vk           = M.to(tl.int64) * 0 + stride_vk_in
-    stride_descale_q_z  = M.to(tl.int64) * 0 + stride_descale_q_z_in
-    stride_descale_k_z  = M.to(tl.int64) * 0 + stride_descale_k_z_in
-    stride_descale_v_z  = M.to(tl.int64) * 0 + stride_descale_v_z_in
-    stride_oz           = M.to(tl.int64) * 0 + stride_oz_in
-    stride_oh           = M.to(tl.int64) * 0 + stride_oh_in
-    stride_om           = M.to(tl.int64) * 0 + stride_om_in
-    stride_on           = M.to(tl.int64) * 0 + stride_on_in
-    stride_alibi_z      = M.to(tl.int64) * 0 + stride_alibi_z_in
-    stride_alibi_h      = M.to(tl.int64) * 0 + stride_alibi_h_in
-    stride_sd_z         = M.to(tl.int64) * 0 + stride_sd_z_in
-    stride_sd_h         = M.to(tl.int64) * 0 + stride_sd_h_in
-    stride_sd_m         = M.to(tl.int64) * 0 + stride_sd_m_in
-    stride_sd_n         = M.to(tl.int64) * 0 + stride_sd_n_in
-    stride_lse_z        = M.to(tl.int64) * 0 + stride_lse_z_in
-    stride_lse_h        = M.to(tl.int64) * 0 + stride_lse_h_in
-    stride_lse_m        = M.to(tl.int64) * 0 + stride_lse_m_in
+    stride_qz           = dummy_M.to(tl.int64) * 0 + stride_qz_in
+    stride_qh           = dummy_M.to(tl.int64) * 0 + stride_qh_in
+    stride_qm           = dummy_M.to(tl.int64) * 0 + stride_qm_in
+    stride_qk           = dummy_M.to(tl.int64) * 0 + stride_qk_in
+    stride_kz           = dummy_M.to(tl.int64) * 0 + stride_kz_in
+    stride_kh           = dummy_M.to(tl.int64) * 0 + stride_kh_in
+    stride_kn           = dummy_M.to(tl.int64) * 0 + stride_kn_in
+    stride_kk           = dummy_M.to(tl.int64) * 0 + stride_kk_in
+    stride_vz           = dummy_M.to(tl.int64) * 0 + stride_vz_in
+    stride_vh           = dummy_M.to(tl.int64) * 0 + stride_vh_in
+    stride_vn           = dummy_M.to(tl.int64) * 0 + stride_vn_in
+    stride_vk           = dummy_M.to(tl.int64) * 0 + stride_vk_in
+    stride_descale_q_z  = dummy_M.to(tl.int64) * 0 + stride_descale_q_z_in
+    stride_descale_k_z  = dummy_M.to(tl.int64) * 0 + stride_descale_k_z_in
+    stride_descale_v_z  = dummy_M.to(tl.int64) * 0 + stride_descale_v_z_in
+    stride_oz           = dummy_M.to(tl.int64) * 0 + stride_oz_in
+    stride_oh           = dummy_M.to(tl.int64) * 0 + stride_oh_in
+    stride_om           = dummy_M.to(tl.int64) * 0 + stride_om_in
+    stride_on           = dummy_M.to(tl.int64) * 0 + stride_on_in
+    stride_alibi_z      = dummy_M.to(tl.int64) * 0 + stride_alibi_z_in
+    stride_alibi_h      = dummy_M.to(tl.int64) * 0 + stride_alibi_h_in
+    stride_sd_z         = dummy_M.to(tl.int64) * 0 + stride_sd_z_in
+    stride_sd_h         = dummy_M.to(tl.int64) * 0 + stride_sd_h_in
+    stride_sd_m         = dummy_M.to(tl.int64) * 0 + stride_sd_m_in
+    stride_sd_n         = dummy_M.to(tl.int64) * 0 + stride_sd_n_in
+    stride_lse_z        = dummy_M.to(tl.int64) * 0 + stride_lse_z_in
+    stride_lse_h        = dummy_M.to(tl.int64) * 0 + stride_lse_h_in
+    stride_lse_m        = dummy_M.to(tl.int64) * 0 + stride_lse_m_in
 
     if VARLEN:
         cu_seqlens_q_start = tl.load(cu_seqlens_q + off_z)

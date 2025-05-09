@@ -1398,22 +1398,13 @@ def _bwd_kernel_dkdvdq_causal(
     tl.assume(stride_do_m >= 0)
     tl.assume(stride_do_k >= 0)
 
-    wid = tl.program_id(0) # workgoup id: 0, ..., NUM_Q_PIDS * BATCH * NUM_K_HEADS - 1
-
-    # workgroups get launched first along batch dim, then in head_q dim, and then in seq k block dim
-    
-    num_atomics_concurrent = NUM_SMS // (NUM_Q_HEADS *  BATCH)
-    
     GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
-
-    batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, GROUP_SIZE)
     
-    # tl.static_print("Compiling...")
-    # batch_idx = wid % BATCH 
-    # head_q_idx = wid // BATCH % NUM_Q_HEADS 
-    # seq_k_blk_idx = wid // (BATCH * NUM_Q_HEADS) % NUM_K_PIDS
+    wid = tl.program_id(0) # workgoup id: 0, ..., NUM_Q_PIDS * BATCH * NUM_K_HEADS - 1
+    batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, GROUP_SIZE)
 
     head_k_idx = head_q_idx // GROUP_SIZE
+    num_atomics_concurrent = NUM_SMS // (NUM_Q_HEADS *  BATCH)
 
     #Determine q and k start along with seqlen_q and seqlen_k
     q_start = 0

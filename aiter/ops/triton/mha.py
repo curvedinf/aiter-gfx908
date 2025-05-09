@@ -356,7 +356,7 @@ def _attn_fwd(q_ptr: torch.Tensor,
     #calculate offsets
     off_q_head = tl.program_id(0) #num_q_heads
     # tl.static_print("compiling...")
-    off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS, 8)
+    off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS - 1, 8)
     start_m = tl.program_id(1) #seqlen_q
     off_z = tl.program_id(2) #batch
 
@@ -1291,7 +1291,7 @@ def _remap_XCD(k, last_k, NUM_XCD):
     Function maps indices k = 0, ..., last_k so that [multiples of NUM_XCD] come first (those present in the set),
     then [multiples of NUM_XCD] + 1, ..., until [multiples of NUM_XCD] + NUM_XCD - 1
     As indices are distributed to the XCDs in a round robin fashion, this remaps the indices at the XCDs back to consecutive indices.
-    """"
+    """
     r = k % NUM_XCD
     m = k // NUM_XCD
     q = last_k // NUM_XCD

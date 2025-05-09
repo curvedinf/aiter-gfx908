@@ -58,7 +58,7 @@ def perftest(
             try:
 
                 log_level = int(os.environ.get("AITER_LOG_MORE", 0))
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
 
                 num = num_rotate_args
                 if num < 1:
@@ -328,7 +328,8 @@ def log_args(func, *args, **kwargs):
 
 
 def get_trace_perf(prof, num_iters):
-    assert num_iters >= 1
+    assert num_iters > 1
+    num_iters -= 1
     df = []
     cols = [
         "name",

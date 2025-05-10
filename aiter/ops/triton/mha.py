@@ -1411,10 +1411,10 @@ def _bwd_kernel_dkdvdq_causal(
     GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
     
     wid = tl.program_id(0) # workgoup id: 0, ..., NUM_Q_PIDS * BATCH * NUM_K_HEADS - 1
-    batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, NUM_XCD=NUM_Q_HEADS)
+    batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, NUM_XCD=8)
     # In the backward we dont want concurrent workgroups to handle consecutive heads or blocks, so remap them to be far apart.
-    # head_q_idx = head_q_idx * 29 % NUM_Q_HEADS
-    # seq_k_blk_idx = seq_k_blk_idx * 29 % NUM_K_PIDS
+    head_q_idx = head_q_idx * 29 % NUM_Q_HEADS
+    seq_k_blk_idx = seq_k_blk_idx * 29 % NUM_K_PIDS
 
 
     head_k_idx = head_q_idx // GROUP_SIZE

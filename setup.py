@@ -96,7 +96,7 @@ class NinjaBuildExtension(BuildExtension):
 
 setup(
     name=PACKAGE_NAME,
-    version="0.1.0",
+    use_scm_version=True,
     packages=["aiter_meta", "aiter"],
     include_package_data=True,
     package_data={
@@ -120,6 +120,7 @@ setup(
         "packaging",
         "psutil",
         "ninja",
+        "setuptools_scm",
     ],
 )
 

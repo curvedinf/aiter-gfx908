@@ -150,11 +150,11 @@ def gemm_afp4wfp4(x,
     BLOCK_SIZE_N = 256
     BLOCK_SIZE_K = 256
     GROUP_SIZE_M = 4
-    waves_per_eu = 1
+    waves_per_eu = 2
     kpack = 1
     num_warps = 8
     num_stages = 2
-    matrix_instr_nonkdim = 32
+    matrix_instr_nonkdim = 16
 
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), )
     _gemm_afp4_wfp4_kernel[grid](

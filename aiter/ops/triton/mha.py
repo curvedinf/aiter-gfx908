@@ -358,7 +358,7 @@ def _remap_XCD(k, N, NUM_XCD):
     return new_index
 
 @triton.jit
-def _balance_attn_workload(wid, NUM_CUs_PER_XCD: tl.constexpr, NUM_XCD: tl.constexpr, BATCH, NUM_Q_HEADS, NUM_K_HEADS, SEQLEN_Q, BLOCK_M):
+def _balance_attn_workload(wid, NUM_XCD: tl.constexpr, BATCH, NUM_Q_HEADS, CHUNK_FACTOR, SEQLEN_Q, BLOCK_M):
     # Traversal strategy along dims: seqlen, q_head, batch
     # 1. Fastest changing dim is the q_head dim. At every <NUM_XCD>th wid, increase the sequence block id (start_m).
     # 2. When we are done with <CHUNK_BLOCKS_SIZE> blocks along seqlen, we move to the next set of <NUM_XCD> q_heads.
@@ -376,11 +376,16 @@ def _balance_attn_workload(wid, NUM_CUs_PER_XCD: tl.constexpr, NUM_XCD: tl.const
     # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
 
     NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
-    CHUNK_BLOCKS_SIZE = 1 # (NUM_CUs_PER_XCD // (NUM_Q_HEADS // NUM_K_HEADS))
-    off_q_head = (wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD) % NUM_Q_HEADS
-    start_m = ((wid // NUM_XCD ) % CHUNK_BLOCKS_SIZE + wid // (CHUNK_BLOCKS_SIZE * NUM_Q_HEADS) * CHUNK_BLOCKS_SIZE) % NUM_BLOCKS
+    Q_HEADS_CHUNK_SIZE = NUM_Q_HEADS // CHUNK_FACTOR
+
+    off_q_head_chunk = wid % Q_HEADS_CHUNK_SIZE
+    start_m = (wid // (Q_HEADS_CHUNK_SIZE)) % NUM_BLOCKS
+    q_head_chunk_id = (wid // (Q_HEADS_CHUNK_SIZE * NUM_BLOCKS)) % CHUNK_FACTOR
+    off_q_head_chunk = _remap_XCD(off_q_head_chunk, Q_HEADS_CHUNK_SIZE-1, NUM_XCD)
+    
+    off_q_head = off_q_head_chunk + q_head_chunk_id * Q_HEADS_CHUNK_SIZE
+
     off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH
-    off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS-1, NUM_XCD)
 
     return off_z, off_q_head, start_m
 
@@ -416,6 +421,7 @@ def _attn_fwd(q_ptr: torch.Tensor,
             SEQLEN_K: tl.constexpr,
             IS_CAUSAL: tl.constexpr,
             NUM_Q_HEADS: tl.constexpr,
+            CHUNK_FACTOR: tl.constexpr,
             NUM_K_HEADS: tl.constexpr,
             BLOCK_M: tl.constexpr,
             BLOCK_N: tl.constexpr,
@@ -428,15 +434,12 @@ def _attn_fwd(q_ptr: torch.Tensor,
             VARLEN: tl.constexpr,
             BATCH,
             NUM_XCD: tl.constexpr,
-            NUM_SMS: tl.constexpr,
 ):
     #calculate offsets
     wid = tl.program_id(0) # workgroup id ranging: 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
     # num blocks along seqlen
 
-    NUM_CUs_PER_XCD: tl.constexpr = NUM_SMS // NUM_XCD
-
-    off_z, off_q_head, start_m = _balance_attn_workload(wid, NUM_CUs_PER_XCD, NUM_XCD, BATCH, NUM_Q_HEADS, NUM_K_HEADS, SEQLEN_Q, BLOCK_M)
+    off_z, off_q_head, start_m = _balance_attn_workload(wid, NUM_XCD, BATCH, NUM_Q_HEADS, CHUNK_FACTOR, SEQLEN_Q, BLOCK_M)
 
     # offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -928,7 +931,11 @@ def _flash_attn_forward(
         }
 
     grid = lambda META:(batch * num_q_heads * triton.cdiv(seqlen_q, META['BLOCK_M']),)
-    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+
+    NUM_XCD = 8
+    CHUNK_FACTOR = max(1, num_q_heads // NUM_XCD)
+    if num_q_heads % CHUNK_FACTOR != 0:
+        CHUNK_FACTOR = 1
 
     _attn_fwd[grid](q,
                     k,
@@ -967,6 +974,7 @@ def _flash_attn_forward(
                     SEQLEN_K=max_seqlen_k,
                     IS_CAUSAL=causal,
                     NUM_Q_HEADS=num_q_heads,
+                    CHUNK_FACTOR=CHUNK_FACTOR,
                     NUM_K_HEADS=num_k_heads,
                     BLOCK_DMODEL=head_sz,
                     BLOCK_DMODEL_POW2=BLOCK_DMODEL_POW2,
@@ -977,7 +985,6 @@ def _flash_attn_forward(
                     VARLEN=is_varlen,
                     BATCH=batch,
                     NUM_XCD=8,
-                    NUM_SMS=NUM_SMS,
                     **config
     )
 

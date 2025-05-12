@@ -6,6 +6,22 @@ import triton.language as tl
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 
 
+@triton.autotune(
+    configs=[
+        triton.Config({
+            waves_per_eu = 1
+        }),
+        triton.Config({
+            waves_per_eu = 2
+        }),
+        triton.Config({
+            waves_per_eu = 3
+        }),
+        triton.Config({
+            waves_per_eu = 4
+        }),
+    ],
+)
 @triton.heuristics({
     'EVEN_K':lambda args: args['K'] % args['BLOCK_SIZE_K'] == 0, 
     'GRID_MN':lambda args: triton.cdiv(args['M'], args['BLOCK_SIZE_M']) * triton.cdiv(args['N'], args['BLOCK_SIZE_N'])
@@ -180,7 +196,7 @@ def gemm_afp4wfp4(x,
         BLOCK_SIZE_N,
         BLOCK_SIZE_K,
         GROUP_SIZE_M,
-        waves_per_eu=waves_per_eu,
+        # waves_per_eu=waves_per_eu,
         kpack=kpack,
         num_warps=num_warps,
         num_stages=num_stages,

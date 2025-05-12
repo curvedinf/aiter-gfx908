@@ -381,11 +381,15 @@ def _balance_attn_workload(wid, NUM_XCD: tl.constexpr, BATCH, NUM_Q_HEADS, CHUNK
     off_q_head_chunk = wid % Q_HEADS_CHUNK_SIZE
     start_m = (wid // (Q_HEADS_CHUNK_SIZE)) % NUM_BLOCKS
     q_head_chunk_id = (wid // (Q_HEADS_CHUNK_SIZE * NUM_BLOCKS)) % CHUNK_FACTOR
+    off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH
+
     off_q_head_chunk = _remap_XCD(off_q_head_chunk, Q_HEADS_CHUNK_SIZE-1, NUM_XCD)
-    
+
+    # start_m = _remap_XCD(start_m, NUM_BLOCKS-1, NUM_XCD)
+    # off_z = _remap_XCD(off_z, BATCH-1, NUM_XCD)
+
     off_q_head = off_q_head_chunk + q_head_chunk_id * Q_HEADS_CHUNK_SIZE
 
-    off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH
 
     return off_z, off_q_head, start_m
 
@@ -933,7 +937,7 @@ def _flash_attn_forward(
     grid = lambda META:(batch * num_q_heads * triton.cdiv(seqlen_q, META['BLOCK_M']),)
 
     NUM_XCD = 8
-    CHUNK_FACTOR = max(1, num_q_heads // NUM_XCD)
+    CHUNK_FACTOR = max(1, (num_q_heads // ((NUM_XCD // 2) * (num_q_heads // num_k_heads))))
     if num_q_heads % CHUNK_FACTOR != 0:
         CHUNK_FACTOR = 1
 

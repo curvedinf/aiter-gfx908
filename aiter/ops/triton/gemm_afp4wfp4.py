@@ -6,22 +6,6 @@ import triton.language as tl
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 
 
-@triton.autotune(
-    configs=[
-        triton.Config(
-            waves_per_eu = 1
-        ),
-        triton.Config(
-            waves_per_eu = 2
-        ),
-        triton.Config(
-            waves_per_eu = 3
-        ),
-        triton.Config(
-            waves_per_eu = 4
-        ),
-    ],
-)
 @triton.heuristics({
     'EVEN_K':lambda args: args['K'] % args['BLOCK_SIZE_K'] == 0, 
     'GRID_MN':lambda args: triton.cdiv(args['M'], args['BLOCK_SIZE_M']) * triton.cdiv(args['N'], args['BLOCK_SIZE_N'])
@@ -162,7 +146,7 @@ def gemm_afp4wfp4(x,
     M, K = x.shape
     K, N = w.shape
 
-    BLOCK_SIZE_M = 32
+    BLOCK_SIZE_M = 16
     BLOCK_SIZE_N = 64
     BLOCK_SIZE_K = 256
     GROUP_SIZE_M = 1
@@ -171,6 +155,7 @@ def gemm_afp4wfp4(x,
     num_warps = 4
     num_stages = 2
     matrix_instr_nonkdim = 16
+    aggregated_loads = -1
 
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), )
     _gemm_afp4_wfp4_kernel[grid](
@@ -201,6 +186,6 @@ def gemm_afp4wfp4(x,
         num_warps=num_warps,
         num_stages=num_stages,
         matrix_instr_nonkdim=matrix_instr_nonkdim,
-        aggregate_load_factor=-1
+        aggregate_load_factor=aggregated_loads
     )
 

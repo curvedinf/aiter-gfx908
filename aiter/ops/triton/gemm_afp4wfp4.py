@@ -8,18 +8,18 @@ from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 
 @triton.autotune(
     configs=[
-        triton.Config({
+        triton.Config(
             waves_per_eu = 1
-        }),
-        triton.Config({
+        ),
+        triton.Config(
             waves_per_eu = 2
-        }),
-        triton.Config({
+        ),
+        triton.Config(
             waves_per_eu = 3
-        }),
-        triton.Config({
+        ),
+        triton.Config(
             waves_per_eu = 4
-        }),
+        ),
     ],
 )
 @triton.heuristics({

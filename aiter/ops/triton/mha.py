@@ -937,7 +937,7 @@ def _flash_attn_forward(
     grid = lambda META:(batch * num_q_heads * triton.cdiv(seqlen_q, META['BLOCK_M']),)
 
     NUM_XCD = 8
-    CHUNK_FACTOR = max(1, (num_q_heads // ((NUM_XCD // 2) * (num_q_heads // num_k_heads))))
+    CHUNK_FACTOR = max(1, (num_q_heads // NUM_XCD) * 2)
     if num_q_heads % CHUNK_FACTOR != 0:
         CHUNK_FACTOR = 1
 

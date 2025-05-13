@@ -493,11 +493,11 @@ def _bwd_dq_inner(
         vT_ptrs += step_n * stride_vn
     return dq
 
-@triton.autotune(
-    configs=causal_autotune_configs,
-    key=causal_autotune_keys,
-    use_cuda_graph=True,
-)
+# @triton.autotune(
+#     configs=causal_autotune_configs,
+#     key=causal_autotune_keys,
+#     use_cuda_graph=True,
+# )
 @triton.jit
 def bwd_kernel_causal( # grid = (tl.cdiv(max_seqlen_q // BLOCK_M2), batch, nheads_q)
     Q, K, V, sm_scale, DO, DQ, DK, DV,
@@ -536,11 +536,7 @@ def bwd_kernel_causal( # grid = (tl.cdiv(max_seqlen_q // BLOCK_M2), batch, nhead
     DEBUG_TRITON: tl.constexpr,
     DEBUG_TRITON_DETAIL: tl.constexpr,
 ):
-    tl.static_print("BLOCK_M1", BLOCK_M1)
-    tl.static_print("BLOCK_N1", BLOCK_N1)
-    tl.static_print("BLOCK_M2", BLOCK_M2)
-    tl.static_print("BLOCK_N2", BLOCK_N2)
-    tl.static_print("BLK_SLICE_FACTOR", BLK_SLICE_FACTOR)
+
 
     # program ids
     wid = tl.program_id(0)

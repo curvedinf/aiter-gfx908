@@ -2587,21 +2587,28 @@ def _flash_attn_backward(
         
         return delta
     
-    # split kernels solution: one kernel computes dk, dv and the other computes dq
-
+    
+    # jignings kernel fuses the two kernels into main by having combined grid
     if onekernel:
         num_k_pids = (max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1
         grid = (batch * num_q_heads * num_k_pids,) 
-        # onekernel_config = {
-        #     "BLOCK_M1": 32,
-        #     "BLOCK_M2": 32,
-        #     "BLOCK_N1": BLOCK_N,
-        #     "BLOCK_N2": BLOCK_N,
-        #     "num_warps": 4,
-        #     "num_stages": 1,
-        #     "waves_per_eu": 1,
-        #     "BLK_SLICE_FACTOR": 2,
-        # }
+
+        NUM_WARPS, NUM_STAGES = 4, 1
+        WAVES_PER_EU = 1
+        BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
+        BLK_SLICE_FACTOR = 2
+
+        onekernel_config = {
+            "BLOCK_M1": BLOCK_M1,
+            "BLOCK_N1": BLOCK_N1,
+            "BLOCK_M2": BLOCK_M2,
+            "BLOCK_N2": BLOCK_N2,
+            "num_warps": NUM_WARPS,
+            "num_stages": NUM_STAGES,
+            "waves_per_eu": WAVES_PER_EU,
+            "BLK_SLICE_FACTOR": BLK_SLICE_FACTOR,
+        }
+
         stride_qb, stride_qh, stride_qm, stride_qd = q_strides
         stride_kb, stride_kh, stride_kn, stride_kd = k_strides
         stride_vb, stride_vh, stride_vn, stride_vd = v_strides
@@ -2644,6 +2651,7 @@ def _flash_attn_backward(
                 FP8_OUTPUT=False,
                 DEBUG_TRITON=False,
                 DEBUG_TRITON_DETAIL=False,
+                **onekernel_config,
             )
         else:
             bwd_kernel_noncausal[grid](
@@ -2679,7 +2687,9 @@ def _flash_attn_backward(
                 DEBUG_TRITON_DETAIL=False,
                 # **onekernel_config,
             )
+        return delta
 
+    # split kernels solution: one kernel computes dk, dv and the other computes dq
     if causal:
         _bwd_kernel_dkdv_causal[grid_dkdv](
             q, k, v, sm_scale, do, dk, dv,
@@ -2914,7 +2924,7 @@ class FlashAttnFunc(torch.autograd.Function):
         dq = dq[..., : q.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : k.shape[-1]]
         dv = dv[..., : v.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
 def flash_attn_func(
     q,
@@ -3258,7 +3268,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         dq = dq[..., : q.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : k.shape[-1]]
         dv = dv[..., : v.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None
 
 
 def flash_attn_varlen_func(
@@ -3482,7 +3492,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
         dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : k_fp8.shape[-1]]
         dv = dv[..., : v_fp8.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None, None
 
 def flash_attn_varlen_fp8_func(
     q,

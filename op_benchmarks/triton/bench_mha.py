@@ -231,7 +231,9 @@ def run_benchmark(custom, args):
         varlen = args.layout == 'thd' if not (hasattr(args, 'test_mode') and args.test_mode) else False  # Force non-varlen in test mode
 
         fused_backward = False
-        onekernel_backward = args.onekernel_bwd
+        onekernel_backward = "fused" in provider
+
+        assert not fused_backward or not onekernel_backward, "fused_backward and onekernel_backward cannot be used together."
 
         # Default softmax scale to match standard attention
         if sm_scale is None:

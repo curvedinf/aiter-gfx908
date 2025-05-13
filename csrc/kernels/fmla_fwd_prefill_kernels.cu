@@ -1035,8 +1035,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     constexpr int32_t k00_loops = Traits::kK0InReg / Traits::kBlockK0;      // #loop for Q in reg
     constexpr int32_t k01_loops = Traits::kK0InSmem / Traits::kBlockK0;     // #loop for Q in smem
     constexpr int32_t k1_loops  = Traits::kBlockN0 / Traits::kBlockK1;
-    // constexpr int32_t n1_loops  = Traits::kSizeDV / Traits::kBlockN1;
-    constexpr int32_t n1_loops = 1;
+    constexpr int32_t n1_loops  = Traits::kSizeDV / Traits::kBlockN1;
     static_assert(k00_loops >= 2);
     static_assert(k1_loops  >= 1);
     static_assert(n1_loops  >= 1);
@@ -1096,6 +1095,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                 }
             }
         );
+        return;
     }
 
 

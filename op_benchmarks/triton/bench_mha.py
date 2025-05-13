@@ -230,7 +230,8 @@ def run_benchmark(custom, args):
         rep = 100
         varlen = args.layout == 'thd' if not (hasattr(args, 'test_mode') and args.test_mode) else False  # Force non-varlen in test mode
 
-        fused_backward = args.fused_bwd or ("fused" in provider)
+        fused_backward = False
+        onekernel_backward = args.onekernel_bwd
 
         # Default softmax scale to match standard attention
         if sm_scale is None:
@@ -291,12 +292,12 @@ def run_benchmark(custom, args):
                 triton_fn = lambda: flash_attn_varlen_func(
                     q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
                     dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                 )
             else:
                 triton_fn = lambda: flash_attn_func(
                     q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward 
+                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                 )
             with torch.enable_grad():
                 triton_out, _, sd_mask = triton_fn()
@@ -336,24 +337,24 @@ def run_benchmark(custom, args):
                     fn = lambda: flash_attn_varlen_fp8_func(
                         q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
                         dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                     )
                 else:
                     fn = lambda: flash_attn_varlen_func(
                         q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
                         dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                     )
             else:
                 if args.fp8:
                     fn = lambda: flash_attn_fp8_func(
                         q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                     )
                 else:
                     fn = lambda: flash_attn_func(
                         q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward 
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                     )
             if mode=="bwd":
                 with torch.enable_grad():
@@ -438,6 +439,7 @@ def parse_args():
     parser.add_argument("-dtype", default='fp16')
     parser.add_argument("-bench_torch", action='store_true', default=False)
     parser.add_argument("-fused_bwd", action='store_true', default=False)
+    parser.add_argument("-onekernel_bwd", action='store_true', default=False)
     parser.add_argument("-print_vgpr", action='store_true', default=False)
     parser.add_argument("-return_all", action='store_true', default=False, help="Prints TFLOPS, walltime, bandwidth.")
     parser.add_argument("-test_mode", action='store_true', default=False, help="Tests correctness of the Triton provider comparing the output to the Torch sdpa.")

@@ -3,7 +3,7 @@ import triton
 import triton.language as tl
 
 from typing import Optional, Tuple
-
+from .mha_onekernel import bwd_kernel_causal, bwd_kernel_noncausal
 @triton.jit
 def cdiv_fn(x, y):
     return (x + y - 1) // y
@@ -2402,7 +2402,9 @@ def _flash_attn_backward(
     descale_v: Optional[torch.Tensor] = None,
     descale_do: Optional[torch.Tensor] = None,
     fused: bool = False,
+    onekernel: bool = False
 ):
+    assert not (fused and onekernel)
     IS_FP8 = is_fp8(q)
     if IS_FP8:
         FP8_MAX = torch.finfo(q.dtype).max
@@ -2587,6 +2589,97 @@ def _flash_attn_backward(
     
     # split kernels solution: one kernel computes dk, dv and the other computes dq
 
+    if onekernel:
+        num_k_pids = (max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1
+        grid = (batch * num_q_heads * num_k_pids,) 
+        # onekernel_config = {
+        #     "BLOCK_M1": 32,
+        #     "BLOCK_M2": 32,
+        #     "BLOCK_N1": BLOCK_N,
+        #     "BLOCK_N2": BLOCK_N,
+        #     "num_warps": 4,
+        #     "num_stages": 1,
+        #     "waves_per_eu": 1,
+        #     "BLK_SLICE_FACTOR": 2,
+        # }
+        stride_qb, stride_qh, stride_qm, stride_qd = q_strides
+        stride_kb, stride_kh, stride_kn, stride_kd = k_strides
+        stride_vb, stride_vh, stride_vn, stride_vd = v_strides
+        stride_dqb, stride_dqh, stride_dqm, stride_dqd = dq_strides
+        stride_dkb, stride_dkh, stride_dkn, stride_dkd = dk_strides
+        stride_dvb, stride_dvh, stride_dvn, stride_dvd = dv_strides
+        stride_deltab, stride_deltah, stride_deltam = delta_strides
+        stride_dob, stride_doh, stride_dom, stride_dod = do_strides
+        stride_dropoutb, stride_dropouth, stride_dropoutm, stride_dropoutn = dropout_strides
+
+        if causal:
+            bwd_kernel_causal[grid](
+                q, k, v, sm_scale, do, dq, dk, dv,
+                softmax_lse, delta,
+                stride_qb, stride_qh, stride_qm, stride_qd,
+                stride_kb, stride_kh, stride_kn, stride_kd,
+                stride_vb, stride_vh, stride_vn, stride_vd,
+                stride_dqb, stride_dqh, stride_dqm, stride_dqd,
+                stride_dkb, stride_dkh, stride_dkn, stride_dkd,
+                stride_dvb, stride_dvh, stride_dvn, stride_dvd,
+                stride_deltab, stride_deltah, stride_deltam,
+                stride_dob, stride_doh, stride_dom, stride_dod,
+                stride_dropoutb, stride_dropouth, stride_dropoutm, stride_dropoutn,
+                stride_descale_q_z, stride_descale_k_z, stride_descale_v_z, stride_descale_do_z,
+                None, None,
+                batch, num_q_heads, num_k_heads,
+                cu_seqlens_q, cu_seqlens_k,
+                max_seqlen_q, max_seqlen_k,
+                dropout_mask, dropout_p, philox_seed, philox_offset,
+                alibi_slopes,
+                descale_q, descale_k, descale_v, descale_do,
+                HEAD_DIM=BLOCK_D_MODEL_POW2,
+                ACTUAL_HEAD_DIM=head_sz,
+                ENABLE_DROPOUT=use_dropout,
+                IS_VARLEN=IS_VARLEN,
+                USE_ALIBI=False,
+                USE_EXP2=True,
+                IS_FP8=IS_FP8,
+                FP8_MAX=FP8_MAX,
+                FP8_OUTPUT=False,
+                DEBUG_TRITON=False,
+                DEBUG_TRITON_DETAIL=False,
+            )
+        else:
+            bwd_kernel_noncausal[grid](
+                q, k, v, sm_scale, do, dq, dk, dv,
+                softmax_lse, delta,
+                *q_strides,
+                *k_strides,
+                *v_strides,
+                *dq_strides,
+                *dk_strides,
+                *dv_strides,
+                *delta_strides,
+                *do_strides,
+                *dropout_strides,
+                stride_descale_q_z, stride_descale_k_z, stride_descale_v_z, stride_descale_do_z,
+                None, None,
+                batch, num_q_heads, num_k_heads,
+                cu_seqlens_q, cu_seqlens_k,
+                max_seqlen_q, max_seqlen_k,
+                dropout_mask, dropout_p, philox_seed, philox_offset,
+                alibi_slopes,
+                descale_q, descale_k, descale_v, descale_do,
+                HEAD_DIM=BLOCK_D_MODEL_POW2,
+                ACTUAL_HEAD_DIM=head_sz,
+                ENABLE_DROPOUT=use_dropout,
+                IS_VARLEN=IS_VARLEN,
+                USE_ALIBI=False,
+                USE_EXP2=True,
+                IS_FP8=IS_FP8,
+                FP8_MAX=FP8_MAX,
+                FP8_OUTPUT=False,
+                DEBUG_TRITON=False,
+                DEBUG_TRITON_DETAIL=False,
+                # **onekernel_config,
+            )
+
     if causal:
         _bwd_kernel_dkdv_causal[grid_dkdv](
             q, k, v, sm_scale, do, dk, dv,
@@ -2734,6 +2827,7 @@ class FlashAttnFunc(torch.autograd.Function):
         return_softmax,
         is_grad_enabled,
         fused_backward,
+        onekernel_backward
     ):
         is_grad = is_grad_enabled and any(
             x.requires_grad for x in [q,k,v]
@@ -2774,6 +2868,7 @@ class FlashAttnFunc(torch.autograd.Function):
             ctx.alibi_slopes = alibi_slopes
             ctx.deterministic = deterministic
             ctx.fused_backward = fused_backward
+            ctx.onekernel_backward = onekernel_backward
 
 
         out = out_padded[..., :head_size_og]
@@ -2814,6 +2909,7 @@ class FlashAttnFunc(torch.autograd.Function):
             philox_seed=ctx.philox_seed,
             philox_offset=ctx.philox_offset,
             fused=ctx.fused_backward,
+            onekernel=ctx.onekernel_backward,
         )
         dq = dq[..., : q.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : k.shape[-1]]
@@ -2833,6 +2929,7 @@ def flash_attn_func(
     return_lse=False,
     return_attn_probs=False,
     fused_backward=False,
+    onekernel_backward=False
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in KV with fewer heads
@@ -2896,6 +2993,7 @@ def flash_attn_func(
         return_attn_probs,
         torch.is_grad_enabled(),
         fused_backward,
+        onekernel_backward
     )
 
 
@@ -2916,6 +3014,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
         return_softmax,
         is_grad_enabled, 
         fused_backward,
+        onekernel_backward
     ):
         is_grad = is_grad_enabled and any(
             x.requires_grad for x in [q,k,v]
@@ -2965,6 +3064,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
             ctx.fused_backward = fused_backward
+            ctx.onekernel_backward = onekernel_backward
         
         out = out_padded[..., :head_size_og]
         result = [out]
@@ -3011,6 +3111,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
             descale_v=descale_v,
             descale_do=descale_do,
             fused=ctx.fused_backward,
+            onekernel=ctx.onekernel_backward,
         )
         #dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
         #dk = dk[..., : k_fp8.shape[-1]]
@@ -3030,6 +3131,7 @@ def flash_attn_fp8_func(
     return_lse=False,
     return_attn_probs=False,
     fused_backward=False,
+    onekernel_backward=False
 ):
     return FlashAttnFP8Func.apply(
         q,
@@ -3045,7 +3147,8 @@ def flash_attn_fp8_func(
         return_attn_probs,
         torch.is_grad_enabled(),
         fused_backward,
-    ) 
+        onekernel_backward
+    )
 
 class FlashAttnVarlenFunc(torch.autograd.Function):
     @staticmethod
@@ -3069,6 +3172,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         block_table,
         is_grad_enabled,
         fused_backward,
+        onekernel_backward
     ):
         is_grad = is_grad_enabled and any(
             x.requires_grad for x in [q, k, v]
@@ -3109,6 +3213,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
             ctx.fused_backward = fused_backward
+            ctx.onekernel_backward = onekernel_backward
         out = out_padded[..., :head_size_og]
 
         result = [out]
@@ -3148,6 +3253,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             philox_seed=ctx.philox_seed,
             philox_offset=ctx.philox_offset,
             fused=ctx.fused_backward,
+            onekernel=ctx.onekernel_backward
         )
         dq = dq[..., : q.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : k.shape[-1]]
@@ -3173,6 +3279,7 @@ def flash_attn_varlen_func(
     return_attn_probs=False,
     block_table=None,
     fused_backward=False,
+    onekernel_backward=False
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in K, V with fewer heads
@@ -3247,6 +3354,7 @@ def flash_attn_varlen_func(
         block_table,
         torch.is_grad_enabled(),
         fused_backward,
+        onekernel_backward
     )
 
 
@@ -3272,6 +3380,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
         block_table,
         is_grad_enabled,
         fused_backward,
+        onekernel_backward
     ):
         is_grad = is_grad_enabled and any(
             x.requires_grad for x in [q, k, v]
@@ -3310,6 +3419,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
             descale_k=descale_k,
             descale_v=descale_v,
             fused_backward=fused_backward,
+            onekernel_backward=onekernel_backward
         )
         if is_grad:
             ctx.save_for_backward(q_fp8, k_fp8, v_fp8, out_padded, softmax_lse, cu_seqlens_q, cu_seqlens_k, descale_q, descale_k, descale_v)
@@ -3392,6 +3502,7 @@ def flash_attn_varlen_fp8_func(
     return_attn_probs=False,
     block_table=None,
     fused_backward=False,
+    one_kernel_backward=False,
 ):
     return FlashAttnVarlenFP8Func.apply(
         q,
@@ -3412,4 +3523,5 @@ def flash_attn_varlen_fp8_func(
         block_table,
         torch.is_grad_enabled(),
         fused_backward,
+        one_kernel_backward
     )

@@ -7,6 +7,11 @@ import triton.language as tl
 from typing import Optional
 
 
+# TODO Move this to a common folder. Will need to add future arch list
+def get_arch():
+    return triton.runtime.driver.active.get_current_target().arch
+
+
 @triton.heuristics(
     {
         "EVEN_K": lambda args: args["K"] % args["BLOCK_SIZE_K"] == 0,
@@ -212,15 +217,12 @@ def gemm_a8w8_blockscale(
     K, N = w.shape
 
     # Scale block sizes
-    GROUP_K = triton.cdiv(K, w_scale.shape[0])
-    GROUP_N = triton.cdiv(N, w_scale.shape[1])
+    # TODO: need a better way to pass scale block sizes around
+    GROUP_K = triton.next_power_of_2(triton.cdiv(K, w_scale.shape[0]))
+    GROUP_N = triton.next_power_of_2(triton.cdiv(N, w_scale.shape[1]))
 
     # Check constraints.
-    # TODO: Remove the scale block size constraint
     assert x.shape[1] == w.shape[0], "Incompatible dimensions!!!"
-    assert (N % GROUP_N == 0) and (
-        K % GROUP_K == 0
-    ), "N/K sizes not aligned to SCALE BLOCK SIZE!"
 
     y = torch.empty((M, N), dtype=dtype, device=x.device)
 
@@ -229,9 +231,9 @@ def gemm_a8w8_blockscale(
     BLOCK_SIZE_K = 128
     GROUP_SIZE_M = 4
     waves_per_eu = 2
-    kpack = 1
+    kpack = 1 if get_arch() in ("gfx950") else 2
     matrix_instr_nonkdim = 16
-    num_warps = 8
+    num_warps = 4
     num_stages = 2
 
     grid = (triton.cdiv(M, BLOCK_SIZE_M) * triton.cdiv(N, BLOCK_SIZE_N),)

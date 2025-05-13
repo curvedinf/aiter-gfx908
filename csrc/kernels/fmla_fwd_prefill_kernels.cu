@@ -1431,6 +1431,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
 //
 
 template <typename Traits, typename scalar_t, typename acc_t, bool kIsCausal, bool kDoSplit>
+__launch_bounds__(256, 2)
 __global__ void kn_fmla_fwd_splictkv_prefill(
     const FlashMlaPrefillFwdParams params)
 {

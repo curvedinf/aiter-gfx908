@@ -1,7 +1,7 @@
 import torch
 import triton
 import triton.language as tl
-from typing import Any, Dict 
+from typing import Any, Dict
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 from triton_bench.numerics_details.mxfp import (
     _unswizzle_mx_block,
@@ -217,7 +217,7 @@ def _fused_moe_kernel(
             a_mx_scale_ptrs = (
                 a_mx_scale_ptr
                 + offs_scale_ak.to(tl.int64)[None, :] * stride_amxk
-                + offs_scale_m.to(tl.int64)[:, None] * stride_amxm
+                + offs_scale_m.to(tl.int64)[:, None] // top_k * stride_amxm
             )
     else:
         a_mx_scale_ptrs = None
@@ -282,18 +282,18 @@ def _fused_moe_kernel(
     # of fp32 values for higher accuracy.
     # `accumulator` will be converted back to fp16 after the loop.
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+    for k in range(0, tl.cdiv(K, PACKED_BLOCK_K_A)):
         # Load the next block of A and B, generate a mask by checking the
         # K dimension.
         a = tl.load(
             a_ptrs,
             mask=token_mask[:, None]
-            & (offs_a_k[None, :] < (K - k * BLOCK_SIZE_K) // A_PACK_DIVISOR),
+            & (offs_a_k[None, :] < (K - k * PACKED_BLOCK_K_A)),
             other=0.0,
         )
         b = tl.load(
             b_ptrs,
-            mask=offs_b_k[:, None] < (K - k * BLOCK_SIZE_K) // B_PACK_DIVISOR,
+            mask=offs_b_k[:, None] < (K - k * PACKED_BLOCK_K_B),
             other=0.0,
         )
         # We accumulate along the K dimension.
@@ -305,7 +305,7 @@ def _fused_moe_kernel(
                     a_mx_scales = _unswizzle_mx_block(tl.load(a_mx_scale_ptrs))
                 else:
                     mask_ak_scale = (
-                        offs_scale_ak < (K - k * BLOCK_SIZE_K) // MX_PACK_DIVISOR
+                        offs_scale_ak < (K - k * PACKED_BLOCK_K_A) // (MX_PACK_DIVISOR//A_PACK_DIVISOR)
                     )
                     a_mx_scales = tl.load(
                         a_mx_scale_ptrs, mask=mask_ak_scale[None, :], other=0.0
@@ -316,7 +316,7 @@ def _fused_moe_kernel(
                 b_mx_scales = _unswizzle_mx_block(tl.load(b_mx_scale_ptrs))
             else:
                 mask_bk_scale = (
-                    offs_scale_bk < (K - k * BLOCK_SIZE_K) // MX_PACK_DIVISOR
+                    offs_scale_bk < (K - k * PACKED_BLOCK_K_B) // (MX_PACK_DIVISOR//B_PACK_DIVISOR)
                 )
                 b_mx_scales = tl.load(
                     b_mx_scale_ptrs, mask=mask_bk_scale[None, :], other=0.0

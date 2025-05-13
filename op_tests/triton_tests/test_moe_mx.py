@@ -76,7 +76,7 @@ def test_fused_moe(
     a_scale = torch.tensor([1.00], dtype=torch.float32, device="cuda")
     b_scale = torch.tensor([1.00] * E, dtype=torch.float32, device="cuda")
     # Reference inputs
-    a_ref, b_ref, c_ref = a_tri, b_tri, c_tri
+    a_ref, b_ref, c_ref = a_tri.clone(), b_tri.clone(), c_tri.clone()
     # Try fixed config for now
     config = {
         "BLOCK_SIZE_M": 128,
@@ -138,7 +138,7 @@ def test_fused_moe(
     b_zp = None
     group_size = 0
     # a_scale and b_scale not used actually
-    torch_moe(
+    c_ref = torch_moe(
         a_ref,
         b_ref,
         c_ref,

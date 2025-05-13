@@ -69,7 +69,7 @@ def test_gemm(dtype, m, n, k):
     checkAllclose(a, b, msg="ck:", rtol=1e-2, atol=0.01)
     checkAllclose(a, c, msg="ck_wpreshuffle: ", rtol=1e-2, atol=0.01)
 
-    return {"us": avg_b}
+    return {"ck": avg_b, "ck_wpreshuffle": avg_c}
 
 
 @perftest(num_iters=5)

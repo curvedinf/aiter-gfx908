@@ -7,6 +7,7 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import aiter
+from aiter import dtypes
 from aiter.test_common import checkAllclose, perftest
 from aiter.ops.shuffle import shuffle_weight
 from gemm_a8w8_blockscale_wpreshuffle_common import kernelInstance, kernels_list
@@ -73,8 +74,8 @@ def tune_gemm(m, n, k, useSplitK = False):
     block_shape_n, block_shape_k = block_shape
     scale_n =  (n + block_shape_n - 1) // block_shape_n
     scale_k =  (k + block_shape_k - 1) // block_shape_k
-    x = (torch.rand((m, k), dtype=torch.float16, device="cuda")/10).to(torch.float8_e4m3fnuz)
-    weight = (torch.rand( (n, k), dtype=torch.float16, device="cuda")/10).to(torch.float8_e4m3fnuz)
+    x = (torch.rand((m, k), dtype=torch.float16, device="cuda")/10).to(dtypes.fp8)
+    weight = (torch.rand( (n, k), dtype=torch.float16, device="cuda")/10).to(dtypes.fp8)
     weight_shuffle = shuffle_weight(weight, layout=(16, 16))
     x_scale = torch.rand([m, scale_k], dtype=torch.float32, device="cuda")
     w_scale = torch.rand([scale_n, scale_k], dtype=torch.float32, device="cuda")

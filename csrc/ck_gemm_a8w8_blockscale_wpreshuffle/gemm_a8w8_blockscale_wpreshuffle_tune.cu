@@ -5,6 +5,7 @@
 #include "gemm_a8w8_blockscale_wpreshuffle_manifest.h"
 #include "gemm_a8w8_blockscale_wpreshuffle_lookup.h"
 #include <string>
+#include "py_itfs_common.h"
 
 using BlockwiseKernel = std::function<
     torch::Tensor(torch::Tensor &, torch::Tensor &,
@@ -66,7 +67,7 @@ torch::Tensor gemm_a8w8_blockscale_wpreshuffle_tune(
     int kernelId,
     int splitK)
 {
-  TORCH_CHECK(XQ.dtype() == at::ScalarType::Float8_e4m3fnuz && XQ.dtype() == WQ.dtype(),
+  TORCH_CHECK(XQ.dtype() == torch_fp8 && XQ.dtype() == WQ.dtype(),
               "Weights and activations should both be fp8!");
   TORCH_CHECK( x_scale.dtype() == w_scale.dtype(),
               "Scales should have the same dtype!");

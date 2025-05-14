@@ -372,7 +372,7 @@ public:
 
         return BlockGemm::template MakeABlockTileDistribution<
             Traits::kBlockM,
-            Traits::kK0InReg>();
+            Traits::kBlockK0>();
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
@@ -876,7 +876,6 @@ template<typename Traits,
          typename acc_t,
          typename out_t,
          typename QDramRegBlockWindow,
-         typename QDramSmemBlockWindow,
          typename LseDramBlockWindow,
          typename OutDramBlockWindow,
          typename KPageBlockNavigator,
@@ -884,7 +883,6 @@ template<typename Traits,
          typename Mask>
 CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     const QDramRegBlockWindow&  q_dram_reg_window_,
-    const QDramSmemBlockWindow& q_dram_smem_window_,
     const KPageBlockNavigator&  k_page_block_navigator,
     const VPageBlockNavigator&  v_page_block_navigator,
     LseDramBlockWindow&         lse_dram_window_,
@@ -989,7 +987,11 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                                   q_dram_reg_window_.get_window_lengths(),
                                   q_dram_reg_window_.get_window_origin(),
                                   Policy::MakeQRegTileDistribution());
-    auto q_reg = ck_tile::load_tile(q_dram_reg_window);
+    decltype(ck_tile::load_tile(q_dram_reg_window)) q_regs[k0_loops];
+    q_regs[0] = ck_tile::load_tile(q_dram_reg_window);
+    ck_tile::move_tile_window(q_dram_reg_window, {0, Traits::kBlockK0});
+    q_regs[1] = ck_tile::load_tile(q_dram_reg_window);
+    ck_tile::move_tile_window(q_dram_reg_window, {0, Traits::kBlockK0});
 
 
     // 5. Prepare KV
@@ -1025,7 +1027,8 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     // 6. Main loop
     //
 
-    for (int32_t loop_idx = 0; loop_idx < num_total_loop; ++loop_idx)
+    // Define main loop
+    auto main_loop = [&]<bool IsFirstLoop>(int32_t loop_idx)
     {
         // I. QK GEMM
         //
@@ -1050,25 +1053,27 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                 {
                     ck_tile::block_sync_lds();
                     gemm_0(s_acc,
-                           ck_tile::get_slice_tile(
-                               q_reg,
-                               ck_tile::sequence<0, k0_id * Traits::kBlockK0>{},
-                               ck_tile::sequence<Traits::kBlockM, (k0_id + 1) * Traits::kBlockK0>{}),
+                           q_regs[k0_id],
                            k_lds_window);
                     ck_tile::block_sync_lds();
                     ck_tile::move_tile_window(k_dram_window, {0, Traits::kBlockK0});
                     ck_tile::store_tile(k_lds_window, k_block_tile);
                     k_block_tile = ck_tile::load_tile(k_dram_window);
+                    if constexpr (IsFirstLoop)
+                    {
+                        q_regs[k0_id + 2] = ck_tile::load_tile(q_dram_reg_window);
+                        if constexpr (k0_id < k0_loops - 3)
+                        {
+                            ck_tile::move_tile_window(q_dram_reg_window, {0, Traits::kBlockK0});
+                        }
+                    }
                 });
         }
 
         // Tailing 2 tiles of QK GEMM_0
         ck_tile::block_sync_lds();
         gemm_0(s_acc,
-               ck_tile::get_slice_tile(
-                   q_reg,
-                   ck_tile::sequence<0, (k0_loops - 2) * Traits::kBlockK0>{},
-                   ck_tile::sequence<Traits::kBlockM, (k0_loops - 1) * Traits::kBlockK0>{}),
+               q_regs[k0_loops - 2],
                k_lds_window);
 
         ck_tile::block_sync_lds();
@@ -1076,10 +1081,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
 
         ck_tile::block_sync_lds();
         gemm_0(s_acc,
-               ck_tile::get_slice_tile(
-                   q_reg,
-                   ck_tile::sequence<0, (k0_loops - 1) * Traits::kBlockK0>{},
-                   ck_tile::sequence<Traits::kBlockM, k0_loops * Traits::kBlockK0>{}),
+               q_regs[k0_loops - 1],
                k_lds_window);
 
         ck_tile::tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
@@ -1219,7 +1221,15 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
         // Move K to next column
         page_block_k_id =
         k_page_block_navigator.move_tile_window(page_block_k_id, k_dram_block_window, {Traits::kBlockN0, 0});
+    };
+
+    // Execute the loop
+    main_loop.template operator()<true>(0);
+    for (int32_t loop_idx = 1; loop_idx < num_total_loop; ++loop_idx)
+    {
+        main_loop.template operator()<false>(loop_idx);
     }
+
 
     // 7. Store LSE
     //
@@ -1287,10 +1297,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
     const int32_t last_block_size     = seqlen_k - (num_blocks - 1) * params.page_block_size;
 
     auto q_dram_reg_window_lengths =
-        ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kK0InReg>{});
-    auto q_dram_smem_window_lengths =
-        ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kK0InSmem>{});
-
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlockK0>{});
 
     const scalar_t* p_query = reinterpret_cast<const scalar_t*>(params.p_query) +
                               int64_t(hqid) * params.stride_h_q +   // head offset
@@ -1304,8 +1311,6 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
 
     auto q_dram_req_window =
         ck_tile::make_tile_window(q_dram_complete, q_dram_reg_window_lengths, {mid, 0});
-    auto q_dram_smem_window =
-        ck_tile::make_tile_window(q_dram_complete, q_dram_smem_window_lengths, {mid, Traits::kK0InReg});
 
     auto k_page_block_navigator = MakePageBlockNavigator<0, scalar_t>(
         reinterpret_cast<const scalar_t*>(params.p_key),   k_dram_complete, k_dram_last, bid, hkid, seqlen_k,
@@ -1349,7 +1354,6 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
 
         kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, acc_t>(
             q_dram_req_window,
-            q_dram_smem_window,
             k_page_block_navigator,
             v_page_block_navigator,
             lse_acc_dram_window,
@@ -1385,7 +1389,6 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
 
         kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, scalar_t>(
             q_dram_req_window,
-            q_dram_smem_window,
             k_page_block_navigator,
             v_page_block_navigator,
             lse_dram_window,

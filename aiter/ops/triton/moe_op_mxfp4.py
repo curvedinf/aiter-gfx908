@@ -247,7 +247,10 @@ def _fused_moe_kernel(
 
             b_mx_scale_ptrs = (
                 b_mx_scale_ptr
-                + offs_scale_n.to(tl.int64)[:, None] * stride_bmxn
+                # + offs_scale_n.to(tl.int64)[:, None] * stride_bmxn
+                + offs_scale_n.to(tl.int64)[:, None]
+                * PACKED_MX_BLOCK_B
+                * (K // MX_SCALE_BLOCK_K_B // (MX_PACK_DIVISOR // B_PACK_DIVISOR))
                 + offs_inner[None, :]
             )
         else:
@@ -287,8 +290,7 @@ def _fused_moe_kernel(
         # K dimension.
         a = tl.load(
             a_ptrs,
-            mask=token_mask[:, None]
-            & (offs_a_k[None, :] < (K - k * PACKED_BLOCK_K_A)),
+            mask=token_mask[:, None] & (offs_a_k[None, :] < (K - k * PACKED_BLOCK_K_A)),
             other=0.0,
         )
         b = tl.load(
@@ -304,8 +306,8 @@ def _fused_moe_kernel(
                 if SWIZZLE_MX_A:
                     a_mx_scales = _unswizzle_mx_block(tl.load(a_mx_scale_ptrs))
                 else:
-                    mask_ak_scale = (
-                        offs_scale_ak < (K - k * PACKED_BLOCK_K_A) // (MX_PACK_DIVISOR//A_PACK_DIVISOR)
+                    mask_ak_scale = offs_scale_ak < (K - k * PACKED_BLOCK_K_A) // (
+                        MX_PACK_DIVISOR // A_PACK_DIVISOR
                     )
                     a_mx_scales = tl.load(
                         a_mx_scale_ptrs, mask=mask_ak_scale[None, :], other=0.0
@@ -315,8 +317,8 @@ def _fused_moe_kernel(
             if SWIZZLE_MX_B:
                 b_mx_scales = _unswizzle_mx_block(tl.load(b_mx_scale_ptrs))
             else:
-                mask_bk_scale = (
-                    offs_scale_bk < (K - k * PACKED_BLOCK_K_B) // (MX_PACK_DIVISOR//B_PACK_DIVISOR)
+                mask_bk_scale = offs_scale_bk < (K - k * PACKED_BLOCK_K_B) // (
+                    MX_PACK_DIVISOR // B_PACK_DIVISOR
                 )
                 b_mx_scales = tl.load(
                     b_mx_scale_ptrs, mask=mask_bk_scale[None, :], other=0.0
@@ -339,7 +341,7 @@ def _fused_moe_kernel(
                 else:
                     a_mx_scale_ptrs += MX_SCALE_BLOCK_K_A * stride_amxk
             if SWIZZLE_MX_B:
-                b_mx_scale_ptrs += MX_SCALE_BLOCK_K_B // 4 * stride_bmxk
+                b_mx_scale_ptrs += MX_SCALE_BLOCK_K_B // 4 * 512
             else:
                 b_mx_scale_ptrs += MX_SCALE_BLOCK_K_B * stride_bmxk
         # Advance the ptrs to the next K block.
@@ -375,7 +377,8 @@ def fused_moe_mxfp4(
     num_tokens_post_padded: torch.Tensor,
     mul_routed_weight: bool,
     top_k: int,
-    swizzle_mx: bool,
+    swizzle_mx_a: bool,
+    swizzle_mx_b: bool,
     config: Dict[str, Any],
     compute_type: tl.dtype,
 ) -> None:
@@ -439,7 +442,7 @@ def fused_moe_mxfp4(
         MUL_ROUTED_WEIGHT=mul_routed_weight,
         top_k=top_k,
         compute_type=compute_type,
-        SWIZZLE_MX_A=swizzle_mx,
-        SWIZZLE_MX_B=swizzle_mx,
+        SWIZZLE_MX_A=swizzle_mx_a,
+        SWIZZLE_MX_B=swizzle_mx_b,
         **config,
     )

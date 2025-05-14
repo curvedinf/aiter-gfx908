@@ -197,29 +197,6 @@ public:
                                     acc_t>();
     }
 
-    CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsBlockDescriptor()
-    {
-        constexpr int32_t kMPerBlock = Traits::kBlockM;
-        // #elements store in SMEM along K0 for query.
-        constexpr int32_t kKPerBlock = ck_tile::max(Traits::kK0InSmem, 64);
-        constexpr int32_t kKPack     = 16 / sizeof(scalar_t);
-
-        constexpr auto q_lds_block_desc_0 = ck_tile::make_naive_tensor_descriptor(
-            ck_tile::make_tuple(ck_tile::number<kKPerBlock / kKPack>{}, ck_tile::number<kMPerBlock>{}, ck_tile::number<kKPack>{}),
-            ck_tile::make_tuple(ck_tile::number<(kMPerBlock + 1) * kKPack>{}, ck_tile::number<kKPack>{}, ck_tile::number<1>{}),
-            ck_tile::number<8>{},
-            ck_tile::number<1>{});
-
-        constexpr auto q_lds_block_desc = ck_tile::transform_tensor_descriptor(
-            q_lds_block_desc_0,
-            ck_tile::make_tuple(ck_tile::make_pass_through_transform(kMPerBlock),
-                                ck_tile::make_merge_transform(ck_tile::make_tuple(kKPerBlock / kKPack, kKPack))),
-            ck_tile::make_tuple(ck_tile::sequence<1>{}, ck_tile::sequence<0, 2>{}),
-            ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
-
-        return q_lds_block_desc;
-    }
-
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsBlockDescriptor()
     {
         constexpr int32_t kNPerBlock = Traits::kBlockN0;
@@ -281,20 +258,6 @@ public:
         return v_lds_block_desc;
     }
 
-    CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSizeQ()
-    {
-        int32_t q_smem_size = 0;
-        if constexpr (Traits::kK0InSmem > 0)
-        {
-            constexpr int32_t lds_alignment = 16; // optional
-            q_smem_size = ck_tile::integer_divide_ceil(
-                sizeof(scalar_t) * MakeQLdsBlockDescriptor().get_element_space_size(),
-                lds_alignment) *
-                lds_alignment;
-        }
-        return q_smem_size;
-    }
-
     CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSizeSingleKV()
     {
         constexpr int32_t SingleKSize = MakeKLdsBlockDescriptor().get_element_space_size();
@@ -317,7 +280,7 @@ public:
 
     CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSize()
     {
-        return GetSmemSizeQ() + Traits::kNumPrefetchKV * GetSmemSizeSingleKV();
+        return Traits::kNumPrefetchKV * GetSmemSizeSingleKV();
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto GetQRegKBlockGemm()
@@ -366,49 +329,6 @@ public:
             return ck_tile::BlockGemmARegBSmemCRegOneWarpV1<GemmProblem, BlockGemmPolicy>{};
     }
 
-    CK_TILE_HOST_DEVICE static constexpr auto GetQSmemKBlockGemm()
-    {
-        using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0, Traits::kBlockK0>;
-        using BlockWarps    = ck_tile::sequence<Traits::kNumWarps, 1, 1>;
-        using WarpTile      = ck_tile::sequence<16, 16, 16>;
-        using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, WarpTile>;
-
-        constexpr int32_t kNumWarps   = Traits::kNumWarps;
-        constexpr int32_t kNumThreads = kNumWarps * ck_tile::get_warp_size();
-
-        using GemmProblem = ck_tile::BlockGemmProblem<scalar_t, scalar_t, acc_t, kNumThreads, TileGemmShape>;
-
-        constexpr int32_t kWarpGemmM = WarpTile::at(ck_tile::number<0>{});
-        static_assert((kWarpGemmM == 4) || (kWarpGemmM == 16) || (kWarpGemmM == 32));
-
-        constexpr auto warp_gemm = []()
-        {
-            if constexpr(std::is_same_v<scalar_t, ck_tile::fp16_t> && std::is_same_v<acc_t, float>)
-            {
-                if constexpr(kWarpGemmM == 32)
-                    return ck_tile::WarpGemmMfmaF16F16F32M32N32K16SwizzleBTransposedCDistribution{};
-                else if constexpr(kWarpGemmM == 16)
-                    return ck_tile::WarpGemmMfmaF16F16F32M16N16K16TransposedCDistribution{};
-                else // kWarpGemmM == 4
-                    return ck_tile::WarpGemmMfmaF16F16F32M4N64K16{};
-            }
-            else if constexpr(std::is_same_v<scalar_t, ck_tile::bf16_t> && std::is_same_v<acc_t, float>)
-            {
-                if constexpr(kWarpGemmM == 32)
-                    return ck_tile::WarpGemmMfmaBf16Bf16F32M32N32K16SwizzleBTransposedCDistribution{};
-                else if constexpr(kWarpGemmM == 16)
-                    return ck_tile::WarpGemmMfmaBf16Bf16F32M16N16K16TransposedCDistribution{};
-                else // kWarpGemmM == 4
-                    return ck_tile::WarpGemmMfmaBf16Bf16F32M4N64K16{};
-            }
-        }();
-
-        using BlockGemmPolicy =
-            ck_tile::BlockGemmASmemBSmemCRegV1CustomPolicy<scalar_t, scalar_t, acc_t, BlockWarps, decltype(warp_gemm)>;
-
-        return ck_tile::BlockGemmASmemBSmemCRegV1<GemmProblem, BlockGemmPolicy>{};
-    }
-
     CK_TILE_HOST_DEVICE static constexpr auto GetKVBlockGemm()
     {
         using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN1, Traits::kBlockK1>;
@@ -453,34 +373,6 @@ public:
         return BlockGemm::template MakeABlockTileDistribution<
             Traits::kBlockM,
             Traits::kK0InReg>();
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr auto MakeQDramTileDistribution()
-    {
-        constexpr int32_t kBlockSize = Traits::kNumThreads;
-        constexpr int32_t kMPerBlock = Traits::kBlockM;
-        constexpr int32_t kKPerBlock = Traits::kBlockK0;
-
-        constexpr int32_t MaxVectorSize = 16 / sizeof(scalar_t);
-
-        constexpr int32_t ElemPerThread = (kMPerBlock * kKPerBlock) / kBlockSize;
-        static_assert(0 < ElemPerThread);
-        constexpr int32_t kMaxVecLoad = ck_tile::min(ElemPerThread, MaxVectorSize);
-
-        constexpr int32_t KPerThread     = kMaxVecLoad;
-        constexpr int32_t KThreads       = kKPerBlock / KPerThread;
-        constexpr int32_t MThreadPerWarp = ck_tile::get_warp_size() / KThreads;
-        constexpr int32_t NumWarps       = kBlockSize / ck_tile::get_warp_size();
-        constexpr int32_t MPerThread     = kMPerBlock / (MThreadPerWarp * NumWarps);
-
-        return ck_tile::make_static_tile_distribution(
-            ck_tile::tile_distribution_encoding<ck_tile::sequence<1>,
-                                                ck_tile::tuple<ck_tile::sequence<MPerThread, NumWarps, MThreadPerWarp>,
-                                                               ck_tile::sequence<KThreads, KPerThread>>,
-                                                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>,
-                                                ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2, 0>>,
-                                                ck_tile::sequence<1, 2>,
-                                                ck_tile::sequence<0, 1>>{});
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
@@ -1009,20 +901,11 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
 
     // 1. Allocate LDS
     //
-    auto q_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-        reinterpret_cast<scalar_t*>(p_smem),
-        Policy::MakeQLdsBlockDescriptor());
     auto k_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-        reinterpret_cast<scalar_t*>(p_smem + Policy::GetSmemSizeQ()),
-        Policy::MakeKLdsBlockDescriptor());
+        reinterpret_cast<scalar_t*>(p_smem), Policy::MakeKLdsBlockDescriptor());
     auto v_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-        reinterpret_cast<scalar_t*>(p_smem + Policy::GetSmemSizeQ()),
-        Policy::MakeVLdsBlockDescriptor());
+        reinterpret_cast<scalar_t*>(p_smem), Policy::MakeVLdsBlockDescriptor());
 
-    auto q_lds_load_window = ck_tile::make_tile_window(
-        q_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlockK0>{}), {0, 0});
-    auto q_lds_store_window = ck_tile::make_tile_window(
-        q_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kK0InSmem>{}), {0, 0});
     auto k_lds_window = ck_tile::make_tile_window(
         k_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kBlockK0>{}), {0, 0});
     auto v_lds_window = ck_tile::make_tile_window(
@@ -1033,11 +916,10 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     //
 
     // Loop counts
-    constexpr int32_t k00_loops = Traits::kK0InReg / Traits::kBlockK0;      // #loop for Q in reg
-    constexpr int32_t k01_loops = Traits::kK0InSmem / Traits::kBlockK0;     // #loop for Q in smem
-    constexpr int32_t k1_loops  = Traits::kBlockN0 / Traits::kBlockK1;
-    constexpr int32_t n1_loops  = Traits::kSizeDV / Traits::kBlockN1;
-    static_assert(k00_loops >= 2);
+    constexpr int32_t k0_loops = Traits::kK0InReg / Traits::kBlockK0;      // #loop for Q in reg
+    constexpr int32_t k1_loops = Traits::kBlockN0 / Traits::kBlockK1;
+    constexpr int32_t n1_loops = Traits::kSizeDV / Traits::kBlockN1;
+    static_assert(k0_loops >= 2);
     static_assert(k1_loops  >= 1);
     static_assert(n1_loops  >= 1);
     static_assert((Traits::kK0InReg % Traits::kBlockK0) == 0);
@@ -1046,16 +928,15 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     static_assert((Traits::kSizeDV % Traits::kBlockN1) == 0);
 
     // Block GEMMs
-    constexpr auto gemm_00 = Policy::GetQRegKBlockGemm();
-    constexpr auto gemm_01 = Policy::GetQSmemKBlockGemm();
-    constexpr auto gemm_1  = Policy::GetKVBlockGemm();
+    constexpr auto gemm_0 = Policy::GetQRegKBlockGemm();
+    constexpr auto gemm_1 = Policy::GetKVBlockGemm();
 
     // Reduction funtions for softmax
     const auto f_max = [](auto e0, auto e1) { return ck_tile::max(e0, e1); };
     const auto f_sum = [](auto e0, auto e1) { return e0 + e1; };
 
     // sacc, S, P, M, L, Oacc
-    using SaccBlockTileType = decltype(gemm_00.MakeCBlockTile());
+    using SaccBlockTileType = decltype(gemm_0.MakeCBlockTile());
     auto s_acc              = SaccBlockTileType{};
     using SBlockTileType    = decltype(ck_tile::cast_tile<acc_t>(s_acc));
     using MLBlockTileType   = decltype(ck_tile::block_tile_reduce<acc_t>(
@@ -1103,13 +984,6 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     // 4. Load Q to lds and reg
     //    TODO: Overlap Q load with compute
     //
-    auto q_dram_smem_window =
-        ck_tile::make_tile_window(q_dram_smem_window_.get_bottom_tensor_view(),
-                                  q_dram_smem_window_.get_window_lengths(),
-                                  q_dram_smem_window_.get_window_origin(),
-                                  Policy::MakeQDramTileDistribution());
-    auto q_smem_reg_tmp = ck_tile::load_tile(q_dram_smem_window);
-    ck_tile::store_tile(q_lds_store_window, q_smem_reg_tmp);
     auto q_dram_reg_window =
         ck_tile::make_tile_window(q_dram_reg_window_.get_bottom_tensor_view(),
                                   q_dram_reg_window_.get_window_lengths(),
@@ -1168,19 +1042,19 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
         ck_tile::store_tile(k_lds_window, k_block_tile);
         k_block_tile = ck_tile::load_tile(k_dram_window);
 
-        // Main part of QK GEMM_00: conduct GEMM and load K tiles 
-        if constexpr (k00_loops > 2)
+        // Main part of QK GEMM_0: conduct GEMM and load K tiles 
+        if constexpr (k0_loops > 2)
         {
-            ck_tile::static_for<0, k00_loops - 2, 1>{}(
+            ck_tile::static_for<0, k0_loops - 2, 1>{}(
                 [&](auto k0_id)
                 {
                     ck_tile::block_sync_lds();
-                    gemm_00(s_acc,
-                            ck_tile::get_slice_tile(
-                                q_reg,
-                                ck_tile::sequence<0, k0_id * Traits::kBlockK0>{},
-                                ck_tile::sequence<Traits::kBlockM, (k0_id + 1) * Traits::kBlockK0>{}),
-                            k_lds_window);
+                    gemm_0(s_acc,
+                           ck_tile::get_slice_tile(
+                               q_reg,
+                               ck_tile::sequence<0, k0_id * Traits::kBlockK0>{},
+                               ck_tile::sequence<Traits::kBlockM, (k0_id + 1) * Traits::kBlockK0>{}),
+                           k_lds_window);
                     ck_tile::block_sync_lds();
                     ck_tile::move_tile_window(k_dram_window, {0, Traits::kBlockK0});
                     ck_tile::store_tile(k_lds_window, k_block_tile);
@@ -1188,63 +1062,25 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                 });
         }
 
-        // Tailing 2 tiles of QK GEMM_00
+        // Tailing 2 tiles of QK GEMM_0
         ck_tile::block_sync_lds();
-        gemm_00(s_acc,
-                ck_tile::get_slice_tile(
-                    q_reg,
-                    ck_tile::sequence<0, (k00_loops - 2) * Traits::kBlockK0>{},
-                    ck_tile::sequence<Traits::kBlockM, (k00_loops - 1) * Traits::kBlockK0>{}),
-                k_lds_window);
+        gemm_0(s_acc,
+               ck_tile::get_slice_tile(
+                   q_reg,
+                   ck_tile::sequence<0, (k0_loops - 2) * Traits::kBlockK0>{},
+                   ck_tile::sequence<Traits::kBlockM, (k0_loops - 1) * Traits::kBlockK0>{}),
+               k_lds_window);
 
         ck_tile::block_sync_lds();
         ck_tile::store_tile(k_lds_window, k_block_tile);
-        if constexpr (k01_loops > 0)
-        {
-            ck_tile::move_tile_window(k_dram_window, {0, Traits::kBlockK0});
-            k_block_tile = ck_tile::load_tile(k_dram_window);
-        }
 
         ck_tile::block_sync_lds();
-        gemm_00(s_acc,
-                ck_tile::get_slice_tile(
-                    q_reg,
-                    ck_tile::sequence<0, (k00_loops - 1) * Traits::kBlockK0>{},
-                    ck_tile::sequence<Traits::kBlockM, k00_loops * Traits::kBlockK0>{}),
-                k_lds_window);
-
-        // GEMM_01 for Q in smem
-        if constexpr (k01_loops > 0)
-        {
-            ck_tile::block_sync_lds();
-            ck_tile::store_tile(k_lds_window, k_block_tile);
-
-            if constexpr (k01_loops > 1)
-            {
-                ck_tile::static_for<0, k01_loops - 1, 1>{}(
-                    [&](auto k0_id)
-                    {
-                        ck_tile::move_tile_window(k_dram_window, {0, Traits::kBlockK0});
-                        k_block_tile = ck_tile::load_tile(k_dram_window);
-
-                        ck_tile::block_sync_lds();
-                        gemm_01(s_acc, q_lds_load_window, k_lds_window);
-                        ck_tile::move_tile_window(q_lds_load_window, {0, Traits::kBlockK0});
-
-                        ck_tile::block_sync_lds();
-                        ck_tile::store_tile(k_lds_window, k_block_tile);
-                    });
-            }
-
-            // Tailing 1 tile of QK GEMM_01
-            ck_tile::block_sync_lds();
-            gemm_01(s_acc, q_lds_load_window, k_lds_window);
-
-            if constexpr (k01_loops > 1)
-            {
-                ck_tile::move_tile_window(q_lds_load_window, {0, -(k01_loops-1) * Traits::kBlockK0});
-            }
-        }
+        gemm_0(s_acc,
+               ck_tile::get_slice_tile(
+                   q_reg,
+                   ck_tile::sequence<0, (k0_loops - 1) * Traits::kBlockK0>{},
+                   ck_tile::sequence<Traits::kBlockM, k0_loops * Traits::kBlockK0>{}),
+               k_lds_window);
 
         ck_tile::tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
 

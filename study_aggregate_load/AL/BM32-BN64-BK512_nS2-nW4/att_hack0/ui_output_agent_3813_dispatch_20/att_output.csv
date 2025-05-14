@@ -1,0 +1,742 @@
+CodeObj, Vaddr, Instruction, Hitcount, Latency, Source
+4,5888,"; _gemm_afp4_wfp4_kernel",0,0,""
+4,5888,"s_load_dwordx2 s[2:3], s[0:1], 0x0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5896,"s_load_dwordx8 s[4:11], s[0:1], 0x8",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5904,"s_load_dwordx4 s[12:15], s[0:1], 0x28",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5912,"s_waitcnt lgkmcnt(0)",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5916,"s_branch 56",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5920,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5924,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5928,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5932,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5936,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5940,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5944,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5948,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5952,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5956,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5960,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5964,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5968,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5972,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5976,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5980,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5984,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5988,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5992,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,5996,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6000,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6004,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6008,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6012,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6016,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6020,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6024,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6028,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6032,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6036,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6040,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6044,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6048,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6052,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6056,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6060,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6064,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6068,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6072,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6076,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6080,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6084,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6088,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6092,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6096,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6100,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6104,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6108,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6112,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6116,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6120,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6124,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6128,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6132,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6136,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6140,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:14
+4,6144,"s_add_i32 s1, s13, 63",32,128,/app/OAI-triton/python/triton/language/standard.py:40
+4,6148,"s_mov_b64 s[20:21], s[10:11]",32,128,/app/OAI-triton/python/triton/language/standard.py:40
+4,6152,"s_ashr_i32 s10, s1, 31",32,128,/app/OAI-triton/python/triton/language/standard.py:40
+4,6156,"s_lshr_b32 s10, s10, 26",32,128,/app/OAI-triton/python/triton/language/standard.py:40
+4,6160,"s_add_i32 s1, s1, s10",32,128,/app/OAI-triton/python/triton/language/standard.py:40
+4,6164,"s_mov_b32 s0, s13",32,128,/app/OAI-triton/python/triton/language/standard.py:40
+4,6168,"s_ashr_i32 s13, s1, 6",32,128,/app/OAI-triton/python/triton/language/standard.py:40
+4,6172,"s_abs_i32 s1, s13",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6176,"v_cvt_f32_u32_e32 v1, s1",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6180,"s_sub_i32 s14, 0, s1",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6184,"s_abs_i32 s11, s16",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6188,"s_xor_b32 s10, s16, s13",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6192,"v_rcp_iflag_f32_e32 v1, v1",32,800,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6196,"s_ashr_i32 s10, s10, 31",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6200,"v_lshlrev_b32_e32 v50, 4, v0",32,608,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6204,"v_and_b32_e32 v18, 0xfe0, v50",32,244,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6212,"v_mul_f32_e32 v1, 0x4f7ffffe, v1",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6220,"v_cvt_u32_f32_e32 v1, v1",32,344,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6224,"v_lshrrev_b32_e32 v52, 4, v0",32,288,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6228,"v_and_b32_e32 v55, 48, v50",32,504,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6232,"v_and_b32_e32 v19, 16, v0",32,152,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6236,"v_readfirstlane_b32 s15, v1",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6240,"s_mul_i32 s14, s14, s15",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6244,"s_mul_hi_u32 s14, s15, s14",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6248,"s_add_i32 s15, s15, s14",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6252,"s_mul_hi_u32 s14, s11, s15",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6256,"s_mul_i32 s15, s14, s1",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6260,"s_sub_i32 s11, s11, s15",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6264,"s_add_i32 s15, s14, 1",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6268,"s_sub_i32 s17, s11, s1",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6272,"s_cmp_ge_u32 s11, s1",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6276,"s_cselect_b32 s14, s15, s14",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6280,"s_cselect_b32 s11, s17, s11",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6284,"s_add_i32 s15, s14, 1",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6288,"s_cmp_ge_u32 s11, s1",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6292,"s_cselect_b32 s1, s15, s14",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6296,"s_abs_i32 s14, s12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6300,"v_cvt_f32_u32_e32 v1, s14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6304,"s_xor_b32 s1, s1, s10",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6308,"s_sub_i32 s17, s1, s10",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:32
+4,6312,"s_lshl_b32 s1, s17, 5",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6316,"v_rcp_iflag_f32_e32 v1, v1",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6320,"s_sub_i32 s10, 0, s14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6324,"v_and_or_b32 v2, v50, 16, s1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6332,"s_bfe_i32 s15, s17, 0x1001a",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6340,"v_mul_f32_e32 v1, 0x4f7ffffe, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6348,"v_cvt_u32_f32_e32 v1, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6352,"v_add_u32_e32 v2, s15, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6356,"v_xor_b32_e32 v2, s15, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6360,"s_and_b32 s9, s9, 0xffff",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6368,"v_mul_lo_u32 v3, s10, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6376,"v_mul_hi_u32 v3, v1, v3",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6384,"v_add_u32_e32 v1, v1, v3",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6388,"v_mul_hi_u32 v3, v2, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6396,"v_mul_lo_u32 v3, v3, s14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6404,"v_sub_u32_e32 v2, v2, v3",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6408,"v_subrev_u32_e32 v3, s14, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6412,"v_cmp_le_u32_e32 vcc, s14, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6416,"s_mov_b32 s11, 0x27000",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6424,"s_mov_b32 s10, 0x7ffffffe",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6432,"v_cndmask_b32_e32 v2, v2, v3, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6436,"v_subrev_u32_e32 v3, s14, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6440,"v_cmp_le_u32_e32 vcc, s14, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6444,"v_or_b32_e32 v12, s1, v52",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6448,"v_add_u32_e32 v12, s15, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6452,"v_cndmask_b32_e32 v2, v2, v3, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6456,"v_xor_b32_e32 v2, s15, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6460,"v_subrev_u32_e32 v2, s15, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6464,"v_add_u32_e32 v10, v2, v18",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6468,"v_add_u32_e32 v11, 0x1000, v10",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6476,"buffer_load_dwordx4 v[2:5], v10, s[8:11], 0 offen",32,220,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6484,"buffer_load_dwordx4 v[6:9], v11, s[8:11], 0 offen",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6492,"v_xor_b32_e32 v12, s15, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6496,"v_mul_hi_u32 v14, v12, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6504,"v_mul_lo_u32 v14, v14, s14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6512,"v_sub_u32_e32 v12, v12, v14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6516,"v_subrev_u32_e32 v14, s14, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6520,"v_cmp_le_u32_e32 vcc, s14, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6524,"v_or_b32_e32 v11, 16, v52",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6528,"v_or_b32_e32 v13, s1, v11",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6532,"v_cndmask_b32_e32 v12, v12, v14, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6536,"v_subrev_u32_e32 v14, s14, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6540,"v_cmp_le_u32_e32 vcc, s14, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6544,"s_mul_i32 s17, s17, s13",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:33
+4,6548,"s_sub_i32 s13, s16, s17",32,128,/app/aiter/aiter/ops/triton/utils/pid_preprocessing.py:33
+4,6552,"v_cndmask_b32_e32 v53, v12, v14, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6556,"v_add_u32_e32 v12, s15, v13",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6560,"v_xor_b32_e32 v12, s15, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6564,"v_mul_hi_u32 v1, v12, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6572,"v_mul_lo_u32 v1, v1, s14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6580,"v_sub_u32_e32 v1, v12, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6584,"v_subrev_u32_e32 v12, s14, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6588,"v_cmp_le_u32_e32 vcc, s14, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6592,"s_abs_i32 s16, s0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6596,"s_bfe_i32 s17, s13, 0x10019",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6604,"v_cndmask_b32_e32 v1, v1, v12, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6608,"v_subrev_u32_e32 v12, s14, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6612,"v_cmp_le_u32_e32 vcc, s14, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6616,"s_lshl_b32 s14, s13, 6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6620,"s_sub_i32 s13, 0, s16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6624,"v_cndmask_b32_e32 v54, v1, v12, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6628,"v_cvt_f32_u32_e32 v12, s16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6632,"v_or_b32_e32 v13, s14, v52",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6636,"v_add_u32_e32 v56, s17, v13",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6640,"v_xor_b32_e32 v13, s17, v56",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6644,"v_rcp_iflag_f32_e32 v12, v12",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6648,"v_or_b32_e32 v11, s14, v11",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6652,"v_or_b32_e32 v14, s14, v55",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6656,"v_add_u32_e32 v47, s17, v11",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6660,"v_mul_f32_e32 v12, 0x4f7ffffe, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6668,"v_cvt_u32_f32_e32 v12, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6672,"v_add_u32_e32 v11, s17, v14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6676,"v_xor_b32_e32 v11, s17, v11",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6680,"v_lshlrev_b32_e32 v1, 3, v0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6684,"v_mul_lo_u32 v15, s13, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6692,"v_mul_hi_u32 v15, v12, v15",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6700,"v_add_u32_e32 v57, v12, v15",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6704,"v_mul_hi_u32 v12, v13, v57",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6712,"v_mul_lo_u32 v12, v12, s16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6720,"v_sub_u32_e32 v12, v13, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6724,"v_subrev_u32_e32 v13, s16, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6728,"v_cmp_le_u32_e32 vcc, s16, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6732,"v_add_u32_e32 v20, 0x2000, v10",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6740,"v_add_u32_e32 v21, 0x3000, v10",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6748,"v_cndmask_b32_e32 v12, v12, v13, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6752,"v_subrev_u32_e32 v13, s16, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6756,"v_cmp_le_u32_e32 vcc, s16, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6760,"s_add_i32 s13, 0, 0x10000",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6768,"v_and_b32_e32 v51, 32, v0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,6772,"v_cndmask_b32_e32 v58, v12, v13, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6776,"v_mul_hi_u32 v12, v11, v57",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6784,"v_mul_lo_u32 v12, v12, s16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6792,"v_sub_u32_e32 v11, v11, v12",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6796,"v_subrev_u32_e32 v12, s16, v11",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6800,"v_cmp_le_u32_e32 vcc, s16, v11",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6804,"v_lshrrev_b32_e32 v60, 2, v0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6808,"s_mov_b32 s18, 0xd000",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6816,"v_cndmask_b32_e32 v11, v11, v12, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6820,"v_subrev_u32_e32 v12, s16, v11",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6824,"v_cmp_le_u32_e32 vcc, s16, v11",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6828,"s_and_b32 s21, s21, 0xffff",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6836,"s_mov_b32 s22, s10",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6840,"v_cndmask_b32_e32 v11, v11, v12, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6844,"v_xor_b32_e32 v11, s17, v11",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6848,"v_subrev_u32_e32 v46, s17, v11",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,6852,"buffer_load_dwordx4 v[10:13], v20, s[8:11], 0 offen",32,184,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6860,"buffer_load_dwordx4 v[14:17], v21, s[8:11], 0 offen",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6868,"v_bitop3_b32 v20, v50, 16, v1 bitop3:0x48",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6876,"v_add3_u32 v59, s13, v20, v18",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6884,"s_waitcnt vmcnt(3)",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6888,"ds_write_b128 v59, v[2:5]",32,720,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6896,"s_waitcnt vmcnt(2)",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6900,"ds_write_b128 v59, v[6:9] offset:4096",32,892,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6908,"v_bfe_u32 v4, v0, 2, 2",32,208,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6916,"v_lshrrev_b32_e32 v2, 2, v19",32,204,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6920,"v_lshrrev_b32_e32 v3, 2, v51",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6924,"v_or3_b32 v6, v2, v4, v3",32,152,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6932,"v_and_b32_e32 v4, 16, v60",32,184,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6936,"v_and_b32_e32 v5, 32, v60",32,224,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6940,"v_or3_b32 v61, v6, v4, v5",32,248,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6948,"v_or_b32_e32 v6, 64, v61",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6952,"v_mad_u64_u32 v[6:7], s[8:9], v6, s18, v[46:47]",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:85
+4,6960,"s_mov_b32 s23, s11",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6964,"v_or_b32_e32 v8, 0x80, v61",32,376,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6972,"buffer_load_dwordx4 v[18:21], v6, s[20:23], 0 offen",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,6980,"v_mad_u64_u32 v[6:7], s[8:9], v8, s18, v[46:47]",32,244,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:85
+4,6988,"v_or_b32_e32 v9, 0xc0, v61",32,168,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,6996,"buffer_load_dwordx4 v[22:25], v6, s[20:23], 0 offen",32,164,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7004,"v_mad_u64_u32 v[6:7], s[8:9], v9, s18, v[46:47]",32,148,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:85
+4,7012,"v_or_b32_e32 v30, 0x100, v61",32,140,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,7020,"buffer_load_dwordx4 v[26:29], v6, s[20:23], 0 offen",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7028,"v_mad_u64_u32 v[6:7], s[8:9], v30, s18, v[46:47]",32,220,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:85
+4,7036,"v_or_b32_e32 v34, 0x140, v61",32,168,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,7044,"buffer_load_dwordx4 v[30:33], v6, s[20:23], 0 offen",32,244,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7052,"v_mad_u64_u32 v[6:7], s[8:9], v34, s18, v[46:47]",32,172,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:85
+4,7060,"v_or_b32_e32 v38, 0x180, v61",32,140,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,7068,"buffer_load_dwordx4 v[34:37], v6, s[20:23], 0 offen",32,560,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7076,"v_mad_u64_u32 v[6:7], s[8:9], v38, s18, v[46:47]",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:85
+4,7084,"v_or_b32_e32 v42, 0x1c0, v61",32,168,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:83
+4,7092,"buffer_load_dwordx4 v[38:41], v6, s[20:23], 0 offen",32,648,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7100,"v_mad_u64_u32 v[6:7], s[8:9], v42, s18, v[46:47]",32,144,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:85
+4,7108,"buffer_load_dwordx4 v[42:45], v6, s[20:23], 0 offen",32,3788,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7116,"v_xor_b32_e32 v6, s17, v47",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7120,"v_mul_hi_u32 v7, v6, v57",32,168,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7128,"v_mul_lo_u32 v7, v7, s16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7136,"v_sub_u32_e32 v6, v6, v7",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7140,"v_subrev_u32_e32 v7, s16, v6",32,192,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7144,"v_cmp_le_u32_e32 vcc, s16, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7148,"v_and_b32_e32 v62, 0xf0, v50",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:79
+4,7156,"s_movk_i32 s8, 0xf0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:79
+4,7160,"v_cndmask_b32_e32 v6, v6, v7, vcc",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7164,"v_subrev_u32_e32 v7, s16, v6",32,148,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7168,"v_cmp_le_u32_e32 vcc, s16, v6",32,140,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7172,"s_and_b32 s9, s3, 0xffff",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7180,"v_accvgpr_write_b32 a3, 0",32,164,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7188,"v_cndmask_b32_e32 v6, v6, v7, vcc",32,204,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7192,"v_add_u32_e32 v7, 32, v56",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7196,"v_xor_b32_e32 v7, s17, v7",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7200,"v_mul_hi_u32 v8, v7, v57",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7208,"v_mul_lo_u32 v8, v8, s16",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7216,"v_sub_u32_e32 v7, v7, v8",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7220,"v_subrev_u32_e32 v8, s16, v7",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7224,"v_cmp_le_u32_e32 vcc, s16, v7",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7228,"v_xor_b32_e32 v6, s17, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7232,"v_accvgpr_write_b32 a2, 0",32,144,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7240,"v_cndmask_b32_e32 v7, v7, v8, vcc",32,156,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7244,"v_subrev_u32_e32 v8, s16, v7",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7248,"v_cmp_le_u32_e32 vcc, s16, v7",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7252,"v_accvgpr_write_b32 a1, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7260,"v_accvgpr_write_b32 a0, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7268,"v_cndmask_b32_e32 v7, v7, v8, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7272,"v_mad_u32_u24 v8, v61, s18, v46",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:85
+4,7280,"buffer_load_dwordx4 v[46:49], v8, s[20:23], 0 offen",32,6016,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7288,"v_add_u32_e32 v8, 48, v56",32,268,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7292,"v_xor_b32_e32 v8, s17, v8",32,168,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7296,"v_mul_hi_u32 v9, v8, v57",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7304,"v_mul_lo_u32 v9, v9, s16",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7312,"v_sub_u32_e32 v8, v8, v9",32,232,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7316,"v_subrev_u32_e32 v9, s16, v8",32,184,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7320,"v_cmp_le_u32_e32 vcc, s16, v8",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7324,"v_subrev_u32_e32 v57, s17, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7328,"v_xor_b32_e32 v6, s17, v7",32,240,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7332,"v_cndmask_b32_e32 v8, v8, v9, vcc",32,196,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7336,"v_subrev_u32_e32 v9, s16, v8",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7340,"v_cmp_le_u32_e32 vcc, s16, v8",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7344,"v_subrev_u32_e32 v6, s17, v6",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7348,"s_waitcnt vmcnt(8)",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7352,"ds_write_b128 v59, v[14:17] offset:12288",32,684,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7360,"v_cndmask_b32_e32 v8, v8, v9, vcc",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7364,"v_xor_b32_e32 v9, s15, v53",32,168,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,7368,"v_subrev_u32_e32 v9, s15, v9",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,7372,"v_xor_b32_e32 v7, s17, v8",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7376,"v_xor_b32_e32 v53, s15, v54",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,7380,"v_xor_b32_e32 v54, s17, v58",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7384,"v_subrev_u32_e32 v58, s17, v7",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7388,"v_lshl_or_b32 v7, v9, 13, v62",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:79
+4,7396,"v_lshl_or_b32 v9, v6, 13, v62",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:80
+4,7404,"v_lshlrev_b32_e32 v6, 2, v0",32,144,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7408,"v_bitop3_b32 v6, v6, 48, v50 bitop3:0x48",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7416,"v_lshlrev_b32_e32 v16, 6, v61",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7420,"v_add_u32_e32 v17, 0, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7424,"v_or_b32_e32 v6, 0x1000, v16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7432,"v_add_u32_e32 v6, v17, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7436,"ds_write_b128 v59, v[10:13] offset:8192",32,672,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7444,"s_waitcnt vmcnt(7)",32,6368,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7448,"ds_write_b128 v6, v[18:21]",32,892,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7456,"v_or_b32_e32 v6, 0x2000, v16",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7464,"v_add_u32_e32 v6, v17, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7468,"s_waitcnt vmcnt(6)",32,6052,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7472,"ds_write_b128 v6, v[22:25]",32,692,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7480,"v_or_b32_e32 v6, 0x3000, v16",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7488,"v_add_u32_e32 v6, v17, v6",32,152,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7492,"s_waitcnt vmcnt(5)",32,8308,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7496,"ds_write_b128 v6, v[26:29]",32,724,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7504,"v_or_b32_e32 v6, 0x4000, v16",32,164,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7512,"v_add_u32_e32 v6, v17, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7516,"s_waitcnt vmcnt(4)",32,10204,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7520,"ds_write_b128 v6, v[30:33]",32,672,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7528,"v_or_b32_e32 v6, 0x5000, v16",32,148,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7536,"v_add_u32_e32 v6, v17, v6",32,240,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7540,"s_waitcnt vmcnt(3)",32,6904,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7544,"ds_write_b128 v6, v[34:37]",32,668,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7552,"v_or_b32_e32 v6, 0x6000, v16",32,164,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7560,"v_add_u32_e32 v6, v17, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7564,"s_waitcnt vmcnt(2)",32,9588,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7568,"ds_write_b128 v6, v[38:41]",32,680,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7576,"v_or_b32_e32 v6, 0x7000, v16",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7584,"v_add_u32_e32 v6, v17, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7588,"v_and_b32_e32 v18, 48, v0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7592,"s_waitcnt vmcnt(1)",32,7736,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7596,"ds_write_b128 v6, v[42:45]",32,652,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7604,"v_bitop3_b32 v6, v50, v18, s8 bitop3:0x6c",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7612,"v_and_b32_e32 v11, 0xc0, v0",32,192,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7620,"v_xor_b32_e32 v11, v6, v11",32,156,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7624,"v_sub_u32_e32 v14, v11, v62",32,152,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7628,"v_and_b32_e32 v56, 63, v0",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,7632,"v_ashrrev_i16_e32 v14, 4, v14",32,164,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7636,"v_lshlrev_b32_e32 v12, 8, v52",32,164,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7640,"v_add_u32_sdwa v15, v56, sext(v14) dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:WORD_0",32,208,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7648,"v_mov_b32_e32 v21, 4",32,160,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7652,"v_subrev_u32_e32 v53, s15, v53",32,192,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,7656,"v_or_b32_e32 v13, v62, v12",32,192,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7660,"s_add_i32 s15, 0, 0x14000",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7668,"v_lshlrev_b32_sdwa v22, v21, sext(v14) dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:WORD_0",32,172,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7676,"v_lshrrev_b64 v[14:15], v15, exec",32,148,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7684,"v_add_u32_e32 v19, s15, v13",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7688,"v_and_b32_e32 v14, 1, v14",32,144,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7692,"v_add_u32_e32 v21, v7, v22",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7696,"v_bfrev_b32_e32 v15, 1",32,164,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7700,"v_cmp_eq_u32_e32 vcc, 1, v14",32,168,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7704,"v_readfirstlane_b32 s16, v19",32,172,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7708,"v_lshl_or_b32 v8, v53, 13, v62",32,156,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:79
+4,7716,"v_add_u32_e32 v20, 0x1000, v19",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7724,"s_mov_b32 s8, s2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7728,"v_cndmask_b32_e32 v14, v15, v21, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7732,"s_mov_b32 m0, s16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7736,"v_readfirstlane_b32 s16, v20",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7740,"buffer_load_dwordx4 v14, s[8:11], 0 offen lds",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7748,"v_add_u32_e32 v14, v8, v22",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7752,"v_cndmask_b32_e32 v14, v15, v14, vcc",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7756,"s_mov_b32 m0, s16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7760,"s_add_i32 s23, 0, 0x8000",32,160,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7768,"buffer_load_dwordx4 v14, s[8:11], 0 offen lds",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,7776,"v_add_u32_e32 v14, 0, v13",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7780,"v_subrev_u32_e32 v54, s17, v54",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,7784,"v_add_u32_e32 v14, 0x8000, v14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7792,"v_add_u32_e32 v19, s23, v13",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7796,"v_add_u32_e32 v21, v22, v62",32,148,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:80
+4,7800,"v_add_u32_e32 v23, 0x1000, v19",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7808,"v_lshl_add_u32 v20, v54, 13, v21",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7816,"v_readfirstlane_b32 s16, v14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7820,"s_and_b32 s9, s5, 0xffff",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7828,"s_mov_b32 s8, s4",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7832,"v_cndmask_b32_e32 v25, v15, v20, vcc",32,152,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7836,"s_mov_b32 m0, s16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7840,"v_lshl_add_u32 v21, v57, 13, v21",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7848,"v_readfirstlane_b32 s16, v23",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7852,"v_add_u32_e32 v24, 0x2000, v19",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7860,"buffer_load_dwordx4 v25, s[8:11], 0 offen sc0 nt lds",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7868,"v_cndmask_b32_e32 v14, v15, v21, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7872,"s_mov_b32 m0, s16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7876,"v_readfirstlane_b32 s16, v24",32,160,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7880,"buffer_load_dwordx4 v14, s[8:11], 0 offen sc0 nt lds",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7888,"v_add_u32_e32 v14, v9, v22",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7892,"v_lshl_or_b32 v10, v58, 13, v62",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:80
+4,7900,"v_add_u32_e32 v19, 0x3000, v19",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7908,"v_cndmask_b32_e32 v14, v15, v14, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7912,"s_mov_b32 m0, s16",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7916,"v_readfirstlane_b32 s16, v19",32,144,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7920,"buffer_load_dwordx4 v14, s[8:11], 0 offen sc0 nt lds",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7928,"v_add_u32_e32 v14, v10, v22",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7932,"v_cndmask_b32_e32 v14, v15, v14, vcc",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7936,"s_mov_b32 m0, s16",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7940,"v_add_u32_e32 v16, v17, v16",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7944,"buffer_load_dwordx4 v14, s[8:11], 0 offen sc0 nt lds",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,7952,"v_bfe_i32 v14, v0, 4, 1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,7960,"v_and_b32_e32 v25, 15, v0",32,140,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,7964,"v_bfe_i32 v15, v0, 5, 1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,7972,"s_waitcnt vmcnt(0)",32,42500,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7976,"ds_write_b128 v16, v[46:49]",32,640,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7984,"v_and_b32_e32 v26, 48, v14",32,148,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7988,"v_lshlrev_b32_e32 v22, 1, v51",32,180,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7992,"v_or_b32_e32 v16, 16, v25",32,200,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,7996,"v_bitop3_b32 v24, v14, v16, 48 bitop3:0x6c",32,176,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8004,"v_bitop3_b32 v28, v22, v26, v16 bitop3:0xf6",32,192,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8012,"v_and_or_b32 v16, v60, 48, v25",32,176,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8020,"v_and_b32_e32 v14, 0x50, v14",32,164,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8028,"v_and_b32_e32 v15, 0xa0, v15",32,212,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8036,"v_and_b32_e32 v29, 0x70, v50",32,160,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:79
+4,8044,"v_and_b32_e32 v30, 0x80, v50",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:79
+4,8052,"v_bitop3_b32 v23, v14, v16, v15 bitop3:0x36",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:79
+4,8060,"v_bitop3_b32 v14, v55, v50, 64 bitop3:0x72",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:79
+4,8068,"v_bitop3_b32 v19, v14, v18, v30 bitop3:0x36",32,140,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:79
+4,8076,"v_or_b32_e32 v14, 0x80, v29",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:79
+4,8084,"s_add_u32 s4, s4, 0x100",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8092,"v_bitop3_b32 v17, v30, v14, v18 bitop3:0x36",32,172,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8100,"v_or_b32_e32 v14, 0xc0, v55",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8108,"v_and_or_b32 v16, v50, 64, v18",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8116,"s_addc_u32 s5, s5, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8120,"v_or3_b32 v31, v5, v4, v25",32,172,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8128,"v_bitop3_b32 v16, v16, v14, v30 bitop3:0x36",32,144,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8136,"v_lshlrev_b32_e32 v14, 8, v0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8140,"s_add_u32 s2, s2, 0x100",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8148,"s_mov_b32 s16, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8152,"s_mov_b32 s17, 0x8000",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8160,"v_or3_b32 v27, v22, v25, v26",32,156,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8168,"v_lshlrev_b32_e32 v15, 8, v25",32,140,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8172,"v_and_b32_e32 v14, 0xf00, v14",32,148,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8180,"v_lshlrev_b32_e32 v18, 8, v31",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8184,"s_addc_u32 s3, s3, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8188,"v_accvgpr_write_b32 a7, 0",32,140,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8196,"v_accvgpr_write_b32 a6, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8204,"v_accvgpr_write_b32 a5, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8212,"v_accvgpr_write_b32 a4, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8220,"s_mov_b32 s18, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8224,"s_mov_b32 s20, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8228,"s_mov_b32 s19, 0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8232,"s_add_i32 s9, s20, 1",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8236,"s_cmp_lt_i32 s9, 2",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8240,"s_cselect_b32 s20, s9, 0",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8244,"s_mov_b32 s24, s15",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8248,"s_lshl_b32 s15, s20, 14",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8252,"s_lshl_b32 s22, s20, 13",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8256,"s_add_i32 s21, s15, 0",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8260,"s_add_i32 s15, s22, 0",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8264,"s_add_i32 s22, s21, 0x8000",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8272,"v_add_u32_e32 v29, s21, v11",992,4184,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8276,"s_add_i32 s15, s15, 0x14000",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8284,"v_add_u32_e32 v30, s22, v13",992,4084,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8288,"v_add3_u32 v29, v29, v12, s17",992,4044,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8296,"v_add3_u32 v31, s15, v11, v12",992,4040,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8304,"v_add_u32_e32 v32, s15, v13",992,4112,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8308,"v_add_u32_e32 v34, 0x2000, v30",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8316,"v_add_u32_e32 v33, 0x1000, v30",992,3976,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8324,"v_add_u32_e32 v35, 0x3000, v30",992,4048,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8332,"v_readfirstlane_b32 s25, v30",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8336,"v_add_u32_e32 v30, 0x1000, v32",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8344,"v_sub_u32_e32 v36, v31, v32",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8348,"v_readfirstlane_b32 s26, v32",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8352,"v_sub_u32_e32 v32, v29, v34",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8356,"v_readfirstlane_b32 s27, v33",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8360,"v_sub_u32_e32 v29, v29, v35",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8364,"v_ashrrev_i32_e32 v33, 31, v36",992,4000,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8368,"v_sub_u32_e32 v31, v31, v30",992,4012,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8372,"v_readfirstlane_b32 s30, v30",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8376,"v_add_u32_e32 v30, 0x2000, v32",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8384,"v_add_u32_e32 v29, 0x3000, v29",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8392,"v_lshrrev_b32_e32 v32, 28, v33",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8396,"v_ashrrev_i32_e32 v33, 31, v30",992,3976,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8400,"v_readfirstlane_b32 s28, v34",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8404,"v_ashrrev_i32_e32 v34, 31, v29",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8408,"v_lshrrev_b32_e32 v33, 28, v33",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8412,"s_mov_b32 s8, s4",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8416,"s_and_b32 s9, s5, 0xffff",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8424,"s_mov_b32 m0, s25",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8428,"v_add_u32_e32 v31, 0x1000, v31",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8436,"v_lshrrev_b32_e32 v34, 28, v34",992,3988,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8440,"v_add_u32_e32 v30, v30, v33",992,3972,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8444,"s_waitcnt vmcnt(0) lgkmcnt(0)",992,639924,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8448,"s_barrier",992,55236,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8452,"v_readfirstlane_b32 s29, v35",992,5276,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8456,"buffer_load_dwordx4 v20, s[8:11], 0 offen sc0 nt lds",992,14944,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8464,"s_mov_b32 m0, s27",992,4228,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8468,"v_ashrrev_i32_e32 v35, 31, v31",992,13448,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8472,"v_add_u32_e32 v29, v29, v34",992,11508,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8476,"v_and_b32_e32 v30, -16, v30",992,10528,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8480,"buffer_load_dwordx4 v21, s[8:11], 0 offen sc0 nt lds",992,4380,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8488,"v_add_u32_e32 v32, v36, v32",992,13816,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8492,"v_lshrrev_b32_e32 v35, 28, v35",992,8496,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8496,"v_and_b32_e32 v29, -16, v29",992,8344,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8500,"v_add_u32_e32 v30, v30, v9",992,8616,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8504,"s_mov_b32 m0, s28",992,4120,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8508,"v_and_b32_e32 v32, -16, v32",992,10208,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8512,"v_add_u32_e32 v31, v31, v35",992,6944,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8516,"v_add_u32_e32 v29, v29, v10",992,7000,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8520,"buffer_load_dwordx4 v30, s[8:11], 0 offen sc0 nt lds",992,4944,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8528,"s_mov_b32 m0, s29",992,4264,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8532,"v_add_u32_e32 v32, v32, v7",992,13640,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8536,"v_and_b32_e32 v31, -16, v31",992,5000,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8540,"buffer_load_dwordx4 v29, s[8:11], 0 offen sc0 nt lds",992,5460,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8548,"s_and_b32 s9, s3, 0xffff",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8556,"s_mov_b32 s8, s2",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8560,"s_mov_b32 m0, s26",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8564,"v_add_u32_e32 v31, v31, v8",992,4140,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8568,"buffer_load_dwordx4 v32, s[8:11], 0 offen lds",992,4888,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8576,"s_mov_b32 m0, s30",992,4096,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8580,"s_nop 0",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8584,"buffer_load_dwordx4 v31, s[8:11], 0 offen lds",992,4796,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8592,"s_and_b32 s8, s16, 0x200",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8600,"s_and_b32 s9, s16, 0x400",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8608,"s_and_b32 s25, s16, 0x800",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8616,"s_and_b32 s26, s16, 0x1000",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8624,"v_add_u32_e32 v29, s24, v6",992,8752,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8628,"v_add_u32_e32 v30, s24, v19",992,6344,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8632,"v_or_b32_e32 v38, s8, v27",992,6100,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8636,"s_cmp_lt_u32 s19, 16",992,3972,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8640,"v_add_u32_e32 v50, s24, v17",992,6936,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8644,"v_add_u32_e32 v51, s24, v16",992,6760,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8648,"v_add3_u32 v31, s23, v6, v18",992,5860,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8656,"v_add3_u32 v34, s23, v19, v18",992,4660,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8664,"v_add3_u32 v52, s23, v17, v18",992,6416,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8672,"v_add3_u32 v53, s23, v16, v18",992,6252,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8680,"v_or_b32_e32 v46, s8, v28",992,5980,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8684,"v_add_u32_e32 v39, v29, v15",992,4328,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8688,"v_add_u32_e32 v42, v30, v15",992,5496,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8692,"v_or_b32_e32 v48, s9, v38",992,4912,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8696,"s_cselect_b32 s8, 0, 0x2000",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8704,"s_cselect_b32 s23, 0, 0x4000",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8712,"s_and_b32 s24, s16, 0x1800",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8720,"s_and_b32 s28, s18, 0x3000",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8728,"s_and_b32 s29, s18, 0x1000",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8736,"v_add_u32_e32 v47, v30, v14",992,5044,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8740,"ds_read_b128 v[30:33], v31",992,4284,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8748,"ds_read_b128 v[34:37], v34",992,4808,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,8756,"v_or_b32_e32 v49, s9, v46",992,4016,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8760,"s_and_b32 s27, s18, 0xc00",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8768,"s_and_b32 s30, s18, 0x2000",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8776,"ds_read_b128 v[38:41], v39",992,4388,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8784,"ds_read_b128 v[42:45], v42",992,4736,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8792,"v_or_b32_e32 v54, s25, v48",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8796,"s_or_b32 s25, s8, s26",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8800,"s_or_b32 s26, s24, s8",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8804,"v_or_b32_e32 v46, s24, v46",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8808,"s_add_i32 s24, s28, 0",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8812,"v_or_b32_e32 v55, s29, v23",992,4084,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8816,"s_or_b32 s28, s23, s30",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8820,"v_or_b32_e32 v46, s9, v46",992,3992,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8824,"s_add_i32 s24, s24, s27",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8828,"v_or_b32_e32 v55, s27, v55",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8832,"v_or_b32_e32 v54, s25, v54",992,3980,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8836,"v_or_b32_e32 v48, s26, v48",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8840,"v_or_b32_e32 v49, s26, v49",992,4036,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8844,"v_or_b32_e32 v46, s8, v46",992,3972,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8848,"s_add_i32 s23, s23, s24",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8852,"v_or_b32_e32 v55, s28, v55",992,3980,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8856,"v_add_u32_e32 v29, v29, v14",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,8860,"v_add_u32_e32 v54, s13, v54",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8864,"v_add_u32_e32 v48, s13, v48",992,4012,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8868,"v_add_u32_e32 v49, s13, v49",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8872,"v_add_u32_e32 v46, s13, v46",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8876,"v_add_u32_e32 v56, s23, v23",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8880,"v_add_u32_e32 v55, 0, v55",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8884,"ds_read_u8 v54, v54",992,4924,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8892,"ds_read_u8 v57, v48 offset:128",992,5944,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8900,"ds_read_u8 v58, v48 offset:256",992,6096,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8908,"ds_read_u8 v59, v48 offset:384",992,6436,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8916,"ds_read_u8 v60, v49",992,6664,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8924,"ds_read_u8 v56, v56",992,6488,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8932,"ds_read_u8 v61, v46 offset:128",992,6572,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8940,"ds_read_u8 v62, v46 offset:256",992,6712,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8948,"ds_read_u8 v63, v46 offset:384",992,6764,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8956,"ds_read_u8 v64, v55 offset:256",992,6808,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8964,"ds_read_u8 v65, v55 offset:512",992,6300,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8972,"ds_read_u8 v55, v55 offset:768",992,6248,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,8980,"s_waitcnt lgkmcnt(6)",992,7752,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,8984,"v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[30:33], v[38:41], a[4:7], v56, v54 op_sel_hi:[0,0,0] cbsz:4 blgp:4",992,12520,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9000,"ds_read_b128 v[38:41], v29 offset:4096",992,4256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9008,"ds_read_b128 v[46:49], v47 offset:4096",992,4640,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9016,"v_add_u32_e32 v29, v50, v15",992,4852,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9020,"v_add_u32_e32 v54, v51, v15",992,5492,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9024,"s_waitcnt lgkmcnt(1)",992,35668,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9028,"v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[30:33], v[38:41], a[0:3], v56, v60 op_sel_hi:[0,0,0] cbsz:4 blgp:4",992,14480,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9044,"ds_read_b128 v[30:33], v52",992,3984,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,9052,"ds_read_b128 v[38:41], v53",992,4080,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,9060,"v_add_u32_e32 v50, v50, v14",992,6076,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9064,"v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[34:37], v[42:45], a[4:7], v64, v57 op_sel_hi:[0,0,0] cbsz:4 blgp:4",992,9388,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9080,"v_add_u32_e32 v51, v51, v14",992,9984,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9084,"s_add_i32 s19, s19, 1",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9088,"s_add_u32 s4, s4, 0x100",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9096,"s_waitcnt lgkmcnt(2)",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9100,"v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[34:37], v[46:49], a[0:3], v64, v61 op_sel_hi:[0,0,0] cbsz:4 blgp:4",992,13124,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9116,"ds_read_b128 v[34:37], v29",992,4136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9124,"ds_read_b128 v[42:45], v54",992,4392,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9132,"s_addc_u32 s5, s5, 0",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9136,"s_add_u32 s2, s2, 0x100",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9144,"s_waitcnt lgkmcnt(1)",992,38800,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9148,"v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[30:33], v[34:37], a[4:7], v65, v58 op_sel_hi:[0,0,0] cbsz:4 blgp:4",992,11912,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9164,"ds_read_b128 v[34:37], v50 offset:4096",992,4028,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9172,"ds_read_b128 v[46:49], v51 offset:4096",992,4012,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9180,"s_addc_u32 s3, s3, 0",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9184,"s_addk_i32 s18, 0x400",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9188,"s_waitcnt lgkmcnt(1)",992,37972,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9192,"v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[30:33], v[34:37], a[0:3], v65, v62 op_sel_hi:[0,0,0] cbsz:4 blgp:4",992,8144,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9208,"s_addk_i32 s16, 0x200",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9212,"s_cmp_lg_u32 s19, 31",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9216,"s_mov_b32 s23, s22",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9220,"v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[38:41], v[42:45], a[4:7], v55, v59 op_sel_hi:[0,0,0] cbsz:4 blgp:4",992,8432,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9236,"s_waitcnt lgkmcnt(0)",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9240,"v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[38:41], v[46:49], a[0:3], v55, v63 op_sel_hi:[0,0,0] cbsz:4 blgp:4",992,12512,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9256,"s_cbranch_scc1 65279",992,3968,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9260,"s_add_i32 s2, 0, 0x13e00",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9268,"v_add_u32_e32 v7, s2, v25",32,164,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9272,"v_add3_u32 v7, v7, v26, v22",32,132,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9280,"v_add_u32_e32 v47, s15, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9284,"v_add_u32_e32 v48, s15, v19",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9288,"s_waitcnt vmcnt(0)",32,24924,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9292,"s_barrier",32,1512,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9296,"v_add3_u32 v8, s2, v24, v22",32,172,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9304,"ds_read_u8 v32, v7",32,168,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9312,"ds_read_u8 v36, v7 offset:128",32,224,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9320,"ds_read_u8 v37, v7 offset:256",32,252,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9328,"ds_read_u8 v38, v7 offset:384",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9336,"ds_read_u8 v39, v8",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9344,"ds_read_u8 v40, v8 offset:128",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9352,"ds_read_u8 v41, v8 offset:256",32,252,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9360,"ds_read_u8 v42, v8 offset:384",32,224,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9368,"v_add_u32_e32 v7, 0, v23",32,316,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9372,"v_add_u32_e32 v10, v47, v15",32,416,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9376,"v_add_u32_e32 v20, v48, v15",32,456,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9380,"v_add3_u32 v6, s21, v6, v18",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,9388,"v_add3_u32 v19, s21, v19, v18",32,180,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,9396,"ds_read_u8 v43, v7 offset:31744",32,160,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9404,"ds_read_u8 v44, v7 offset:32000",32,184,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9412,"ds_read_u8 v45, v7 offset:32256",32,188,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9420,"ds_read_u8 v46, v7 offset:32512",32,204,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:89
+4,9428,"ds_read_b128 v[6:9], v6 offset:32768",32,196,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,9436,"ds_read_b128 v[10:13], v10",32,204,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9444,"ds_read_b128 v[20:23], v20",32,248,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9452,"ds_read_b128 v[24:27], v19 offset:32768",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,9460,"v_add_u32_e32 v49, s15, v17",32,144,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9464,"v_add3_u32 v17, s21, v17, v18",32,192,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,9472,"ds_read_b128 v[28:31], v17 offset:32768",32,172,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,9480,"s_waitcnt lgkmcnt(3)",32,868,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9484,"v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[6:9], v[10:13], a[4:7], v43, v32 op_sel_hi:[0,0,0] cbsz:4 blgp:4",32,268,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9500,"v_add3_u32 v10, s21, v16, v18",32,272,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,9508,"v_add_u32_e32 v19, v49, v15",32,136,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9512,"ds_read_b128 v[10:13], v10 offset:32768",32,148,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:98
+4,9520,"ds_read_b128 v[32:35], v19",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9528,"s_waitcnt lgkmcnt(3)",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9532,"v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[24:27], v[20:23], a[4:7], v44, v36 op_sel_hi:[0,0,0] cbsz:4 blgp:4",32,260,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9548,"v_add_u32_e32 v36, s15, v16",32,308,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9552,"v_add_u32_e32 v15, v36, v15",32,228,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9556,"ds_read_b128 v[16:19], v15",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9564,"s_waitcnt lgkmcnt(1)",32,532,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9568,"v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[28:31], v[32:35], a[4:7], v45, v37 op_sel_hi:[0,0,0] cbsz:4 blgp:4",32,316,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9584,"v_add_u32_e32 v15, v47, v14",32,320,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9588,"s_ashr_i32 s2, s1, 31",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:114
+4,9592,"s_ashr_i32 s15, s14, 31",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:115
+4,9596,"s_waitcnt lgkmcnt(0)",32,316,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9600,"v_mfma_scale_f32_16x16x128_f8f6f4 a[4:7], v[10:13], v[16:19], a[4:7], v46, v38 op_sel_hi:[0,0,0] cbsz:4 blgp:4",32,392,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9616,"ds_read_b128 v[16:19], v15 offset:4096",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9624,"v_add_u32_e32 v15, v48, v14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9628,"ds_read_b128 v[20:23], v15 offset:4096",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9636,"s_waitcnt lgkmcnt(1)",32,1076,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9640,"v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[6:9], v[16:19], a[0:3], v43, v39 op_sel_hi:[0,0,0] cbsz:4 blgp:4",32,288,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9656,"v_add_u32_e32 v6, v49, v14",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9660,"ds_read_b128 v[6:9], v6 offset:4096",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9668,"v_add_u32_e32 v14, v36, v14",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9672,"ds_read_b128 v[14:17], v14 offset:4096",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:97
+4,9680,"s_waitcnt lgkmcnt(2)",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9684,"v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[24:27], v[20:23], a[0:3], v44, v40 op_sel_hi:[0,0,0] cbsz:4 blgp:4",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9700,"v_lshrrev_b32_e32 v19, 3, v0",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:77
+4,9704,"s_waitcnt lgkmcnt(0)",32,960,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9708,"s_barrier",32,1456,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9712,"v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[28:31], v[6:9], a[0:3], v45, v41 op_sel_hi:[0,0,0] cbsz:4 blgp:4",32,432,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9728,"v_or_b32_e32 v6, s1, v19",32,484,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:114
+4,9732,"v_mov_b32_e32 v7, s2",32,160,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:114
+4,9736,"s_mul_hi_i32 s2, s1, 0x1a000",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:116
+4,9744,"s_mul_i32 s1, s1, 0x1a000",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:116
+4,9752,"s_add_u32 s1, s6, s1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:116
+4,9756,"s_addc_u32 s5, s7, s2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:116
+4,9760,"s_lshl_b64 s[2:3], s[14:15], 1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:116
+4,9764,"s_add_u32 s4, s1, s2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:116
+4,9768,"s_addc_u32 s2, s5, s3",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:116
+4,9772,"s_ashr_i32 s13, s12, 31",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:117
+4,9776,"v_cmp_gt_i64_e32 vcc, s[12:13], v[6:7]",32,448,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:117
+4,9780,"v_lshlrev_b32_e32 v6, 6, v0",32,432,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9784,"v_and_b32_e32 v6, 0x3c0, v6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9792,"v_or3_b32 v2, v6, v2, v3",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9800,"v_or3_b32 v4, v2, v4, v5",32,372,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9808,"v_lshrrev_b32_e32 v2, 2, v6",32,652,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9812,"v_lshlrev_b32_e32 v3, 1, v4",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9816,"v_add3_u32 v5, 0, v2, v3",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9824,"v_accvgpr_read_b32 v2, a7",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9832,"v_accvgpr_read_b32 v3, a6",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9840,"v_cvt_pk_bf16_f32 v3, v3, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9848,"v_accvgpr_read_b32 v2, a5",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9856,"v_accvgpr_read_b32 v6, a4",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9864,"v_mfma_scale_f32_16x16x128_f8f6f4 a[0:3], v[10:13], v[14:17], a[0:3], v46, v42 op_sel_hi:[0,0,0] cbsz:4 blgp:4",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:103
+4,9880,"v_cvt_pk_bf16_f32 v2, v6, v2",32,256,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9888,"ds_write_b64 v5, v[2:3]",32,436,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9896,"v_or_b32_e32 v2, 0x400, v4",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9904,"v_lshrrev_b32_e32 v3, 2, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9908,"v_and_b32_e32 v3, 0x3ffffff0, v3",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9916,"v_lshlrev_b32_e32 v2, 1, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9920,"v_and_b32_e32 v18, 56, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:78
+4,9924,"v_and_b32_e32 v1, 0x7f8, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9932,"v_add3_u32 v4, 0, v3, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9940,"v_accvgpr_read_b32 v2, a3",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9948,"v_accvgpr_read_b32 v3, a2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9956,"v_and_b32_e32 v0, 0xf8, v0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9964,"v_cvt_pk_bf16_f32 v3, v3, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9972,"v_accvgpr_read_b32 v2, a1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9980,"v_accvgpr_read_b32 v5, a0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9988,"v_lshlrev_b32_e32 v0, 1, v0",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9992,"v_lshlrev_b32_e32 v1, 1, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,9996,"v_cvt_pk_bf16_f32 v2, v5, v2",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10004,"v_add3_u32 v0, 0, v0, v1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10012,"ds_write_b64 v4, v[2:3]",32,384,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10020,"s_waitcnt lgkmcnt(0)",32,1684,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10024,"s_barrier",32,776,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10028,"ds_read_b128 v[0:3], v0",32,172,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10036,"v_or_b32_e32 v8, s14, v18",32,276,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:115
+4,10040,"v_mov_b32_e32 v9, s15",32,792,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:115
+4,10044,"v_mul_u32_u24_e32 v10, 0xd000, v19",32,516,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:116
+4,10052,"s_ashr_i32 s1, s0, 31",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:117
+4,10056,"v_or_b32_e32 v10, v10, v18",32,176,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:116
+4,10060,"v_cmp_gt_i64_e64 s[0:1], s[0:1], v[8:9]",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:117
+4,10068,"v_lshlrev_b32_e32 v4, 1, v10",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10072,"v_bfrev_b32_e32 v5, 1",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10076,"s_and_b64 vcc, vcc, s[0:1]",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:117
+4,10080,"s_and_b32 s5, s2, 0xffff",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10088,"s_mov_b32 s7, 0x27000",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10096,"s_mov_b32 s6, 0x7ffffffe",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10104,"v_cndmask_b32_e32 v4, v5, v4, vcc",32,356,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10108,"s_waitcnt lgkmcnt(0)",32,128,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10112,"buffer_store_dwordx4 v[0:3], v4, s[4:7], 0 offen",32,284,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10120,"s_endpgm",32,8672,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118
+4,10124,"s_nop 0",0,0,/app/aiter/aiter/ops/triton/gemm_afp4wfp4.py:118

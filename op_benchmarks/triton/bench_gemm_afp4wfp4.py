@@ -10,7 +10,7 @@ from utils.benchmark_utils import get_model_configs, get_available_models
 def model_benchmark_shapes(args):
     config_file = args.model_configs
     configs = get_model_configs(config_path=config_file, models=args.model)
-    M_list = [args.M] if args.model == "all" else [2 ** i for i in range(0, 6)]
+    M_list = [args.M] if args.model == "all" else [2 ** i for i in range(5, 6)]
     shapes = []
     for M in M_list:
         for _, config in configs.items():

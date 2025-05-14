@@ -407,7 +407,7 @@ def get_args_of_build(ops_name: str, exclue=[]):
                             import torch as torch
                         tmp = eval(el)
                         if isinstance(tmp, list):
-                            if not tmp:
+                            if tmp:
                                 tmp = tmp[0]
                             else:
                                 tmp = ""

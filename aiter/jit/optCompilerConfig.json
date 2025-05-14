@@ -186,7 +186,11 @@
             "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale_wpreshuffle/gemm_a8w8_blockscale_wpreshuffle.cu'"
         ],
         "flags_extra_cc": [],
-        "flags_extra_hip": [],
+        "flags_extra_hip": [
+            "hip_flag_checker('-mllvm --slp-threshold=-32')", 
+            "hip_flag_checker('-mllvm --disable-schedmodel-in-sched-mi=1')", 
+            "hip_flag_checker('-mllvm --amdgpu-sched-strategy=gcn-iterative-max-occupancy-experimental')", 
+            "hip_flag_checker('-mllvm --misched-bottomup=1')"],
         "extra_ldflags": "None",
         "extra_include": [],
         "verbose": "False",
@@ -400,7 +404,10 @@
             "f'{AITER_CSRC_DIR}/ck_gemm_a8w8_blockscale_wpreshuffle/include'"
         ],
         "flags_extra_cc": [],
-        "flags_extra_hip": [],
+        "flags_extra_hip": ["hip_flag_checker('-mllvm --slp-threshold=-32')", 
+            "hip_flag_checker('-mllvm --disable-schedmodel-in-sched-mi=1')", 
+            "hip_flag_checker('-mllvm --amdgpu-sched-strategy=gcn-iterative-max-occupancy-experimental')", 
+            "hip_flag_checker('-mllvm --misched-bottomup=1')"],
         "extra_ldflags": "None",
         "extra_include": [],
         "verbose": "False",

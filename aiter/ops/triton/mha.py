@@ -2591,7 +2591,7 @@ def _flash_attn_backward(
     # jignings kernel fuses the two kernels into main by having combined grid
     if onekernel:
         num_k_pids = (max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1
-        grid = (batch * num_q_heads * num_k_pids,) 
+        grid = (num_k_pids, batch, num_k_heads, )
 
         NUM_WARPS, NUM_STAGES = 4, 1
         WAVES_PER_EU = 1
@@ -2634,7 +2634,7 @@ def _flash_attn_backward(
                 stride_dropoutb, stride_dropouth, stride_dropoutm, stride_dropoutn,
                 stride_descale_q_z, stride_descale_k_z, stride_descale_v_z, stride_descale_do_z,
                 None, None,
-                batch, num_q_heads, num_k_heads,
+                num_q_heads, num_k_heads,
                 cu_seqlens_q, cu_seqlens_k,
                 max_seqlen_q, max_seqlen_k,
                 dropout_mask, dropout_p, philox_seed, philox_offset,
@@ -2668,7 +2668,7 @@ def _flash_attn_backward(
                 *dropout_strides,
                 stride_descale_q_z, stride_descale_k_z, stride_descale_v_z, stride_descale_do_z,
                 None, None,
-                batch, num_q_heads, num_k_heads,
+                num_q_heads, num_k_heads,
                 cu_seqlens_q, cu_seqlens_k,
                 max_seqlen_q, max_seqlen_k,
                 dropout_mask, dropout_p, philox_seed, philox_offset,

@@ -2522,6 +2522,8 @@ def _flash_attn_backward(
             # We can incur the cost of atomic adds for dk and dv, because they are not in the loop.
             # Avoiding contention for dq atomic add (inside the loop) is critical. 
             # We can reduce the risk by mapping the workgroups ids (0,1,2... batch * num_q_heads * num_k_pids-1) so that concurrent workgroups are (if possible) at different batch, or head_q or inner loop m_idx.
+            print("Running fused-bwd causal...")
+            
             grid_dkdvdq = (batch * num_q_heads * num_k_pids,) 
             _bwd_kernel_dkdvdq_causal[grid_dkdvdq](
                 q, k, v, sm_scale, do, dk, dv, dq,

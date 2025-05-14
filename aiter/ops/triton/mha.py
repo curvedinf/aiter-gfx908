@@ -2591,7 +2591,7 @@ def _flash_attn_backward(
     # jignings kernel fuses the two kernels into main by having combined grid
     if onekernel:
         num_k_pids = (max_seqlen_k + BLOCK_N1 - 1) // BLOCK_N1
-        grid = (num_k_pids, batch, num_k_heads, )
+        grid = (num_k_heads, num_k_pids, batch, )
 
         NUM_WARPS, NUM_STAGES = 4, 1
         WAVES_PER_EU = 1

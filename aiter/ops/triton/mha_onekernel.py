@@ -9,6 +9,63 @@ from .utils import DEBUG, AUTOTUNE, DROPOUT_USE_PYTORCH, DROPOUT_DUMP, get_shape
 tl_DROPOUT_USE_PYTORCH: tl.constexpr = triton.language.constexpr(DROPOUT_USE_PYTORCH)
 tl_DROPOUT_DUMP: tl.constexpr = triton.language.constexpr(DROPOUT_DUMP)
 
+@triton.jit
+def _remap_XCD(k, last_k, NUM_XCD):
+    """
+    Parameters:
+        NUM_XCD: number of XCDs in the GPU, e.g. 38 for MI300x.
+        last_k: the last index of the set, i.e. len(set) - 1
+        k: the index to be remapped
+    Function maps indices k = 0, ..., last_k so that [multiples of NUM_XCD] come first (those present in the set),
+    then [multiples of NUM_XCD] + 1, ..., until [multiples of NUM_XCD] + NUM_XCD - 1
+    As indices are distributed to the XCDs in a round robin fashion, this remaps the indices at the XCDs back to consecutive indices.
+    """
+    r = k % NUM_XCD
+    m = k // NUM_XCD
+    q = last_k // NUM_XCD
+    t = last_k - NUM_XCD * q
+    u = min(r, t + 1)
+    new_index = u * q + (r - u) * (q - 1) + r + m
+    return new_index
+
+@triton.jit
+def _balance_attn_workload(
+    wid,
+    NUM_XCD: tl.constexpr,
+    BATCH,
+    NUM_Q_HEADS,
+    SEQLEN_Q,
+    BLOCK_M,
+):
+    # Traversal strategy along dims: seqlen, q_head, batch
+    # 1. Fastest changing dim is the q_head dim. At every <NUM_XCD>th wid, increase the sequence block id (start_m).
+    # 2. When we are done with <CHUNK_BLOCKS_SIZE> blocks along seqlen, we move to the next set of <NUM_XCD> q_heads.
+    # 3. Batch changes last.
+
+    # so XCD 0 should get workgroups with indices (batch, head q idx, start_m)
+    # (0, 0, 0), (0, 0, 1), (0, 0, 2), ..., (0, 0, CHUNK_BLOCKS_SIZE), (0, NUM_XCD, 0)
+    # XCD 1
+    # (0, 1, 0), (0, 1, 1), (0, 1, 2), ..., (0, 1, CHUNK_BLOCKS_SIZE), (0, NUM_XCD+1, 0)
+    # ...
+    # XCD <NUM_XCD - 1>
+    # (0, NUM_XCD-1, 0), (0, NUM_XCD-1, 1), (0, NUM_XCD-1, 2), ..., (0, NUM_XCD-1, CHUNK_BLOCKS_SIZE), (0, 2 * NUM_XCD-1, 0)
+
+    # Notice that on the same round robin turn, XCDs get the same start_m, i.e. workgroups with equal workloads.
+    # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
+
+    NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
+    CHUNK_BLOCKS_SIZE = 1  # (NUM_CUs_PER_XCD // (NUM_Q_HEADS // NUM_K_HEADS))
+    off_q_head = (
+        wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD
+    ) % NUM_Q_HEADS
+    start_m = (
+        (wid // NUM_XCD) % CHUNK_BLOCKS_SIZE
+        + wid // (CHUNK_BLOCKS_SIZE * NUM_Q_HEADS) * CHUNK_BLOCKS_SIZE
+    ) % NUM_BLOCKS
+    off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH
+    off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS - 1, NUM_XCD)
+
+    return off_z, off_q_head, start_m
 
 def get_autotune_configs():
     if False:
@@ -487,9 +544,10 @@ def bwd_kernel_causal( # grid = (tl.cdiv(max_seqlen_q // BLOCK_M2), batch, nhead
     DEBUG_TRITON_DETAIL: tl.constexpr,
 ):
     # program ids
-    pid = tl.program_id(0)
-    bid = tl.program_id(1)
-    hkid = tl.program_id(2)
+    hkid = tl.program_id(0)
+    pid = tl.program_id(1)
+    # pid = _remap_XCD(pid, tl.cdiv(max_seqlen_k, BLOCK_N1) - 1, 8)
+    bid = tl.program_id(2)
     if DEBUG_TRITON: print(f"\npid: {pid}, bid: {bid}, hkid: {hkid}")  # noqa: E701
     # figure out varlen start and end
     q_start = 0

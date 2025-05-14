@@ -1176,7 +1176,8 @@ def _bwd_dkdvdq_inner(
     #dK = QdS^T
 
 
-    offset_factor = num_steps // num_atomics_concurrent # 3 if num_steps > 1 or num_steps==3 else 1 # coprime with num_steps
+    # offset_factor = num_steps // num_atomics_concurrent # 3 if num_steps > 1 or num_steps==3 else 1 # coprime with num_steps
+    offset_factor = 0
     # Compute a starting index and step based on workgroup_id
     # Use a simple hash-like function to spread out the starting points
     start_idx = (workgroup_id * offset_factor) % num_steps  # 17 is an arbitrary prime to spread indices
@@ -1409,16 +1410,22 @@ def _bwd_kernel_dkdvdq_causal(
     tl.assume(stride_do_k >= 0)
 
     GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
-    
-    wid = tl.program_id(0) # workgoup id: 0, ..., NUM_Q_PIDS * BATCH * NUM_K_HEADS - 1
-    batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, NUM_XCD=8)
+    # wid = tl.program_id(0) # workgoup id: 0, ..., NUM_Q_PIDS * BATCH * NUM_K_HEADS - 1
+    # batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, NUM_XCD=8)
+
+    head_q_idx = tl.program_id(0)
+    # head_q_idx = _remap_XCD(head_q_idx, NUM_Q_HEADS-1, 8)
+
+    batch_idx = tl.program_id(1)
+    seq_k_blk_idx = tl.program_id(2)
+
     # In the backward we dont want concurrent workgroups to handle consecutive heads or blocks, so remap them to be far apart.
-    head_q_idx = head_q_idx * 29 % NUM_Q_HEADS
-    seq_k_blk_idx = seq_k_blk_idx * 29 % NUM_K_PIDS
+    # head_q_idx = head_q_idx * 29 % NUM_Q_HEADS
+    # seq_k_blk_idx = seq_k_blk_idx * 29 % NUM_K_PIDS
 
 
     head_k_idx = head_q_idx // GROUP_SIZE
-    num_atomics_concurrent = NUM_SMS // (NUM_Q_HEADS *  BATCH)
+    num_atomics_concurrent = NUM_SMS // (NUM_Q_HEADS * BATCH) // 2
 
     #Determine q and k start along with seqlen_q and seqlen_k
     q_start = 0
@@ -2522,7 +2529,7 @@ def _flash_attn_backward(
             # We can incur the cost of atomic adds for dk and dv, because they are not in the loop.
             # Avoiding contention for dq atomic add (inside the loop) is critical. 
             # We can reduce the risk by mapping the workgroups ids (0,1,2... batch * num_q_heads * num_k_pids-1) so that concurrent workgroups are (if possible) at different batch, or head_q or inner loop m_idx.
-            grid_dkdvdq = (batch * num_q_heads * num_k_pids,) 
+            grid_dkdvdq = (num_q_heads, batch, num_k_pids,) 
             _bwd_kernel_dkdvdq_causal[grid_dkdvdq](
                 q, k, v, sm_scale, do, dk, dv, dq,
                 softmax_lse, delta,

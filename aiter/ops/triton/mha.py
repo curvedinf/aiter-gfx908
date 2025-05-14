@@ -2685,7 +2685,7 @@ def _flash_attn_backward(
                 FP8_OUTPUT=False,
                 DEBUG_TRITON=False,
                 DEBUG_TRITON_DETAIL=False,
-                # **onekernel_config,
+                **onekernel_config,
             )
         return delta
 

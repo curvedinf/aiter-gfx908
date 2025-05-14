@@ -188,7 +188,12 @@ def create_benchmark_configs(custom, args):
     # unit = "ms"
 
     if mode=="bwd":
-        line_vals = [f'fused-bwd({unit})', f'bwd({unit})']
+        if args.fused_bwd:
+            line_vals = [f'fused-bwd({unit})', f'bwd({unit})']
+        elif args.onekernel_bwd:
+            line_vals = [f'onekernel-bwd({unit})', f'bwd({unit})']
+        else:
+            line_vals = [f'fused-bwd({unit})', f'onekernel-bwd({unit})', f'bwd({unit})']
     else:
         line_vals = [f'fwd({unit})']
 
@@ -205,7 +210,7 @@ def create_benchmark_configs(custom, args):
             line_arg='provider',
             line_vals=line_vals,
             line_names=line_vals,
-            styles=[('red', '-'), ('green', '-')],
+            styles=[('red', '-'), ('green', '-'), ('yellow', '-')],
             ylabel=unit,
             plot_name=plot_name,
             args=extra_args
@@ -230,8 +235,8 @@ def run_benchmark(custom, args):
         rep = 100
         varlen = args.layout == 'thd' if not (hasattr(args, 'test_mode') and args.test_mode) else False  # Force non-varlen in test mode
 
-        fused_backward = False
-        onekernel_backward = "fused" in provider
+        fused_backward = "fused-bwd" in provider
+        onekernel_backward = "onekernel-bwd" in provider
 
         assert not fused_backward or not onekernel_backward, "fused_backward and onekernel_backward cannot be used together."
 
@@ -371,7 +376,6 @@ def run_benchmark(custom, args):
         if mode == "bwd":
             total_flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
 
-
         input_bytes = q.element_size()
         output_bytes = q.element_size()
         if varlen:
@@ -385,7 +389,6 @@ def run_benchmark(custom, args):
                total_num_tokens_q * HQ * D_HEAD * output_bytes)
 
         # return ms
-        
         if "ms" in provider:
             return ms
         elif "TFLOPS" in provider:

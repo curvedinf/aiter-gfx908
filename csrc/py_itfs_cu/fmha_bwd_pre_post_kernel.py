@@ -621,7 +621,7 @@ class fmha_bwd_v3_kernel
         if (const char* env_val = std::getenv("AITER_ASM_DIR")) {{
             AITER_ASM_DIR = env_val;
         }} else {{
-            AITER_ASM_DIR = "{F_AITER_ROOT_DIR}" + "/hsa/" + get_gpu_arch_hip() + "/";
+            AITER_ASM_DIR = std::string("{F_AITER_ROOT_DIR}/hsa/") + get_gpu_arch_hip() + "/";
         }}
         HIP_CALL(hipModuleLoad(&module, (AITER_ASM_DIR + "fmha_v3_bwd/" + hsaco).c_str()));
         HIP_CALL(hipModuleGetFunction(&kernel_func, module, kernel_func_name.c_str()));

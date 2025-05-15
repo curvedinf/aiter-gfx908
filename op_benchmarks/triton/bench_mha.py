@@ -196,7 +196,7 @@ def create_benchmark_configs(custom, args):
         line_vals = [f'Triton({unit})', f'Torch({unit})']
 
     if args.test_mode:
-        line_vals = ["test_mode"]
+        line_vals = ["fused-bwd"]
 
     configs.append(
         triton.testing.Benchmark(
@@ -230,7 +230,7 @@ def run_benchmark(custom, args):
         rep = 100
         varlen = args.layout == 'thd' if not (hasattr(args, 'test_mode') and args.test_mode) else False  # Force non-varlen in test mode
 
-        fused_backward = args.fused_bwd or ("fused" in provider)
+        fused_backward = args.fused_bwd or ("fused" in provider) or args.test_mode
 
         # Default softmax scale to match standard attention
         if sm_scale is None:

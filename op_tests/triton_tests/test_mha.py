@@ -574,6 +574,7 @@ def test_mha_backward_varlen(
             causal=CAUSAL,
             return_lse=True,
             return_attn_probs=True,
+            fused_backward=False,
         )
 
     assert len(triton_out) == 3
@@ -649,3 +650,9 @@ def test_mha_backward_varlen(
     torch.testing.assert_close(
         triton_dq, torch_dq.to(triton_out.dtype), atol=1e-2, rtol=1e-2
     )
+
+
+if __name__ == "__main__":
+    # Run the tests
+    test_mha_backward_varlen(4, 1024, 1024, 32, 8, 128, 0.0, True, False, torch.float16)
+    print("backward passes")

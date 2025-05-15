@@ -206,7 +206,7 @@ public:
         constexpr auto k_lds_block_desc_0 = ck_tile::make_naive_tensor_descriptor(
             ck_tile::make_tuple(ck_tile::number<kKPerBlock / kKPack>{}, ck_tile::number<kNPerBlock>{}, ck_tile::number<kKPack>{}),
             ck_tile::make_tuple(ck_tile::number<(kNPerBlock + 1) * kKPack>{}, ck_tile::number<kKPack>{}, ck_tile::number<1>{}),
-            ck_tile::number<8>{},
+            ck_tile::number<kKPack>{},
             ck_tile::number<1>{});
 
         constexpr auto k_lds_block_desc = ck_tile::transform_tensor_descriptor(
@@ -290,10 +290,7 @@ public:
         using WarpTile      = ck_tile::sequence<16, 16, 16>;
         using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, WarpTile>;
 
-        constexpr int32_t kNumWarps   = Traits::kNumWarps;
-        constexpr int32_t kNumThreads = kNumWarps * ck_tile::get_warp_size();
-
-        using GemmProblem = ck_tile::BlockGemmProblem<scalar_t, scalar_t, acc_t, kNumThreads, TileGemmShape>;
+        using GemmProblem = ck_tile::BlockGemmProblem<scalar_t, scalar_t, acc_t, Traits::kNumThreads, TileGemmShape>;
 
         constexpr int32_t kWarpGemmM = WarpTile::at(ck_tile::number<0>{});
         static_assert((kWarpGemmM == 4) || (kWarpGemmM == 16) || (kWarpGemmM == 32));
@@ -323,10 +320,7 @@ public:
         using BlockGemmPolicy =
             ck_tile::BlockGemmARegBSmemCRegV2CustomPolicy<scalar_t, scalar_t, acc_t, BlockWarps, decltype(warp_gemm)>;
 
-        if constexpr (kNumWarps > 1)
-            return ck_tile::BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
-        else
-            return ck_tile::BlockGemmARegBSmemCRegOneWarpV1<GemmProblem, BlockGemmPolicy>{};
+        return ck_tile::BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto GetKVBlockGemm()

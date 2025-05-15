@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 #pragma once
 #include <hip/hip_runtime.h>
 #include <iostream>
+#include <filesystem>
+#include <unistd.h>
+#include <limits.h>
 #include "ck_tile/core.hpp"
+
+namespace fs = std::filesystem;
 
 #if CK_TILE_USE_OCP_FP8
 constexpr auto FP8_MAX = 448.f;
@@ -37,6 +42,48 @@ struct p1
 {
     unsigned int _p0;
 };
+
+std::string get_gpu_arch_hip() {
+    int device_count;
+    hipError_t err = hipGetDeviceCount(&device_count);
+    if (err != hipSuccess || device_count == 0) {
+        return "No GPU Found";
+    }
+
+    hipDeviceProp_t prop;
+    hipGetDeviceProperties(&prop, 0);
+
+    std::string arch_full = prop.gcnArchName;
+    size_t colon_pos = arch_full.find(':');
+    if (colon_pos != std::string::npos) {
+        return arch_full.substr(0, colon_pos);
+    } else {
+        return arch_full;
+    }
+}
+
+fs::path get_executable_path() {
+    char buf[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (len != -1) {
+        buf[len] = '\0';
+        return fs::path(buf);
+    }
+    return fs::path();
+}
+
+std::string get_aiter_asm_dir() {
+    std::string arch = get_gpu_arch_hip();
+    fs::path aiter_core_dir = get_executable_path().parent_path().parent_path().parent_path();
+    fs::path aiter_asm_dir = aiter_core_dir / "hsa" / arch / "";
+
+    if (!fs::exists(aiter_asm_dir)) {
+        return fs::path();
+    }
+
+    return aiter_asm_dir;
+}
+
 struct AiterAsmKernelArgs
 {
     void *args_ptr;
@@ -59,9 +106,14 @@ private:
 public:
     AiterAsmKernel(const char *name, const char *hsaco)
     {
-        const char *AITER_ASM_DIR = std::getenv("AITER_ASM_DIR");
-        std::cout << "[aiter] hipModuleLoad: " << (std::string(AITER_ASM_DIR) + hsaco).c_str() << " GetFunction: " << name;
-        HIP_CALL(hipModuleLoad(&module, (std::string(AITER_ASM_DIR) + hsaco).c_str()));
+        std::string AITER_ASM_DIR;
+        if (const char* env_val = std::getenv("AITER_ASM_DIR")) {
+            AITER_ASM_DIR = env_val;
+        } else {
+            AITER_ASM_DIR = get_aiter_asm_dir();
+        }
+        std::cout << "[aiter] hipModuleLoad: " << (AITER_ASM_DIR + hsaco).c_str() << " GetFunction: " << name;
+        HIP_CALL(hipModuleLoad(&module, (AITER_ASM_DIR + hsaco).c_str()));
         HIP_CALL(hipModuleGetFunction(&kernel_func, module, name));
         std::cout << " Success" << std::endl;
     };

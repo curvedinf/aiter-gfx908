@@ -47,11 +47,14 @@ std::string get_gpu_arch_hip() {
     int device_count;
     hipError_t err = hipGetDeviceCount(&device_count);
     if (err != hipSuccess || device_count == 0) {
-        return "No GPU Found";
+        std::cerr <<  "No GPU Found" << std::endl;
     }
 
     hipDeviceProp_t prop;
-    hipGetDeviceProperties(&prop, 0);
+    err = hipGetDeviceProperties(&prop, 0);
+    if (err != hipSuccess) {
+        std::cerr << "Failed to get GPU device properties: " << hipGetErrorString(err) << std::endl;
+    }
 
     std::string arch_full = prop.gcnArchName;
     size_t colon_pos = arch_full.find(':');

@@ -93,7 +93,7 @@ Observations from trace
     - There are a lot of `valu` and `salu` instructions. 
   - Go back to `num_stages=2` and increase tile size
 
-## Larger tile init runtime (2800 GB/s)  LDS: 163840
+## Larger tile init runtime (4.0 TB/s)  LDS: 163840
 
 Configs
 ```
@@ -118,6 +118,7 @@ IR
 - IR: `/app/aiter/study_aggregate_load/AL/BM32-BN128-BK512_nS2-nW4/orig`
 - att: `/app/aiter/study_aggregate_load/AL/BM32-BN128-BK512_nS2-nW4/att_orig`
 
-### hack2
+### hack2 (4.36 TB/s)
 
-Move 
+Move `buffer_load` close to `async_wait`
+

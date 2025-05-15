@@ -105,6 +105,9 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 4 : i32, ttg.targ
     %58 = arith.addi %57, %54 : tensor<128x512xi32, #blocked1> loc(#loc38)
     %59 = amdgpu.buffer_load %arg4[%58] : tensor<128x512xi8, #blocked1> loc(#loc37)
     %60 = ttg.local_alloc %59 : (tensor<128x512xi8, #blocked1>) -> !ttg.memdesc<128x512xi8, #shared, #smem, mutable> loc(#loc37)
+
+    rocdl.sched.barrier 0
+
     %61 = ttg.local_alloc : () -> !ttg.memdesc<2x32x256xi8, #shared1, #smem, mutable> loc(#loc39)
     %62 = ttg.local_alloc : () -> !ttg.memdesc<2x256x128xi8, #shared, #smem, mutable> loc(#loc40)
     %63 = ttg.memdesc_subview %61[%c0_i32, %c0_i32, %c0_i32] : !ttg.memdesc<2x32x256xi8, #shared1, #smem, mutable> -> !ttg.memdesc<32x256xi8, #shared1, #smem, mutable> loc(#loc39)

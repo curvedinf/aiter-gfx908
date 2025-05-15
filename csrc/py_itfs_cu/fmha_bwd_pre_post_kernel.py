@@ -2517,7 +2517,9 @@ def get_fmha_bwd_dq_dk_dv_tile_ppl_dict_from_dtype(dtype: str) -> Optional[dict]
 class FmhaBwdApiPool:
     @property
     def api(self) -> str:
-        return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_API.format(F_AITER_ROOT_DIR=AITER_ROOT_DIR)
+        return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_API.format(
+            F_AITER_ROOT_DIR=AITER_ROOT_DIR
+        )
 
 
 def get_bwd_dq_dk_dv_blobs() -> FmhaBwdApiPool:

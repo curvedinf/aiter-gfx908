@@ -76,9 +76,13 @@ private:
 public:
     FMoeKernel(const char *name, const char *hsaco, uint32_t sub_GU = 512)
     {
-        const char *AITER_ASM_DIR = std::getenv("AITER_ASM_DIR");
-        std::cout << "[aiter] hipModuleLoad: " << (std::string(AITER_ASM_DIR) + hsaco).c_str() << " GetFunction: " << name;
-        HIP_CALL(hipModuleLoad(&module, (std::string(AITER_ASM_DIR) + hsaco).c_str()));
+        std::string AITER_ASM_DIR;
+        if (const char* env_val = std::getenv("AITER_ASM_DIR")) {
+            AITER_ASM_DIR = env_val;
+        } else {
+            AITER_ASM_DIR = get_aiter_asm_dir();
+        }        std::cout << "[aiter] hipModuleLoad: " << (AITER_ASM_DIR + hsaco).c_str() << " GetFunction: " << name;
+        HIP_CALL(hipModuleLoad(&module, (AITER_ASM_DIR + hsaco).c_str()));
         HIP_CALL(hipModuleGetFunction(&kernel_func, module, name));
         std::cout << " Success" << std::endl;
         this->sub_GU = sub_GU;

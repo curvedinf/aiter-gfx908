@@ -611,8 +611,13 @@ class fmha_bwd_v3_kernel
     {
         int length = strlen(name);
         std::string kernel_func_name = "_ZN5aiter" + std::to_string(length) + name + "E";
-        const char *AITER_ASM_DIR = std::getenv("AITER_ASM_DIR");
-        HIP_CALL(hipModuleLoad(&module, (std::string(AITER_ASM_DIR) + "fmha_v3_bwd/" + hsaco).c_str()));
+        std::string AITER_ASM_DIR;
+        if (const char* env_val = std::getenv("AITER_ASM_DIR")) {
+            AITER_ASM_DIR = env_val;
+        } else {
+            AITER_ASM_DIR = get_aiter_asm_dir();
+        }
+        HIP_CALL(hipModuleLoad(&module, (AITER_ASM_DIR + "fmha_v3_bwd/" + hsaco).c_str()));
         HIP_CALL(hipModuleGetFunction(&kernel_func, module, kernel_func_name.c_str()));
     }
 

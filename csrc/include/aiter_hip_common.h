@@ -65,25 +65,15 @@ std::string get_gpu_arch_hip() {
     }
 }
 
-fs::path get_executable_path() {
-    char buf[PATH_MAX];
-    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (len != -1) {
-        buf[len] = '\0';
-        return fs::path(buf);
-    }
-    return fs::path();
-}
-
 std::string get_aiter_asm_dir() {
     std::string arch = get_gpu_arch_hip();
-    fs::path aiter_core_dir = get_executable_path().parent_path().parent_path().parent_path();
+    fs::path aiter_core_dir = std::filesystem::absolute(__FILE__).parent_path().parent_path().parent_path().parent_path();
     fs::path aiter_asm_dir = aiter_core_dir / "hsa" / arch / "";
 
     if (!fs::exists(aiter_asm_dir)) {
+        std::cerr << "cannot find aiter asm dir: " << aiter_asm_dir << std::endl;
         return fs::path();
     }
-
     return aiter_asm_dir;
 }
 

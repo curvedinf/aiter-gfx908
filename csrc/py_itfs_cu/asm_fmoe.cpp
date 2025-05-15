@@ -81,7 +81,8 @@ public:
             AITER_ASM_DIR = env_val;
         } else {
             AITER_ASM_DIR = get_aiter_asm_dir();
-        }        std::cout << "[aiter] hipModuleLoad: " << (AITER_ASM_DIR + hsaco).c_str() << " GetFunction: " << name;
+        }
+        std::cout << "[aiter] hipModuleLoad: " << (AITER_ASM_DIR + hsaco).c_str() << " GetFunction: " << name;
         HIP_CALL(hipModuleLoad(&module, (AITER_ASM_DIR + hsaco).c_str()));
         HIP_CALL(hipModuleGetFunction(&kernel_func, module, name));
         std::cout << " Success" << std::endl;

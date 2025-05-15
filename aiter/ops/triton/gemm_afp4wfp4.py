@@ -160,7 +160,7 @@ def gemm_afp4wfp4(
     BLOCK_SIZE_M = 256
     BLOCK_SIZE_N = 256
     BLOCK_SIZE_K = 256
-    GROUP_SIZE_M = 4
+    GROUP_SIZE_M = 32
     waves_per_eu = 1
     kpack = 1
     num_warps = 8

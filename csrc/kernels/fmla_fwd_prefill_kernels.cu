@@ -81,8 +81,8 @@ struct FlashMlaPrefillKernelTrait
 
     // For QS+QR mixed implementation, VGPR always store 256 elements in row/along K0.
     // So the rest are stored in SMEM.
-    static constexpr int32_t kK0InReg  = kSizeD;
-    static constexpr int32_t kK0InSmem = kSizeD - kK0InReg;
+    static constexpr int32_t kK0InSmem = kBlockK0 * 0;
+    static constexpr int32_t kK0InReg  = kSizeD - kK0InSmem;
     static constexpr int32_t kNumPrefetchK  = 1;
     static constexpr int32_t kNumPrefetchV  = 1;
     static constexpr int32_t kNumPrefetchKV = ck_tile::max(kNumPrefetchK, kNumPrefetchV);
@@ -197,6 +197,29 @@ public:
                                     acc_t>();
     }
 
+    CK_TILE_HOST_DEVICE static constexpr auto MakeQLdsBlockDescriptor()
+    {
+        constexpr int32_t kMPerBlock = Traits::kBlockM;
+        // #elements store in SMEM along K0 for query.
+        constexpr int32_t kKPerBlock = ck_tile::max(Traits::kK0InSmem, Traits::kBlockK0);
+        constexpr int32_t kKPack     = 16 / sizeof(scalar_t);
+
+        constexpr auto q_lds_block_desc_0 = ck_tile::make_naive_tensor_descriptor(
+            ck_tile::make_tuple(ck_tile::number<kKPerBlock / kKPack>{}, ck_tile::number<kMPerBlock>{}, ck_tile::number<kKPack>{}),
+            ck_tile::make_tuple(ck_tile::number<(kMPerBlock + 1) * kKPack>{}, ck_tile::number<kKPack>{}, ck_tile::number<1>{}),
+            ck_tile::number<kKPack>{},
+            ck_tile::number<1>{});
+
+        constexpr auto q_lds_block_desc = ck_tile::transform_tensor_descriptor(
+            q_lds_block_desc_0,
+            ck_tile::make_tuple(ck_tile::make_pass_through_transform(kMPerBlock),
+                                ck_tile::make_merge_transform(ck_tile::make_tuple(kKPerBlock / kKPack, kKPack))),
+            ck_tile::make_tuple(ck_tile::sequence<1>{}, ck_tile::sequence<0, 2>{}),
+            ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
+
+        return q_lds_block_desc;
+    }
+
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsBlockDescriptor()
     {
         constexpr int32_t kNPerBlock = Traits::kBlockN0;
@@ -258,6 +281,20 @@ public:
         return v_lds_block_desc;
     }
 
+    CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSizeQ()
+    {
+        int32_t q_smem_size = 0;
+        if constexpr (Traits::kK0InSmem > 0)
+        {
+            constexpr int32_t lds_alignment = 16; // optional
+            q_smem_size = ck_tile::integer_divide_ceil(
+                sizeof(scalar_t) * MakeQLdsBlockDescriptor().get_element_space_size(),
+                lds_alignment) *
+                lds_alignment;
+        }
+        return q_smem_size;
+    }
+
     CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSizeSingleKV()
     {
         constexpr int32_t SingleKSize = MakeKLdsBlockDescriptor().get_element_space_size();
@@ -280,7 +317,7 @@ public:
 
     CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSize()
     {
-        return Traits::kNumPrefetchKV * GetSmemSizeSingleKV();
+        return GetSmemSizeQ() + Traits::kNumPrefetchKV * GetSmemSizeSingleKV();
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto GetQRegKBlockGemm()
@@ -893,10 +930,12 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
 
     // 1. Allocate LDS
     //
+    auto q_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+        reinterpret_cast<scalar_t*>(p_smem), Policy::MakeQLdsBlockDescriptor());
     auto k_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-        reinterpret_cast<scalar_t*>(p_smem), Policy::MakeKLdsBlockDescriptor());
+        reinterpret_cast<scalar_t*>(p_smem + Policy::GetSmemSizeQ()), Policy::MakeKLdsBlockDescriptor());
     auto v_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-        reinterpret_cast<scalar_t*>(p_smem), Policy::MakeVLdsBlockDescriptor());
+        reinterpret_cast<scalar_t*>(p_smem + Policy::GetSmemSizeQ()), Policy::MakeVLdsBlockDescriptor());
 
     auto k_lds_window = ck_tile::make_tile_window(
         k_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kBlockK0>{}), {0, 0});
@@ -908,16 +947,15 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     //
 
     // Loop counts
-    constexpr int32_t k0_loops = Traits::kK0InReg / Traits::kBlockK0;      // #loop for Q in reg
+    constexpr int32_t k0_loops = Traits::kSizeD / Traits::kBlockK0;      // #loop for Q in reg
     constexpr int32_t k1_loops = Traits::kBlockN0 / Traits::kBlockK1;
     constexpr int32_t n1_loops = Traits::kSizeDV / Traits::kBlockN1;
     static_assert(k0_loops >= 2);
-    static_assert(k1_loops  >= 1);
-    static_assert(n1_loops  >= 1);
-    static_assert((Traits::kK0InReg % Traits::kBlockK0) == 0);
-    static_assert((Traits::kK0InSmem % Traits::kBlockK0) == 0);
+    static_assert(k1_loops >= 1);
+    static_assert(n1_loops >= 1);
+    static_assert((Traits::kSizeD   % Traits::kBlockK0) == 0);
     static_assert((Traits::kBlockN0 % Traits::kBlockK1) == 0);
-    static_assert((Traits::kSizeDV % Traits::kBlockN1) == 0);
+    static_assert((Traits::kSizeDV  % Traits::kBlockN1) == 0);
 
     // Block GEMMs
     constexpr auto gemm_0 = Policy::GetQRegKBlockGemm();
@@ -981,7 +1019,15 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                                   q_dram_reg_window_.get_window_lengths(),
                                   q_dram_reg_window_.get_window_origin(),
                                   Policy::MakeQRegTileDistribution());
-    decltype(ck_tile::load_tile(q_dram_reg_window)) q_regs[k0_loops];
+    constexpr int32_t kQInReg = Traits::kK0InReg / Traits::kBlockK0;
+    using QTile = decltype(ck_tile::load_tile(q_dram_reg_window));
+    QTile q_regs[kQInReg];
+
+    static_assert((Traits::kK0InReg % Traits::kBlockK0) == 0);
+    static_assert((Traits::kK0InSmem % Traits::kBlockK0) == 0);
+    static_assert(kQInReg >= 2);
+    static_assert(Traits::kK0InSmem != Traits::kBlockK0, "There is no vgpr saved in this case!");
+
     q_regs[0] = ck_tile::load_tile(q_dram_reg_window);
     ck_tile::move_tile_window(q_dram_reg_window, {0, Traits::kBlockK0});
     q_regs[1] = ck_tile::load_tile(q_dram_reg_window);
@@ -1027,6 +1073,30 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
         // I. QK GEMM
         //
 
+        auto q_lds_store_window = ck_tile::make_tile_window(
+            q_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlockK0>{}), {0, 0},
+            Policy::MakeQRegTileDistribution());
+        auto q_lds_load_window = ck_tile::make_tile_window(
+            q_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlockK0>{}), {0, 0},
+            Policy::MakeQRegTileDistribution());
+
+        auto conduct_gemm_0 = [&]<int32_t idx>()
+        {
+            if constexpr (idx < kQInReg)
+            {
+                gemm_0(s_acc, q_regs[idx], k_lds_window);
+            }
+            else
+            {
+                auto q_reg_lds = ck_tile::load_tile(q_lds_load_window);
+                if constexpr (idx < (k0_loops - 1))
+                {
+                    ck_tile::move_tile_window(q_lds_load_window, {0, ck_tile::number<Traits::kBlockK0>{}});
+                }
+                gemm_0(s_acc, q_reg_lds, k_lds_window);
+            }
+        };
+
         ck_tile::clear_tile(s_acc);
 
         // Load 1st K tile from DRAM to SMEM and start loading the 2nd
@@ -1046,17 +1116,29 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                 [&](auto k0_id)
                 {
                     ck_tile::block_sync_lds();
-                    gemm_0(s_acc,
-                           q_regs[k0_id],
-                           k_lds_window);
+                    conduct_gemm_0.template operator()<k0_id>();
                     ck_tile::block_sync_lds();
                     ck_tile::move_tile_window(k_dram_window, {0, Traits::kBlockK0});
                     ck_tile::store_tile(k_lds_window, k_block_tile);
                     k_block_tile = ck_tile::load_tile(k_dram_window);
                     if constexpr (IsFirstLoop)
                     {
-                        q_regs[k0_id + 2] = ck_tile::load_tile(q_dram_reg_window);
-                        if constexpr (k0_id < k0_loops - 3)
+                        constexpr int32_t load_idx = k0_id + 2;
+
+                        if constexpr (load_idx < kQInReg)
+                        {
+                            q_regs[load_idx] = ck_tile::load_tile(q_dram_reg_window);
+                        }
+                        else
+                        {
+                            ck_tile::store_tile(q_lds_store_window, ck_tile::load_tile(q_dram_reg_window));
+                            if constexpr (load_idx < k0_loops - 1)
+                            {
+                                ck_tile::move_tile_window(q_lds_store_window, {0, ck_tile::number<Traits::kBlockK0>{}});
+                            }
+                        }
+
+                        if constexpr (load_idx < k0_loops - 1)
                         {
                             ck_tile::move_tile_window(q_dram_reg_window, {0, Traits::kBlockK0});
                         }
@@ -1066,17 +1148,13 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
 
         // Tailing 2 tiles of QK GEMM_0
         ck_tile::block_sync_lds();
-        gemm_0(s_acc,
-               q_regs[k0_loops - 2],
-               k_lds_window);
+        conduct_gemm_0.template operator()<k0_loops - 2>();
 
         ck_tile::block_sync_lds();
         ck_tile::store_tile(k_lds_window, k_block_tile);
 
         ck_tile::block_sync_lds();
-        gemm_0(s_acc,
-               q_regs[k0_loops - 1],
-               k_lds_window);
+        conduct_gemm_0.template operator()<k0_loops - 1>();
 
         ck_tile::tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
 

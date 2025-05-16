@@ -407,7 +407,7 @@ def fused_moe_mxfp4(
         # and we can skip some invalid blocks.
         EM = min(sorted_token_ids.shape[0], A.shape[0] * top_k * config["BLOCK_SIZE_M"])
 
-    grid = lambda META: ( # noqa: E731
+    grid = lambda META: (  # noqa: E731
         triton.cdiv(EM, META["BLOCK_SIZE_M"])
         * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]),
     )

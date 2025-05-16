@@ -3,6 +3,7 @@ from typing import Optional
 import torch
 import triton
 import triton.language as tl
+import os
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 
 
@@ -146,16 +147,17 @@ def gemm_afp4wfp4(x,
     M, K = x.shape
     K, N = w.shape
 
+    env = os.environ
     BLOCK_SIZE_M = 16
-    BLOCK_SIZE_N = 64
+    BLOCK_SIZE_N = int(env["BLOCK_SIZE_N"]) if "BLOCK_SIZE_N" in env else 64
     BLOCK_SIZE_K = 256
     GROUP_SIZE_M = 1
     waves_per_eu = 6
     kpack = 1
-    num_warps = 4
+    num_warps = int(env["NUM_WARPS"]) if "NUM_WARPS" in env else 4
     num_stages = 2
     matrix_instr_nonkdim = 16
-    aggregated_loads = -1
+    aggregated_loads = int(env["AGGREGATED_LOADS"]) if "AGGREGATED_LOADS" in env else -1
 
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), )
     _gemm_afp4_wfp4_kernel[grid](

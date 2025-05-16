@@ -16,8 +16,14 @@ def generate_gemm_afp4wfp4_inputs(M, N, K):
     # Scale of 1.0 in e8m0, bias 127.
     x_scales = torch.randint(124, 128, (K//SCALE_GROUP_SIZE, M), dtype=torch.uint8, device='cuda')
     w_scales = torch.randint(124, 128, (K//SCALE_GROUP_SIZE, N), dtype=torch.uint8, device='cuda')
-    x_scales = x_scales.T
-    w_scales = w_scales.T
+    import os
+
+    if "SCALES_K_FAST" in os.environ:
+        x_scales = x_scales.T.contiguous()
+        w_scales = w_scales.T.contiguous()
+    else:
+        x_scales = x_scales.T
+        w_scales = w_scales.T
 
     return x, w, x_scales, w_scales
 

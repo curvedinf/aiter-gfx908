@@ -54,7 +54,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     const AttentionVariant* variant)
 {
     const int seq_idx = blockIdx.x;
-    const int64_t query_loc = cu_query_lens[seq_idx];
+    const int query_loc = cu_query_lens[seq_idx];
     const int query_len = cu_query_lens[seq_idx + 1] - query_loc;
     if(query_len > 1) {
         return;
@@ -94,7 +94,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
     const int num_heads = gridDim.x;
     const int head_idx  = blockIdx.x;
     const int seq_idx   = blockIdx.y;
-    const int64_t query_loc = cu_query_lens[seq_idx];
+    const int query_loc = cu_query_lens[seq_idx];
     const int query_len = cu_query_lens[seq_idx + 1] - query_loc;
     if(query_len > 1) {
         return;

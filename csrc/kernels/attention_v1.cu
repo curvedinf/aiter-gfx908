@@ -23,8 +23,8 @@ template <typename scalar_t,
           int HEAD_SIZE,
           int NUM_THREADS,
           bool ALIBI_ENABLED,
-          bool LOGITS_SOFT_CAP_ENABLED,
-          int GQA_RATIO>
+          int GQA_RATIO,
+          typename AttentionVariant>
 __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
     const scalar_t* __restrict__ q,      // [num_seqs, num_heads, head_size]
     const cache_t* __restrict__ k_cache, // [num_blocks, num_kv_heads,
@@ -48,8 +48,10 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                                     // head_size]
     OUTT* __restrict__ final_out,   // [num_seqs, num_heads, head_size]
     float logits_soft_cap,
+    float logits_soft_cap_rcp,
     const float* k_scale_ptr,
-    const float* v_scale_ptr)
+    const float* v_scale_ptr,
+    const AttentionVariant* variant)
 {
     const int seq_idx = blockIdx.x;
     const int64_t query_loc = cu_query_lens[seq_idx];
@@ -66,7 +68,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
         return;
     }
     const int* block_table_seq = block_tables + seq_idx * max_num_blocks_per_seq;
-    _paged_attention_kernel<scalar_t, cache_t, KV_DTYPE, OUTT, BLOCK_SIZE, HEAD_SIZE, NUM_THREADS, ALIBI_ENABLED, LOGITS_SOFT_CAP_ENABLED, GQA_RATIO>(block_table_seq, static_cast<int64_t>(query_loc), context_len, partition_start_token_idx, q, k_cache, v_cache, scale, alibi_slopes, q_stride, kv_block_stride, kv_head_stride, kv_seq_stride, exp_sums, max_logits, out, final_out, logits_soft_cap, k_scale_ptr, v_scale_ptr);    
+    _paged_attention_kernel<scalar_t, cache_t, KV_DTYPE, OUTT, BLOCK_SIZE, HEAD_SIZE, NUM_THREADS, ALIBI_ENABLED, GQA_RATIO, AttentionVariant>(block_table_seq, static_cast<int64_t>(query_loc), context_len, partition_start_token_idx, q, k_cache, v_cache, scale, alibi_slopes, q_stride, kv_block_stride, kv_head_stride, kv_seq_stride, exp_sums, max_logits, out, final_out, logits_soft_cap, logits_soft_cap_rcp, k_scale_ptr, v_scale_ptr, variant);    
 }
 
 // Grid: (num_heads, num_seqs).
@@ -112,8 +114,8 @@ template <typename scalar_t,
           int HEAD_SIZE,
           int NUM_THREADS,
           bool ALIBI_ENABLED,
-          bool LOGITS_SOFT_CAP_ENABLED,
-          int GQA_RATIO>
+          int GQA_RATIO,
+          typename AttentionVariant>
 __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
     const scalar_t* __restrict__ q,      // [num_seqs, num_heads, head_size]
     const cache_t* __restrict__ k_cache, // [num_blocks, num_kv_heads,
@@ -137,8 +139,10 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                                     // head_size]
     OUTT* __restrict__ final_out,   // [num_seqs, num_heads, head_size]
     float logits_soft_cap,
+    float logits_soft_cap_rcp,
     const float* k_scale_ptr,
-    const float* v_scale_ptr)
+    const float* v_scale_ptr,
+    const AttentionVariant* variant)
 {
     UNREACHABLE_CODE
 }
@@ -178,8 +182,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
                                             HEAD_SIZE,               \
                                             NTHR,                    \
                                             ALIBI_ENABLED,           \
-                                            LOGITS_SOFT_CAP_ENABLED, \
-                                            GQA_RATIO>               \
+                                            GQA_RATIO,               \
+                                            AttentionVariant>        \
         <<<grid, block, 0, stream>>>(query_ptr,                      \
                                      key_cache_ptr,                  \
                                      value_cache_ptr,                \
@@ -198,8 +202,10 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
                                      tmp_out_ptr,                    \
                                      out_ptr,                        \
                                      logits_soft_cap,                \
+                                     logits_soft_cap_rcp,            \
                                      k_scale_ptr,                    \
-                                     v_scale_ptr);
+                                     v_scale_ptr,                    \
+                                     variant);
 
 
 #define LAUNCH_CUSTOM_REDUCTION(NPAR_LOOPS)                                                        \
@@ -266,7 +272,8 @@ void paged_attention_custom_launcher(torch::Tensor& out,
     const float* fp8_out_scale_ptr =
         fp8_out_scale ? reinterpret_cast<const float*>(fp8_out_scale.value().data_ptr()) : nullptr;
     OUTT* out_ptr = reinterpret_cast<OUTT*>(out.data_ptr());
-
+    
+    const float logits_soft_cap_rcp = (LOGITS_SOFT_CAP_ENABLED ? 1.f / logits_soft_cap : 0.f);
     // partition size is fixed at 256 since both mfma4 and mfma16 kernels support it
     // mfma4 kernel also supports partition size 512
     constexpr int PARTITION_SIZE = 256;
@@ -281,6 +288,8 @@ void paged_attention_custom_launcher(torch::Tensor& out,
     float* max_logits_ptr = exp_sums_ptr + (num_seqs * num_heads * max_num_partitions);
     T* tmp_out_ptr =
         reinterpret_cast<T*>(max_logits_ptr + (num_seqs * num_heads * max_num_partitions));
+
+    ck_tile::ComposedAttention<LOGITS_SOFT_CAP_ENABLED * ck_tile::LOGITS_SOFT_CAP> variant;
 
     constexpr int NTHR = 256;
 
@@ -331,9 +340,9 @@ void paged_attention_custom_launcher(torch::Tensor& out,
 }
 
 
-#define CALL_CUSTOM_LAUNCHER(                                                                \
+#define CALL_CUSTOM_LAUNCHER(                                                                   \
     T, KVT, KV_DTYPE, BLK_SIZE, HEAD_SIZE, OUTT, PSIZE, ALIBI_ENABLED, LOGITS_SOFT_CAP_ENABLED) \
-        paged_attention_custom_launcher<T,                                                \
+        paged_attention_custom_launcher<T,                                                      \
                                     KVT,                                                        \
                                     KV_DTYPE,                                                   \
                                     BLK_SIZE,                                                   \

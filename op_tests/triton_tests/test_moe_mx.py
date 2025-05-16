@@ -2,7 +2,13 @@ import pytest
 import torch
 import triton
 
-from triton_kernels.numerics_details.mxfp import downcast_to_mxfp, upcast_from_mxfp
+try:
+    from triton_kernels.numerics_details.mxfp import downcast_to_mxfp, upcast_from_mxfp
+
+    _SKIP = False
+except ImportError:
+    _SKIP = True
+
 from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
 from op_tests.op_benchmarks.triton.utils.common import (
     str_to_torch_dtype,
@@ -66,7 +72,11 @@ def test_fused_moe(
     routed_weight: bool,
     swizzle_mx_scale: bool,
 ):
-    if triton.runtime.driver.active.get_current_target().arch not in ("gfx950"):
+    global _SKIP
+    if (
+        triton.runtime.driver.active.get_current_target().arch not in ("gfx950")
+        or _SKIP
+    ):
         pytest.skip("MXFP4 not supported on this architecture")
 
     is_a_mixed_input = a_dtype_str.startswith("mx")

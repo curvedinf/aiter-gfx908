@@ -246,7 +246,7 @@ void paged_attention_custom_launcher(torch::Tensor& out,
                                      const c10::optional<torch::Tensor>& fp8_out_scale)
 {
     const int num_kv_heads = kv_cache_layout=="HND" ? key_cache.size(1) : key_cache.size(2);
-    int num_seqs        = query.size(0);
+    int num_seqs        = context_lens.size(0);
     int num_heads       = query.size(1);
     int head_size       = query.size(2);
     int q_stride        = query.stride(0);
@@ -263,7 +263,7 @@ void paged_attention_custom_launcher(torch::Tensor& out,
     KVT* value_cache_ptr       = reinterpret_cast<KVT*>(value_cache.data_ptr());
     int* context_lens_ptr      = context_lens.data_ptr<int>();
     int* block_tables_ptr      = block_tables.data_ptr<int>();
-    int* cu_query_lens_ptr      = cu_query_lens.data_ptr<int>();
+    int* cu_query_lens_ptr     = cu_query_lens.data_ptr<int>();
 
     const float* k_scale_ptr = reinterpret_cast<const float*>(k_scale.data_ptr());
     const float* v_scale_ptr = reinterpret_cast<const float*>(v_scale.data_ptr());

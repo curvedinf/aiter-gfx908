@@ -1242,6 +1242,11 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     const float* v_scale_ptr)
 {
     const int seq_idx = blockIdx.x;
+    const int64_t query_loc = cu_query_lens[seq_idx];
+    const int query_len = cu_query_lens[seq_idx + 1] - query_loc;
+    if(query_len > 1) {
+        return;
+    }
     const int partition_idx = blockIdx.y;
     constexpr int T_PAR_SIZE = 256;
     const int context_len = context_lens[seq_idx];
@@ -1250,9 +1255,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     if (partition_start_token_idx >= context_len) {
         return;
     }
-    const int64_t query_loc = static_cast<int64_t>(cu_query_lens[seq_idx]);
     const int* block_table_seq = block_tables + seq_idx * max_num_blocks_per_seq;
-    _paged_attention_kernel<scalar_t, cache_t, KV_DTYPE, OUTT, BLOCK_SIZE, HEAD_SIZE, NUM_THREADS, ALIBI_ENABLED, LOGITS_SOFT_CAP_ENABLED, GQA_RATIO>(block_table_seq, query_loc, context_len, partition_start_token_idx, q, k_cache, v_cache, scale, alibi_slopes, q_stride, kv_block_stride, kv_head_stride, kv_seq_stride, exp_sums, max_logits, out, final_out, logits_soft_cap, k_scale_ptr, v_scale_ptr);    
+    _paged_attention_kernel<scalar_t, cache_t, KV_DTYPE, OUTT, BLOCK_SIZE, HEAD_SIZE, NUM_THREADS, ALIBI_ENABLED, LOGITS_SOFT_CAP_ENABLED, GQA_RATIO>(block_table_seq, static_cast<int64_t>(query_loc), context_len, partition_start_token_idx, q, k_cache, v_cache, scale, alibi_slopes, q_stride, kv_block_stride, kv_head_stride, kv_seq_stride, exp_sums, max_logits, out, final_out, logits_soft_cap, k_scale_ptr, v_scale_ptr);    
 }
 
 // Grid: (num_heads, num_seqs).
@@ -1278,9 +1282,14 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
     const int num_heads = gridDim.x;
     const int head_idx  = blockIdx.x;
     const int seq_idx   = blockIdx.y;
-    const int64_t query_loc = static_cast<int64_t>(cu_query_lens[seq_idx]);
+    const int64_t query_loc = cu_query_lens[seq_idx];
+    const int query_len = cu_query_lens[seq_idx + 1] - query_loc;
+    if(query_len > 1) {
+        return;
+    }
+
     const int context_len = context_lens[seq_idx];
-    _paged_attention_ll4mi_reduce_kernel<scalar_t, OUTT, HEAD_SIZE, NUM_THREADS, PARTITION_SIZE, NPAR_LOOPS>(query_loc, context_len, out, exp_sums, max_logits, tmp_out, max_num_partitions, fp8_out_scale_ptr);
+    _paged_attention_ll4mi_reduce_kernel<scalar_t, OUTT, HEAD_SIZE, NUM_THREADS, PARTITION_SIZE, NPAR_LOOPS>(static_cast<int64_t>(query_loc), context_len, out, exp_sums, max_logits, tmp_out, max_num_partitions, fp8_out_scale_ptr);
 }
 
 #else // !defined(__HIP__MI300_MI250__) TODO: Add NAVI support

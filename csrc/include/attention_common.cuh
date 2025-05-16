@@ -8,6 +8,8 @@
 #include "dtype_fp8.cuh"
 #include "quant_utils.cuh"
 
+#include <ck_tile/ops/fmha/block/block_masking.hpp>
+#include <ck_tile/ops/fmha/block/variants.hpp>
 
 #if defined(__HIPCC__) && (defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__))
 #define __HIP__MI300_MI250__
@@ -381,8 +383,8 @@ template <typename scalar_t,
           int HEAD_SIZE,
           int NUM_THREADS,
           bool ALIBI_ENABLED,
-          bool LOGITS_SOFT_CAP_ENABLED,
-          int GQA_RATIO>
+          int GQA_RATIO,
+          typename AttentionVariant>
 __device__ void _paged_attention_kernel(
     const int* block_table_seq,
     const int64_t query_loc,
@@ -404,8 +406,10 @@ __device__ void _paged_attention_kernel(
                                     // head_size]
     OUTT* __restrict__ final_out,   // [num_seqs, num_heads, head_size]
     float logits_soft_cap,
+    float logits_soft_cap_rcp,
     const float* k_scale_ptr,
-    const float* v_scale_ptr)
+    const float* v_scale_ptr,
+    const AttentionVariant* variant)
 {
     const int seq_idx       = blockIdx.x;
     const int partition_idx = blockIdx.y;
@@ -452,6 +456,22 @@ __device__ void _paged_attention_kernel(
     const int wg_start_head_idx    = blockIdx.z * GQA_RATIO;
     const int wg_start_kv_head_idx = blockIdx.z;
     const int total_num_heads      = gridDim.z * GQA_RATIO;
+
+    /// NOTICE: We don't support mask for this kernel, so just use a placeholder type/object here.
+    using Mask = ck_tile::SimplifiedGenericAttentionMask</*IsMasking=*/false>;
+    const Mask mask{/*seqlen_q=*/1, /*seqlen_k=*/context_len};
+
+    const auto variant_params = [&] {
+        if constexpr(AttentionVariant::use_logits_soft_cap)
+        {
+            return ck_tile::LogitsSoftCapParams<Mask, AttentionVariant::use_exp2>{
+                mask, scale, logits_soft_cap, logits_soft_cap_rcp};
+        }
+        else
+        {
+            return ck_tile::StandardAttentionParams<Mask>{mask, scale};
+        }
+    }();
 
     // for QK mfma, tokens in multiples of TOKENS_PER_WARP are spread across warps
     // each mfma takes QH16xT16x16HE across warp
@@ -696,7 +716,10 @@ __device__ void _paged_attention_kernel(
                 }
             }
         }
-        dout[token_depth] *= scale2;
+        for(int i = 0; i < 4; i++)
+        {
+            dout[token_depth][i] = variant->QueryTransform(variant_params, dout[token_depth][i]);
+        }
     }
 
     const int qkout_token_idx = partition_start_token_idx + TOKENS_PER_WARP * warpid + rowid * 4;
@@ -715,19 +738,16 @@ __device__ void _paged_attention_kernel(
         }
     }
     // apply soft-capping to logits
-    if constexpr(LOGITS_SOFT_CAP_ENABLED)
+    for(int token_depth = 0; token_depth < TLOOP; token_depth++)
     {
-        const float logits_soft_cap_reciprocal = __frcp_rn(logits_soft_cap);
-        const auto apply_soft_cap              = [&](float value) {
-            return logits_soft_cap * tanhf(value * logits_soft_cap_reciprocal);
-        };
-
-        for(int token_depth = 0; token_depth < TLOOP; token_depth++)
+        for(int i = 0; i < 4; i++)
         {
-            for(int i = 0; i < 4; i++)
-            {
-                dout[token_depth][i] = apply_soft_cap(dout[token_depth][i]);
-            }
+            dout[token_depth][i] =
+                variant->LogitsTransform(variant_params,
+                                        dout[token_depth][i],
+                                        /*batch_idx=*/blockIdx.x,
+                                        /*qo_head_idx=*/wg_start_head_idx + lane16id,
+                                        /*kv_head_idx=*/blockIdx.z);
         }
     }
 

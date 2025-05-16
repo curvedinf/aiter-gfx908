@@ -173,8 +173,8 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
 #endif // defined(__HIP__MI300_MI250__) TODO: Add NAVI support
 
 
-#define LAUNCH_CUSTOM_ATTENTION_MFMA16(GQA_RATIO)                 \
-    paged_attention_ll4mi_QKV_mfma16_kernel<T,                    \
+#define LAUNCH_CUSTOM_ATTENTION_MFMA16(GQA_RATIO)                    \
+    paged_attention_ll4mi_QKV_mfma16_kernel<T,                       \
                                             KVT,                     \
                                             KV_DTYPE,                \
                                             OUTT,                    \
@@ -182,8 +182,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
                                             HEAD_SIZE,               \
                                             NTHR,                    \
                                             ALIBI_ENABLED,           \
-                                            GQA_RATIO,               \
-                                            AttentionVariant>        \
+                                            GQA_RATIO>               \
         <<<grid, block, 0, stream>>>(query_ptr,                      \
                                      key_cache_ptr,                  \
                                      value_cache_ptr,                \
@@ -205,7 +204,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
                                      logits_soft_cap_rcp,            \
                                      k_scale_ptr,                    \
                                      v_scale_ptr,                    \
-                                     variant);
+                                     &variant);
 
 
 #define LAUNCH_CUSTOM_REDUCTION(NPAR_LOOPS)                                                        \

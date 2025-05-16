@@ -152,7 +152,7 @@ def gemm_afp4wfp4(x,
     GROUP_SIZE_M = 1
     waves_per_eu = 2
     kpack = 1
-    num_warps = 4
+    num_warps = 8
     num_stages = 2
     matrix_instr_nonkdim = 16
     aggregated_loads = 1

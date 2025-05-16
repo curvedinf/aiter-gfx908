@@ -3,12 +3,10 @@ import sys
 
 import torch
 import triton
-import triton.language as tl
 from utils.benchmark_utils import get_available_models, get_model_configs
 
 from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
-from op_benchmarks.triton.utils.common import (str_to_torch_dtype,
-                                               torch_to_tl_dtype)
+from op_benchmarks.triton.utils.common import str_to_torch_dtype, torch_to_tl_dtype
 from op_benchmarks.triton.utils.moe import generate_moe_alignment
 from op_tests.triton_tests.test_moe_mx import alloc_rand
 from triton_bench.numerics_details.mxfp import downcast_to_mxfp
@@ -17,8 +15,7 @@ from triton_bench.numerics_details.mxfp import downcast_to_mxfp
 def model_benchmark_configs(args):
     config_file = args.model_configs
     configs = get_model_configs(
-        config_path=config_file,
-        models="mistral" if args.model is None else args.model
+        config_path=config_file, models="mistral" if args.model is None else args.model
     )
     moe_configs = []
     M = args.M if args.M else 128  # check size
@@ -47,17 +44,21 @@ def run_benchmark(args):
     swizzle_mx = args.swizzle_mx
 
     x_vals_list = model_benchmark_configs(args)
-    x_names = ['model', 'M', 'N', 'K', 'E', 'top_k']
+    x_names = ["model", "M", "N", "K", "E", "top_k"]
 
-    line_names = ['Time (ms)', 'TFLOPS', 'Bandwidth (GB/s)']
-    line_vals = ['time', 'tflops', 'bandwidth']
+    line_names = ["Time (ms)", "TFLOPS", "Bandwidth (GB/s)"]
+    line_vals = ["time", "tflops", "bandwidth"]
 
     benchmark = triton.testing.Benchmark(
-        x_names=x_names, x_vals=x_vals_list, line_arg='metric', line_vals=line_vals, line_names=line_names,
-        styles=[('red', '-'), ('blue', '-'), ('yellow', '-')],
-        ylabel='ms / TFLOPS / GB/s',
-        plot_name=f'MoE Benchmark {a_dtype_str} x {b_dtype_str}',
-        args={'a_dtype': a_dtype_str, "swizzle_mx": swizzle_mx},
+        x_names=x_names,
+        x_vals=x_vals_list,
+        line_arg="metric",
+        line_vals=line_vals,
+        line_names=line_names,
+        styles=[("red", "-"), ("blue", "-"), ("yellow", "-")],
+        ylabel="ms / TFLOPS / GB/s",
+        plot_name=f"MoE Benchmark {a_dtype_str} x {b_dtype_str}",
+        args={"a_dtype": a_dtype_str, "swizzle_mx": swizzle_mx},
     )
 
     @triton.testing.perf_report([benchmark])
@@ -68,9 +69,13 @@ def run_benchmark(args):
         b_dtype = str_to_torch_dtype[b_dtype_str]
         c_dtype = torch.bfloat16 if is_a_mixed_input else a_dtype
         fp16_dtype = torch.float16 if a_dtype_str == "fp16" else torch.bfloat16
-        a_tri = alloc_rand((M, K) , dtype=fp16_dtype, device='cuda', requires_grad=False)
-        b_tri = alloc_rand((E, N, K), dtype=fp16_dtype, device='cuda', requires_grad=False)
-        c_tri = torch.zeros((M, top_k, N), dtype=c_dtype, device='cuda', requires_grad=False)
+        a_tri = alloc_rand((M, K), dtype=fp16_dtype, device="cuda", requires_grad=False)
+        b_tri = alloc_rand(
+            (E, N, K), dtype=fp16_dtype, device="cuda", requires_grad=False
+        )
+        c_tri = torch.zeros(
+            (M, top_k, N), dtype=c_dtype, device="cuda", requires_grad=False
+        )
         a_scale = torch.tensor([1.00], dtype=torch.float32, device="cuda")
         b_scale = torch.tensor([1.00] * E, dtype=torch.float32, device="cuda")
 
@@ -83,21 +88,26 @@ def run_benchmark(args):
             "num_stages": 2,
             "waves_per_eu": 0,
             "matrix_instr_nonkdim": 16,
-            "kpack": 1
+            "kpack": 1,
         }
 
-        topk_weights, topk_ids, sorted_token_ids, expert_ids, num_tokens_post_padded = \
+        topk_weights, topk_ids, sorted_token_ids, expert_ids, num_tokens_post_padded = (
             generate_moe_alignment(M, E, top_k, config["BLOCK_SIZE_M"])
+        )
         # Downcast a tensor to mxfp4 and upcast back for reference
         if is_a_mixed_input:
             swizzle_axis = 0 if swizzle_mx else None
-            a_tri, a_mx_scales, _ = downcast_to_mxfp(a_tri, a_dtype, axis=1, swizzle_axis=swizzle_axis)
+            a_tri, a_mx_scales, _ = downcast_to_mxfp(
+                a_tri, a_dtype, axis=1, swizzle_axis=swizzle_axis
+            )
         else:
             a_mx_scales = None
         # Downcast b tensor to mxfp4 and upcast back for reference
         if is_b_mixed_input:
             swizzle_axis = 1 if swizzle_mx else None
-            b_tri, b_mx_scales, _ = downcast_to_mxfp(b_tri, b_dtype, axis=2, swizzle_axis=swizzle_axis)
+            b_tri, b_mx_scales, _ = downcast_to_mxfp(
+                b_tri, b_dtype, axis=2, swizzle_axis=swizzle_axis
+            )
         # (M, K) * (top_k, N, K) -> (M, top_k, N). 2 for multiplication and accumulation
         flops = 2.0 * M * top_k * K * N
         # The weight is applied on the gemm product which has the shape of (M, top_k, N)
@@ -105,16 +115,30 @@ def run_benchmark(args):
             flops += M * top_k * N
 
         # Variables to compute bandwidth
-        mem_read = a_tri.numel() * a_tri.element_size() + b_tri.numel() * b_tri.element_size()
+        mem_read = (
+            a_tri.numel() * a_tri.element_size() + b_tri.numel() * b_tri.element_size()
+        )
         mem_write = c_tri.numel() * c_tri.element_size()
         mem = mem_read + mem_write
 
-        fn = lambda: fused_moe_mxfp4(a_tri, b_tri, c_tri,
-                    a_scale, b_scale,
-                    a_mx_scales, b_mx_scales,
-                    topk_weights, topk_ids, sorted_token_ids, expert_ids, num_tokens_post_padded,
-                    routed_weight, top_k, swizzle_mx,
-                    config, torch_to_tl_dtype[c_tri.dtype]
+        fn = lambda: fused_moe_mxfp4(  # noqa: E731
+            a_tri,
+            b_tri,
+            c_tri,
+            a_scale,
+            b_scale,
+            a_mx_scales,
+            b_mx_scales,
+            topk_weights,
+            topk_ids,
+            sorted_token_ids,
+            expert_ids,
+            num_tokens_post_padded,
+            routed_weight,
+            top_k,
+            swizzle_mx,
+            config,
+            torch_to_tl_dtype[c_tri.dtype],
         )
 
         ms = triton.testing.do_bench(fn, warmup=25, rep=100)
@@ -123,11 +147,11 @@ def run_benchmark(args):
         tflops = flops / ms * 1e-9
 
         # Return exactly one scalar depending on which metric is active
-        if metric == 'time':
+        if metric == "time":
             return ms
-        elif metric == 'tflops':
+        elif metric == "tflops":
             return tflops
-        elif metric == 'bandwidth':
+        elif metric == "bandwidth":
             return bandwidth
         else:
             raise ValueError("Unknown metric: " + metric)
@@ -140,15 +164,29 @@ def parse_args():
         prog="Benchmark MoE with micro scaled format",
         allow_abbrev=False,
     )
-    parser.add_argument('-model_configs', type=str, default="utils/model_configs.json", help="Model config json file.")
+    parser.add_argument(
+        "-model_configs",
+        type=str,
+        default="utils/model_configs.json",
+        help="Model config json file.",
+    )
     available_models = get_available_models()  # Dynamically load model names
-    model_help = ("Model name to benchmark. Select from: [" + ", ".join(available_models) +
-                  "]. Use 'all' to benchmark all models or leave blank for the default benchmark script.")
-    parser.add_argument('--model', type=str, default=None, help=model_help)
+    model_help = (
+        "Model name to benchmark. Select from: ["
+        + ", ".join(available_models)
+        + "]. Use 'all' to benchmark all models or leave blank for the default benchmark script."
+    )
+    parser.add_argument("--model", type=str, default=None, help=model_help)
     parser.add_argument("-M", type=int, help="M dimension")
-    parser.add_argument("--routed-weight", action='store_true')
-    parser.add_argument("--swizzle-mx", action='store_true')
-    parser.add_argument("-A", "--a-dtype", type=str, choices=["bf16", "fp16", "fp8_e5m2", "mxfp4_e2m1"], default="mxfp4_e2m1")
+    parser.add_argument("--routed-weight", action="store_true")
+    parser.add_argument("--swizzle-mx", action="store_true")
+    parser.add_argument(
+        "-A",
+        "--a-dtype",
+        type=str,
+        choices=["bf16", "fp16", "fp8_e5m2", "mxfp4_e2m1"],
+        default="mxfp4_e2m1",
+    )
     args = parser.parse_args()
     return args
 
@@ -158,5 +196,5 @@ def main():
     run_benchmark(args)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.exit(main())

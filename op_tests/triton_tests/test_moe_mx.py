@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from triton_bench.numerics_details.mxfp import downcast_to_mxfp, upcast_from_mxfp
+from triton_kernels.numerics_details.mxfp import downcast_to_mxfp, upcast_from_mxfp
 from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
 from op_benchmarks.triton.utils.common import str_to_torch_dtype, torch_to_tl_dtype
 from op_benchmarks.triton.utils.moe import generate_moe_alignment

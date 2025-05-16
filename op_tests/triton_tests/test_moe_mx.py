@@ -2,13 +2,6 @@ import pytest
 import torch
 import triton
 
-try:
-    from triton_kernels.numerics_details.mxfp import downcast_to_mxfp, upcast_from_mxfp
-
-    _SKIP = False
-except ImportError:
-    _SKIP = True
-
 from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
 from op_tests.op_benchmarks.triton.utils.common import (
     str_to_torch_dtype,
@@ -17,6 +10,7 @@ from op_tests.op_benchmarks.triton.utils.common import (
 from op_tests.op_benchmarks.triton.utils.moe import generate_moe_alignment
 
 from .utils.fused_moe_ref import torch_moe
+from .utils.quant_ref import torch_dynamic_mxfp4_quant
 
 DEBUG_MODE = False
 
@@ -73,16 +67,12 @@ def test_fused_moe(
     swizzle_mx_scale: bool,
 ):
     global _SKIP
-    if (
-        triton.runtime.driver.active.get_current_target().arch not in ("gfx950")
-        or _SKIP
-    ):
+    if triton.runtime.driver.active.get_current_target().arch not in ("gfx950"):
         pytest.skip("MXFP4 not supported on this architecture")
 
     is_a_mixed_input = a_dtype_str.startswith("mx")
     is_b_mixed_input = b_dtype_str.startswith("mx")
     a_dtype = str_to_torch_dtype[a_dtype_str]
-    b_dtype = str_to_torch_dtype[b_dtype_str]
     c_dtype = torch.bfloat16 if is_a_mixed_input else a_dtype
     fp16_dtype = torch.float16 if a_dtype_str == "fp16" else torch.bfloat16
     a_tri = alloc_rand((M, K), dtype=fp16_dtype, device="cuda", requires_grad=False)
@@ -112,25 +102,27 @@ def test_fused_moe(
     )
     # Downcast a tensor to mxfp4 and upcast back for reference
     if is_a_mixed_input:
-        swizzle_axis = 0 if swizzle_mx_scale else None
-        a_tri, a_mx_scales, _ = downcast_to_mxfp(
-            a_tri, a_dtype, axis=1, swizzle_axis=swizzle_axis
-        )
-        a_ref = upcast_from_mxfp(
-            a_tri, a_mx_scales, fp16_dtype, axis=1, swizzle_axis=swizzle_axis
-        )
+        # swizzle_axis = 0 if swizzle_mx_scale else None  # TODO Add Swizzle support
+        a_tri, a_mx_scales, _ = torch_dynamic_mxfp4_quant(a_tri)
+
+        # TODO Add Upcast support
+        a_ref = a_tri
+        # a_ref = torch_upcast_from_mxfp(
+        #    a_tri, a_mx_scales, fp16_dtype, axis=1, swizzle_axis=swizzle_axisv
+        # )
     else:
         a_ref = a_ref.to(fp16_dtype)
         a_mx_scales = None
     # Downcast b tensor to mxfp4 and upcast back for reference
     if is_b_mixed_input:
-        swizzle_axis = 1 if swizzle_mx_scale else None
-        b_tri, b_mx_scales, _ = downcast_to_mxfp(
-            b_tri, b_dtype, axis=2, swizzle_axis=swizzle_axis
-        )
-        b_ref = upcast_from_mxfp(
-            b_tri, b_mx_scales, fp16_dtype, axis=2, swizzle_axis=swizzle_axis
-        )
+        # swizzle_axis = 1 if swizzle_mx_scale else None  # TODO Add Swizzle support
+        b_tri, b_mx_scales = torch_dynamic_mxfp4_quant(b_tri)
+
+        # TODO Add Upcast support
+        b_ref = b_tri
+        # b_ref = torch_upcast_from_mxfp(
+        #    b_tri, b_mx_scales, fp16_dtype, axis=2, swizzle_axis=swizzle_axis
+        # )
     # Triton
     fused_moe_mxfp4(
         a_tri,

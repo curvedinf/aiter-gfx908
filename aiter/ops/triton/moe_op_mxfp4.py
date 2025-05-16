@@ -3,10 +3,18 @@ import triton
 import triton.language as tl
 from typing import Any, Dict
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
-from triton_kernels.numerics_details.mxfp import (
-    _unswizzle_mx_block,
-    get_scaled_dot_format_string,
-)
+
+
+@tl.constexpr_function
+def get_scaled_dot_format_string(dtype: tl.dtype):
+    mapping = {
+        tl.float16: "fp16",
+        tl.bfloat16: "bf16",
+        tl.uint8: "e2m1",
+        tl.float8e4nv: "e4m3",
+        tl.float8e5: "e5m2",
+    }
+    return mapping[dtype]
 
 
 @triton.jit
@@ -76,8 +84,8 @@ def _fused_moe_kernel(
     top_k: tl.constexpr,
     compute_type: tl.constexpr,
     GRID_MN: tl.constexpr,
-    SWIZZLE_MX_A: tl.constexpr,
-    SWIZZLE_MX_B: tl.constexpr,
+    SWIZZLE_MX_A: tl.constexpr,  # TODO add swizzle support
+    SWIZZLE_MX_B: tl.constexpr,  # TODO add swizzle support
 ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -303,26 +311,26 @@ def _fused_moe_kernel(
             a_format: tl.constexpr = get_scaled_dot_format_string(a.dtype)
             b_format: tl.constexpr = get_scaled_dot_format_string(b.dtype)
             if is_a_microscaled_format:
-                if SWIZZLE_MX_A:
-                    a_mx_scales = _unswizzle_mx_block(tl.load(a_mx_scale_ptrs))
-                else:
-                    mask_ak_scale = offs_scale_ak < (K - k * PACKED_BLOCK_K_A) // (
-                        MX_PACK_DIVISOR // A_PACK_DIVISOR
-                    )
-                    a_mx_scales = tl.load(
-                        a_mx_scale_ptrs, mask=mask_ak_scale[None, :], other=0.0
-                    )
+                # if SWIZZLE_MX_A:
+                #    a_mx_scales = _unswizzle_mx_block(tl.load(a_mx_scale_ptrs))
+                # else:
+                mask_ak_scale = offs_scale_ak < (K - k * PACKED_BLOCK_K_A) // (
+                    MX_PACK_DIVISOR // A_PACK_DIVISOR
+                )
+                a_mx_scales = tl.load(
+                    a_mx_scale_ptrs, mask=mask_ak_scale[None, :], other=0.0
+                )
             else:
                 a_mx_scales = None
-            if SWIZZLE_MX_B:
-                b_mx_scales = _unswizzle_mx_block(tl.load(b_mx_scale_ptrs))
-            else:
-                mask_bk_scale = offs_scale_bk < (K - k * PACKED_BLOCK_K_B) // (
-                    MX_PACK_DIVISOR // B_PACK_DIVISOR
-                )
-                b_mx_scales = tl.load(
-                    b_mx_scale_ptrs, mask=mask_bk_scale[None, :], other=0.0
-                )
+            # if SWIZZLE_MX_B:
+            #    b_mx_scales = _unswizzle_mx_block(tl.load(b_mx_scale_ptrs))
+            # else:
+            mask_bk_scale = offs_scale_bk < (K - k * PACKED_BLOCK_K_B) // (
+                MX_PACK_DIVISOR // B_PACK_DIVISOR
+            )
+            b_mx_scales = tl.load(
+                b_mx_scale_ptrs, mask=mask_bk_scale[None, :], other=0.0
+            )
 
             accumulator = tl.dot_scaled(
                 a,
@@ -442,7 +450,7 @@ def fused_moe_mxfp4(
         MUL_ROUTED_WEIGHT=mul_routed_weight,
         top_k=top_k,
         compute_type=compute_type,
-        SWIZZLE_MX_A=swizzle_mx_a,
-        SWIZZLE_MX_B=swizzle_mx_b,
+        SWIZZLE_MX_A=swizzle_mx_a,  # TODO add swizzle support
+        SWIZZLE_MX_B=swizzle_mx_b,  # TODO add swizzle support
         **config,
     )

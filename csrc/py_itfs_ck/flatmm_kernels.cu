@@ -73,58 +73,67 @@ float flatmm_calc(const ck_tile::FlatmmHostArgs& args, const ck_tile::stream_con
                                                                 AccDataType,
                                                                 CodegenFlatmmShape,
                                                                 CodegenGemmTraits>;
-    using GemmEpilogue           = ck_tile::CShuffleEpilogue<
-        ck_tile::CShuffleEpilogueProblem<ADataType,
-                                         BDataType,
-                                         AccDataType,
-                                         CDataType,
-                                         CLayout,
-                                         CodegenPipelineProblem::kBlockSize,
-                                         TilePartitioner::MPerBlock,
-                                         TilePartitioner::NPerBlock,
-                                         M_Warp,
-                                         N_Warp,
-                                         M_Warp_Tile,
-                                         N_Warp_Tile,
-                                         K_Warp_Tile,
-                                         CodegenPipelineProblem::TransposeC>>;
+   const auto Run               = [&](const auto memory_operation_) {
+        constexpr auto memory_operation = memory_operation_.value;
 
-    using CodegenFlatmmPolicy = ck_tile::UniversalFlatmmPipelineAgBgCrPolicy;
-    using CodegenFlatmmPipeline =
-        ck_tile::FlatmmPipelineAGmemBGmemCRegV1<CodegenPipelineProblem, CodegenFlatmmPolicy>;
+        using GemmEpilogue = ck_tile::CShuffleEpilogue<
+            ck_tile::CShuffleEpilogueProblem<ADataType,
+                                             BDataType,
+                                             AccDataType,
+                                             CDataType,
+                                             CLayout,
+                                             CodegenPipelineProblem::kBlockSize,
+                                             TilePartitioner::MPerBlock,
+                                             TilePartitioner::NPerBlock,
+                                             M_Warp,
+                                             N_Warp,
+                                             M_Warp_Tile,
+                                             N_Warp_Tile,
+                                             K_Warp_Tile,
+                                             CodegenPipelineProblem::TransposeC,
+                                             memory_operation>>;
 
-    // ToDo: Will add the codegen part to test different pipeline policies in GEMM.
-    // Now we only use the BlockGemmASmemBSmemCRegV1DefaultPolicy.
-    using Kernel = ck_tile::FlatmmKernel<TilePartitioner, CodegenFlatmmPipeline, GemmEpilogue>;
+        using CodegenFlatmmPolicy = ck_tile::UniversalFlatmmPipelineAgBgCrPolicy;
+        using CodegenFlatmmPipeline =
+            ck_tile::FlatmmPipelineAGmemBGmemCRegV1<CodegenPipelineProblem, CodegenFlatmmPolicy>;
 
-    auto kargs = Kernel::MakeKernelArgs(args);
+        // ToDo: Will add the codegen part to test different pipeline policies in GEMM.
+        // Now we only use the BlockGemmASmemBSmemCRegV1DefaultPolicy.
+        using Kernel = ck_tile::FlatmmKernel<TilePartitioner, CodegenFlatmmPipeline, GemmEpilogue>;
 
-    const dim3 grids      = Kernel::GridSize(args.M, args.N, args.k_batch);
-    constexpr dim3 blocks = Kernel::BlockSize();
+        auto kargs = Kernel::MakeKernelArgs(args);
 
-    if(!Kernel::IsSupportedArgument(kargs))
+        const dim3 grids      = Kernel::GridSize(args.M, args.N, args.k_batch);
+        constexpr dim3 blocks = Kernel::BlockSize();
+
+        if(!Kernel::IsSupportedArgument(kargs))
+        {
+            throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!\n");
+        }
+
+        if(s.log_level_ > 0)
+        {
+            std::cout << "Launching kernel with args:"
+                      << " grid: {" << grids.x << ", " << grids.y << ", " << grids.z << "}"
+                      << ", blocks: {" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}"
+                      << std::endl;
+        }
+
+        float ave_time = ck_tile::launch_kernel(
+            s, ck_tile::make_kernel<blocks.x, kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+
+        return ave_time;
+    };
+    if(args.k_batch == 1)
     {
-        throw std::runtime_error("Wrong! Arguments not supported! Skipping gemm!\n");
+        return Run(ck_tile::integral_constant<ck_tile::memory_operation_enum,
+                                              ck_tile::memory_operation_enum::set>{});
     }
-
-    // if(s.log_level_ > 0)
-    // {
-        std::cout << "Launching kernel with args:"
-                  << " grid: {" << grids.x << ", " << grids.y << ", " << grids.z << "}"
-                  << ", blocks: {" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}"
-                  << std::endl;
-    // }
-
-    float ave_time = ck_tile::launch_kernel(
-        s, ck_tile::make_kernel<blocks.x, kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
-        //std::cout << "Launching kernel with args:"<< kargs.M << std::endl;
-    CDataType* c_ptr = reinterpret_cast<CDataType*>(kargs.c_ptr);
-    for (int i = 0; i < 8; ++i) {
-        printf(" kargs %.4f ", static_cast<float>(c_ptr[i]));
+    else
+    {
+        return Run(ck_tile::integral_constant<ck_tile::memory_operation_enum,
+                                              ck_tile::memory_operation_enum::atomic_add>{});
     }
-    printf("\n");
-
-    return ave_time;
 }
 
 torch::Tensor flatmm_ck(    
@@ -165,9 +174,9 @@ torch::Tensor flatmm_ck(
     args.M        = m;
     args.N        = n;
     args.K        = k;
-    args.stride_A = 0;
-    args.stride_B = 0;
-    args.stride_C = 0;
+    args.stride_A = k;
+    args.stride_B = k;
+    args.stride_C = n;
 
     CDataType* c_ptr = reinterpret_cast<CDataType*>(out.data_ptr());
     //size_t num_elements = out.numel(); 
@@ -180,10 +189,10 @@ torch::Tensor flatmm_ck(
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     ck_tile::stream_config naive_config{stream};
     flatmm_calc<ADataType, BDataType, AccDataType, CDataType, ALayout, BLayout, CLayout>(args, naive_config);
-    for (int i = 0; i < 8; ++i) {
-        printf(" cptr %.4f ", static_cast<float>(c_ptr[i]));
-    }
-    printf("\n");
+    // for (int i = 0; i < 8; ++i) {
+    //     printf(" cptr %.4f ", static_cast<float>(c_ptr[i]));
+    // }
+    // printf("\n");
     return out;
 
  }

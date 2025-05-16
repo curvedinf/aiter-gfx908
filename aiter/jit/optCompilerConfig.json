@@ -209,7 +209,9 @@
             "f'{AITER_CSRC_DIR}/py_itfs_ck/flatmm_kernels.cu'"
         ],
         "flags_extra_cc": [],
-        "flags_extra_hip": [],
+        "flags_extra_hip": [
+            "'-DUSING_MFMA_16x16x32=1'",
+             "'-DENABLE_FP8'"],
         "extra_ldflags": "None",
         "extra_include": [
             "f'{CK_DIR}/example/ck_tile/18_flatmm'"

@@ -137,6 +137,7 @@ def run_benchmark(args):
             routed_weight,
             top_k,
             swizzle_mx,
+            swizzle_mx,
             config,
             torch_to_tl_dtype[c_tri.dtype],
         )

@@ -3,7 +3,7 @@ import triton
 import triton.language as tl
 from typing import Any, Dict
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
-from triton_bench.numerics_details.mxfp import (
+from triton_kernels.numerics_details.mxfp import (
     _unswizzle_mx_block,
     get_scaled_dot_format_string,
 )

@@ -35,9 +35,10 @@ Initial bandwidth: 3.1 TB/s
 ### clusterization
 
 ```
+wave0-3                            wave4-7
 async_wait A,B,SA,SB[buf0]
 
-async_load A,B,SA,SB[buf1]
+async_load A,B,SA,SB[buf1]         local_load A,B,SA,SB[buf1]
 
 s_barrier
 
@@ -73,3 +74,54 @@ This version moves `buffer_load` up and separate `buffer_load` and non-mem.
 - IR_dump: `/app/aiter/skinny_M128/hack3/`
 - att: `/app/aiter/skinny_M128/att_hack3/`
 
+
+## `num_wave=8` pingpong version 2
+
+The previous version has a dependency issue. Check [this comment](https://github.com/ROCm/triton-internal/issues/822#issuecomment-2888470782) for more detail.
+
+This new design should address the problem
+
+```
+wave0-3                            wave4-7
+----------------------
+async_wait A,SA[buf0]
+
+async_copy A,SA[buf1]
+                                 -------------------------
+s_barrier                          async_wait A,SA[buf0]
+
+local_load A,SA[buf0]              async_copy A,SA[buf1]
+async_wait B,SB[buf0]              s_barrier
+
+async_copy B,SB[buf1]              local_load A,SA[buf0]
+
+s_barrier                          async_wait B,SB[buf0]
+
+local_load B,SB[buf0]              async_load B,SB[buf1]
+dot
+
+--------------------
+
+async_wait A,SA[buf1]              s_barrier
+
+async_copy A,SA[buf0]              local_load B,SB[buf0]
+                                   dot
+                                 --------------------------
+
+s_barrier                          async_wait A,SA[buf1]
+
+local_load A,SA[buf1]              async_copy A,SA[buf0]
+async_wait B,SB[buf1]              s_barrier
+
+async_copy B,SB[buf0]              local_load A,SA[buf1]
+
+s_barrier                          async_wait B,SB[buf1]
+
+local_load B,SB[buf1]              async_load B,SB[buf0]
+dot
+```
+
+- bandwidth: 3.77 TB/s
+- ttgir hack: `/app/aiter/skinny_M128/hack5.ttgir`
+- IR_dump: `/app/aiter/skinny_M128/hack5/`
+- att: `/app/aiter/skinny_M128/att_hack5/`

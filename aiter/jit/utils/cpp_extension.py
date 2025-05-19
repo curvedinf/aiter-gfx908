@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 # This file origins from pytorch:
 # https://github.com/pytorch/pytorch/blob/main/torch/utils/cpp_extension.py
@@ -1117,6 +1117,7 @@ def _jit_compile(
     is_standalone,
     keep_intermediates=True,
     torch_exclude=False,
+    hipify=True,
 ) -> None:
     if is_python_module and is_standalone:
         raise ValueError(
@@ -1163,7 +1164,7 @@ def _jit_compile(
                         _TORCH_PATH = os.path.join(os.path.dirname(torch.__file__))
                         torch_path = os.path.join(_TORCH_PATH, "*")
 
-                    if IS_HIP_EXTENSION and with_cuda:
+                    if IS_HIP_EXTENSION and with_cuda and hipify:
                         hipify_result = hipify_python.hipify(
                             project_directory=build_directory,
                             output_directory=build_directory,

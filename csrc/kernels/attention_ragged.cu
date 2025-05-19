@@ -2,8 +2,8 @@
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <torch/all.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDAGuard.h>
+#include <ATen/hip/HIPContext.h>
+#include <ATen/hip/impl/HIPGuardImplMasqueradingAsCUDA.h>
 
 #include "attention_ragged.h"
 #include "attention_common.cuh"
@@ -53,7 +53,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     float logits_soft_cap_rcp,
     const float* k_scale_ptr,
     const float* v_scale_ptr,
-    const AttentionVariant& variant)
+    const AttentionVariant* variant)
 {
     const int seq_idx       = blockIdx.x;
     const int partition_idx = blockIdx.y;
@@ -159,8 +159,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     float logits_soft_cap_rcp,
     const float* k_scale_ptr,
     const float* v_scale_ptr,
-    const float* __restrict__ fp8_out_scale_ptr,
-    const AttentionVariant& variant)
+    const AttentionVariant* variant)
 {
     UNREACHABLE_CODE
 }
@@ -222,7 +221,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
                                      logits_soft_cap_rcp,   \
                                      k_scale_ptr,           \
                                      v_scale_ptr,           \
-                                     variant);
+                                     &variant);
 
 #define LAUNCH_CUSTOM_REDUCTION(NPAR_LOOPS)                               \
     paged_attention_ll4mi_reduce_kernel<T,                                \
@@ -230,8 +229,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
                                         HEAD_SIZE,                        \
                                         HEAD_SIZE,                        \
                                         PARTITION_SIZE,                   \
-                                        NPAR_LOOPS,                       \
-                                        (BLOCK_SIZE > 1)>                 \
+                                        NPAR_LOOPS, (BLOCK_SIZE > 1)>     \
         <<<reduce_grid, reduce_block, 0, stream>>>(out_ptr,               \
                                                    exp_sums_ptr,          \
                                                    max_logits_ptr,        \
@@ -317,8 +315,8 @@ void paged_attention_custom_launcher(torch::Tensor& out,
     constexpr int NTHR = 256;
     dim3 grid(num_seqs, max_num_partitions, num_kv_heads);
     dim3 block(NTHR);
-    const at::cuda::OptionalCUDAGuard device_guard(device_of(query));
-    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    const at::hip::OptionalHIPGuardMasqueradingAsCUDA device_guard(device_of(query));
+    const hipStream_t stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA();
 
     // mfma4 kernel is faster than mfma16 for gqa_ratio <= 4
     switch(gqa_ratio)

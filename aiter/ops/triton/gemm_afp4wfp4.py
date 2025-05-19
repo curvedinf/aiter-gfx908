@@ -148,11 +148,11 @@ def gemm_afp4wfp4(x,
     K, N = w.shape
 
     env = os.environ
-    BLOCK_SIZE_M = 16
+    BLOCK_SIZE_M = int(env["BLOCK_SIZE_M"]) if "BLOCK_SIZE_M" in env else 16
     BLOCK_SIZE_N = int(env["BLOCK_SIZE_N"]) if "BLOCK_SIZE_N" in env else 64
-    BLOCK_SIZE_K = 256
+    BLOCK_SIZE_K = int(env["BLOCK_SIZE_K"]) if "BLOCK_SIZE_K" in env else 256
     GROUP_SIZE_M = 1
-    waves_per_eu = 6
+    waves_per_eu = int(env["WAVES_PER_EU"]) if "WAVES_PER_EU" in env else 6
     kpack = 1
     num_warps = int(env["NUM_WARPS"]) if "NUM_WARPS" in env else 4
     num_stages = 2

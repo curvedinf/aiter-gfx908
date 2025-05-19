@@ -206,7 +206,14 @@
       m.def("gemm_a8w8_tune", &gemm_a8w8_tune, "gemm_a8w8_tune", py::arg("XQ"), py::arg("WQ"), \
             py::arg("x_scale"), py::arg("w_scale"), py::arg("Out"), py::arg("kernelId") = 0,   \
             py::arg("splitK") = 0);
+#define GEMM_A8W8_BPRESHUFFLE_PYBIND                                                                                                     \
+      m.def("gemm_a8w8_bpreshuffle", &gemm_a8w8_bpreshuffle, "fp8 gemm wpreshuffle", py::arg("XQ"), py::arg("WQ"), \
+            py::arg("x_scale"), py::arg("w_scale"), py::arg("Out"));
 
+#define GEMM_A8W8_BPRESHUFFLE_TUNE_PYBIND                                                                                                                \
+      m.def("gemm_a8w8_bpreshuffle_tune", &gemm_a8w8_bpreshuffle_tune, "gemm_a8w8_bpreshuffle_tune", py::arg("XQ"), py::arg("WQ"), \
+            py::arg("x_scale"), py::arg("w_scale"), py::arg("Out"), py::arg("kernelId") = 0,                                                                        \
+            py::arg("splitK") = 0);
 #define MHA_BWD_ASM_PYBIND                                  \
       m.def("fmha_v3_bwd", &aiter::torch_itfs::fmha_v3_bwd, \
             py::arg("dout"),                                \

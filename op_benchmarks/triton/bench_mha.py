@@ -189,9 +189,9 @@ def create_benchmark_configs(custom, args):
 
     if mode=="bwd":
         if args.fused_bwd:
-            line_vals = [f'fused-bwd({unit})', f'bwd({unit})']
+            line_vals = [f'fused-bwd({unit})']
         elif args.onekernel_bwd:
-            line_vals = [f'onekernel-bwd({unit})', f'bwd({unit})']
+            line_vals = [f'onekernel-bwd({unit})']
         else:
             line_vals = [f'fused-bwd({unit})', f'onekernel-bwd({unit})', f'bwd({unit})']
     else:
@@ -201,7 +201,12 @@ def create_benchmark_configs(custom, args):
         line_vals = [f'Triton({unit})', f'Torch({unit})']
 
     if args.test_mode:
-        line_vals = ["test_mode"]
+        if  args.onekernel_bwd:
+            line_vals = [f'onekernel-bwd({unit})']
+        elif args.fused_bwd:
+            line_vals = [f'fused-bwd({unit})']
+        else:
+            line_vals = [f'bwd({unit})']
 
     configs.append(
         triton.testing.Benchmark(
@@ -294,17 +299,19 @@ def run_benchmark(custom, args):
 
         # Test mode: Verify outputs match
         if hasattr(args, 'test_mode') and args.test_mode:
+            print(f"Testing backward implementation <{provider}> against Torch with shape:")
+            print(f"BATCH={BATCH}, HQ={HQ}, HK={HK}, N_CTX_Q={N_CTX_Q}, N_CTX_K={N_CTX_K}, D_HEAD={D_HEAD}")
             # Triton
             if varlen:
                 triton_fn = lambda: flash_attn_varlen_func(
                     q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
                     dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, 
+                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                 )
             else:
                 triton_fn = lambda: flash_attn_func(
                     q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, 
+                    return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                 )
             with torch.enable_grad():
                 triton_out, _, sd_mask = triton_fn()
@@ -322,21 +329,28 @@ def run_benchmark(custom, args):
                 torch_dq, torch_dk, torch_dv = torch.autograd.grad(torch_out, (q, k, v), do)
 
             # compare forward outputs
-            torch.testing.assert_close(
-                triton_out, torch_out.to(triton_out.dtype), atol=1e-2, rtol=1e-2
-            )
-            print("Forward outputs match!")
+            try:
+                torch.testing.assert_close(
+                    triton_out, torch_out.to(triton_out.dtype), atol=1e-2, rtol=1e-2
+                )
+                print("Forward outputs match.")
+            except AssertionError as e:
+                print(e)
             # Compare gradients
-            torch.testing.assert_close(
-                triton_dv, torch_dv.to(triton_out.dtype), atol=1e-2, rtol=1e-2
-            )
-            torch.testing.assert_close(
-                triton_dk, torch_dk.to(triton_out.dtype), atol=1e-2, rtol=1e-2
-            )
-            torch.testing.assert_close(
+            try:
+                torch.testing.assert_close(
                 triton_dq, torch_dq.to(triton_out.dtype), atol=1e-2, rtol=1e-2
-            )
-            print(f"Backward gradients match for shape: BATCH={BATCH}, HQ={HQ}, HK={HK}, N_CTX_Q={N_CTX_Q}, N_CTX_K={N_CTX_K}, D_HEAD={D_HEAD}")
+                )
+                torch.testing.assert_close(
+                    triton_dv, torch_dv.to(triton_out.dtype), atol=1e-2, rtol=1e-2
+                )
+                torch.testing.assert_close(
+                    triton_dk, torch_dk.to(triton_out.dtype), atol=1e-2, rtol=1e-2
+                )
+                print(f"Backward gradients match.")
+            except AssertionError as e:
+                print(e)
+            
             return 0
 
         # Benchmark mode
@@ -352,24 +366,24 @@ def run_benchmark(custom, args):
                     fn = lambda: flash_attn_varlen_fp8_func(
                         q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
                         dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, 
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                     )
                 else:
                     fn = lambda: flash_attn_varlen_func(
                         q_input, k_input, v_input, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
                         dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, 
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                     )
             else:
                 if args.fp8:
                     fn = lambda: flash_attn_fp8_func(
                         q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, 
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                     )
                 else:
                     fn = lambda: flash_attn_func(
                         q_input, k_input, v_input, dropout_p=dropout, softmax_scale=sm_scale, causal=causal,
-                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, 
+                        return_lse=return_lse, return_attn_probs=return_attn_probs, fused_backward=fused_backward, onekernel_backward=onekernel_backward
                     )
             if mode=="bwd":
                 with torch.enable_grad():

@@ -283,16 +283,27 @@ def gemm_afp4wfp4(
         matrix_instr_nonkdim = 16
         cache_modifier = ".cg"
 
-        NUM_KSPLIT = 4
+        NUM_KSPLIT = (
+            4
+            if (
+                triton.cdiv(M, BLOCK_SIZE_M)
+                * triton.cdiv(N, BLOCK_SIZE_N)
+                * triton.cdiv(K, BLOCK_SIZE_K)
+                >= 26624
+            )
+            else 1
+        )
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, BLOCK_SIZE_K, NUM_KSPLIT
         )
 
-        if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
+        if NUM_KSPLIT == 1:
+            y_pp = None
+        elif os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
             y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
         else:
             y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
-    elif M <= 128:
+    elif M < 128:
         BLOCK_SIZE_M = triton.next_power_of_2(M)
         BLOCK_SIZE_N = 128
         BLOCK_SIZE_K = 256
@@ -304,12 +315,23 @@ def gemm_afp4wfp4(
         matrix_instr_nonkdim = 16
         cache_modifier = ".cg"
 
-        NUM_KSPLIT = 4
+        NUM_KSPLIT = (
+            4
+            if (
+                triton.cdiv(M, BLOCK_SIZE_M)
+                * triton.cdiv(N, BLOCK_SIZE_N)
+                * triton.cdiv(K, BLOCK_SIZE_K)
+                >= 13312
+            )
+            else 1
+        )
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, BLOCK_SIZE_K, NUM_KSPLIT
         )
 
-        if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
+        if NUM_KSPLIT == 1:
+            y_pp = None
+        elif os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
             y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
         else:
             y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
@@ -318,16 +340,66 @@ def gemm_afp4wfp4(
         BLOCK_SIZE_N = 128
         BLOCK_SIZE_K = 256
         GROUP_SIZE_M = 2
-        waves_per_eu = 4
+        waves_per_eu = 2
         kpack = 1
-        num_warps = 4
+        num_warps = 8
         num_stages = 2
         matrix_instr_nonkdim = 16
         cache_modifier = ".cg"
 
-        NUM_KSPLIT = 1
-        SPLITK_BLOCK_SIZE = 2 * K
-        y_pp = None
+        NUM_KSPLIT = (
+            1
+            if (
+                triton.cdiv(M, BLOCK_SIZE_M)
+                * triton.cdiv(N, BLOCK_SIZE_N)
+                * triton.cdiv(K, BLOCK_SIZE_K)
+                >= 53248
+            )
+            else 4
+        )
+        SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
+            K, BLOCK_SIZE_K, NUM_KSPLIT
+        )
+
+        if NUM_KSPLIT == 1:
+            y_pp = None
+        elif os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
+        else:
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
+    elif M <= 512:
+        BLOCK_SIZE_M = 256
+        BLOCK_SIZE_N = 256
+        BLOCK_SIZE_K = 256
+        GROUP_SIZE_M = 32
+        waves_per_eu = 1
+        kpack = 1
+        num_warps = 8
+        num_stages = 2
+        matrix_instr_nonkdim = 32
+        cache_modifier = None
+
+        NUM_KSPLIT = (
+            4
+            if (
+                26624
+                > triton.cdiv(M, BLOCK_SIZE_M)
+                * triton.cdiv(N, BLOCK_SIZE_N)
+                * triton.cdiv(K, BLOCK_SIZE_K)
+                >= 13312
+            )
+            else 1
+        )
+        SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
+            K, BLOCK_SIZE_K, NUM_KSPLIT
+        )
+
+        if NUM_KSPLIT == 1:
+            y_pp = None
+        elif os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
+        else:
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
     else:
         BLOCK_SIZE_M = 256
         BLOCK_SIZE_N = 256

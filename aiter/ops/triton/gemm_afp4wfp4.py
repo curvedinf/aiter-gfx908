@@ -251,19 +251,61 @@ def gemm_afp4wfp4(
             y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
         else:
             y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
-    elif M <= 128:
-        BLOCK_SIZE_M = triton.next_power_of_2(M)
+    elif M <= 128 and False:
+        BLOCK_SIZE_M = 128
         BLOCK_SIZE_N = 128
         BLOCK_SIZE_K = 256
         GROUP_SIZE_M = 1
-        waves_per_eu = 4
+        waves_per_eu = 1
         kpack = 1
         num_warps = 4
+        num_stages = 4
+        matrix_instr_nonkdim = 16
+        cache_modifier = ".cg"
+
+        NUM_KSPLIT = 1
+        SPLITK_BLOCK_SIZE = (
+            triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
+        )
+        if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
+        else:
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
+    elif M <= 128 and True:
+        # 266 us
+        BLOCK_SIZE_M = 128
+        BLOCK_SIZE_N = 256
+        BLOCK_SIZE_K = 256
+        GROUP_SIZE_M = 1
+        waves_per_eu = 2
+        kpack = 1
+        num_warps = 4
+        num_stages = 3
+        matrix_instr_nonkdim = 16
+        cache_modifier = ".cg"
+
+        NUM_KSPLIT = 1
+        SPLITK_BLOCK_SIZE = (
+            triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
+        )
+        if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
+        else:
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
+    elif M <= 128 and False:
+        # pingpong
+        BLOCK_SIZE_M = 128
+        BLOCK_SIZE_N = 128
+        BLOCK_SIZE_K = 512
+        GROUP_SIZE_M = 1
+        waves_per_eu = 2
+        kpack = 1
+        num_warps = 8
         num_stages = 2
         matrix_instr_nonkdim = 16
         cache_modifier = ".cg"
 
-        NUM_KSPLIT = 4
+        NUM_KSPLIT = 1
         SPLITK_BLOCK_SIZE = (
             triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
         )

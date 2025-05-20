@@ -17,15 +17,23 @@ def generate_gemm_afp4wfp4_inputs(M, N, K):
     w_high = torch.randint(0, 16, (N, K // 2), dtype=torch.uint8, device="cuda")
     w = w_low | w_high << 4
     w = w.T
+
+
     # Scale of 1.0 in e8m0, bias 127.
-    x_scales = torch.randint(
-        124, 128, (K // SCALE_GROUP_SIZE, M), dtype=torch.uint8, device="cuda"
-    )
-    w_scales = torch.randint(
-        124, 128, (K // SCALE_GROUP_SIZE, N), dtype=torch.uint8, device="cuda"
-    )
-    x_scales = x_scales.T
-    w_scales = w_scales.T
+    if False:
+        x_scales = torch.randint(
+            124, 128, (K // SCALE_GROUP_SIZE, M), dtype=torch.uint8, device="cuda"
+        )
+        w_scales = torch.randint(
+            124, 128, (K // SCALE_GROUP_SIZE, N), dtype=torch.uint8, device="cuda"
+        )
+        x_scales = x_scales.T
+        w_scales = w_scales.T
+    else:
+        x_scales = torch.randint(124, 128, (M, K//SCALE_GROUP_SIZE), dtype=torch.uint8, device='cuda')
+        w_scales = torch.randint(124, 128, (N, K//SCALE_GROUP_SIZE), dtype=torch.uint8, device='cuda')
+        w_scales = w_scales.T
+
 
     return x, w, x_scales, w_scales
 

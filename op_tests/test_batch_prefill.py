@@ -107,6 +107,7 @@ def ref_masked_attention(
 @pytest.mark.parametrize("num_qo_heads,num_kv_heads", [(6, 1), (3, 1)])
 @pytest.mark.parametrize("head_dim", [128])
 @pytest.mark.parametrize("causal", [False, True])
+@pytest.mark.parametrize("is_chunked_prefill", [False, True])
 @pytest.mark.parametrize("kv_layout", ["NHD"])
 @pytest.mark.parametrize("logits_soft_cap", [0.0, 30.0])
 @pytest.mark.parametrize("contiguous_kv", [True, False])
@@ -123,6 +124,7 @@ def test_batch_prefill_with_paged_kv_cache(
     num_kv_heads,
     head_dim,
     causal,
+    is_chunked_prefill,
     kv_layout,
     logits_soft_cap,
     contiguous_kv,
@@ -204,6 +206,21 @@ def test_batch_prefill_with_paged_kv_cache(
     k_cache = chunks[0].squeeze(2).squeeze(2)
     v_cache = chunks[1].squeeze(2).squeeze(2)
 
+    if batch_size == 1:
+        o_ck_flash_attn_vllm = aiter.mha_batch_prefill_func(
+            q,
+            k_cache,
+            v_cache,
+            q_indptr_gpu,
+            kv_indptr_gpu,
+            kv_indices_gpu.unsqueeze(0),
+            torch.max(qo_lens).item(),
+            torch.max(kv_lens).item(),
+            causal=causal,
+            is_chunked_prefill=is_chunked_prefill,
+            logits_soft_cap=logits_soft_cap,
+        )
+
     o_ck_flash_attn = aiter.mha_batch_prefill_func(
         q,
         k_cache,
@@ -214,6 +231,7 @@ def test_batch_prefill_with_paged_kv_cache(
         torch.max(qo_lens).item(),
         torch.max(kv_lens).item(),
         causal=causal,
+        is_chunked_prefill=is_chunked_prefill,
         logits_soft_cap=logits_soft_cap,
     )
 
@@ -273,7 +291,8 @@ if __name__ == "__main__":
         causal,
         logits_soft_cap,
         dtype,
-    ) in itertools.product([True, ], [0.0, 30.0], [torch.float16, torch.bfloat16]):
+        is_chunked_prefill,
+    ) in itertools.product([True, False], [0.0, 30.0], [torch.float16, torch.bfloat16], [True, False]):
         test_batch_prefill_with_paged_kv_cache(
             batch_size=1,
             kv_len=8192,
@@ -283,6 +302,7 @@ if __name__ == "__main__":
             num_kv_heads=1,
             head_dim=128,
             causal=causal,
+            is_chunked_prefill=is_chunked_prefill,
             kv_layout="NHD",
             logits_soft_cap=logits_soft_cap,
             contiguous_kv=True,

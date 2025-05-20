@@ -252,7 +252,7 @@ def create_benchmark_configs(custom, args):
         else:
             line_vals = [f"fused-bwd({unit})", f"onekernel-bwd({unit})", f"bwd({unit})"]
     else:
-        line_vals = [f"fwd({unit})"]
+        line_vals = [f"fwd({unit})", f"persistent-fwd({unit})"]
 
     if args.bench_torch:
         line_vals = [f"Triton({unit})", f"Torch({unit})"]
@@ -262,6 +262,8 @@ def create_benchmark_configs(custom, args):
             line_vals = [f"onekernel-bwd({unit})"]
         elif args.fused_bwd:
             line_vals = [f"fused-bwd({unit})"]
+        elif args.persistent_fwd:
+            line_vals = [f"persistent-fwd({unit})"]
         else:
             line_vals = [f"bwd({unit})"]
 
@@ -316,6 +318,8 @@ def run_benchmark(custom, args):
             if not (hasattr(args, "test_mode") and args.test_mode)
             else False
         )  # Force non-varlen in test mode
+
+        persistent_fwd = "persistent-fwd" in provider
 
         fused_backward = "fused-bwd" in provider
         onekernel_backward = "onekernel-bwd" in provider
@@ -402,7 +406,7 @@ def run_benchmark(custom, args):
         # Test mode: Verify outputs match
         if hasattr(args, "test_mode") and args.test_mode:
             print(
-                f"Testing backward implementation <{provider}> against Torch with shape:"
+                f"Testing kernel implementation <{provider}> against Torch with shape:"
             )
             print(
                 f"BATCH={BATCH}, HQ={HQ}, HK={HK}, N_CTX_Q={N_CTX_Q}, N_CTX_K={N_CTX_K}, D_HEAD={D_HEAD}"
@@ -422,6 +426,7 @@ def run_benchmark(custom, args):
                     causal=causal,
                     return_lse=return_lse,
                     return_attn_probs=return_attn_probs,
+                    persistent_forward=persistent_fwd,
                     fused_backward=fused_backward,
                     onekernel_backward=onekernel_backward,
                 )
@@ -435,6 +440,7 @@ def run_benchmark(custom, args):
                     causal=causal,
                     return_lse=return_lse,
                     return_attn_probs=return_attn_probs,
+                    persistent_forward=persistent_fwd,
                     fused_backward=fused_backward,
                     onekernel_backward=onekernel_backward,
                 )
@@ -509,6 +515,7 @@ def run_benchmark(custom, args):
                         causal=causal,
                         return_lse=return_lse,
                         return_attn_probs=return_attn_probs,
+                        persistent_forward=persistent_fwd,
                         fused_backward=fused_backward,
                         onekernel_backward=onekernel_backward,
                     )
@@ -526,6 +533,7 @@ def run_benchmark(custom, args):
                         causal=causal,
                         return_lse=return_lse,
                         return_attn_probs=return_attn_probs,
+                        persistent_forward=persistent_fwd,
                         fused_backward=fused_backward,
                         onekernel_backward=onekernel_backward,
                     )
@@ -660,6 +668,7 @@ def parse_args():
     parser.add_argument("-bench_torch", action="store_true", default=False)
     parser.add_argument("-fused_bwd", action="store_true", default=False)
     parser.add_argument("-onekernel_bwd", action="store_true", default=False)
+    parser.add_argument("-persistent_fwd", action="store_true", default=False)
     parser.add_argument("-print_vgpr", action="store_true", default=False)
     parser.add_argument(
         "-return_all",

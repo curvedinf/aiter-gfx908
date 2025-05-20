@@ -1691,10 +1691,6 @@ def _persistent_attn_fwd(
         wid = tl.atomic_add(pid_counter, 1)
 
 
-
-
-
-
 def _flash_attn_forward(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -1799,29 +1795,12 @@ def _flash_attn_forward(
         s_dmask = None
         dropout_mask = None
 
-    # Tuned for MI300x
-    config = {
-        "BLOCK_M": 128,
-        "BLOCK_N": 64,
-        "waves_per_eu": 2,
-        "num_warps": 4,
-        "num_ctas": 1,
-        "num_stages": 1,
-    }
-    # Dropout significantly increases VGPR usage so use small tiles
-    if enable_dropout or q.dtype == torch.float32:
-        config = {
-            "BLOCK_M": 32,
-            "BLOCK_N": 32,
-            "waves_per_eu": 1,
-            "num_warps": 2,
-            "num_ctas": 1,
-            "num_stages": 1,
-        }
-    
+    # persistent workgroup loops over multiple workgroups of work
     if persistent:
+        # Tuned for MI300x
+        BLOCK_M = 256
         config = {
-            "BLOCK_M": 256,
+            "BLOCK_M": BLOCK_M,
             "BLOCK_N": 64,
             "waves_per_eu": 2,
             "num_warps": 8,
@@ -1830,13 +1809,23 @@ def _flash_attn_forward(
             "num_ctas": 1,
             "num_stages": 1,
         }
+
+        # Dropout significantly increases VGPR usage so use small tiles
+        if enable_dropout or q.dtype == torch.float32:
+            BLOCK_M = 32
+            config = {
+                "BLOCK_M": BLOCK_M,
+                "BLOCK_N": 32,
+                "waves_per_eu": 1,
+                "num_warps": 2,
+                "num_ctas": 1,
+                "num_stages": 1,
+            }
         
         # number of persistent workgroups launched
         NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count * 1
-        pid_counter = torch.ones(
-            (1,), device=q.device, dtype=torch.int32
-        ) * NUM_WGS
-        grid = lambda META: (min(NUM_WGS, batch * num_q_heads * triton.cdiv(seqlen_q, META["BLOCK_M"])),)  # noqa: E731
+        pid_counter = torch.ones((1,), device=q.device, dtype=torch.int32) * NUM_WGS
+        grid = (min(NUM_WGS, batch * num_q_heads * triton.cdiv(seqlen_q, BLOCK_M)),)
         _persistent_attn_fwd[grid](
             q,
             k,
@@ -1889,9 +1878,30 @@ def _flash_attn_forward(
             **config,
         )
     else:
-        grid = lambda META: (  # noqa: E731
-            batch * num_q_heads * triton.cdiv(seqlen_q, META["BLOCK_M"]),
-        )
+        # Tuned for MI300x
+        BLOCK_M = 128
+        config = {
+            "BLOCK_M": BLOCK_M,
+            "BLOCK_N": 64,
+            "waves_per_eu": 2,
+            "num_warps": 4,
+            "num_ctas": 1,
+            "num_stages": 1,
+        }
+
+        # Dropout significantly increases VGPR usage so use small tiles
+        if enable_dropout or q.dtype == torch.float32:
+            BLOCK_M = 32
+            config = {
+                "BLOCK_M": BLOCK_M,
+                "BLOCK_N": 32,
+                "waves_per_eu": 1,
+                "num_warps": 2,
+                "num_ctas": 1,
+                "num_stages": 1,
+            }
+
+        grid = (batch * num_q_heads * triton.cdiv(seqlen_q, BLOCK_M),)
 
         _attn_fwd[grid](
             q,
@@ -5015,6 +5025,7 @@ class FlashAttnFunc(torch.autograd.Function):
         return_lse,
         return_softmax,
         is_grad_enabled,
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     ):
@@ -5041,6 +5052,7 @@ class FlashAttnFunc(torch.autograd.Function):
                 return_softmax=return_softmax and dropout_p > 0,
                 max_seqlen_q=q.shape[1],
                 max_seqlen_k=k.shape[1],
+                persistent=persistent_forward,
             )
         )
 
@@ -5164,6 +5176,7 @@ class FlashAttnFunc(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
@@ -5179,6 +5192,7 @@ def flash_attn_func(
     deterministic=True,
     return_lse=False,
     return_attn_probs=False,
+    persistent_forward=False,
     fused_backward=False,
     onekernel_backward=False,
 ):
@@ -5243,6 +5257,7 @@ def flash_attn_func(
         return_lse,
         return_attn_probs,
         torch.is_grad_enabled(),
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     )
@@ -5264,6 +5279,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
         return_lse,
         return_softmax,
         is_grad_enabled,
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     ):
@@ -5302,6 +5318,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
                 descale_q=descale_q,
                 descale_k=descale_k,
                 descale_v=descale_v,
+                persistent=persistent_forward,
             )
         )
 
@@ -5433,7 +5450,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
         # dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
         # dk = dk[..., : k_fp8.shape[-1]]
         # dv = dv[..., : v_fp8.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
 
 
 def flash_attn_fp8_func(
@@ -5448,6 +5465,7 @@ def flash_attn_fp8_func(
     deterministic=False,
     return_lse=False,
     return_attn_probs=False,
+    persistent_forward=False,
     fused_backward=False,
     onekerenl_backward=False,
 ):
@@ -5464,6 +5482,7 @@ def flash_attn_fp8_func(
         return_lse,
         return_attn_probs,
         torch.is_grad_enabled(),
+        persistent_forward,
         fused_backward,
         onekerenl_backward,
     )
@@ -5490,6 +5509,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         return_softmax,
         block_table,
         is_grad_enabled,
+        persistent_forward,
         fused_backward,
         onekerenl_backward,
     ):
@@ -5518,6 +5538,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
                 max_seqlen_k=max_seqlen_k,
                 cu_seqlens_q=cu_seqlens_q,
                 cu_seqlens_k=cu_seqlens_k,
+                persistent=persistent_forward,
             )
         )
         if is_grad:
@@ -5643,6 +5664,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
@@ -5663,6 +5685,7 @@ def flash_attn_varlen_func(
     return_lse=False,
     return_attn_probs=False,
     block_table=None,
+    persistent_forward=False,
     fused_backward=False,
     onekernel_backward=False,
 ):
@@ -5738,6 +5761,7 @@ def flash_attn_varlen_func(
         return_attn_probs,
         block_table,
         torch.is_grad_enabled(),
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     )
@@ -5764,6 +5788,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
         return_softmax,
         block_table,
         is_grad_enabled,
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     ):
@@ -5802,6 +5827,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
                 descale_q=descale_q,
                 descale_k=descale_k,
                 descale_v=descale_v,
+                persistent=persistent_forward,
             )
         )
         if is_grad:
@@ -5947,7 +5973,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
         dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : k_fp8.shape[-1]]
         dv = dv[..., : v_fp8.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
 
 
 def flash_attn_varlen_fp8_func(
@@ -5967,6 +5993,7 @@ def flash_attn_varlen_fp8_func(
     return_lse=False,
     return_attn_probs=False,
     block_table=None,
+    persistent_forward=False,
     fused_backward=False,
     onekernel_backward=False,
 ):
@@ -5988,6 +6015,7 @@ def flash_attn_varlen_fp8_func(
         return_attn_probs,
         block_table,
         torch.is_grad_enabled(),
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     )

@@ -20,20 +20,20 @@ def _gemm_afp4_wfp4_kernel(
     c_ptr,
     a_scales_ptr,
     b_scales_ptr,
-    M,
-    N,
-    K,
-    stride_am,
-    stride_ak,
-    stride_bk,
+    M: tl.constexpr,
+    N: tl.constexpr,
+    K: tl.constexpr,
+    stride_am: tl.constexpr,
+    stride_ak: tl.constexpr,
+    stride_bk: tl.constexpr,
     stride_bn,
-    stride_ck,
-    stride_cm,
-    stride_cn,
-    stride_asm,
-    stride_ask,
-    stride_bsn,
-    stride_bsk,
+    stride_ck: tl.constexpr,
+    stride_cm: tl.constexpr,
+    stride_cn: tl.constexpr,
+    stride_asm: tl.constexpr,
+    stride_ask: tl.constexpr,
+    stride_bsn: tl.constexpr,
+    stride_bsk: tl.constexpr,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
@@ -252,18 +252,19 @@ def gemm_afp4wfp4(
         else:
             y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
     elif M <= 128:
-        BLOCK_SIZE_M = triton.next_power_of_2(M)
-        BLOCK_SIZE_N = 128
+        BLOCK_SIZE_M = 128
+        BLOCK_SIZE_N = 256
         BLOCK_SIZE_K = 256
         GROUP_SIZE_M = 1
-        waves_per_eu = 4
+        waves_per_eu = 2
+        aggregate = 2
         kpack = 1
-        num_warps = 4
+        num_warps = 8
         num_stages = 2
         matrix_instr_nonkdim = 16
-        cache_modifier = ".cg"
+        cache_modifier = None#".cg"
 
-        NUM_KSPLIT = 4
+        NUM_KSPLIT = 1
         SPLITK_BLOCK_SIZE = (
             triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
         )
@@ -339,6 +340,7 @@ def gemm_afp4wfp4(
         waves_per_eu=waves_per_eu,
         kpack=kpack,
         num_warps=num_warps,
+        aggregate_load_factor = aggregate,
         num_stages=num_stages,
         matrix_instr_nonkdim=matrix_instr_nonkdim,
     )

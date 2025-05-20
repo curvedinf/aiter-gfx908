@@ -159,8 +159,8 @@ def test_fmoe(
         w1 = torch.randn((E, inter_dim, model_dim), dtype=dtype)
     w2 = torch.ones((E, model_dim, inter_dim), dtype=dtype) 
 
-    # w1 = torch.randn((E, 1, 1), dtype=dtype)
-    # w1 = w1.repeat(1, inter_dim * 2,model_dim)
+    w1 = torch.randn((E, 1, 1), dtype=dtype)
+    w1 = w1.repeat(1, inter_dim * 2,model_dim)
 
     # for i in range(inter_dim * 2):
     #     w1[:, i, :] = i

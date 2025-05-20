@@ -275,6 +275,21 @@
             py::arg("rng_state") = std::nullopt,      \
             py::arg("gen") = std::nullopt);
 
+#define MHA_FWD_ASM_PYBIND                                  \
+      m.def("fmha_v3_fwd", &aiter::torch_itfs::fmha_v3_fwd, \
+            py::arg("q"), py::arg("k"), py::arg("v"),       \
+            py::arg("dropout_p"),                           \
+            py::arg("softmax_scale"),                       \
+            py::arg("is_causal"),                           \
+            py::arg("window_size_left"),                    \
+            py::arg("window_size_right"),                   \
+            py::arg("return_softmax_lse"),                  \
+            py::arg("return_dropout_randval"),              \
+            py::arg("out") = std::nullopt,                  \
+            py::arg("bias") = std::nullopt,                 \
+            py::arg("alibi_slopes") = std::nullopt,         \
+            py::arg("gen") = std::nullopt);
+
 #define MHA_FWD_PYBIND                                \
       m.def("mha_fwd", &aiter::torch_itfs::mha_fwd,   \
             py::arg("q"), py::arg("k"), py::arg("v"), \
@@ -323,6 +338,7 @@
             py::arg("max_seqlen_k"),                              \
             py::arg("dropout_p"),                                 \
             py::arg("softmax_scale"),                             \
+            py::arg("logits_soft_cap"),                           \
             py::arg("zero_tensors"),                              \
             py::arg("is_causal"),                                 \
             py::arg("window_size_left"),                          \
@@ -333,6 +349,28 @@
             py::arg("block_table") = std::nullopt,                \
             py::arg("bias") = std::nullopt,                       \
             py::arg("alibi_slopes") = std::nullopt,               \
+            py::arg("gen") = std::nullopt);
+
+#define MHA_BATCH_PREFILL_PYBIND                      \
+      m.def("mha_batch_prefill", &aiter::torch_itfs::mha_batch_prefill,  \
+            py::arg("q"), py::arg("k"), py::arg("v"),                    \
+            py::arg("cu_seqlens_q"),                                     \
+            py::arg("kv_indptr"),                                        \
+            py::arg("kv_page_indices"),                                  \
+            py::arg("max_seqlen_q"),                                     \
+            py::arg("max_seqlen_k"),                                     \
+            py::arg("dropout_p"),                                        \
+            py::arg("softmax_scale"),                                    \
+            py::arg("logits_soft_cap"),                                  \
+            py::arg("zero_tensors"),                                     \
+            py::arg("is_causal"),                                        \
+            py::arg("window_size_left"),                                 \
+            py::arg("window_size_right"),                                \
+            py::arg("return_softmax_lse"),                               \
+            py::arg("return_dropout_randval"),                           \
+            py::arg("out") = std::nullopt,                               \
+            py::arg("bias") = std::nullopt,                              \
+            py::arg("alibi_slopes") = std::nullopt,                      \
             py::arg("gen") = std::nullopt);
 
 #define MOE_CK_2STAGES_PYBIND                          \
@@ -497,9 +535,9 @@
       m.def("batched_rotary_embedding", &batched_rotary_embedding, "batched_rotary_embedding");
 
 #define QUANT_PYBIND                                                                   \
-      m.def("static_scaled_fp8_quant", &static_scaled_fp8_quant);                      \
-      m.def("dynamic_scaled_fp8_quant", &dynamic_scaled_fp8_quant);                    \
-      m.def("dynamic_per_token_scaled_fp8_quant", &dynamic_per_token_scaled_fp8_quant, \
+      m.def("static_per_tensor_quant", &static_per_tensor_quant);                      \
+      m.def("dynamic_per_tensor_quant", &dynamic_per_tensor_quant);                    \
+      m.def("dynamic_per_token_scaled_quant", &dynamic_per_token_scaled_quant, \
             py::arg("out"), py::arg("input"),                                          \
             py::arg("scales"), py::arg("scale_ub") = std::nullopt);
 
@@ -566,6 +604,7 @@
           .value("No", QuantType::No)                   \
           .value("per_Tensor", QuantType::per_Tensor)   \
           .value("per_Token", QuantType::per_Token)     \
+          .value("per_1x32", QuantType::per_1x32)     \
           .value("per_1x128", QuantType::per_1x128)     \
           .value("per_128x128", QuantType::per_128x128) \
           .export_values();                             \

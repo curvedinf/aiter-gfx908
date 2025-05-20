@@ -66,7 +66,6 @@ def _remap_XCD(k, last_k, NUM_XCD):
     new_index = u * q + (r - u) * (q - 1) + r + m
     return new_index
 
-
 @triton.jit
 def _wid2pid(wid, BATCH_SIZE, NUM_HEAD_PIDS, NUM_SEQ_PIDS, NUM_XCD: tl.constexpr = 8):
     """
@@ -86,24 +85,15 @@ def _wid2pid(wid, BATCH_SIZE, NUM_HEAD_PIDS, NUM_SEQ_PIDS, NUM_XCD: tl.constexpr
     1. Fastest changing dim is the head dim. Then seq_blk dim. Then batch dim.
     2. Since workgroups are distributed across the XCDs in a round robin fashion, we do remapping to have consequent head indices being processed at the same XCD.
 
-    The exception is when NUM_HEAD_PIDS < NUM_XCD, in which case we traverse <BATCH_RESIDUE = NUM_XCD // NUM_HEAD_PIDS> amount of batch samples before moving to the seq_blk idx.
-
     The goal here is that for each round robin iteration of assigning workgroups to the XCDs:
     - the workgroups have equal amount of work (they do, because only head or batch changes during round robin iteration)
     - the workgroups inside a XCD process grouped heads (they do, because of the remapping) or consecutive sequence blocks (prioritized after consecutive heads)
     """
 
-    if NUM_HEAD_PIDS < NUM_XCD:
-        BATCH_RESIDUE = NUM_XCD // NUM_HEAD_PIDS
-        head_idx = wid % NUM_HEAD_PIDS
-        batch_idx = ((wid // NUM_HEAD_PIDS) % BATCH_RESIDUE + wid // (NUM_HEAD_PIDS * BATCH_RESIDUE * NUM_SEQ_PIDS) * BATCH_RESIDUE) % BATCH_SIZE
-        seq_blk_idx = (wid // (NUM_HEAD_PIDS * BATCH_RESIDUE)) % NUM_SEQ_PIDS
-        head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_HEAD_PIDS)
-    else:
-        head_idx = wid % NUM_HEAD_PIDS
-        head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_XCD)
-        seq_blk_idx = (wid // NUM_HEAD_PIDS) % NUM_SEQ_PIDS
-        batch_idx = (wid // (NUM_SEQ_PIDS * NUM_HEAD_PIDS)) % BATCH_SIZE
+    head_idx = wid % NUM_HEAD_PIDS
+    head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_XCD)
+    seq_blk_idx = (wid // NUM_HEAD_PIDS) % NUM_SEQ_PIDS
+    batch_idx = (wid // (NUM_SEQ_PIDS * NUM_HEAD_PIDS)) % BATCH_SIZE
 
     return batch_idx, head_idx, seq_blk_idx
 

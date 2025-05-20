@@ -1797,18 +1797,31 @@ def _flash_attn_forward(
 
     # persistent workgroup loops over multiple workgroups of work
     if persistent:
-        # Tuned for MI300x
-        BLOCK_M = 256
-        config = {
-            "BLOCK_M": BLOCK_M,
-            "BLOCK_N": 64,
-            "waves_per_eu": 2,
-            "num_warps": 8,
-            "num_ctas": 1,
-            "matrix_instr_nonkdim": 16,
-            "num_ctas": 1,
-            "num_stages": 1,
-        }
+        device_properties = torch.cuda.get_device_properties("cuda")
+        if "gfx950" in device_properties.gcnArchName: # MI350
+            BLOCK_M = 256
+            config = {
+                "BLOCK_M": BLOCK_M,
+                "BLOCK_N": 128,
+                "waves_per_eu": 2,
+                "num_warps": 8,
+                "num_ctas": 1,
+                "matrix_instr_nonkdim": 32,
+                "num_ctas": 1,
+                "num_stages": 1,
+            } 
+        else: # MI300X and else
+            BLOCK_M = 256
+            config = {
+                "BLOCK_M": BLOCK_M,
+                "BLOCK_N": 64,
+                "waves_per_eu": 2,
+                "num_warps": 8,
+                "num_ctas": 1,
+                "matrix_instr_nonkdim": 16,
+                "num_ctas": 1,
+                "num_stages": 1,
+            }
 
         # Dropout significantly increases VGPR usage so use small tiles
         if enable_dropout or q.dtype == torch.float32:
@@ -1823,7 +1836,7 @@ def _flash_attn_forward(
             }
         
         # number of persistent workgroups launched
-        NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count * 1
+        NUM_WGS = device_properties.multi_processor_count * 1
         pid_counter = torch.ones((1,), device=q.device, dtype=torch.int32) * NUM_WGS
         grid = (min(NUM_WGS, batch * num_q_heads * triton.cdiv(seqlen_q, BLOCK_M)),)
         _persistent_attn_fwd[grid](

@@ -46,6 +46,12 @@ def _gemm_afp4_wfp4_kernel(
     EVEN_K: tl.constexpr,
     GRID_MN: tl.constexpr,
     cache_modifier: tl.constexpr,
+    FP8_QUANT: tl.constexpr,
+    FP8_MAX: tl.constexpr,
+    fp8_scales_out_ptr,
+    fp8_scales_out_stride_sk,
+    fp8_scales_out_stride_m,
+    fp8_scales_out_stride_n,
 ):
     """Kernel for computing the matmul C = A x B.
     A and B inputs are in the microscale fp4 (mxfp4) format.
@@ -142,6 +148,11 @@ def _gemm_afp4_wfp4_kernel(
             a_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_ask
             b_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_bsk
 
+        if FP8_QUANT:
+            c_scale = tl.max(tl.abs(accumulator)) / FP8_MAX
+            c_scale_recip = 1 / c_scale
+            accumulator = accumulator * c_scale_recip
+
         c = accumulator.to(c_ptr.type.element_ty)
 
         # Write back the block of the output matrix C with masks.
@@ -155,6 +166,15 @@ def _gemm_afp4_wfp4_kernel(
         )
         c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
         tl.store(c_ptrs, c, mask=c_mask)
+
+        if FP8_QUANT:
+            tl.store(
+                fp8_scales_out_ptr
+                + pid_k * fp8_scales_out_stride_sk
+                + pid_m * fp8_scales_out_stride_m
+                + pid_n * fp8_scales_out_stride_n,
+                c_scale,
+            )
 
 
 @triton.jit
@@ -172,6 +192,12 @@ def _gemm_afp4_wfp4_reduce_kernel(
     BLOCK_SIZE_N: tl.constexpr,
     ACTUAL_KSPLIT: tl.constexpr,
     MAX_KSPLIT: tl.constexpr,
+    FP8_QUANT: tl.constexpr,
+    FP8_MAX: tl.constexpr,
+    fp8_scales_in_ptr,
+    fp8_scales_in_stride_sk,
+    fp8_scales_in_stride_m,
+    fp8_scales_in_stride_n,
 ):
 
     pid_m = tl.program_id(axis=0)
@@ -191,6 +217,19 @@ def _gemm_afp4_wfp4_reduce_kernel(
         c = tl.load(c_in_ptrs)
     else:
         c = tl.load(c_in_ptrs, mask=offs_k[:, None, None] < ACTUAL_KSPLIT)
+
+    if FP8_QUANT:
+        fp8_scales_in_ptrs = (
+            fp8_scales_in_ptr
+            + offs_k[:, None, None] * fp8_scales_in_stride_sk
+            + pid_m * fp8_scales_in_stride_m
+            + pid_n * fp8_scales_in_stride_n
+        )
+        c_scales = tl.load(
+            fp8_scales_in_ptrs, mask=offs_k[:, None, None] < ACTUAL_KSPLIT
+        )
+        c = c.to(fp8_scales_in_ptr.type.element_ty) * c_scales
+
     c = tl.sum(c, axis=0)
 
     c = c.to(c_out_ptr.type.element_ty)
@@ -240,6 +279,39 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
     # print(K, SPLITK_BLOCK_SIZE // 2, BLOCK_SIZE_K // 2, NUM_KSPLIT)
     # print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
     return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
+
+
+def get_splitk_tmp_tensor(
+    NUM_KSPLIT: int,
+    M: int,
+    N: int,
+    y: torch.Tensor,
+    BLOCK_SIZE_M: int,
+    BLOCK_SIZE_N: int,
+    quant_type: int = 0,
+):
+    y_pp = None
+    fp8_scales_out = None
+
+    if NUM_KSPLIT > 1:
+        if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_QUANT") == "2":
+            fp8_dtype = torch.float8_e4m3fn
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=fp8_dtype, device=y.device)
+            fp8_scales_out = torch.zeros(
+                (
+                    NUM_KSPLIT,
+                    triton.cdiv(M, BLOCK_SIZE_M),
+                    triton.cdiv(N, BLOCK_SIZE_N),
+                ),
+                dtype=torch.float32,
+                device=y.device,
+            )
+        elif os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_QUANT") == "1":
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
+        else:
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
+
+    return y_pp, fp8_scales_out
 
 
 # Wrapper for gemm kernel.
@@ -296,13 +368,11 @@ def gemm_afp4wfp4(
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, BLOCK_SIZE_K, NUM_KSPLIT
         )
-
-        if NUM_KSPLIT == 1:
-            y_pp = None
-        elif os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
-            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
-        else:
-            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
+        ## force
+        NUM_KSPLIT = 4
+        SPLITK_BLOCK_SIZE = (
+            triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
+        )
     elif M < 128:
         BLOCK_SIZE_M = triton.next_power_of_2(M)
         BLOCK_SIZE_N = 128
@@ -328,13 +398,6 @@ def gemm_afp4wfp4(
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, BLOCK_SIZE_K, NUM_KSPLIT
         )
-
-        if NUM_KSPLIT == 1:
-            y_pp = None
-        elif os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
-            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
-        else:
-            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
     elif M <= 256:
         BLOCK_SIZE_M = 128
         BLOCK_SIZE_N = 128
@@ -360,13 +423,6 @@ def gemm_afp4wfp4(
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, BLOCK_SIZE_K, NUM_KSPLIT
         )
-
-        if NUM_KSPLIT == 1:
-            y_pp = None
-        elif os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
-            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
-        else:
-            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
     elif M <= 512:
         BLOCK_SIZE_M = 256
         BLOCK_SIZE_N = 256
@@ -393,13 +449,6 @@ def gemm_afp4wfp4(
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, BLOCK_SIZE_K, NUM_KSPLIT
         )
-
-        if NUM_KSPLIT == 1:
-            y_pp = None
-        elif os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
-            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
-        else:
-            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
     else:
         BLOCK_SIZE_M = 256
         BLOCK_SIZE_N = 256
@@ -415,6 +464,16 @@ def gemm_afp4wfp4(
         NUM_KSPLIT = 1
         SPLITK_BLOCK_SIZE = 2 * K
         y_pp = None
+    # print("GEMM_MXFP4", NUM_KSPLIT, M, N, K, (y_pp.dtype if y_pp is not None else "None"))
+
+    y_pp, fp8_scales_out = get_splitk_tmp_tensor(
+        NUM_KSPLIT, M, N, y, BLOCK_SIZE_M, BLOCK_SIZE_N
+    )
+
+    FP8_QUANT = fp8_scales_out is not None
+    FP8_MAX = (
+        torch.finfo(torch.float8_e4m3fn).max if fp8_scales_out is not None else None
+    )
 
     grid = lambda META: (  # noqa: E731
         (
@@ -450,6 +509,18 @@ def gemm_afp4wfp4(
         NUM_KSPLIT,
         SPLITK_BLOCK_SIZE,
         cache_modifier=cache_modifier,
+        FP8_QUANT=FP8_QUANT,
+        FP8_MAX=FP8_MAX,
+        fp8_scales_out_ptr=fp8_scales_out,
+        fp8_scales_out_stride_sk=(
+            fp8_scales_out.stride(0) if fp8_scales_out is not None else 0
+        ),
+        fp8_scales_out_stride_m=(
+            fp8_scales_out.stride(1) if fp8_scales_out is not None else 0
+        ),
+        fp8_scales_out_stride_n=(
+            fp8_scales_out.stride(2) if fp8_scales_out is not None else 0
+        ),
         waves_per_eu=waves_per_eu,
         kpack=kpack,
         num_warps=num_warps,
@@ -458,13 +529,18 @@ def gemm_afp4wfp4(
     )
 
     if NUM_KSPLIT > 1:
-        REDUCE_BLOCK_SIZE_M = 16
-        # TODO: Need to debug - REDUCE_BLOCK_SIZE_N=128 with fp32 partials fails
-        # NOTE: REDUCE_BLOCK_SIZE_N=16 gives best perf with fp32 partials and
-        # REDUCE_BLOCK_SIZE_N=128 gives best perf with bf16 partials
-        REDUCE_BLOCK_SIZE_N = (
-            128 if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1" else 64
-        )
+        if FP8_QUANT:
+            REDUCE_BLOCK_SIZE_M = BLOCK_SIZE_M
+            REDUCE_BLOCK_SIZE_N = BLOCK_SIZE_N
+        else:
+            REDUCE_BLOCK_SIZE_M = 16
+            # TODO: Need to debug - REDUCE_BLOCK_SIZE_N=128 with fp32 partials fails
+            # NOTE: REDUCE_BLOCK_SIZE_N=16 gives best perf with fp32 partials and
+            # REDUCE_BLOCK_SIZE_N=128 gives best perf with bf16 partials
+            REDUCE_BLOCK_SIZE_N = (
+                128 if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1" else 64
+            )
+
         ACTUAL_KSPLIT = triton.cdiv(K, (SPLITK_BLOCK_SIZE // 2))
 
         grid_reduce = (
@@ -485,4 +561,16 @@ def gemm_afp4wfp4(
             REDUCE_BLOCK_SIZE_N,
             ACTUAL_KSPLIT,
             NUM_KSPLIT,
+            FP8_QUANT=FP8_QUANT,
+            FP8_MAX=FP8_MAX,
+            fp8_scales_in_ptr=fp8_scales_out,
+            fp8_scales_in_stride_sk=(
+                fp8_scales_out.stride(0) if fp8_scales_out is not None else 0
+            ),
+            fp8_scales_in_stride_m=(
+                fp8_scales_out.stride(1) if fp8_scales_out is not None else 0
+            ),
+            fp8_scales_in_stride_n=(
+                fp8_scales_out.stride(2) if fp8_scales_out is not None else 0
+            ),
         )

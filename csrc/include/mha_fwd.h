@@ -12,7 +12,8 @@ struct mha_fwd_traits : public fmha_fwd_traits {
   mha_fwd_traits(int head_size_q, int head_size_v, std::string dtype,
                  bool is_group_mode, bool has_logits_soft_cap,
                  const mask_info &mask, bias_enum bias_type, bool has_lse,
-                 bool has_dropout)
+                 bool has_dropout, bool is_sglang_layout=false,
+                 bool is_chunked_prefill=false)
       : fmha_fwd_traits{head_size_q,
                         head_size_v,
                         dtype,
@@ -23,6 +24,8 @@ struct mha_fwd_traits : public fmha_fwd_traits {
                         bias_type,
                         has_lse,
                         has_dropout,
+                        is_sglang_layout,
+                        is_chunked_prefill,
                         false} // do_fp8_static_quant
   {}
 };
@@ -61,6 +64,7 @@ float mha_fwd_splitkv(mha_fwd_splitkv_args args,
 float mha_batch_prefill(mha_batch_prefill_args args,
                         const ck_tile::stream_config &stream_config,
                         std::string q_dtype_str, bool is_group_mode,
-                        mask_info mask, bias_enum bias_type, bool has_lse);
+                        mask_info mask, bias_enum bias_type, bool has_lse,
+                        bool is_chunked_prefill=false);
 
 } // namespace aiter

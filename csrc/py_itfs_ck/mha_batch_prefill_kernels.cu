@@ -21,6 +21,7 @@ get_ck_fmha_batch_prefill_args(bool has_lse,
                                const int h_k,
                                const int d,
                                const int d_v,
+                               const int page_block_size,
                                // device pointers
                                const at::Tensor q,
                                const at::Tensor k,
@@ -123,6 +124,10 @@ get_ck_fmha_batch_prefill_args(bool has_lse,
     args.scale_p         = 1;
     args.scale_o         = 1;
 
+    args.page_block_size = page_block_size;
+    args.block_table_batch_stride = kv_page_indices.dim() == 1 ?
+        0 : kv_page_indices.size(1);
+
     args.logits_soft_cap = logits_soft_cap;
 
     args.stride_q             = stride_q;
@@ -157,8 +162,8 @@ get_ck_fmha_batch_prefill_args(bool has_lse,
 
 std::vector<at::Tensor>
 mha_batch_prefill(at::Tensor& q,                  // [total_q, hq, d]
-                  const at::Tensor& k,            // [total_k, hk, d]
-                  const at::Tensor& v,            // [total_k, hk, d]
+                  at::Tensor& k,                  // [total_k, hk, d]
+                  at::Tensor& v,                  // [total_k, hk, d]
                   const at::Tensor& cu_seqlens_q, // [b+1]
                   const at::Tensor& kv_indptr,    // [b+1]
                   const at::Tensor& kv_page_indices,
@@ -173,6 +178,7 @@ mha_batch_prefill(at::Tensor& q,                  // [total_q, hq, d]
                   int window_size_right,
                   bool return_softmax_lse,
                   bool return_dropout_randval,
+                  bool is_chunked_prefill,
                   std::optional<at::Tensor> out_,                // [total_q, hq, d]
                   std::optional<const at::Tensor> bias_,         // [total_q, max_seqlen_k]
                   std::optional<const at::Tensor> alibi_slopes_, // [hq] or [b, hq]
@@ -212,10 +218,11 @@ mha_batch_prefill(at::Tensor& q,                  // [total_q, hq, d]
     const int batch_size  = cu_seqlens_q.numel() - 1;
     int num_heads         = sizes[1];
     const int head_size_q = sizes[2];
-    const int head_size_v = v.size(2);
-    const int num_heads_k = k.size(1);
+    const int head_size_v = v.size(-1);
+    const int num_heads_k = k.size(-2);
 
     const int num_blocks = k.size(0);
+    const int page_block_size = k.dim() == 3 ? 1 : k.size(1);
 
     if(max_seqlen_q == 1 && !alibi_slopes_.has_value())
     {
@@ -274,9 +281,11 @@ mha_batch_prefill(at::Tensor& q,                  // [total_q, hq, d]
         mask = mask_info::decode(mask_identify, max_seqlen_q, max_seqlen_k); // local
     }
 
+    k = k.reshape({num_blocks * page_block_size, num_heads_k, head_size_q});
+    v = v.reshape({num_blocks * page_block_size, num_heads_k, head_size_v});
     CHECK_SHAPE(q, total_q, num_heads, head_size_q);
-    CHECK_SHAPE(k, num_blocks, num_heads_k, head_size_q);
-    CHECK_SHAPE(v, num_blocks, num_heads_k, head_size_v);
+    CHECK_SHAPE(k, num_blocks * page_block_size, num_heads_k, head_size_q);
+    CHECK_SHAPE(v, num_blocks * page_block_size, num_heads_k, head_size_v);
 
     CHECK_SHAPE(cu_seqlens_q, batch_size + 1);
     CHECK_SHAPE(kv_indptr, batch_size + 1);
@@ -364,6 +373,7 @@ mha_batch_prefill(at::Tensor& q,                  // [total_q, hq, d]
                                                    num_heads_k,
                                                    head_size_q,
                                                    head_size_v,
+                                                   page_block_size,
                                                    q,
                                                    k,
                                                    v,
@@ -386,7 +396,8 @@ mha_batch_prefill(at::Tensor& q,                  // [total_q, hq, d]
                                            true, // is_group_mode
                                            mask,
                                            bias_type,
-                                           has_lse);
+                                           has_lse,
+                                           is_chunked_prefill);
         TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd_splitkv");
     }
     else

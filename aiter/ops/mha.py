@@ -1399,6 +1399,7 @@ def mha_batch_prefill(
     window_size_right: int,
     return_softmax_lse: bool,
     return_dropout_randval: bool,
+    is_chunked_prefill: bool,
     out: Optional[Tensor] = None,
     alibi_slopes: Optional[Tensor] = None,
     gen: Optional[Generator] = None,
@@ -1423,6 +1424,7 @@ def _mha_batch_prefill(
     alibi_slopes: Optional[torch.Tensor] = None,
     return_lse: bool = False,
     return_softmax: bool = False,
+    is_chunked_prefill: bool = False,
     zero_tensors: bool = False,
     out: torch.Tensor = None,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -1468,6 +1470,18 @@ def _mha_batch_prefill(
     else:
         md_name += "_dropout"
         filter_fwd += "_dropout*"
+    if is_chunked_prefill:
+        md_name += "_chunked"
+        filter_fwd += "_chunked*"
+    else:
+        md_name += "_nchunked"
+        filter_fwd += "_nchunked*"
+    # if kv_page_indices.dim() == 1:
+    #     md_name += "_sglang"
+    #     filter_fwd += "_sglang*"
+    # else:
+    #     md_name += "_vllm"
+    #     filter_fwd += "_vllm*"
     blob_gen_cmd = [
         f"{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill "
         "--receipt 200 --filter {} --output_dir {{}}".format(filter_fwd)
@@ -1495,6 +1509,7 @@ def _mha_batch_prefill(
         window_size_right,
         return_lse,
         return_softmax,
+        is_chunked_prefill,
         out,
         alibi_slopes,
         None,
@@ -1521,12 +1536,13 @@ def mha_batch_prefill_func(
     deterministic=False,
     return_lse=False,
     return_attn_probs=False,
+    is_chunked_prefill=False,
     out=None,
 ):
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
-    head_size_q_og = q.size(2)
-    head_size_v_og = v.size(2)
+    head_size_q_og = q.size(-1)
+    head_size_v_og = v.size(-1)
     if head_size_q_og % 8 != 0:
         q = torch.nn.functional.pad(q, [0, 8 - head_size_q_og % 8])
         k = torch.nn.functional.pad(k, [0, 8 - head_size_q_og % 8])
@@ -1550,6 +1566,7 @@ def mha_batch_prefill_func(
         alibi_slopes=alibi_slopes,
         return_lse=return_lse,
         return_softmax=return_attn_probs and dropout_p > 0,
+        is_chunked_prefill=is_chunked_prefill,
         out=out,
     )
     out = out_padded[..., :head_size_v_og]

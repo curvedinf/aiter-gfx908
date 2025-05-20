@@ -21,7 +21,9 @@ mha_fwd_traits get_mha_fwd_traits(int head_size_q,
                                   const mask_info &mask,
                                   bias_enum bias_type,
                                   bool has_lse,
-                                  bool has_dropout)
+                                  bool has_dropout,
+                                  bool is_sglang_layout = false,
+                                  bool is_chunked_prefill = false)
 {{
     return mha_fwd_traits(head_size_q,
                           head_size_v,
@@ -31,7 +33,9 @@ mha_fwd_traits get_mha_fwd_traits(int head_size_q,
                           mask,
                           bias_type,
                           has_lse,
-                          has_dropout);
+                          has_dropout,
+                          is_sglang_layout,
+                          is_chunked_prefill);
 }}
 
 mha_fwd_splitkv_traits get_mha_fwd_splitkv_traits(int head_size_q,
@@ -111,11 +115,13 @@ float mha_batch_prefill(mha_batch_prefill_args args,
               bool is_group_mode,
               mask_info mask,
               bias_enum bias_type,
-              bool has_lse)
+              bool has_lse,
+              bool is_chunked_prefill)
 {
     int head_size_q = args.hdim_q;
     int head_size_v = args.hdim_v;
     bool has_dropout = args.p_drop > 0.f;
+    bool is_sglang_layout = args.block_table_batch_stride == 0;
     auto traits = get_mha_fwd_traits(head_size_q,
                                      head_size_v,
                                      q_dtype_str,
@@ -124,7 +130,9 @@ float mha_batch_prefill(mha_batch_prefill_args args,
                                      mask,
                                      bias_type,
                                      has_lse,
-                                     has_dropout);
+                                     has_dropout,
+                                     is_sglang_layout,
+                                     is_chunked_prefill);
     return fmha_batch_prefill(traits, args, stream_config);
 }"""
 

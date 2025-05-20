@@ -546,7 +546,6 @@ def bwd_kernel_causal( # grid = (tl.cdiv(max_seqlen_q // BLOCK_M2), batch, nhead
     # program ids
     hkid = tl.program_id(0)
     pid = tl.program_id(1)
-    # pid = _remap_XCD(pid, tl.cdiv(max_seqlen_k, BLOCK_N1) - 1, 8)
     bid = tl.program_id(2)
     if DEBUG_TRITON: print(f"\npid: {pid}, bid: {bid}, hkid: {hkid}")  # noqa: E701
     # figure out varlen start and end

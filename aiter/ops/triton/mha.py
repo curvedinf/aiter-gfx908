@@ -4246,17 +4246,28 @@ def _flash_attn_fused_backward(
 
     # After the backward pass is complete, we need to sum the split dimensions back together
     # Sum across the split dimensions to get the final gradient for DQ
-    sum_grid = (batch, num_q_heads, max_seqlen_q)
+    # sum_grid = (batch, num_q_heads, max_seqlen_q)
 
-    _sum_split_d_kernel[sum_grid](
-        dq,  # Source tensor with split dimensions
-        dq_result,  # Result tensor to store the summed gradients
-        *dq_strides,
-        *dq_result_strides,
-        BLOCK_D_MODEL=head_sz,
-        BLOCK_D_MODEL_POW2=BLOCK_D_MODEL_POW2,
-        split_d=SPLIT_D
-    )
+    # _sum_split_d_kernel[sum_grid](
+    #     dq,  # Source tensor with split dimensions
+    #     dq_result,  # Result tensor to store the summed gradients
+    #     *dq_strides,
+    #     *dq_result_strides,
+    #     BLOCK_D_MODEL=head_sz,
+    #     BLOCK_D_MODEL_POW2=BLOCK_D_MODEL_POW2,
+    #     split_d=SPLIT_D
+    # )
+
+    # TODO convert this into a triton kernel
+    # Sum the split dq dimensions back into dq_result
+    # Take slices from dq and sum them to build the original gradient
+    for i in range(SPLIT_D):
+        slice_start = i * head_sz
+        slice_end = (i + 1) * head_sz
+        if i == SPLIT_D - 1:  # Last slice might be smaller
+            slice_end = min(slice_end, orig_shape[-1])
+        dq_slice = dq[..., slice_start:slice_end]
+        dq_result[..., :slice_end-slice_start] += dq_slice
 
     return delta
 

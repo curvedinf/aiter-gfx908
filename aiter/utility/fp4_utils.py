@@ -14,7 +14,6 @@ def fp32_to_fp4_e2m1fn_x2(x):
     x = x.view(dtypes.fp4x2)
     return x
 
-
 def down_size(size):
     assert size[-1] % 2 == 0, f"{size} last dim not divisible by two"
     return (*size[:-1], size[-1] // 2)

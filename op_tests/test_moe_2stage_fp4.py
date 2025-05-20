@@ -154,10 +154,13 @@ def test_fmoe(
     torch_act = aiter.get_torch_act(actType)
     input = torch.randn((token, model_dim), dtype=dtype)
     if use_g1u1:
-        w1 = torch.randn((E, inter_dim * 2, model_dim), dtype=dtype)
+        w1 = torch.ones((E, inter_dim * 2, model_dim), dtype=dtype) * 6
     else:
         w1 = torch.randn((E, inter_dim, model_dim), dtype=dtype)
-    w2 = torch.randn((E, model_dim, inter_dim), dtype=dtype) 
+    w2 = torch.ones((E, model_dim, inter_dim), dtype=dtype) 
+
+    # w1 = torch.randn((E, 1, 1), dtype=dtype)
+    # w1 = w1.repeat(1, inter_dim * 2,model_dim)
 
     # for i in range(inter_dim * 2):
     #     w1[:, i, :] = i
@@ -165,7 +168,7 @@ def test_fmoe(
     # for i in range(model_dim):
     #     w1[:, :, i] = i
 
-    score = torch.ones((token, E), dtype=dtype)
+    score = torch.randn((token, E), dtype=dtype)
     topk_weights, topk_ids = fused_topk(input, score, topk, True)
 
     M, _ = topk_ids.shape
@@ -184,17 +187,16 @@ def test_fmoe(
     else:
         w1_qt, w1_scale = torch_quant(w1.view(-1, model_dim), quant_dtype=WQDType)
         w2_qt, w2_scale = torch_quant(w2.view(-1, model_dim), quant_dtype=WQDType)
+
     w1_qt = w1_qt_aiter = w1_qt.view(E, inter_dim * 2, -1)
     w2_qt = w2_qt_aiter = w2_qt.view(E, model_dim, -1)
-
-
     # w1_scale = 0
     # w2_scale = 0
 
     a1_qt, a1_scale = torch_quant(input, quant_dtype=AQDType)
-    a1_scale = torch.ones_like(a1_scale) * 126
-    w1_scale = torch.ones_like(w1_scale) * 126
-    w2_scale = torch.ones_like(w2_scale) * 126
+    # a1_scale = torch.ones_like(a1_scale) * 126
+    # w1_scale = torch.ones_like(w1_scale) * 126
+    # w2_scale = torch.ones_like(w2_scale) * 126
     # w1_scale = w1_scale.fill_(1)
     # a1_scale = a1_scale.fill_(1)
 
@@ -213,23 +215,20 @@ def test_fmoe(
         num_iters=3,
         doweight=doweight_stage1,
     )
-    for i in range(3072):
-        w1_qt_aiter[:, :, i] = i % 256
-    if WQDType == torch.int4:  # int4 w quant
-        w1_qt_aiter = rearrange_4bit_elements(
-            convert_int8_to_uint32_int4(
-                shuffle_weight(w1_qt_aiter, (16, 16), use_int4=True)
-            )
-        )
-        w2_qt_aiter = rearrange_4bit_elements(
-            convert_int8_to_uint32_int4(
-                shuffle_weight(w2_qt_aiter, (16, 16), use_int4=True)
-            )
-        )
-    else:
-        w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(16, 16))
-        w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(16, 16))
-    print(f"{w1_qt_aiter.view(-1)[0:128]=}")
+    # for i in range(inter_dim * 2):
+    #     w1_qt_aiter[:, i, :] = i % 256
+    # if WQDType == torch.int4:  # int4 w quant
+    # w1_qt_aiter = rearrange_4bit_elements(
+    #         shuffle_weight(w1_qt_aiter, (16, 16), use_int4=True)
+    # )
+    # w2_qt_aiter = rearrange_4bit_elements(
+    #         shuffle_weight(w2_qt_aiter, (16, 16), use_int4=True)
+    # )
+    # print(w1_qt_aiter.shape)
+    # else:
+    w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(16, 16))
+    w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(16, 16))
+    # print(f"{w1_qt_aiter[0,0:4, 0:64]=}")
     # ######################## stage 1 start ###########
     out1_ck, us = run_perftest(
         ck_moe_stage1,
@@ -320,7 +319,7 @@ def test_fmoe(
     # if qType == aiter.QuantType.per_Token:
     #     out1_ck = out1_ref.view(token, -1)
     # a2_qt, a2_scale = torch_quant(out1_ref.view(token, -1), quant_dtype=AQDType)
-    a2_qt = a2_qt.view(M, topk, -1)
+    # a2_qt = a2_qt.view(M, topk, -1)
 
     # out2_ck, us = run_perftest(
     #     ck_moe_stage2,

@@ -1714,7 +1714,7 @@ def _flash_attn_forward(
     descale_q: Optional[torch.Tensor] = None,
     descale_k: Optional[torch.Tensor] = None,
     descale_v: Optional[torch.Tensor] = None,
-    persistent: bool = False,
+    persistent: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
     # FP8
@@ -1821,16 +1821,18 @@ def _flash_attn_forward(
     
     if persistent:
         config = {
-            "BLOCK_M": 128,
+            "BLOCK_M": 256,
             "BLOCK_N": 64,
             "waves_per_eu": 2,
-            "num_warps": 4,
+            "num_warps": 8,
+            "num_ctas": 1,
+            "matrix_instr_nonkdim": 16,
             "num_ctas": 1,
             "num_stages": 1,
         }
         
         # number of persistent workgroups launched
-        NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count * 2
+        NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count * 1
         pid_counter = torch.ones(
             (1,), device=q.device, dtype=torch.int32
         ) * NUM_WGS

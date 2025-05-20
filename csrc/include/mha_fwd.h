@@ -24,9 +24,9 @@ struct mha_fwd_traits : public fmha_fwd_traits {
                         bias_type,
                         has_lse,
                         has_dropout,
+                        false, // do_fp8_static_quant
                         is_sglang_layout,
-                        is_chunked_prefill,
-                        false} // do_fp8_static_quant
+                        is_chunked_prefill}
   {}
 };
 

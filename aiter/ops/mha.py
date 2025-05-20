@@ -1470,18 +1470,18 @@ def _mha_batch_prefill(
     else:
         md_name += "_dropout"
         filter_fwd += "_dropout*"
+    if kv_page_indices.dim() == 1:
+        md_name += "_sglang"
+        filter_fwd += "_sglang*"
+    else:
+        md_name += "_vllm"
+        filter_fwd += "_vllm*"
     if is_chunked_prefill:
         md_name += "_chunked"
         filter_fwd += "_chunked*"
     else:
         md_name += "_nchunked"
         filter_fwd += "_nchunked*"
-    # if kv_page_indices.dim() == 1:
-    #     md_name += "_sglang"
-    #     filter_fwd += "_sglang*"
-    # else:
-    #     md_name += "_vllm"
-    #     filter_fwd += "_vllm*"
     blob_gen_cmd = [
         f"{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_prefill "
         "--receipt 200 --filter {} --output_dir {{}}".format(filter_fwd)

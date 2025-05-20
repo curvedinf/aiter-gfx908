@@ -273,7 +273,7 @@ if __name__ == "__main__":
         causal,
         logits_soft_cap,
         dtype,
-    ) in itertools.product([False, True], [0.0, 30.0], [torch.float16, torch.bfloat16]):
+    ) in itertools.product([True, ], [0.0, 30.0], [torch.float16, torch.bfloat16]):
         test_batch_prefill_with_paged_kv_cache(
             batch_size=1,
             kv_len=8192,

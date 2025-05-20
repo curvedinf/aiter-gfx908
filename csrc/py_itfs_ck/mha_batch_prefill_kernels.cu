@@ -398,7 +398,7 @@ mha_batch_prefill(at::Tensor& q,                  // [total_q, hq, d]
                                            bias_type,
                                            has_lse,
                                            is_chunked_prefill);
-        TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd_splitkv");
+        TORCH_CHECK(t >= 0, "invalid argument for mha_batch_prefill");
     }
     else
     {

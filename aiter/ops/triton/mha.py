@@ -2821,6 +2821,9 @@ def _bwd_dkdvdq_inner(
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
     workgroup_id,
+    head_id,
+    SPLIT_D: tl.constexpr,
+    NUM_Q_HEADS: tl.constexpr
 ):
     tl.assume(stride_q_m >= 0)
     tl.assume(stride_q_k >= 0)
@@ -2842,8 +2845,9 @@ def _bwd_dkdvdq_inner(
     qT_ptrs_start = (
         Q + offs_m[None, :] * stride_q_m + offs_k[:, None] * stride_q_k
     )  # [BLOCK_D_MODEL_POW2, BLOCK_M]
+    split_id = (head_id // (NUM_Q_HEADS // 8)) % SPLIT_D # TODO tune split id
     dq_ptrs_start = (
-        DQ + offs_m[:, None] * stride_dq_m + offs_k[None, :] * stride_dq_k
+        DQ + offs_m[:, None] * stride_dq_m + offs_k[None, :] * stride_dq_k + split_id * BLOCK_D_MODEL_POW2 * stride_q_k
     )  # [BLOCK_M, BLOCK_D_MODEL_POW2]
 
     do_ptrs_start = DO + offs_m[:, None] * stride_do_m + offs_k[None, :] * stride_do_k
@@ -2872,6 +2876,7 @@ def _bwd_dkdvdq_inner(
     for iter in range(num_steps):
         # Permute the iteration order to reduce the probability that concurrent workgroups (that share the same q head idx and batch idx) are at the same iteration
         blk_idx = (iter + workgroup_id) % num_steps
+        # blk_idx = iter
 
         curr_m = start_m + blk_idx * step_m
         qT_ptrs = qT_ptrs_start + blk_idx * step_m * stride_q_m
@@ -3071,6 +3076,8 @@ def _bwd_kernel_dkdvdq_causal(
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
     NUM_SMS: tl.constexpr,
+    # dq has shape [b,h,s,d * 4]
+    SPLIT_D: tl.constexpr
 ):
     tl.assume(stride_q_b >= 0)
     tl.assume(stride_q_h >= 0)
@@ -3292,6 +3299,9 @@ def _bwd_kernel_dkdvdq_causal(
         IS_FP8=IS_FP8,
         FP8_MAX=FP8_MAX,
         workgroup_id=seq_k_blk_idx,
+        head_id=head_q_idx,
+        SPLIT_D=SPLIT_D,
+        NUM_Q_HEADS=NUM_Q_HEADS
     )
 
     start_m += num_steps * MASK_BLOCK_M
@@ -3340,6 +3350,9 @@ def _bwd_kernel_dkdvdq_causal(
         IS_FP8=IS_FP8,
         FP8_MAX=FP8_MAX,
         workgroup_id=seq_k_blk_idx,
+        head_id=head_q_idx,
+        SPLIT_D=SPLIT_D,
+        NUM_Q_HEADS=NUM_Q_HEADS
     )
 
     # Write back dV and dK.
@@ -3915,6 +3928,65 @@ def _flash_attn_backward(
 
     return delta
 
+@triton.jit
+def _sum_split_d_kernel(
+    dq_ptr,
+    dq_result_ptr,
+    stride_b,
+    stride_h,
+    stride_m,
+    stride_d,
+    result_stride_b,
+    result_stride_h,
+    result_stride_m,
+    result_stride_d,
+    BLOCK_D_MODEL: tl.constexpr,
+    BLOCK_D_MODEL_POW2: tl.constexpr,
+    split_d: tl.constexpr,
+):
+    # Program ID
+    pid_b = tl.program_id(0)  # batch dim
+    pid_h = tl.program_id(1)  # head dim
+    pid_m = tl.program_id(2)  # sequence dim
+
+    # Offsets for loading and storing
+    offs_d = tl.arange(0, BLOCK_D_MODEL_POW2)
+    mask_d = offs_d < BLOCK_D_MODEL
+
+    # Base offset for dq_result
+    result_offset = (
+        pid_b * result_stride_b
+        + pid_h * result_stride_h
+        + pid_m * result_stride_m
+    )
+
+    # Initialize accumulator with zeros
+    acc = tl.zeros([BLOCK_D_MODEL_POW2], dtype=tl.float32)
+
+    # Loop over each split dimension and accumulate
+    for i in range(split_d):
+        slice_start = i * BLOCK_D_MODEL
+        slice_size = BLOCK_D_MODEL
+        if i == split_d - 1:  # Last slice might be smaller
+            slice_size = min(slice_size, BLOCK_D_MODEL)
+
+        # Calculate offset for this slice
+        dq_offset = (
+            pid_b * stride_b
+            + pid_h * stride_h
+            + pid_m * stride_m
+            + slice_start * stride_d
+        )
+
+        # Load slice
+        dq_slice = tl.load(dq_ptr + dq_offset + offs_d * stride_d, mask=mask_d, other=0.0)
+
+        # Accumulate
+        acc += dq_slice
+
+    # Store accumulated result back to dq_result
+    tl.store(dq_result_ptr + result_offset + offs_d * result_stride_d, acc, mask=mask_d)
+
 
 def _flash_attn_fused_backward(
     do: torch.Tensor,
@@ -3941,6 +4013,18 @@ def _flash_attn_fused_backward(
     descale_v: Optional[torch.Tensor] = None,
     descale_do: Optional[torch.Tensor] = None,
 ):
+    dq_result = dq
+    # Reinitialize dq with the same dimensions but last dim as SPLIT_D multiple
+    SPLIT_D = 4
+    orig_shape = dq.shape
+
+    # Compute new shape with last dimension multiplied by SPLIT_D
+    new_shape = list(orig_shape)
+    new_shape[-1] = new_shape[-1] * SPLIT_D
+
+    # Create a new tensor with expanded last dimension
+    dq = torch.zeros(new_shape, dtype=dq.dtype, device=dq.device)
+
 
     IS_FP8 = is_fp8(q)
     if IS_FP8:
@@ -3981,6 +4065,7 @@ def _flash_attn_fused_backward(
         v_strides = (0, v.stride(1), v.stride(0), v.stride(2))
         o_strides = (0, o.stride(1), o.stride(0), o.stride(2))
         dq_strides = (0, dq.stride(1), dq.stride(0), dq.stride(2))
+        dq_result_strides = (0, dq_result.stride(1), dq_result.stride(0), dq_result.stride(2))
         dk_strides = (0, dk.stride(1), dk.stride(0), dk.stride(2))
         dv_strides = (0, dv.stride(1), dv.stride(0), dv.stride(2))
         do_strides = (0, do.stride(1), do.stride(0), do.stride(2))
@@ -3992,6 +4077,7 @@ def _flash_attn_fused_backward(
         k_strides = (k.stride(0), k.stride(2), k.stride(1), k.stride(3))
         v_strides = (v.stride(0), v.stride(2), v.stride(1), v.stride(3))
         o_strides = (o.stride(0), o.stride(2), o.stride(1), o.stride(3))
+        dq_result_strides = (dq_result.stride(0), dq_result.stride(2), dq_result.stride(1), dq_result.stride(3))
         dq_strides = (dq.stride(0), dq.stride(2), dq.stride(1), dq.stride(3))
         dk_strides = (dk.stride(0), dk.stride(2), dk.stride(1), dk.stride(3))
         dv_strides = (dv.stride(0), dv.stride(2), dv.stride(1), dv.stride(3))
@@ -4053,6 +4139,7 @@ def _flash_attn_fused_backward(
     config = {
         "BLOCK_M": 16,
         "BLOCK_N": BLOCK_N,
+        "SPLIT_D": SPLIT_D,
         "num_warps": 8,
         "num_stages": 1,
         "waves_per_eu": 2,
@@ -4157,6 +4244,21 @@ def _flash_attn_fused_backward(
             NUM_SMS=NUM_SMS,
             **config,
         )
+
+    # After the backward pass is complete, we need to sum the split dimensions back together
+    # Sum across the split dimensions to get the final gradient for DQ
+    sum_grid = (batch, num_q_heads, max_seqlen_q)
+
+    _sum_split_d_kernel[sum_grid](
+        dq,  # Source tensor with split dimensions
+        dq_result,  # Result tensor to store the summed gradients
+        *dq_strides,
+        *dq_result_strides,
+        BLOCK_D_MODEL=head_sz,
+        BLOCK_D_MODEL_POW2=BLOCK_D_MODEL_POW2,
+        split_d=SPLIT_D
+    )
+
     return delta
 
 

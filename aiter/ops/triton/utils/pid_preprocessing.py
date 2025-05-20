@@ -94,11 +94,15 @@ def _wid2pid(wid, BATCH_SIZE, NUM_HEAD_PIDS, NUM_SEQ_PIDS, NUM_XCD: tl.constexpr
     """
 
     if NUM_HEAD_PIDS < NUM_XCD:
-        BATCH_RESIDUE = NUM_XCD // NUM_HEAD_PIDS
+        # BATCH_RESIDUE = NUM_XCD // NUM_HEAD_PIDS
+        # head_idx = wid % NUM_HEAD_PIDS
+        # batch_idx = ((wid // NUM_HEAD_PIDS) % BATCH_RESIDUE + wid // (NUM_HEAD_PIDS * BATCH_RESIDUE * NUM_SEQ_PIDS) * BATCH_RESIDUE) % BATCH_SIZE
+        # seq_blk_idx = (wid // (NUM_HEAD_PIDS * BATCH_RESIDUE)) % NUM_SEQ_PIDS
+        # head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_HEAD_PIDS)
         head_idx = wid % NUM_HEAD_PIDS
-        batch_idx = ((wid // NUM_HEAD_PIDS) % BATCH_RESIDUE + wid // (NUM_HEAD_PIDS * BATCH_RESIDUE * NUM_SEQ_PIDS) * BATCH_RESIDUE) % BATCH_SIZE
-        seq_blk_idx = (wid // (NUM_HEAD_PIDS * BATCH_RESIDUE)) % NUM_SEQ_PIDS
-        head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_HEAD_PIDS)
+        head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_XCD)
+        batch_idx = (wid // (NUM_HEAD_PIDS)) % BATCH_SIZE
+        seq_blk_idx = (wid // (NUM_HEAD_PIDS * BATCH_SIZE)) % NUM_SEQ_PIDS
     else:
         head_idx = wid % NUM_HEAD_PIDS
         head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_XCD)

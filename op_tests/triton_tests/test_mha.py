@@ -676,7 +676,7 @@ def test_mha_fused_backward_varlen(
     atomic: bool,
     dtype=torch.float16,
 ):
-    torch.cuda.empty_cache() # makes the atomic tests pass. TODO: why?
+    torch.cuda.empty_cache()  # makes the atomic tests pass. TODO: why?
     torch.manual_seed(20)
     q = torch.randn((BATCH, SEQLEN_Q, NUM_Q_HEADS, HEAD_SZ), device="cuda", dtype=dtype)
     k = torch.randn((BATCH, SEQLEN_K, NUM_K_HEADS, HEAD_SZ), device="cuda", dtype=dtype)
@@ -813,7 +813,9 @@ def test_mha_fused_backward_varlen(
         triton_out, ref_out.to(triton_out.dtype), atol=1e-2, rtol=1e-2
     )
 
-    ref_dq, ref_dk, ref_dv = torch.autograd.grad(ref_out, (q_unpad, k_unpad, v_unpad), do)
+    ref_dq, ref_dk, ref_dv = torch.autograd.grad(
+        ref_out, (q_unpad, k_unpad, v_unpad), do
+    )
     ref_dq = dq_pad_fn(ref_dq)
     ref_dk = dk_pad_fn(ref_dk)
     ref_dv = dk_pad_fn(ref_dv)

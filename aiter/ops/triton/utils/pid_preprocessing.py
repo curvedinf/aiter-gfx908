@@ -47,6 +47,7 @@ def pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M: tl.constexpr = 1):
 
     return pid_m, pid_n
 
+
 @triton.jit
 def _remap_XCD(k, last_k, NUM_XCD):
     """
@@ -66,6 +67,7 @@ def _remap_XCD(k, last_k, NUM_XCD):
     new_index = u * q + (r - u) * (q - 1) + r + m
     return new_index
 
+
 @triton.jit
 def _wid2pid(wid, BATCH_SIZE, NUM_HEAD_PIDS, NUM_SEQ_PIDS, NUM_XCD: tl.constexpr = 8):
     """
@@ -80,7 +82,7 @@ def _wid2pid(wid, BATCH_SIZE, NUM_HEAD_PIDS, NUM_SEQ_PIDS, NUM_XCD: tl.constexpr
         head_idx: head index
         seq_blk_idx: sequence block index
 
-    This function is a mapping from workgroup id (wid) -> (batch idx, head_idx, seq_blk_idx) 
+    This function is a mapping from workgroup id (wid) -> (batch idx, head_idx, seq_blk_idx)
     i.e. its a traversal strategy of a attention kernel launch grid with dims: (BATCH_SIZE * NUM_HEAD_PIDS * NUM_SEQ_PIDS, )
     1. Fastest changing dim is the head dim. Then seq_blk dim. Then batch dim.
     2. Since workgroups are distributed across the XCDs in a round robin fashion, we do remapping to have consequent head indices being processed at the same XCD.
@@ -91,9 +93,8 @@ def _wid2pid(wid, BATCH_SIZE, NUM_HEAD_PIDS, NUM_SEQ_PIDS, NUM_XCD: tl.constexpr
     """
 
     head_idx = wid % NUM_HEAD_PIDS
-    head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS-1, NUM_XCD)
+    head_idx = _remap_XCD(head_idx, NUM_HEAD_PIDS - 1, NUM_XCD)
     seq_blk_idx = (wid // NUM_HEAD_PIDS) % NUM_SEQ_PIDS
     batch_idx = (wid // (NUM_SEQ_PIDS * NUM_HEAD_PIDS)) % BATCH_SIZE
 
     return batch_idx, head_idx, seq_blk_idx
-

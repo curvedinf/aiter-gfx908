@@ -5,7 +5,11 @@ import triton.language as tl
 from typing import Optional, Tuple
 from aiter.ops.triton.utils.pid_preprocessing import _wid2pid, _remap_XCD
 from aiter.ops.triton.mha_bwd_onekernel import bwd_kernel_causal, bwd_kernel_noncausal
-from aiter.ops.triton.utils.mha_onekernel_utils import get_shapes_from_layout, get_strides_from_layout, is_cdna
+from aiter.ops.triton.utils.mha_onekernel_utils import (
+    get_shapes_from_layout,
+    get_strides_from_layout,
+    is_cdna,
+)
 
 
 def get_autotune_configs():
@@ -4198,30 +4202,35 @@ def _flash_attn_onekernel_backward(
         stride_descale_do_z = descale_do.stride(0) if descale_do is not None else None
     else:
         FP8_MAX = None
-        stride_descale_q_z = stride_descale_k_z = stride_descale_v_z = stride_descale_o_z = stride_descale_do_z = None
+        stride_descale_q_z = stride_descale_k_z = stride_descale_v_z = (
+            stride_descale_o_z
+        ) = stride_descale_do_z = None
 
     layout = "thd" if IS_VARLEN else "bhsd"
     # get strides and shape
-    batch, nheads_q, nheads_k, head_size, max_seqlen_q_final, max_seqlen_k_final = \
+    batch, nheads_q, nheads_k, head_size, max_seqlen_q_final, max_seqlen_k_final = (
         get_shapes_from_layout(
-            q, k, layout,
-            cu_seqlens_q, cu_seqlens_k,
-            max_seqlen_q, max_seqlen_k
+            q, k, layout, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k
         )
-    q_strides, k_strides, v_strides, o_strides = \
-        get_strides_from_layout(q, k, v, o, layout)
-    stride_qb, stride_qh, stride_qm, stride_qd =  q_strides
+    )
+    q_strides, k_strides, v_strides, o_strides = get_strides_from_layout(
+        q, k, v, o, layout
+    )
+    stride_qb, stride_qh, stride_qm, stride_qd = q_strides
     stride_kb, stride_kh, stride_kn, stride_kd = k_strides
     stride_vb, stride_vh, stride_vn, stride_vd = v_strides
     stride_ob, stride_oh, stride_om, stride_od = o_strides
-    dq_strides, dk_strides, dv_strides, do_strides = \
-        get_strides_from_layout(dq, dk, dv, do, layout)
-    stride_dqb, stride_dqh, stride_dqm, stride_dqd =  dq_strides
+    dq_strides, dk_strides, dv_strides, do_strides = get_strides_from_layout(
+        dq, dk, dv, do, layout
+    )
+    stride_dqb, stride_dqh, stride_dqm, stride_dqd = dq_strides
     stride_dkb, stride_dkh, stride_dkn, stride_dkd = dk_strides
     stride_dvb, stride_dvh, stride_dvn, stride_dvd = dv_strides
     stride_dob, stride_doh, stride_dom, stride_dod = do_strides
-    use_dropout = (dropout_p > 0.0)
-    use_alibi, (stride_az, stride_ah) = (True, alibi_slopes.stride()) if alibi_slopes is not None else (False, (0, 0))
+    use_dropout = dropout_p > 0.0
+    use_alibi, (stride_az, stride_ah) = (
+        (True, alibi_slopes.stride()) if alibi_slopes is not None else (False, (0, 0))
+    )
 
     # get closest power of 2 over or equal to 32.
     padded_d_model = 1 << (head_size - 1).bit_length()
@@ -4240,34 +4249,44 @@ def _flash_attn_onekernel_backward(
     pre_grid = (triton.cdiv(max_seqlen_q, PRE_BLOCK), batch, nheads_q)
 
     _bwd_preprocess[pre_grid](
-        o, do,
+        o,
+        do,
         delta,
-        stride_ob, stride_oh, stride_om, stride_od,
-        stride_deltab, stride_deltah, stride_deltam,
+        stride_ob,
+        stride_oh,
+        stride_om,
+        stride_od,
+        stride_deltab,
+        stride_deltah,
+        stride_deltam,
         stride_descale_do_z,
-        cu_seqlens_q, max_seqlen_q_final,
+        cu_seqlens_q,
+        max_seqlen_q_final,
         descale_do,
         BLOCK_M=PRE_BLOCK,
         BLOCK_D_MODEL_POW2=HEAD_DIM,
         BLOCK_D_MODEL=ACTUAL_HEAD_DIM,
         IS_VARLEN=IS_VARLEN,
-        IS_FP8=IS_FP8
+        IS_FP8=IS_FP8,
     )
 
     # dropout mask tensor for debugging. We dump the dropout mask created in
     #   the kernel for testing
     dropout_mask = None
-    stride_dropoutb, stride_dropouth, stride_dropoutm, stride_dropoutn = \
-        (0, 0 , 0 , 0)
+    stride_dropoutb, stride_dropouth, stride_dropoutm, stride_dropoutn = (0, 0, 0, 0)
     if use_dropout:
         dropout_mask = torch.zeros(
             (batch, nheads_q, max_seqlen_q_final, max_seqlen_k_final),
             device=q.device,
-            dtype=torch.float32
+            dtype=torch.float32,
         )
 
     seqlen = max(max_seqlen_q_final, max_seqlen_k_final)
-    grid = lambda META: (nheads_k, (seqlen + META['BLOCK_N1'] - 1) // META['BLOCK_N1'], batch, )
+    grid = lambda META: (
+        nheads_k,
+        (seqlen + META["BLOCK_N1"] - 1) // META["BLOCK_N1"],
+        batch,
+    )
     NUM_WARPS, NUM_STAGES = 4, 1
     WAVES_PER_EU = 1
     BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
@@ -4288,25 +4307,72 @@ def _flash_attn_onekernel_backward(
     }
     if causal:
         bwd_kernel_causal[grid](
-            q, k, v, sm_scale, do, dq, dk, dv,
-            softmax_lse, delta,
-            stride_qb, stride_qh, stride_qm, stride_qd,
-            stride_kb, stride_kh, stride_kn, stride_kd,
-            stride_vb, stride_vh, stride_vn, stride_vd,
-            stride_dqb, stride_dqh, stride_dqm, stride_dqd,
-            stride_dkb, stride_dkh, stride_dkn, stride_dkd,
-            stride_dvb, stride_dvh, stride_dvn, stride_dvd,
-            stride_deltab, stride_deltah, stride_deltam,
-            stride_dob, stride_doh, stride_dom, stride_dod,
-            stride_dropoutb, stride_dropouth, stride_dropoutm, stride_dropoutn,
-            stride_descale_q_z, stride_descale_k_z, stride_descale_v_z, stride_descale_do_z,
-            stride_az, stride_ah,
-            nheads_q, nheads_k,
-            cu_seqlens_q, cu_seqlens_k,
-            max_seqlen_q_final, max_seqlen_k_final,
-            dropout_mask, dropout_p, philox_seed, philox_offset,
+            q,
+            k,
+            v,
+            sm_scale,
+            do,
+            dq,
+            dk,
+            dv,
+            softmax_lse,
+            delta,
+            stride_qb,
+            stride_qh,
+            stride_qm,
+            stride_qd,
+            stride_kb,
+            stride_kh,
+            stride_kn,
+            stride_kd,
+            stride_vb,
+            stride_vh,
+            stride_vn,
+            stride_vd,
+            stride_dqb,
+            stride_dqh,
+            stride_dqm,
+            stride_dqd,
+            stride_dkb,
+            stride_dkh,
+            stride_dkn,
+            stride_dkd,
+            stride_dvb,
+            stride_dvh,
+            stride_dvn,
+            stride_dvd,
+            stride_deltab,
+            stride_deltah,
+            stride_deltam,
+            stride_dob,
+            stride_doh,
+            stride_dom,
+            stride_dod,
+            stride_dropoutb,
+            stride_dropouth,
+            stride_dropoutm,
+            stride_dropoutn,
+            stride_descale_q_z,
+            stride_descale_k_z,
+            stride_descale_v_z,
+            stride_descale_do_z,
+            stride_az,
+            stride_ah,
+            nheads_q,
+            nheads_k,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q_final,
+            max_seqlen_k_final,
+            dropout_mask,
+            dropout_p,
+            philox_seed,
+            philox_offset,
             alibi_slopes,
-            descale_q, descale_k, descale_v, descale_do,
+            descale_q,
+            descale_k,
+            descale_v,
+            descale_do,
             HEAD_DIM=HEAD_DIM,
             ACTUAL_HEAD_DIM=ACTUAL_HEAD_DIM,
             ENABLE_DROPOUT=use_dropout,
@@ -4322,25 +4388,72 @@ def _flash_attn_onekernel_backward(
         )
     else:
         bwd_kernel_noncausal[grid](
-            q, k, v, sm_scale, do, dq, dk, dv,
-            softmax_lse, delta,
-            stride_qb, stride_qh, stride_qm, stride_qd,
-            stride_kb, stride_kh, stride_kn, stride_kd,
-            stride_vb, stride_vh, stride_vn, stride_vd,
-            stride_dqb, stride_dqh, stride_dqm, stride_dqd,
-            stride_dkb, stride_dkh, stride_dkn, stride_dkd,
-            stride_dvb, stride_dvh, stride_dvn, stride_dvd,
-            stride_deltab, stride_deltah, stride_deltam,
-            stride_dob, stride_doh, stride_dom, stride_dod,
-            stride_dropoutb, stride_dropouth, stride_dropoutm, stride_dropoutn,
-            stride_descale_q_z, stride_descale_k_z, stride_descale_v_z, stride_descale_do_z,
-            stride_az, stride_ah,
-            nheads_q, nheads_k,
-            cu_seqlens_q, cu_seqlens_k,
-            max_seqlen_q_final, max_seqlen_k_final,
-            dropout_mask, dropout_p, philox_seed, philox_offset,
+            q,
+            k,
+            v,
+            sm_scale,
+            do,
+            dq,
+            dk,
+            dv,
+            softmax_lse,
+            delta,
+            stride_qb,
+            stride_qh,
+            stride_qm,
+            stride_qd,
+            stride_kb,
+            stride_kh,
+            stride_kn,
+            stride_kd,
+            stride_vb,
+            stride_vh,
+            stride_vn,
+            stride_vd,
+            stride_dqb,
+            stride_dqh,
+            stride_dqm,
+            stride_dqd,
+            stride_dkb,
+            stride_dkh,
+            stride_dkn,
+            stride_dkd,
+            stride_dvb,
+            stride_dvh,
+            stride_dvn,
+            stride_dvd,
+            stride_deltab,
+            stride_deltah,
+            stride_deltam,
+            stride_dob,
+            stride_doh,
+            stride_dom,
+            stride_dod,
+            stride_dropoutb,
+            stride_dropouth,
+            stride_dropoutm,
+            stride_dropoutn,
+            stride_descale_q_z,
+            stride_descale_k_z,
+            stride_descale_v_z,
+            stride_descale_do_z,
+            stride_az,
+            stride_ah,
+            nheads_q,
+            nheads_k,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q_final,
+            max_seqlen_k_final,
+            dropout_mask,
+            dropout_p,
+            philox_seed,
+            philox_offset,
             alibi_slopes,
-            descale_q, descale_k, descale_v, descale_do,
+            descale_q,
+            descale_k,
+            descale_v,
+            descale_do,
             HEAD_DIM=HEAD_DIM,
             ACTUAL_HEAD_DIM=ACTUAL_HEAD_DIM,
             ENABLE_DROPOUT=use_dropout,

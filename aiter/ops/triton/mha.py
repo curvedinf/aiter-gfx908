@@ -2847,7 +2847,7 @@ def _bwd_dkdvdq_inner(
     )  # [BLOCK_D_MODEL_POW2, BLOCK_M]
     split_id = (head_id // (NUM_Q_HEADS // 8)) % SPLIT_D # TODO tune split id
     dq_ptrs_start = (
-        DQ + offs_m[:, None] * stride_dq_m + offs_k[None, :] * stride_dq_k + split_id * BLOCK_D_MODEL_POW2 * stride_q_k
+        DQ + offs_m[:, None] * stride_dq_m + offs_k[None, :] * stride_dq_k + split_id * BLOCK_D_MODEL * stride_q_k
     )  # [BLOCK_M, BLOCK_D_MODEL_POW2]
 
     do_ptrs_start = DO + offs_m[:, None] * stride_do_m + offs_k[None, :] * stride_do_k
@@ -4024,7 +4024,6 @@ def _flash_attn_fused_backward(
 
     # Create a new tensor with expanded last dimension
     dq = torch.zeros(new_shape, dtype=dq.dtype, device=dq.device)
-
 
     IS_FP8 = is_fp8(q)
     if IS_FP8:

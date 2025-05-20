@@ -60,7 +60,7 @@ def get_tuned_gemm_list(tuned_gemm_file):
     if os.path.exists(tuned_gemm_file):
         tunedf = pd.read_csv(tuned_gemm_file)
     else:
-        tunedf = pd.DataFrame(columns=["M", "N", "K", "kernelId", "splitK", "us", "kernelName"])
+        tunedf = pd.DataFrame(columns=["cu_num", "M", "N", "K", "kernelId", "splitK", "us", "kernelName"])
     return tunedf
 
 @perftest()
@@ -120,17 +120,35 @@ def tune_gemm(m, n, k, useSplitK = False):
     return best_kernelId, splitK, best_time
 
 
-def tune_gemm_list(untunedf, tunedf, issorted = False, useSplitK = False):
+def tune_gemm_list(untunedf, tunedf, issorted=False, useSplitK=False):
+    gpu = torch.cuda.current_device()
+    device_properties = torch.cuda.get_device_properties(gpu)
+    cu_num = device_properties.multi_processor_count
     for i in range(len(untunedf)):
         M = untunedf.loc[i, "M"]
         N = untunedf.loc[i, "N"]
         K = untunedf.loc[i, "K"]
-        
-        if tunedf[(tunedf["M"]==M) & (tunedf["N"]==N) & (tunedf["K"]==K)].empty:
+
+        if tunedf[
+            (tunedf["M"] == M)
+            & (tunedf["N"] == N)
+            & (tunedf["K"] == K)
+            & (tunedf["cu_num"] == cu_num)
+        ].empty:
             kernelId, splitK, time = tune_gemm(M, N, K, useSplitK)
-            kernelName = 'None' if kernelId == -1 else kernels_list[kernelId].name
-            temp = pd.DataFrame({"M":[M], "N":[N], "K":[K], "kernelId":[kernelId], "splitK":[splitK], 
-                           "us":[time], "kernelName":[kernelName]})
+            kernelName = "None" if kernelId == -1 else kernels_list[kernelId].name
+            temp = pd.DataFrame(
+                {
+                    "M": [M],
+                    "N": [N],
+                    "K": [K],
+                    "cu_num": [cu_num],
+                    "kernelId": [kernelId],
+                    "splitK": [splitK],
+                    "us": [time],
+                    "kernelName": [kernelName],
+                }
+            )
             tunedf = pd.concat([tunedf, temp], ignore_index=True)
 
         else:

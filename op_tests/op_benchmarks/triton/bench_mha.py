@@ -345,24 +345,49 @@ def run_benchmark(custom, args):
             f"BATCH={BATCH}, HQ={HQ}, HK={HK}, N_CTX_Q={N_CTX_Q}, N_CTX_K={N_CTX_K}, D_HEAD={D_HEAD}"
             )
             # Select appropriate test function based on flags and layout.
-            if fused_backward or onekernel_backward:
-                func = test_mha_fused_backward_varlen if varlen else test_mha_fused_backward
-                is_fused = fused_backward  # onekernel_backward implies False.
-                func(
-                    BATCH,
-                    N_CTX_Q,
-                    N_CTX_K,
-                    HQ,
-                    HK,
-                    D_HEAD,
-                    dropout,
-                    causal,
-                    args.fp8,
-                    is_fused,
-                    dtype,
+            if mode=="bwd":
+                if fused_backward or onekernel_backward:
+                    func = test_mha_fused_backward_varlen if varlen else test_mha_fused_backward
+                    is_fused = fused_backward  # onekernel_backward implies False.
+                    func(
+                        BATCH,
+                        N_CTX_Q,
+                        N_CTX_K,
+                        HQ,
+                        HK,
+                        D_HEAD,
+                        dropout,
+                        causal,
+                        args.fp8,
+                        is_fused,
+                        dtype,
                 )
-            elif args.persistent_fwd:
-                func = test_persistent_mha_varlen if varlen else test_persistent_mha
+                else:
+                    func = test_mha_backward_varlen if varlen else test_mha_backward
+                    func(
+                        BATCH,
+                        N_CTX_Q,
+                        N_CTX_K,
+                        HQ,
+                        HK,
+                        D_HEAD,
+                        dropout,
+                        causal,
+                        args.fp8,
+                        dtype,
+                    )
+            else: # fwd
+                if varlen:
+                    if args.persistent_fwd:
+                        func = test_persistent_mha_varlen
+                    else:
+                        func = test_mha_varlen
+                else:
+                    if args.persistent_fwd:
+                        func = test_persistent_mha
+                    else:
+                        func = test_mha
+
                 func(
                     BATCH,
                     N_CTX_Q,
@@ -377,20 +402,7 @@ def run_benchmark(custom, args):
                     args.fp8,
                     dtype,
                 )
-            else:
-                func = test_mha_backward_varlen if varlen else test_mha_backward
-                func(
-                    BATCH,
-                    N_CTX_Q,
-                    N_CTX_K,
-                    HQ,
-                    HK,
-                    D_HEAD,
-                    dropout,
-                    causal,
-                    args.fp8,
-                    dtype,
-                )
+
             print("Test passed!")
             return 0
 
@@ -465,45 +477,27 @@ def run_benchmark(custom, args):
 
 
         if varlen:
-            if args.fp8:
-                fn = lambda: flash_attn_varlen_fp8_func(
-                    q_input,
-                    k_input,
-                    v_input,
-                    cu_seqlens_q,
-                    cu_seqlens_k,
-                    max_seqlen_q,
-                    max_seqlen_k,
-                    dropout_p=dropout,
-                    softmax_scale=sm_scale,
-                    causal=causal,
-                    return_lse=return_lse,
-                    return_attn_probs=return_attn_probs,
-                    persistent_forward=persistent_fwd,
-                    fused_backward=fused_backward,
-                    onekernel_backward=onekernel_backward,
-                )
-            else:
-                fn = lambda: flash_attn_varlen_func(
-                    q_input,
-                    k_input,
-                    v_input,
-                    cu_seqlens_q,
-                    cu_seqlens_k,
-                    max_seqlen_q,
-                    max_seqlen_k,
-                    dropout_p=dropout,
-                    softmax_scale=sm_scale,
-                    causal=causal,
-                    return_lse=return_lse,
-                    return_attn_probs=return_attn_probs,
-                    persistent_forward=persistent_fwd,
-                    fused_backward=fused_backward,
-                    onekernel_backward=onekernel_backward,
-                )
-
+            func = flash_attn_varlen_fp8_func if args.fp8 else flash_attn_varlen_func
+            fn = lambda: func(
+                q_input,
+                k_input,
+                v_input,
+                cu_seqlens_q,
+                cu_seqlens_k,
+                max_seqlen_q,
+                max_seqlen_k,
+                dropout_p=dropout,
+                softmax_scale=sm_scale,
+                causal=causal,
+                return_lse=return_lse,
+                return_attn_probs=return_attn_probs,
+                persistent_forward=persistent_fwd,
+                fused_backward=fused_backward,
+                onekernel_backward=onekernel_backward,
+            )
         else:
-            fn = lambda: flash_attn_func(
+            func = flash_attn_fp8_func if args.fp8 else flash_attn_func
+            fn = lambda: func(
                 q_input,
                 k_input,
                 v_input,

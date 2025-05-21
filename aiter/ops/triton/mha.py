@@ -1320,7 +1320,6 @@ def _persistent_attn_fwd(
     # persistent loop: persistent workgroup loops over multiple workgroups of work
     while wid < total_num_blocks:
         # map workgroup id to pid
-        # off_z, off_q_head, start_m = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_BLOCKS, NUM_XCD)
         start_m = wid % NUM_BLOCKS
         off_q_head = ((wid // NUM_BLOCKS) % GROUP_SIZE + wid // (NUM_BLOCKS * GROUP_SIZE) * GROUP_SIZE) % NUM_Q_HEADS
         off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS - 1, 8)
@@ -1695,8 +1694,209 @@ def _persistent_attn_fwd(
                 tl.store(out_ptr + offs_out, op, mask=out_mask)
 
                 # fetch the next available workgroup id
+        # fetch the next available workgroup id
         wid = tl.atomic_add(pid_counter, 1)
 
+
+def _persistent_flash_attn_forward(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    dropout_p: float,
+    softmax_scale: float,
+    causal: bool,
+    window_size_left: int,
+    window_size_right: int,
+    alibi_slopes: Optional[torch.Tensor],
+    return_lse: bool,
+    return_softmax: bool,
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    cu_seqlens_q: Optional[torch.Tensor] = None,
+    cu_seqlens_k: Optional[torch.Tensor] = None,
+    descale_q: Optional[torch.Tensor] = None,
+    descale_k: Optional[torch.Tensor] = None,
+    descale_v: Optional[torch.Tensor] = None,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+    # FP8
+    IS_FP8 = is_fp8(q)
+    FP8_MAX: tl.constexpr = torch.finfo(q.dtype).max
+    is_varlen = True if cu_seqlens_q is not None else False
+
+    if IS_FP8:
+        o = torch.zeros_like(q, dtype=torch.float32)
+    else:
+        o = torch.zeros_like(q)
+    if is_varlen:
+        # Layout for q,k,v is thd ie [total_tokens, num_head, head_dim]
+        batch, seqlen_q, num_q_heads, head_sz = (
+            len(cu_seqlens_q) - 1,
+            max_seqlen_q,
+            q.shape[1],
+            q.shape[2],
+        )
+        seqlen_k, num_k_heads = max_seqlen_k, k.shape[1]
+        q_strides = (0, q.stride(1), q.stride(0), q.stride(2))
+        k_strides = (0, k.stride(1), k.stride(0), k.stride(2))
+        v_strides = (0, v.stride(1), v.stride(0), v.stride(2))
+        o_strides = (0, o.stride(1), o.stride(0), o.stride(2))
+    else:
+        # Layout for q,k,v is bshd ie [batch, seq_len, num_head, head_dim]
+        batch, seqlen_q, num_q_heads, head_sz = q.shape
+        seqlen_k = k.shape[1]
+        num_k_heads = k.shape[2]
+        q_strides = (q.stride(0), q.stride(2), q.stride(1), q.stride(3))
+        k_strides = (k.stride(0), k.stride(2), k.stride(1), k.stride(3))
+        v_strides = (v.stride(0), v.stride(2), v.stride(1), v.stride(3))
+        o_strides = (o.stride(0), o.stride(2), o.stride(1), o.stride(3))
+
+    # padding for head_dim. Power of 2 or 16
+    BLOCK_DMODEL_POW2 = triton.next_power_of_2(head_sz)
+    BLOCK_DMODEL_POW2 = max(BLOCK_DMODEL_POW2, 16)
+
+    # softmax_lse [batch, num_q_heads, seqlen_q]
+    if return_lse:
+        if is_varlen:
+            softmax_lse = torch.zeros(
+                (q.shape[0], num_q_heads), device=q.device, dtype=torch.float32
+            )
+            stride_lse_z, stride_lse_h, stride_lse_m = (
+                0,
+                softmax_lse.stride(1),
+                softmax_lse.stride(0),
+            )
+        else:
+            softmax_lse = torch.zeros(
+                (batch, num_q_heads, max_seqlen_q), device=q.device, dtype=torch.float32
+            )
+            stride_lse_z, stride_lse_h, stride_lse_m = softmax_lse.stride()
+    else:
+        softmax_lse = None
+
+    # exp_scores [batch, num_q_heads, seqlen_q, seqlen_k]
+    enable_dropout = dropout_p > 0.0
+    if enable_dropout:
+        philox_seed = torch.randint(0, 0xFFFFFF, (1,))[
+            0
+        ].item()  # No specific reason to restrict range to 0xffffff
+        philox_offset = torch.randint(0, 0xFFFFFF, (1,))[
+            0
+        ].item()  # Pass in an int, not Tensor
+    else:
+        philox_seed = 0
+        philox_offset = 0
+    if return_softmax or enable_dropout:
+        s_dmask = torch.zeros(
+            (batch, num_q_heads, max_seqlen_q, max_seqlen_k),
+            device=q.device,
+            dtype=torch.float32,
+        )
+        dropout_mask = torch.zeros(
+            (batch, num_q_heads, max_seqlen_q, max_seqlen_k),
+            device=q.device,
+            dtype=torch.float32,
+        )
+    else:
+        s_dmask = None
+        dropout_mask = None
+
+    # persistent workgroup loops over multiple workgroups of work
+    device_properties = torch.cuda.get_device_properties("cuda")
+    if "gfx950" in device_properties.gcnArchName: # MI350
+        BLOCK_M = 256
+        config = {
+            "BLOCK_M": BLOCK_M,
+            "BLOCK_N": 128,
+            "waves_per_eu": 2,
+            "num_warps": 8,
+            "num_ctas": 1,
+            "matrix_instr_nonkdim": 32,
+            "num_ctas": 1,
+            "num_stages": 1,
+        } 
+    else: # MI300X and else
+        BLOCK_M = 256
+        config = {
+            "BLOCK_M": BLOCK_M,
+            "BLOCK_N": 64,
+            "waves_per_eu": 2,
+            "num_warps": 8,
+            "num_ctas": 1,
+            "matrix_instr_nonkdim": 16,
+            "num_ctas": 1,
+            "num_stages": 1,
+        }
+
+    # Dropout significantly increases VGPR usage so use small tiles
+    if enable_dropout or q.dtype == torch.float32:
+        BLOCK_M = 32
+        config = {
+            "BLOCK_M": BLOCK_M,
+            "BLOCK_N": 32,
+            "waves_per_eu": 1,
+            "num_warps": 2,
+            "num_ctas": 1,
+            "num_stages": 1,
+        }
+    
+    # number of persistent workgroups launched
+    NUM_WGS = device_properties.multi_processor_count * 1
+    pid_counter = torch.ones((1,), device=q.device, dtype=torch.int32) * NUM_WGS
+    grid = (min(NUM_WGS, batch * num_q_heads * triton.cdiv(seqlen_q, BLOCK_M)),)
+    _persistent_attn_fwd[grid](
+        q,
+        k,
+        v,
+        descale_q,
+        descale_k,
+        descale_v,
+        o,
+        alibi_slopes,
+        s_dmask,
+        dropout_mask,
+        softmax_lse,
+        *q_strides,
+        *k_strides,
+        *v_strides,
+        descale_q.stride(0) if descale_q is not None else 0,
+        descale_k.stride(0) if descale_k is not None else 0,
+        descale_v.stride(0) if descale_v is not None else 0,
+        *o_strides,
+        alibi_slopes.stride(0) if alibi_slopes is not None else 0,
+        alibi_slopes.stride(1) if alibi_slopes is not None else 0,
+        s_dmask.stride(0) if s_dmask is not None else 0,
+        s_dmask.stride(1) if s_dmask is not None else 0,
+        s_dmask.stride(2) if s_dmask is not None else 0,
+        s_dmask.stride(3) if s_dmask is not None else 0,
+        stride_lse_z if softmax_lse is not None else 0,
+        stride_lse_h if softmax_lse is not None else 0,
+        stride_lse_m if softmax_lse is not None else 0,
+        softmax_scale,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        dropout_p,
+        philox_seed,
+        philox_offset,
+        SEQLEN_Q=max_seqlen_q,
+        SEQLEN_K=max_seqlen_k,
+        IS_CAUSAL=causal,
+        NUM_Q_HEADS=num_q_heads,
+        NUM_K_HEADS=num_k_heads,
+        BLOCK_DMODEL=head_sz,
+        BLOCK_DMODEL_POW2=BLOCK_DMODEL_POW2,
+        RETURN_SCORES=return_softmax,
+        ENABLE_DROPOUT=enable_dropout,
+        IS_FP8=IS_FP8,
+        FP8_MAX=FP8_MAX,
+        VARLEN=is_varlen,
+        BATCH=batch,
+        NUM_XCD=8,
+        pid_counter=pid_counter,
+        **config,
+    )
+
+    return o, softmax_lse, s_dmask, philox_seed, philox_offset
 
 def _flash_attn_forward(
     q: torch.Tensor,
@@ -1802,177 +2002,82 @@ def _flash_attn_forward(
         s_dmask = None
         dropout_mask = None
 
-    # persistent workgroup loops over multiple workgroups of work
-    if persistent:
-        device_properties = torch.cuda.get_device_properties("cuda")
-        if "gfx950" in device_properties.gcnArchName: # MI350
-            BLOCK_M = 256
-            config = {
-                "BLOCK_M": BLOCK_M,
-                "BLOCK_N": 128,
-                "waves_per_eu": 2,
-                "num_warps": 8,
-                "num_ctas": 1,
-                "matrix_instr_nonkdim": 32,
-                "num_ctas": 1,
-                "num_stages": 1,
-            } 
-        else: # MI300X and else
-            BLOCK_M = 256
-            config = {
-                "BLOCK_M": BLOCK_M,
-                "BLOCK_N": 64,
-                "waves_per_eu": 2,
-                "num_warps": 8,
-                "num_ctas": 1,
-                "matrix_instr_nonkdim": 16,
-                "num_ctas": 1,
-                "num_stages": 1,
-            }
+   
+    # Tuned for MI300x
+    BLOCK_M = 128
+    config = {
+        "BLOCK_M": BLOCK_M,
+        "BLOCK_N": 64,
+        "waves_per_eu": 2,
+        "num_warps": 4,
+        "num_ctas": 1,
+        "num_stages": 1,
+    }
 
-        # Dropout significantly increases VGPR usage so use small tiles
-        if enable_dropout or q.dtype == torch.float32:
-            BLOCK_M = 32
-            config = {
-                "BLOCK_M": BLOCK_M,
-                "BLOCK_N": 32,
-                "waves_per_eu": 1,
-                "num_warps": 2,
-                "num_ctas": 1,
-                "num_stages": 1,
-            }
-        
-        # number of persistent workgroups launched
-        NUM_WGS = device_properties.multi_processor_count * 1
-        pid_counter = torch.ones((1,), device=q.device, dtype=torch.int32) * NUM_WGS
-        grid = (min(NUM_WGS, batch * num_q_heads * triton.cdiv(seqlen_q, BLOCK_M)),)
-        _persistent_attn_fwd[grid](
-            q,
-            k,
-            v,
-            descale_q,
-            descale_k,
-            descale_v,
-            o,
-            alibi_slopes,
-            s_dmask,
-            dropout_mask,
-            softmax_lse,
-            *q_strides,
-            *k_strides,
-            *v_strides,
-            descale_q.stride(0) if descale_q is not None else 0,
-            descale_k.stride(0) if descale_k is not None else 0,
-            descale_v.stride(0) if descale_v is not None else 0,
-            *o_strides,
-            alibi_slopes.stride(0) if alibi_slopes is not None else 0,
-            alibi_slopes.stride(1) if alibi_slopes is not None else 0,
-            s_dmask.stride(0) if s_dmask is not None else 0,
-            s_dmask.stride(1) if s_dmask is not None else 0,
-            s_dmask.stride(2) if s_dmask is not None else 0,
-            s_dmask.stride(3) if s_dmask is not None else 0,
-            stride_lse_z if softmax_lse is not None else 0,
-            stride_lse_h if softmax_lse is not None else 0,
-            stride_lse_m if softmax_lse is not None else 0,
-            softmax_scale,
-            cu_seqlens_q,
-            cu_seqlens_k,
-            dropout_p,
-            philox_seed,
-            philox_offset,
-            SEQLEN_Q=max_seqlen_q,
-            SEQLEN_K=max_seqlen_k,
-            IS_CAUSAL=causal,
-            NUM_Q_HEADS=num_q_heads,
-            NUM_K_HEADS=num_k_heads,
-            BLOCK_DMODEL=head_sz,
-            BLOCK_DMODEL_POW2=BLOCK_DMODEL_POW2,
-            RETURN_SCORES=return_softmax,
-            ENABLE_DROPOUT=enable_dropout,
-            IS_FP8=IS_FP8,
-            FP8_MAX=FP8_MAX,
-            VARLEN=is_varlen,
-            BATCH=batch,
-            NUM_XCD=8,
-            pid_counter=pid_counter,
-            **config,
-        )
-    else:
-        # Tuned for MI300x
-        BLOCK_M = 128
+    # Dropout significantly increases VGPR usage so use small tiles
+    if enable_dropout or q.dtype == torch.float32:
+        BLOCK_M = 32
         config = {
             "BLOCK_M": BLOCK_M,
-            "BLOCK_N": 64,
-            "waves_per_eu": 2,
-            "num_warps": 4,
+            "BLOCK_N": 32,
+            "waves_per_eu": 1,
+            "num_warps": 2,
             "num_ctas": 1,
             "num_stages": 1,
         }
 
-        # Dropout significantly increases VGPR usage so use small tiles
-        if enable_dropout or q.dtype == torch.float32:
-            BLOCK_M = 32
-            config = {
-                "BLOCK_M": BLOCK_M,
-                "BLOCK_N": 32,
-                "waves_per_eu": 1,
-                "num_warps": 2,
-                "num_ctas": 1,
-                "num_stages": 1,
-            }
+    grid = (batch * num_q_heads * triton.cdiv(seqlen_q, BLOCK_M),)
 
-        grid = (batch * num_q_heads * triton.cdiv(seqlen_q, BLOCK_M),)
-
-        _attn_fwd[grid](
-            q,
-            k,
-            v,
-            descale_q,
-            descale_k,
-            descale_v,
-            o,
-            alibi_slopes,
-            s_dmask,
-            dropout_mask,
-            softmax_lse,
-            *q_strides,
-            *k_strides,
-            *v_strides,
-            descale_q.stride(0) if descale_q is not None else 0,
-            descale_k.stride(0) if descale_k is not None else 0,
-            descale_v.stride(0) if descale_v is not None else 0,
-            *o_strides,
-            alibi_slopes.stride(0) if alibi_slopes is not None else 0,
-            alibi_slopes.stride(1) if alibi_slopes is not None else 0,
-            s_dmask.stride(0) if s_dmask is not None else 0,
-            s_dmask.stride(1) if s_dmask is not None else 0,
-            s_dmask.stride(2) if s_dmask is not None else 0,
-            s_dmask.stride(3) if s_dmask is not None else 0,
-            stride_lse_z if softmax_lse is not None else 0,
-            stride_lse_h if softmax_lse is not None else 0,
-            stride_lse_m if softmax_lse is not None else 0,
-            softmax_scale,
-            cu_seqlens_q,
-            cu_seqlens_k,
-            dropout_p,
-            philox_seed,
-            philox_offset,
-            SEQLEN_Q=max_seqlen_q,
-            SEQLEN_K=max_seqlen_k,
-            IS_CAUSAL=causal,
-            NUM_Q_HEADS=num_q_heads,
-            NUM_K_HEADS=num_k_heads,
-            BLOCK_DMODEL=head_sz,
-            BLOCK_DMODEL_POW2=BLOCK_DMODEL_POW2,
-            RETURN_SCORES=return_softmax,
-            ENABLE_DROPOUT=enable_dropout,
-            IS_FP8=IS_FP8,
-            FP8_MAX=FP8_MAX,
-            VARLEN=is_varlen,
-            BATCH=batch,
-            NUM_XCD=8,
-            **config,
-        )
+    _attn_fwd[grid](
+        q,
+        k,
+        v,
+        descale_q,
+        descale_k,
+        descale_v,
+        o,
+        alibi_slopes,
+        s_dmask,
+        dropout_mask,
+        softmax_lse,
+        *q_strides,
+        *k_strides,
+        *v_strides,
+        descale_q.stride(0) if descale_q is not None else 0,
+        descale_k.stride(0) if descale_k is not None else 0,
+        descale_v.stride(0) if descale_v is not None else 0,
+        *o_strides,
+        alibi_slopes.stride(0) if alibi_slopes is not None else 0,
+        alibi_slopes.stride(1) if alibi_slopes is not None else 0,
+        s_dmask.stride(0) if s_dmask is not None else 0,
+        s_dmask.stride(1) if s_dmask is not None else 0,
+        s_dmask.stride(2) if s_dmask is not None else 0,
+        s_dmask.stride(3) if s_dmask is not None else 0,
+        stride_lse_z if softmax_lse is not None else 0,
+        stride_lse_h if softmax_lse is not None else 0,
+        stride_lse_m if softmax_lse is not None else 0,
+        softmax_scale,
+        cu_seqlens_q,
+        cu_seqlens_k,
+        dropout_p,
+        philox_seed,
+        philox_offset,
+        SEQLEN_Q=max_seqlen_q,
+        SEQLEN_K=max_seqlen_k,
+        IS_CAUSAL=causal,
+        NUM_Q_HEADS=num_q_heads,
+        NUM_K_HEADS=num_k_heads,
+        BLOCK_DMODEL=head_sz,
+        BLOCK_DMODEL_POW2=BLOCK_DMODEL_POW2,
+        RETURN_SCORES=return_softmax,
+        ENABLE_DROPOUT=enable_dropout,
+        IS_FP8=IS_FP8,
+        FP8_MAX=FP8_MAX,
+        VARLEN=is_varlen,
+        BATCH=batch,
+        NUM_XCD=8,
+        **config,
+    )
 
     return o, softmax_lse, s_dmask, philox_seed, philox_offset
 
@@ -4524,9 +4629,6 @@ def _flash_attn_fused_backward(
         )
 
     IS_VARLEN = True if cu_seqlens_q is not None else False
-    print("Running fused backward...")
-    print("IS_VARLEN", IS_VARLEN)
-
     # get strides and shape
     if IS_VARLEN:
         # Layout for q,k,v is thd ie [total tokens, num_head, head_dim]
@@ -5065,24 +5167,45 @@ class FlashAttnFunc(torch.autograd.Function):
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
             k = torch.nn.functional.pad(k, [0, 8 - head_size_og % 8])
             v = torch.nn.functional.pad(v, [0, 8 - head_size_og % 8])
-        out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
-            _flash_attn_forward(
-                q,
-                k,
-                v,
-                dropout_p,
-                softmax_scale,
-                causal=causal,
-                window_size_left=window_size[0],
-                window_size_right=window_size[1],
-                alibi_slopes=alibi_slopes,
-                return_lse=return_lse,
-                return_softmax=return_softmax and dropout_p > 0,
-                max_seqlen_q=q.shape[1],
-                max_seqlen_k=k.shape[1],
-                persistent=persistent_forward,
+        
+        if persistent_forward:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _persistent_flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0,
+                    max_seqlen_q=q.shape[1],
+                    max_seqlen_k=k.shape[1],
+                    persistent=persistent_forward,
+                )
             )
-        )
+        else:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0,
+                    max_seqlen_q=q.shape[1],
+                    max_seqlen_k=k.shape[1],
+                    persistent=persistent_forward,
+                )
+            )
 
         if is_grad:
             ctx.save_for_backward(q, k, v, out_padded, softmax_lse)
@@ -5326,29 +5449,52 @@ class FlashAttnFP8Func(torch.autograd.Function):
         k_fp8, descale_k = cast_to_fp8(k, fp8_dtype, "bshd")
         v_fp8, descale_v = cast_to_fp8(v, fp8_dtype, "bshd")
 
-        out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
-            _flash_attn_forward(
-                q,
-                k,
-                v,
-                dropout_p,
-                softmax_scale,
-                causal=causal,
-                window_size_left=window_size[0],
-                window_size_right=window_size[1],
-                alibi_slopes=alibi_slopes,
-                return_lse=return_lse,
-                return_softmax=return_softmax and dropout_p > 0,
-                max_seqlen_q=q.shape[1],
-                max_seqlen_k=k.shape[1],
-                cu_seqlens_q=None,
-                cu_seqlens_k=None,
-                descale_q=descale_q,
-                descale_k=descale_k,
-                descale_v=descale_v,
-                persistent=persistent_forward,
+        if persistent_forward:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _persistent_flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0,
+                    max_seqlen_q=q.shape[1],
+                    max_seqlen_k=k.shape[1],
+                    cu_seqlens_q=None,
+                    cu_seqlens_k=None,
+                    descale_q=descale_q,
+                    descale_k=descale_k,
+                    descale_v=descale_v,
+                )
             )
-        )
+        else:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0,
+                    max_seqlen_q=q.shape[1],
+                    max_seqlen_k=k.shape[1],
+                    cu_seqlens_q=None,
+                    cu_seqlens_k=None,
+                    descale_q=descale_q,
+                    descale_k=descale_k,
+                    descale_v=descale_v,
+                )
+            )
 
         if is_grad:
             ctx.save_for_backward(
@@ -5549,26 +5695,46 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
             k = torch.nn.functional.pad(k, [0, 8 - head_size_og % 8])
             v = torch.nn.functional.pad(v, [0, 8 - head_size_og % 8])
-        out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
-            _flash_attn_forward(
-                q,
-                k,
-                v,
-                dropout_p,
-                softmax_scale,
-                causal=causal,
-                window_size_left=window_size[0],
-                window_size_right=window_size[1],
-                alibi_slopes=alibi_slopes,
-                return_lse=return_lse,
-                return_softmax=return_softmax and dropout_p > 0.0,
-                max_seqlen_q=max_seqlen_q,
-                max_seqlen_k=max_seqlen_k,
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_k=cu_seqlens_k,
-                persistent=persistent_forward,
+        if persistent_forward:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _persistent_flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0.0,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_q=cu_seqlens_q,
+                    cu_seqlens_k=cu_seqlens_k,
+                )
             )
-        )
+        else:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0.0,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_q=cu_seqlens_q,
+                    cu_seqlens_k=cu_seqlens_k,
+                )
+            )
         if is_grad:
             ctx.save_for_backward(
                 q, k, v, out_padded, softmax_lse, cu_seqlens_q, cu_seqlens_k

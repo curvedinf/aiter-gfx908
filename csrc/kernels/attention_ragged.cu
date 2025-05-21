@@ -17,8 +17,8 @@
 #include "quant_utils.cuh"
 
 #if defined(__HIPCC__) && \
-    (defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__))
-#define __HIP__MI300_MI250__
+    (defined(__gfx90a__) || defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+#define __HIP__MI3XX_MI250__
 #endif
 
 #if defined(NDEBUG)
@@ -34,7 +34,7 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define DIVIDE_ROUND_UP(a, b) (((a) + (b)-1) / (b))
 
-#if defined(__HIP__MI300_MI250__) // TODO: Add NAVI support
+#if defined(__HIP__MI3XX_MI250__) // TODO: Add NAVI support
 
 #define GCN_MFMA_INSTR1 __builtin_amdgcn_mfma_f32_16x16x4f32
 #define GCN_MFMA_INSTR __builtin_amdgcn_mfma_f32_4x4x4f16
@@ -56,6 +56,9 @@ typedef struct _B16x8
 {
     _B16x4 xy[2];
 } _B16x8;
+
+using bit16x8 = __attribute__((__vector_size__(8 * sizeof(uint16_t)))) uint16_t;
+typedef bit16x8 _B16x8_2;
 
 using _B8x8  = uint2;
 using _B8x4  = int32_t; // used in builtins
@@ -104,6 +107,30 @@ __device__ __forceinline__ floatx4 gcn_mfma4x4x4_instr(const _B16x4& inpA,
     }
 }
 
+#if defined(__gfx950__)
+template <typename T, int absz, int cbid, int blgp>
+__device__ __forceinline__ floatx4 gcn_mfma16x16x32_instr(const _B16x8& inpA,
+                                                          const _B16x8& inpB,
+                                                          const floatx4& inpC)
+{
+    _B16x8_2 tmpA = __builtin_shufflevector(inpA.xy[0], inpA.xy[1], 0, 1, 2, 3, 4, 5, 6, 7);
+    _B16x8_2 tmpB = __builtin_shufflevector(inpB.xy[0], inpB.xy[1], 0, 1, 2, 3, 4, 5, 6, 7);
+
+    if constexpr(std::is_same<T, _Float16>::value)
+    {
+        return __builtin_amdgcn_mfma_f32_16x16x32_f16(tmpA, tmpB, inpC, absz, cbid, blgp);
+    }
+    else if constexpr(std::is_same<T, __hip_bfloat16>::value)
+    {
+        return __builtin_amdgcn_mfma_f32_16x16x32_bf16(tmpA, tmpB, inpC, absz, cbid, blgp);
+    }
+    else
+    {
+        static_assert(false, "unsupported 16b dtype");
+    }
+}
+#else
+
 template <typename T, int absz, int cbid, int blgp>
 __device__ __forceinline__ floatx4 gcn_mfma16x16x16_instr(const _B16x4& inpA,
                                                           const _B16x4& inpB,
@@ -122,6 +149,7 @@ __device__ __forceinline__ floatx4 gcn_mfma16x16x16_instr(const _B16x4& inpA,
         static_assert(false, "unsupported 16b dtype");
     }
 }
+#endif
 
 template <typename T>
 __device__ __forceinline__ float to_float(const T& inp)
@@ -724,6 +752,12 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
             {
                 for(int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++)
                 {
+#if defined(__gfx950__)
+                    dout[token_depth] = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                        Klocal[token_depth][qkhe_depth],
+                        Qlocal[qkhe_depth][qkratio],
+                        dout[token_depth]);
+#else			
                     for(int i = 0; i < 2; i++)
                     {
                         dout[token_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
@@ -731,6 +765,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                             Qlocal[qkhe_depth][qkratio].xy[i],
                             dout[token_depth]);
                     }
+#endif
                 }
             }
             else
@@ -741,11 +776,18 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                 {
                     _B8x8 Ktmp8x8    = Ktmp8x16.xy[qkratio];
                     _B16x8 Klocaltmp = convert_b8x8_custom<scalar_t>(Ktmp8x8);
+#if defined(__gfx950__)
+                        dout[token_depth] = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                            Klocaltmp,
+			    Qlocal[qkhe_depth][qkratio],
+			    dout[token_depth]);
+#else		    
                     for(int i = 0; i < 2; i++)
                     {
                         dout[token_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
                             Klocaltmp.xy[i], Qlocal[qkhe_depth][qkratio].xy[i], dout[token_depth]);
                     }
+#endif		    
                 }
             }
         }
@@ -931,6 +973,24 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                             *reinterpret_cast<const _B16x8*>(elems);
                     }
 
+#if defined(__gfx950__)
+		    assert(ELEMS8_ELEMS4_RATIO == 2);
+                    _B16x8 tmp_in;
+                    for(int i = 0; i < 2; i++)
+                    {
+                        const int offset = rowid * VTLANELOOP * ELEMS8_ELEMS4_RATIO +
+                            vfetch_depth * ELEMS8_ELEMS4_RATIO + i;
+                        const int offset1 = offset % ROWS_PER_WARP;
+                        const int offset2 = offset / ROWS_PER_WARP;
+                        tmp_in.xy[i] = shared_logits[vtoken_depth][offset2][lane16id][offset1];
+                    }
+                    // output format is 16 qheads across 16 lanes, 16 head elems spread
+                    // across 4 rows
+                    tmp_out = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                        Vlocal[vtoken_depth][vhe_depth][vfetch_depth],
+                        tmp_in,
+                        tmp_out);
+#else		    
                     for(int i = 0; i < ELEMS8_ELEMS4_RATIO; i++)
                     {
                         const int offset = rowid * VTLANELOOP * ELEMS8_ELEMS4_RATIO +
@@ -944,6 +1004,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                             shared_logits[vtoken_depth][offset2][lane16id][offset1],
                             tmp_out);
                     }
+#endif		    
                 }
                 // KV cache fp8
             }
@@ -958,6 +1019,24 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                     {
                         _B8x8 Vtmp8x8    = Vtmp8x16.xy[j];
                         _B16x8 Vlocaltmp = convert_b8x8_custom<scalar_t>(Vtmp8x8);
+#if defined(__gfx950__)
+    		        assert(ELEMS16_ELEMS8_RATIO == 2);
+		        _B16x8 tmp_in;
+                        for(int i = 0; i < 2; i++)
+                        {
+                            const int offset = rowid * ELEMS16_ELEMS8_RATIO * ELEMS8_ELEMS4_RATIO +
+                                               j * ELEMS8_ELEMS4_RATIO + i;
+                            const int offset1 = offset % ROWS_PER_WARP;
+                            const int offset2 = offset / ROWS_PER_WARP;
+			    tmp_in.xy[i] = shared_logits[vtoken_depth][offset2][lane16id][offset1];
+                        }
+                        // output format is 16 qheads across 16 lanes, 16 head elems
+                        // spread across 4 rows
+                        tmp_out = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                            Vlocaltmp,
+                            tmp_in,
+                            tmp_out);
+#else			
                         for(int i = 0; i < ELEMS8_ELEMS4_RATIO; i++)
                         {
                             const int offset = rowid * ELEMS16_ELEMS8_RATIO * ELEMS8_ELEMS4_RATIO +
@@ -971,6 +1050,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
                                 shared_logits[vtoken_depth][offset2][lane16id][offset1],
                                 tmp_out);
                         }
+#endif			
                     }
                 }
             }
@@ -1823,7 +1903,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
     }
 }
 
-#else // !defined(__HIP__MI300_MI250__) TODO: Add NAVI support
+#else // !defined(__HIP__MI3XX_MI250__) TODO: Add NAVI support
 
 template <typename scalar_t,
           typename cache_t,
@@ -1928,7 +2008,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
     UNREACHABLE_CODE
 }
 
-#endif // defined(__HIP__MI300_MI250__) TODO: Add NAVI support
+#endif // defined(__HIP__MI3XX_MI250__) TODO: Add NAVI support
 
 #define LAUNCH_CUSTOM_ATTENTION_MFMA16(GQA_RATIO)           \
     paged_attention_ll4mi_QKV_mfma16_kernel<T,              \

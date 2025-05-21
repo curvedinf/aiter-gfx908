@@ -78,9 +78,9 @@ torch::Tensor gemm_a8w8_bpreshuffle_tune(
   int K = XQ.size(1);
   int KBatch = std::pow(2, splitK);
 
-  if (Y.dtype() == at::ScalarType::BFloat16)
+  if (Y.dtype() == at::ScalarType::Half)
   {
-    blockwise_dispatch<F32, B16>(kernelId)(XQ, WQ, x_scale, w_scale, Y);
+    blockwise_dispatch<F32, F16>(kernelId)(XQ, WQ, x_scale, w_scale, Y);
   }
   else
   {

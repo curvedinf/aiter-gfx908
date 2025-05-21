@@ -113,6 +113,7 @@ torch::Tensor gemm_a8w8_bpreshuffle(
     torch::Tensor &w_scale,
     torch::Tensor &Y)
 {
+  // printf("solin:=====gemm_a8w8_bpreshuffle==.\n");
   TORCH_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
   TORCH_CHECK(x_scale.dtype() == w_scale.dtype(),
               "Scales should have the same dtype!");
@@ -120,7 +121,7 @@ torch::Tensor gemm_a8w8_bpreshuffle(
   int M = XQ.size(0);
   int N = WQ.size(0);
   int K = XQ.size(1);
-
+ // printf("solin:=====gemm_a8w8_bpreshuffle=m=%d,n=%d,k=%d=.\n",M,N,K);
   if (x_scale.dtype() == at::ScalarType::Float && Y.dtype() == at::ScalarType::Half)
   {
     blockscale_dispatch<F32, F16>(M, N, K)(XQ, WQ, x_scale, w_scale, Y);

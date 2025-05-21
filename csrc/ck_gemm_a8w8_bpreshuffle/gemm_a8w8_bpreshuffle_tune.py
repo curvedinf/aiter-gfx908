@@ -84,7 +84,7 @@ def tune_gemm(m, n, k, useSplitK = False):
     ref_out = run_torch(x, weight, x_scale, w_scale)
 
     print(f"*******************M:{m} X N:{n} X K:{k}**************************")
-    print(f"Start tuning a8w8 gemm kernel for M:{m}, N:{n}, K{k}:")
+    print(f"Start tuning a8w8 gemm kernel for M:{m}, N:{n}, K:{k}")
     kernels_num = len(kernels_list)
     best_kernelConfig = (-1, 0)
     best_time = -1
@@ -154,7 +154,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-i",
         "--untune_file",
-        default="aiter/configs/a8w8_blockscale_untuned_gemm.csv",
+        default="aiter/configs/a8w8_bpreshuffle_untuned_gemm.csv",
         required=False,
         help="input"
     )
@@ -162,7 +162,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-o",
         "--tune_file",
-        default="aiter/configs/a8w8_blockscale_tuned_gemm.csv",
+        default="aiter/configs/a8w8_bpreshuffle_tuned_gemm.csv",
         required=False,
         help="output: tuning result store this file"
     )

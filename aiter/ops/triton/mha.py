@@ -1917,7 +1917,6 @@ def _flash_attn_forward(
     descale_q: Optional[torch.Tensor] = None,
     descale_k: Optional[torch.Tensor] = None,
     descale_v: Optional[torch.Tensor] = None,
-    persistent: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
     # FP8

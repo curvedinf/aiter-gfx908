@@ -67,149 +67,149 @@ void ck_moe_stage1_gemm_mxfp4(const hipStream_t &stream, int tokens, int sorted_
 )
 {
     // ~~~~~~~~~~~~~~~~~~~~~~~~following start with ck things
-    static constexpr ck::index_t ScaleBlockSize  = 32; // scaling block size
-    ck::index_t StrideA = K;
-    ck::index_t StrideB = K;
-    ck::index_t StrideD = 0;
-    ck::index_t StrideE = N;
-    ck::index_t Scale_Stride_AM      = (K + ScaleBlockSize - 1) / ScaleBlockSize;
-    ck::index_t Scale_Stride_BN      = (K + ScaleBlockSize - 1) / ScaleBlockSize;
-    ck::index_t KBatch = 1;
-    // using AccDataType = F32;
-    using CShuffleDataType = F32;
-    using DsDataType = ck::Tuple<F32, F32, F32>;
+//     static constexpr ck::index_t ScaleBlockSize  = 32; // scaling block size
+//     ck::index_t StrideA = K;
+//     ck::index_t StrideB = K;
+//     ck::index_t StrideD = 0;
+//     ck::index_t StrideE = N;
+//     ck::index_t Scale_Stride_AM      = (K + ScaleBlockSize - 1) / ScaleBlockSize;
+//     ck::index_t Scale_Stride_BN      = (K + ScaleBlockSize - 1) / ScaleBlockSize;
+//     ck::index_t KBatch = 1;
+//     // using AccDataType = F32;
+//     using CShuffleDataType = F32;
+//     using DsDataType = ck::Tuple<F32, F32, F32>;
 
-    using A0Layout = Row;
-    using B0Layout = Col;
-    using D0Layout = Row;
-    using D1Layout = Col;
-    using ELayout  = Row;
-    using D2Layout = ELayout;
-    using DsLayout = ck::Tuple<D0Layout, D1Layout, D2Layout>;
+//     using A0Layout = Row;
+//     using B0Layout = Col;
+//     using D0Layout = Row;
+//     using D1Layout = Col;
+//     using ELayout  = Row;
+//     using D2Layout = ELayout;
+//     using DsLayout = ck::Tuple<D0Layout, D1Layout, D2Layout>;
 
-    using PassThrough = ck::tensor_operation::element_wise::PassThrough;
-    using AElementOp = PassThrough;
-    using BElementOp = PassThrough;
-    // using CDEElementOp = MultiplyMultiply;
+//     using PassThrough = ck::tensor_operation::element_wise::PassThrough;
+//     using AElementOp = PassThrough;
+//     using BElementOp = PassThrough;
+//     // using CDEElementOp = MultiplyMultiply;
 
-    static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::Default;
-    // static constexpr ck::index_t MPerBlock = 128;
-    static constexpr ck::index_t MNPerXDL = 16;
-    static constexpr ck::index_t BLOCKSIZE = 256;
-    static constexpr ck::index_t NPerBlock = PipelineVer == ck::BlockGemmPipelineVersion::v1 ? 128 : 256;
-    static constexpr ck::index_t WAVES = BLOCKSIZE / 64;
-    // static constexpr ck::index_t MWaves = 1;
-    // static constexpr ck::index_t NWaves = WAVES / MWaves;
-    static constexpr ck::index_t MXDLPerWave = MPerBlock / (MNPerXDL * MWaves);
-    static constexpr ck::index_t NXDLPerWave = NPerBlock / (MNPerXDL * NWaves);
-    static constexpr ck::index_t CShuffleMXDLPerWave = MXDLPerWave;
-    static constexpr ck::index_t CShuffleNXDLPerWave = NXDLPerWave;
-    // static constexpr ck::index_t KPerBlock = ck::is_same_v<B0DataType, I4> ? 128 : 256 / sizeof(A0DataType);
-    static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);
-    static constexpr ck::index_t BK1 = 32 / sizeof(B0DataType);
-    static constexpr ck::index_t EVec = 16 / sizeof(EDataType);
-    static constexpr ck::index_t K0_A = KPerBlock / AK1;
-    static constexpr ck::index_t K0_B = KPerBlock / BK1;
-    static constexpr ck::index_t K0_M_A = BLOCKSIZE / K0_A;
-    static constexpr ck::index_t K0_N_B = BLOCKSIZE / K0_B;
-    static constexpr ck::index_t D0Vec = 1;
-    static constexpr ck::index_t D1Vec = PerTensorQuant ? 1 : EVec;
-    static constexpr ck::index_t D2Vec = 1;
+//     static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::Default;
+//     // static constexpr ck::index_t MPerBlock = 128;
+//     static constexpr ck::index_t MNPerXDL = 16;
+//     static constexpr ck::index_t BLOCKSIZE = 256;
+//     static constexpr ck::index_t NPerBlock = PipelineVer == ck::BlockGemmPipelineVersion::v1 ? 128 : 256;
+//     static constexpr ck::index_t WAVES = BLOCKSIZE / 64;
+//     // static constexpr ck::index_t MWaves = 1;
+//     // static constexpr ck::index_t NWaves = WAVES / MWaves;
+//     static constexpr ck::index_t MXDLPerWave = MPerBlock / (MNPerXDL * MWaves);
+//     static constexpr ck::index_t NXDLPerWave = NPerBlock / (MNPerXDL * NWaves);
+//     static constexpr ck::index_t CShuffleMXDLPerWave = MXDLPerWave;
+//     static constexpr ck::index_t CShuffleNXDLPerWave = NXDLPerWave;
+//     // static constexpr ck::index_t KPerBlock = ck::is_same_v<B0DataType, I4> ? 128 : 256 / sizeof(A0DataType);
+//     static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);
+//     static constexpr ck::index_t BK1 = 32 / sizeof(B0DataType);
+//     static constexpr ck::index_t EVec = 16 / sizeof(EDataType);
+//     static constexpr ck::index_t K0_A = KPerBlock / AK1;
+//     static constexpr ck::index_t K0_B = KPerBlock / BK1;
+//     static constexpr ck::index_t K0_M_A = BLOCKSIZE / K0_A;
+//     static constexpr ck::index_t K0_N_B = BLOCKSIZE / K0_B;
+//     static constexpr ck::index_t D0Vec = 1;
+//     static constexpr ck::index_t D1Vec = PerTensorQuant ? 1 : EVec;
+//     static constexpr ck::index_t D2Vec = 1;
 
-    // preShuffleBuffer((cosntF4*)w1_scale, w1, 4096, 6144, 16);
+//     // preShuffleBuffer((cosntF4*)w1_scale, w1, 4096, 6144, 16);
 
-    // std::cout << "ck_preshuffle" << std::endl;
-    // for (int i = 0; i < 128; i++) {
-    //     std::cout << (int)((uint8_t*)w1)[i] << ", ";
-    // }
+//     // std::cout << "ck_preshuffle" << std::endl;
+//     // for (int i = 0; i < 128; i++) {
+//     //     std::cout << (int)((uint8_t*)w1)[i] << ", ";
+//     // }
     
-    using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemmMX<
-        A0Layout,    B0Layout,    DsLayout,    ELayout, 
-        A0DataType,  A1DataType,  B0DataType,  B1DataType,  DsDataType, EDataType, AccDataType, CShuffleDataType,
-        AElementOp,  BElementOp, CDEElementOp, GemmSpec,   
-        ScaleBlockSize,      256,   
-        128,   128,    128,
-        32,   32,
-        16,   16,
-        8,    2,
-        S<4, 64, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 32, 32, 0,
-        S<4, 64, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 32, 32, 0,
-        2,    2,   S<1, 32, 1, 8>, S<2, 1, 1, 1>,
-        ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, ActOP, Nswizzle, true, MulRoutedWeight, ck::index_t, A0DataType>;
-// clang-format on
+//     using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemmMXBNS<
+//         A0Layout,    B0Layout,    DsLayout,    ELayout, 
+//         A0DataType,  A1DataType,  B0DataType,  B1DataType,  DsDataType, EDataType, AccDataType, CShuffleDataType,
+//         AElementOp,  BElementOp, CDEElementOp, GemmSpec,   
+//         ScaleBlockSize,      256,   
+//         128,   128,    128,
+//         16,   16,
+//         16,   16,
+//         8,    2,
+//         S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
+//         S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
+//         2,    2,   S<1, 32, 1, 8>, S<2, 1, 1, 1>,
+//         ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, ActOP, Nswizzle, true, MulRoutedWeight, ck::index_t, A0DataType>;
+// // clang-format on
 
-    auto a_element_op = AElementOp{};
-    auto b_element_op = BElementOp{};
-    auto cde_element_op = CDEElementOp{};
+//     auto a_element_op = AElementOp{};
+//     auto b_element_op = BElementOp{};
+//     auto cde_element_op = CDEElementOp{};
 
-    constexpr ck::index_t NumDTensor = DsDataType::Size();
+//     constexpr ck::index_t NumDTensor = DsDataType::Size();
 
-    constexpr auto I0 = ck::Number<0>{};
-    constexpr auto I1 = ck::Number<1>{};
-    static constexpr auto DStride = PerTensorQuant ? I0 : I1;
+//     constexpr auto I0 = ck::Number<0>{};
+//     constexpr auto I1 = ck::Number<1>{};
+//     static constexpr auto DStride = PerTensorQuant ? I0 : I1;
 
-    // Tensor<A0DataType> a0_t_k(HostTensorDescriptor({1024, K}, {K, 1}));
-    // Tensor<A1DataType> a1_t_k(HostTensorDescriptor(
-    //     {1024, (K + ScaleBlockSize - 1) / ScaleBlockSize}, {Scale_Stride_AM, 1}));
-    // Tensor<B0DataType> b0_e_n_k(HostTensorDescriptor({8, K, N * 2}, {N * 2 * K, 1, K}));
-    // Tensor<B1DataType> b1_e_n_k(
-    //     HostTensorDescriptor({8, (K + ScaleBlockSize - 1) / ScaleBlockSize, N * 2},
-    //                          {(N * 2 * Scale_Stride_BN), 1, Scale_Stride_BN}));
+//     // Tensor<A0DataType> a0_t_k(HostTensorDescriptor({1024, K}, {K, 1}));
+//     // Tensor<A1DataType> a1_t_k(HostTensorDescriptor(
+//     //     {1024, (K + ScaleBlockSize - 1) / ScaleBlockSize}, {Scale_Stride_AM, 1}));
+//     // Tensor<B0DataType> b0_e_n_k(HostTensorDescriptor({8, K, N * 2}, {N * 2 * K, 1, K}));
+//     // Tensor<B1DataType> b1_e_n_k(
+//     //     HostTensorDescriptor({8, (K + ScaleBlockSize - 1) / ScaleBlockSize, N * 2},
+//     //                          {(N * 2 * Scale_Stride_BN), 1, Scale_Stride_BN}));
     
-    // a0_t_k.GenerateTensorValue(GeneratorTensor_3<A0DataType>{6, 6});
-    // b0_e_n_k.GenerateTensorValue(GeneratorTensor_3<B0DataType>{6, 6});
-    // a1_t_k.GenerateTensorValue(GeneratorTensor_3<A1DataType>{125, 125});
-    // b1_e_n_k.GenerateTensorValue(GeneratorTensor_3<B1DataType>{125, 125});
+//     // a0_t_k.GenerateTensorValue(GeneratorTensor_3<A0DataType>{6, 6});
+//     // b0_e_n_k.GenerateTensorValue(GeneratorTensor_3<B0DataType>{6, 6});
+//     // a1_t_k.GenerateTensorValue(GeneratorTensor_3<A1DataType>{125, 125});
+//     // b1_e_n_k.GenerateTensorValue(GeneratorTensor_3<B1DataType>{125, 125});
 
-    // DeviceMem a0_device_buf(sizeof(A0DataType) * a0_t_k.mDesc.GetElementSpaceSize() / 2);
-    // DeviceMem a1_device_buf(sizeof(A1DataType) * a1_t_k.mDesc.GetElementSpaceSize());
-    // DeviceMem b0_device_buf(sizeof(B0DataType) * b0_e_n_k.mDesc.GetElementSpaceSize() / 2);
-    // DeviceMem b1_device_buf(sizeof(B1DataType) * b1_e_n_k.mDesc.GetElementSpaceSize());
+//     // DeviceMem a0_device_buf(sizeof(A0DataType) * a0_t_k.mDesc.GetElementSpaceSize() / 2);
+//     // DeviceMem a1_device_buf(sizeof(A1DataType) * a1_t_k.mDesc.GetElementSpaceSize());
+//     // DeviceMem b0_device_buf(sizeof(B0DataType) * b0_e_n_k.mDesc.GetElementSpaceSize() / 2);
+//     // DeviceMem b1_device_buf(sizeof(B1DataType) * b1_e_n_k.mDesc.GetElementSpaceSize());
 
-    // a0_device_buf.ToDevice(a0_t_k.mData.data());
-    // a1_device_buf.ToDevice(a1_t_k.mData.data());
-    // b0_device_buf.ToDevice(b0_e_n_k.mData.data);
-    // b1_device_buf.ToDevice(b1_e_n_k.mData.data());
-    // // do GEMM
-    auto device_op = DeviceOpInstance{};
+//     // a0_device_buf.ToDevice(a0_t_k.mData.data());
+//     // a1_device_buf.ToDevice(a1_t_k.mData.data());
+//     // b0_device_buf.ToDevice(b0_e_n_k.mData.data);
+//     // b1_device_buf.ToDevice(b1_e_n_k.mData.data());
+//     // // do GEMM
+//     auto device_op = DeviceOpInstance{};
 
-    auto invoker = device_op.MakeInvoker();
-    auto argument =
-        device_op.MakeArgument(sorted_token_ids,
-                               sorted_expert_ids,
-                               num_valid_ids,
-                               hidden_states,
-                               a1_scale.value(),
-                               w1,
-                               w1_scale.value(),
-                               std::array<const void *, NumDTensor>{nullptr,
-                                                                    nullptr,
-                                                                    MulRoutedWeight ? sorted_weights : nullptr},
-                               out,
-                               tokens,
-                               topk,
-                               sorted_size,
-                               N,
-                               K,
-                               StrideA,
-                               Scale_Stride_AM,
-                               StrideB,
-                               Scale_Stride_BN,
-                               std::array<ck::index_t, NumDTensor>{I0, I0, I0},
-                               StrideE,
-                               KBatch,
-                               a_element_op,
-                               b_element_op,
-                               cde_element_op);
+//     auto invoker = device_op.MakeInvoker();
+//     auto argument =
+//         device_op.MakeArgument(sorted_token_ids,
+//                                sorted_expert_ids,
+//                                num_valid_ids,
+//                                hidden_states,
+//                                a1_scale.value(),
+//                                w1,
+//                                w1_scale.value(),
+//                                std::array<const void *, NumDTensor>{nullptr,
+//                                                                     nullptr,
+//                                                                     MulRoutedWeight ? sorted_weights : nullptr},
+//                                out,
+//                                tokens,
+//                                topk,
+//                                sorted_size,
+//                                N,
+//                                K,
+//                                StrideA,
+//                                Scale_Stride_AM,
+//                                StrideB,
+//                                Scale_Stride_BN,
+//                                std::array<ck::index_t, NumDTensor>{I0, I0, I0},
+//                                StrideE,
+//                                KBatch,
+//                                a_element_op,
+//                                b_element_op,
+//                                cde_element_op);
 
-    if (!device_op.IsSupportedArgument(argument))
-    {
-        throw std::runtime_error(
-            "wrong! device_gemm with the specified compilation parameters does "
-            "not support this GEMM problem");
-    }
+//     if (!device_op.IsSupportedArgument(argument))
+//     {
+//         throw std::runtime_error(
+//             "wrong! device_gemm with the specified compilation parameters does "
+//             "not support this GEMM problem");
+//     }
 
-    invoker.Run(argument, StreamConfig{stream});
+//     invoker.Run(argument, StreamConfig{stream});
 }
 
 #define CK_MOE_STAGE1_GEMM_MXFP4_DEFINE(MPerfBlock, KPerBlock, MWaves, NWaves, PipelineVer, MulRoutedWeight, ActOP)                                                                                                                            \
@@ -269,6 +269,7 @@ void ck_moe_stage2_gemm_mxfp4(const hipStream_t &stream, int tokens, int sorted_
     ck::index_t Scale_Stride_BN      = (K + ScaleBlockSize - 1) / ScaleBlockSize;
     ck::index_t KBatch = 1;
 
+    printf("%dx%dx%d", tokens, N, K);
     // using AccDataType = F32;
     using CShuffleDataType = F32;
     using DsDataType = ck::Tuple<F32, F32, F32>;
@@ -309,19 +310,19 @@ void ck_moe_stage2_gemm_mxfp4(const hipStream_t &stream, int tokens, int sorted_
     static constexpr ck::index_t K0_M = BLOCKSIZE / K0_A;
     static constexpr ck::index_t K0_N = BLOCKSIZE / K0_B;
 // clang-format off
-using DeviceOpInstance                     = ck::tensor_operation::device::DeviceMoeGemmMX<      
+using DeviceOpInstance                     = ck::tensor_operation::device::DeviceMoeGemmMXBNS<      
     A0Layout,    B0Layout,    DsLayout,    ELayout, 
     A0DataType,  A1DataType,  B0DataType,  B1DataType,  DsDataType, EDataType, AccDataType, CShuffleDataType,
     AElementOp,  BElementOp, CDEElementOp, GemmSpec,   
     ScaleBlockSize,      256,   
     128,   128,    128,
-    32,   32,
+    16,   16,
     16,   16,
     8,    2,
-    S<4, 64, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 32, 32, 0,
-    S<4, 64, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 32, 32, 0,
+    S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
+    S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
     2,    2,   S<1, 32, 1, 8>, S<2, 1, 1, 1>,
-    ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, 0, Nswizzle, false, MulRoutedWeight, ck::index_t, A0DataType>;
+    ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, 0, false, false, MulRoutedWeight, ck::index_t, A0DataType>;
 // clang-format on
 
     auto a_element_op = AElementOp{};

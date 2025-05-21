@@ -244,7 +244,9 @@
         "md_name": "'module_moe_ck2stages'",
         "flags_extra_cc": [],
         "flags_extra_hip": [
-            "'-mllvm --amdgpu-enable-max-ilp-scheduling-strategy=1'"
+            "'-mllvm --amdgpu-enable-max-ilp-scheduling-strategy=1'",
+            "'-mllvm -greedy-reverse-local-assignment=1'",
+            "'-v --save-temps -Wno-gnu-line-marker -ftemplate-backtrace-limit=0'"
         ],
         "extra_ldflags": "None",
         "extra_include": [],

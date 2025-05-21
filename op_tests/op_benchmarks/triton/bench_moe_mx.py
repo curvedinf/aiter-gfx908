@@ -6,10 +6,13 @@ import triton
 from utils.benchmark_utils import get_available_models, get_model_configs
 
 from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
-from op_benchmarks.triton.utils.common import str_to_torch_dtype, torch_to_tl_dtype
-from op_benchmarks.triton.utils.moe import generate_moe_alignment
-from op_tests.triton_tests.test_moe_mx import alloc_rand
-from op_tests.triton_tests.utils.quant_ref import torch_dynamic_mxfp4_quant
+from op_tests.triton_tests.test_moe_mx import (
+    alloc_rand,
+    str_to_torch_dtype,
+    torch_to_tl_dtype,
+    moe_align_block_size,
+    torch_dynamic_mxfp4_quant,
+)
 
 
 def model_benchmark_configs(args):
@@ -90,25 +93,21 @@ def run_benchmark(args):
             "kpack": 1,
         }
 
-        topk_weights, topk_ids, sorted_token_ids, expert_ids, num_tokens_post_padded = (
-            generate_moe_alignment(M, E, top_k, config["BLOCK_SIZE_M"])
+        values = torch.randn(M, E, dtype=torch.float16, device="cuda")
+        softmax_vals = torch.softmax(values, dim=1)
+        topk_weights, topk_ids = torch.topk(softmax_vals, k=top_k, dim=1)
+
+        sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
+            topk_ids, config["BLOCK_SIZE_M"], E
         )
-        # Downcast a tensor to mxfp4 and upcast back for reference
+
         if is_a_mixed_input:
-            # swizzle_axis = 0 if swizzle_mx else None
-            # a_tri, a_mx_scales, _ = downcast_to_mxfp(
-            #    a_tri, a_dtype, axis=1, swizzle_axis=swizzle_axis
-            # )
             a_tri, a_mx_scales = torch_dynamic_mxfp4_quant(a_tri)
         else:
             a_mx_scales = None
-        # Downcast b tensor to mxfp4 and upcast back for reference
+
         if is_b_mixed_input:
-            # swizzle_axis = 1 if swizzle_mx else None
-            # b_tri, b_mx_scales, _ = downcast_to_mxfp(
-            #    b_tri, b_dtype, axis=2, swizzle_axis=swizzle_axis
-            # )
-            b_tri, b_mx_scales = torch_dynamic_mxfp4_quant(a_tri)
+            b_tri, b_mx_scales = torch_dynamic_mxfp4_quant(b_tri)
         # (M, K) * (top_k, N, K) -> (M, top_k, N). 2 for multiplication and accumulation
         flops = 2.0 * M * top_k * K * N
         # The weight is applied on the gemm product which has the shape of (M, top_k, N)

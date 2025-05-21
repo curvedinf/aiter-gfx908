@@ -257,7 +257,6 @@ def gemm_afp4wfp4(
         BLOCK_SIZE_K = 256
         GROUP_SIZE_M = 1
         waves_per_eu = 2
-        aggregate = 2
         kpack = 1
         num_warps = 8
         num_stages = 2
@@ -340,7 +339,6 @@ def gemm_afp4wfp4(
         waves_per_eu=waves_per_eu,
         kpack=kpack,
         num_warps=num_warps,
-        aggregate_load_factor = aggregate,
         num_stages=num_stages,
         matrix_instr_nonkdim=matrix_instr_nonkdim,
     )

@@ -38,6 +38,9 @@ def run_torch(x, weight, x_scale, w_scale, dtype=dtypes.bf16):
     out = F.linear(x.to(dtypes.fp32), weight.to(dtypes.fp32))
     return out.to(dtype)
 
+@perftest()
+def run_flatmm(x, weight, x_scale, w_scale, dtype=torch.float16):
+    return aiter.flatmm_CK(x, weight, x_scale, w_scale, dtype)
 
 @perftest()
 def run_gemm_ck(x, weight, x_scale, w_scale, dtype=dtypes.bf16):
@@ -61,17 +64,17 @@ def test_gemm(dtype, m, n, k):
     # print("solin:====scale_k =", scale_k)
     # print("solin:====scale_n =", scale_n)
     a, avg_a = run_torch(x, weight, x_scale, w_scale, dtype)
-    b, avg_b = run_gemm_ck(x, weight, x_scale, w_scale, dtype)
+    b, avg_b = run_flatmm(x, weight_shuffle, x_scale, w_scale, dtype)
     c, avg_c = run_gemm_ck_bpreshuffle(x, weight_shuffle, x_scale, w_scale, dtype)
 
 
     msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, ck avg: {avg_b:<8.2f} us, ck wpreshuffle avg: {avg_c:<8.2f} us uplift: {avg_a/min(avg_b, avg_c) -1:<5.1%}"
     print(msg)
-    checkAllclose(a, b, msg="ck:", rtol=1e-2, atol=0.01)
-    checkAllclose(a, c, msg="ck_wpreshuffle: ", rtol=1e-2, atol=0.01)
+    checkAllclose(a, b, msg="ck_tile:", rtol=1e-2, atol=0.01)
+    checkAllclose(a, c, msg="ck_preshuffle: ", rtol=1e-2, atol=0.01)
     tflops = 2 * m *n *k /avg_c /1e6
 
-    return {"ck": avg_b, "ck_wpreshuffle": avg_c, "ck_wpreshuffle_tflops":tflops}
+    return {"ck_tile": avg_b, "ck_wpreshuffle": avg_c, "ck_wpreshuffle_tflops":tflops}
 
 
 @perftest(num_iters=5)

@@ -5,7 +5,39 @@ import triton
 import triton.language as tl
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 
+def get_autotune_configs():
+  configs = []
+  sched_hint = 'none'
+  group_m = 1
+  for block_m in [16]:
+    for block_n in [64]:
+      for block_k in [1024]:
+        for wpeu in [1]:
+          for nonk in [16]:
+            for num_warps in [2]:
+              for num_stages in [3]:
+                configs.append(triton.Config({
+                    'BLOCK_SIZE_M': block_m,
+                    'BLOCK_SIZE_N': block_n,
+                    'BLOCK_SIZE_K': block_k,
+                    'GROUP_SIZE_M': group_m,
+                    'waves_per_eu': wpeu,
+                    'matrix_instr_nonkdim': nonk,
+                    'schedule_hint': sched_hint,
+                    'cache_modifier': '.cg'},
+                    num_stages=num_stages,
+                    num_warps=num_warps))
+  print("num_configs=",len(configs))
+  return configs
 
+def get_autotune_keys():
+    return ['M', 'N', 'K']
+
+@triton.autotune(
+    configs=get_autotune_configs(),
+    key=get_autotune_keys(),
+    use_cuda_graph=True,
+)
 @triton.heuristics(
     {
         "EVEN_K": lambda args: args["K"] % args["BLOCK_SIZE_K"] == 0,
@@ -35,12 +67,12 @@ def _gemm_afp4_wfp4_kernel(
     stride_bsn,
     stride_bsk,
     # Meta-parameters
+    NUM_KSPLIT: tl.constexpr,
+    SPLITK_BLOCK_SIZE: tl.constexpr,
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
-    NUM_KSPLIT: tl.constexpr,
-    SPLITK_BLOCK_SIZE: tl.constexpr,
     EVEN_K: tl.constexpr,
     GRID_MN: tl.constexpr,
     cache_modifier: tl.constexpr,
@@ -230,7 +262,7 @@ def gemm_afp4wfp4(
 
     M, K = x.shape
     K, N = w.shape
-
+    """
     if M < 32:
         BLOCK_SIZE_M = 16
         BLOCK_SIZE_N = 64
@@ -272,12 +304,12 @@ def gemm_afp4wfp4(
         else:
             y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
     elif M <= 128 and True:
-        # 266 us
-        BLOCK_SIZE_M = 128
+        # 266 us using new scale layout
+        BLOCK_SIZE_M = 64
         BLOCK_SIZE_N = 256
         BLOCK_SIZE_K = 256
         GROUP_SIZE_M = 1
-        waves_per_eu = 2
+        waves_per_eu = 1
         kpack = 1
         num_warps = 4
         num_stages = 3
@@ -297,6 +329,27 @@ def gemm_afp4wfp4(
         BLOCK_SIZE_M = 128
         BLOCK_SIZE_N = 128
         BLOCK_SIZE_K = 512
+        GROUP_SIZE_M = 1
+        waves_per_eu = 2
+        kpack = 1
+        num_warps = 8
+        num_stages = 2
+        matrix_instr_nonkdim = 16
+        cache_modifier = ".cg"
+
+        NUM_KSPLIT = 1
+        SPLITK_BLOCK_SIZE = (
+            triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
+        )
+        if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=y.dtype, device=y.device)
+        else:
+            y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=y.device)
+    elif M <= 128 and False:
+        # Ilia reschedule async wait
+        BLOCK_SIZE_M = 128
+        BLOCK_SIZE_N = 256
+        BLOCK_SIZE_K = 256
         GROUP_SIZE_M = 1
         waves_per_eu = 2
         kpack = 1
@@ -343,7 +396,10 @@ def gemm_afp4wfp4(
         NUM_KSPLIT = 1
         SPLITK_BLOCK_SIZE = 2 * K
         y_pp = None
+    """
 
+    NUM_KSPLIT = 1
+    SPLITK_BLOCK_SIZE = (2 * K)
     grid = lambda META: (  # noqa: E731
         (
             NUM_KSPLIT
@@ -371,18 +427,18 @@ def gemm_afp4wfp4(
         x_scales.stride(1),
         w_scales.stride(0),
         w_scales.stride(1),
-        BLOCK_SIZE_M,
-        BLOCK_SIZE_N,
-        BLOCK_SIZE_K,
-        GROUP_SIZE_M,
         NUM_KSPLIT,
         SPLITK_BLOCK_SIZE,
-        cache_modifier=cache_modifier,
-        waves_per_eu=waves_per_eu,
-        kpack=kpack,
-        num_warps=num_warps,
-        num_stages=num_stages,
-        matrix_instr_nonkdim=matrix_instr_nonkdim,
+        #BLOCK_SIZE_M,
+        #BLOCK_SIZE_N,
+        #BLOCK_SIZE_K,
+        #GROUP_SIZE_M,
+        #cache_modifier=cache_modifier,
+        #waves_per_eu=waves_per_eu,
+        #kpack=kpack,
+        #num_warps=num_warps,
+        #num_stages=num_stages,
+        #matrix_instr_nonkdim=matrix_instr_nonkdim,
     )
 
     if NUM_KSPLIT > 1:

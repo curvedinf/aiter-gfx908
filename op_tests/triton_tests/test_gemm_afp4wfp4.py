@@ -20,7 +20,7 @@ def generate_gemm_afp4wfp4_inputs(M, N, K):
 
 
     # Scale of 1.0 in e8m0, bias 127.
-    if False:
+    if True:
         x_scales = torch.randint(
             124, 128, (K // SCALE_GROUP_SIZE, M), dtype=torch.uint8, device="cuda"
         )

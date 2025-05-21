@@ -97,7 +97,7 @@ def run_benchmark(args):
         ms = triton.testing.do_bench(
             lambda: gemm_afp4wfp4(x, w, out, x_scale, w_scale, c_dtype),
             warmup=25,
-            rep=100,
+            rep=10000,
         )
 
         # Return exactly one scalar depending on which metric is active

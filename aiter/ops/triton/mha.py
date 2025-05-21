@@ -4205,8 +4205,15 @@ def _flash_attn_onekernel_backward(
         stride_descale_q_z = stride_descale_k_z = stride_descale_v_z = (
             stride_descale_o_z
         ) = stride_descale_do_z = None
+    if IS_VARLEN:
+        layout = "thd"
+    elif q.shape[2] == max_seqlen_q:
+        layout = "bhsd"
+    elif q.shape[1] == max_seqlen_q:
+        layout = "bshd"
+    else:
+        raise ValueError('invalid layout')
 
-    layout = "thd" if IS_VARLEN else "bhsd"
     # get strides and shape
     batch, nheads_q, nheads_k, head_size, max_seqlen_q_final, max_seqlen_k_final = (
         get_shapes_from_layout(

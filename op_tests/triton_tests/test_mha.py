@@ -651,6 +651,145 @@ def test_mha_backward_varlen(
     )
 
 
+@pytest.mark.parametrize("BATCH", [1, 4, 57, 128])
+@pytest.mark.parametrize(
+    "SEQLEN_Q, SEQLEN_K",
+    [(1, 1), (4, 4), (128, 128), (2, 1), (1, 2), (32, 16), (64, 128)],
+)
+@pytest.mark.parametrize("DROPOUT, CAUSAL", [(0.0, False), (0.0, True), (0.2, False)])
+# @pytest.mark.parametrize('DROPOUT, CAUSAL',[(0.0, False),(0.0, True),(0.2, False),(0.2, True)]) #Debug Causal + Dropout. fails for seq >= 64
+@pytest.mark.parametrize(
+    "NUM_Q_HEADS, NUM_K_HEADS", [(1, 1), (16, 16), (2, 1), (48, 8)]
+)
+@pytest.mark.parametrize("HEAD_SZ", [8, 32, 128])
+@pytest.mark.parametrize("FP8", [False])
+@pytest.mark.parametrize("atomic", [False, True])
+# @pytest.mark.parametrize('FP8',[(False), (True)]) #TODO Debug FP8
+def test_mha_fused_backward(
+    BATCH: int,
+    SEQLEN_Q: int,
+    SEQLEN_K: int,
+    NUM_Q_HEADS: int,
+    NUM_K_HEADS: int,
+    HEAD_SZ: int,
+    DROPOUT: float,
+    CAUSAL: bool,
+    FP8: bool,
+    atomic: bool,
+    dtype=torch.float16,
+):
+    torch.cuda.empty_cache()  # makes the atomic tests pass. TODO: why?
+    torch.manual_seed(20)
+    q = torch.randn((BATCH, SEQLEN_Q, NUM_Q_HEADS, HEAD_SZ), device="cuda", dtype=dtype)
+    k = torch.randn((BATCH, SEQLEN_K, NUM_K_HEADS, HEAD_SZ), device="cuda", dtype=dtype)
+    v = torch.randn((BATCH, SEQLEN_K, NUM_K_HEADS, HEAD_SZ), device="cuda", dtype=dtype)
+    q.requires_grad = True
+    k.requires_grad = True
+    v.requires_grad = True
+
+    do = torch.randn_like(q)
+
+    if DEBUG_MODE:
+        print("--------------Triton----------------")
+        print(f"q.shape={q.shape} q={q}")
+        print(f"k.shape={k.shape} k={k}")
+        print(f"v.shape={v.shape} v={v}")
+        print(f"do.shape={do.shape} do={do}")
+
+    with torch.enable_grad():
+        if FP8:
+            triton_out = flash_attn_fp8_func(
+                q,
+                k,
+                v,
+                dropout_p=DROPOUT,
+                causal=CAUSAL,
+                return_lse=True,
+                return_attn_probs=True,
+                fused_backward=atomic,
+                onekernel_backward=(not atomic),
+            )
+        else:
+            triton_out = flash_attn_func(
+                q,
+                k,
+                v,
+                dropout_p=DROPOUT,
+                causal=CAUSAL,
+                return_lse=True,
+                return_attn_probs=True,
+                fused_backward=atomic,
+                onekernel_backward=(not atomic),
+            )
+
+    assert len(triton_out) == 3
+    triton_out, lse, sd_mask = triton_out[0], triton_out[1], triton_out[2]
+
+    if DROPOUT > 0.0:
+        dropout_mask = sd_mask >= 0
+    else:
+        dropout_mask = None
+
+    triton_dq, triton_dk, triton_dv = torch.autograd.grad(
+        triton_out, (q, k, v), do.clone()
+    )
+
+    if DEBUG_MODE:
+        print(f"triton_out={triton_out}")
+        print(f"triton_lse={lse}")
+        print(f"triton_dq.shape={triton_dq.shape} triton_dq={triton_dq}")
+        print(f"triton_dk.shape={triton_dk.shape} triton_dk={triton_dk}")
+        print(f"triton_dv.shape={triton_dv.shape} triton_dv={triton_dv}")
+        print(f"dropout_mask={dropout_mask}")
+
+    if DEBUG_MODE:
+        print("--------------Torch----------------")
+        print(f"q.shape={q.shape} q={q}")
+        print(f"k.shape={k.shape} k={k}")
+        print(f"v.shape={v.shape} v={v}")
+        print(f"do.shape={do.shape} do={do}")
+    with torch.enable_grad():
+        torch_out = attention_ref(
+            q, k, v, dropout_p=DROPOUT, dropout_mask=dropout_mask, causal=CAUSAL
+        )
+    torch_out, attention_scores = torch_out
+
+    torch.testing.assert_close(
+        triton_out, torch_out.to(triton_out.dtype), atol=1e-2, rtol=1e-2
+    )
+
+    torch_dq, torch_dk, torch_dv = torch.autograd.grad(torch_out, (q, k, v), do)
+
+    if DEBUG_MODE:
+        print(f"torch_out={torch_out}")
+        print(f"torch_attn_scores={attention_scores}")
+        print(f"torch_dq.shape={torch_dq.shape} torch_dq={torch_dq}")
+        print(f"torch_dk.shape={torch_dk.shape} torch_dk={torch_dk}")
+        print(f"torch_dv.shape={torch_dv.shape} torch_dv={torch_dv}")
+
+    if FP8:
+        fp8_assert_close(
+            triton_dq, torch_dq.to(triton_dq.dtype), atol=ATOL_fp8, rtol=RTOL_fp8
+        )
+        fp8_assert_close(
+            triton_dk, torch_dk.to(triton_dk.dtype), atol=ATOL_fp8, rtol=RTOL_fp8
+        )
+        fp8_assert_close(
+            triton_dv, torch_dv.to(triton_dv.dtype), atol=ATOL_fp8, rtol=RTOL_fp8
+        )
+    else:
+        torch.testing.assert_close(
+            triton_dv, torch_dv.to(triton_out.dtype), atol=1e-2, rtol=1e-2
+        )
+        torch.testing.assert_close(
+            triton_dk, torch_dk.to(triton_out.dtype), atol=1e-2, rtol=1e-2
+        )
+        torch.testing.assert_close(
+            triton_dq, torch_dq.to(triton_out.dtype), atol=1e-2, rtol=1e-2
+        )
+
+
+
 @pytest.mark.parametrize("BATCH", [4])
 @pytest.mark.parametrize(
     "SEQLEN_Q, SEQLEN_K",

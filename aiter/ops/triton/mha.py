@@ -3132,6 +3132,7 @@ def _bwd_kernel_dkdvdq_causal(
         seqlen_q = q_end - q_start
         seqlen_k = k_end - k_start
 
+
     dk = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
     dv = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
 
@@ -3609,7 +3610,6 @@ def _flash_attn_backward(
     descale_v: Optional[torch.Tensor] = None,
     descale_do: Optional[torch.Tensor] = None,
 ):
-
     IS_FP8 = is_fp8(q)
     if IS_FP8:
         FP8_MAX = torch.finfo(q.dtype).max
@@ -3945,7 +3945,6 @@ def _flash_attn_fused_backward(
     descale_v: Optional[torch.Tensor] = None,
     descale_do: Optional[torch.Tensor] = None,
 ):
-
     IS_FP8 = is_fp8(q)
     if IS_FP8:
         FP8_MAX = torch.finfo(q.dtype).max
@@ -3968,7 +3967,9 @@ def _flash_attn_fused_backward(
         )
 
     IS_VARLEN = True if cu_seqlens_q is not None else False
-
+    print("Running fused backward...")
+    print("IS_VARLEN", IS_VARLEN)
+    
     # get strides and shape
     if IS_VARLEN:
         # Layout for q,k,v is thd ie [total tokens, num_head, head_dim]
@@ -4068,6 +4069,7 @@ def _flash_attn_fused_backward(
     NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
     if causal:
         grid_dkdvdq = (batch * num_q_heads * num_k_pids,)
+        
         _bwd_kernel_dkdvdq_causal[grid_dkdvdq](
             q,
             k,
@@ -4928,7 +4930,7 @@ def flash_attn_fp8_func(
     return_lse=False,
     return_attn_probs=False,
     fused_backward=False,
-    onekerenl_backward=False,
+    onekernel_backward=False,
 ):
     return FlashAttnFP8Func.apply(
         q,
@@ -4944,7 +4946,7 @@ def flash_attn_fp8_func(
         return_attn_probs,
         torch.is_grad_enabled(),
         fused_backward,
-        onekerenl_backward,
+        onekernel_backward,
     )
 
 
@@ -4970,7 +4972,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         block_table,
         is_grad_enabled,
         fused_backward,
-        onekerenl_backward,
+        onekernel_backward,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
@@ -5013,7 +5015,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
             ctx.fused_backward = fused_backward
-            ctx.onekerenl_backward = onekerenl_backward
+            ctx.onekernel_backward = onekernel_backward
 
         out = out_padded[..., :head_size_og]
 
@@ -5055,7 +5057,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
                 philox_seed=ctx.philox_seed,
                 philox_offset=ctx.philox_offset,
             )
-        elif ctx.onekerenl_backward:
+        elif ctx.onekernel_backward:
             _flash_attn_onekernel_backward(
                 do_padded,
                 q,

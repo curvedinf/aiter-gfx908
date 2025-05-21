@@ -3132,7 +3132,6 @@ def _bwd_kernel_dkdvdq_causal(
         seqlen_q = q_end - q_start
         seqlen_k = k_end - k_start
 
-
     dk = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
     dv = tl.zeros([BLOCK_N, BLOCK_D_MODEL_POW2], dtype=tl.float32)
 
@@ -3969,7 +3968,7 @@ def _flash_attn_fused_backward(
     IS_VARLEN = True if cu_seqlens_q is not None else False
     print("Running fused backward...")
     print("IS_VARLEN", IS_VARLEN)
-    
+
     # get strides and shape
     if IS_VARLEN:
         # Layout for q,k,v is thd ie [total tokens, num_head, head_dim]
@@ -4069,7 +4068,7 @@ def _flash_attn_fused_backward(
     NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
     if causal:
         grid_dkdvdq = (batch * num_q_heads * num_k_pids,)
-        
+
         _bwd_kernel_dkdvdq_causal[grid_dkdvdq](
             q,
             k,
@@ -4214,7 +4213,7 @@ def _flash_attn_onekernel_backward(
     elif q.shape[1] == max_seqlen_q:
         layout = "bshd"
     else:
-        raise ValueError('invalid layout')
+        raise ValueError("invalid layout")
 
     # get strides and shape
     batch, nheads_q, nheads_k, head_size, max_seqlen_q_final, max_seqlen_k_final = (

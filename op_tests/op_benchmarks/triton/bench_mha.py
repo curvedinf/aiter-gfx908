@@ -2,7 +2,12 @@ import torch.test
 import triton
 import triton.language as tl
 from utils.benchmark_utils import get_model_configs, get_available_models, print_vgpr
-from op_tests.triton_tests.test_mha import test_mha_backward, test_mha_backward_varlen, test_mha_fused_backward_varlen, test_mha_fused_backward
+from op_tests.triton_tests.test_mha import (
+    test_mha_backward,
+    test_mha_backward_varlen,
+    test_mha_fused_backward_varlen,
+    test_mha_fused_backward,
+)
 import torch
 
 import os
@@ -307,7 +312,7 @@ def run_benchmark(custom, args):
         In test_mode, verifies output matching with non-varlen inputs.
         """
         assert dropout <= 0.0, "Dropout not supported in this benchmark."
-        requires_grad = mode=="bwd" or args.test_mode
+        requires_grad = mode == "bwd" or args.test_mode
         return_lse = True
         return_attn_probs = False
         varlen = args.layout == "thd"
@@ -334,30 +339,92 @@ def run_benchmark(custom, args):
             if fused_backward:
                 if varlen:
                     test_mha_fused_backward_varlen(
-                        BATCH, N_CTX_Q, N_CTX_K, HQ, HK, D_HEAD, dropout, causal, args.fp8, True, dtype
+                        BATCH,
+                        N_CTX_Q,
+                        N_CTX_K,
+                        HQ,
+                        HK,
+                        D_HEAD,
+                        dropout,
+                        causal,
+                        args.fp8,
+                        True,
+                        dtype,
                     )
                 else:
                     test_mha_fused_backward(
-                        BATCH, N_CTX_Q, N_CTX_K, HQ, HK, D_HEAD, dropout, causal, args.fp8, True, dtype
+                        BATCH,
+                        N_CTX_Q,
+                        N_CTX_K,
+                        HQ,
+                        HK,
+                        D_HEAD,
+                        dropout,
+                        causal,
+                        args.fp8,
+                        True,
+                        dtype,
                     )
             elif onekernel_backward:
                 if varlen:
                     test_mha_fused_backward_varlen(
-                        BATCH, N_CTX_Q, N_CTX_K, HQ, HK, D_HEAD, dropout, causal, args.fp8, False, dtype
+                        BATCH,
+                        N_CTX_Q,
+                        N_CTX_K,
+                        HQ,
+                        HK,
+                        D_HEAD,
+                        dropout,
+                        causal,
+                        args.fp8,
+                        False,
+                        dtype,
                     )
                 else:
                     test_mha_fused_backward(
-                        BATCH, N_CTX_Q, N_CTX_K, HQ, HK, D_HEAD, dropout, causal, args.fp8, False, dtype
+                        BATCH,
+                        N_CTX_Q,
+                        N_CTX_K,
+                        HQ,
+                        HK,
+                        D_HEAD,
+                        dropout,
+                        causal,
+                        args.fp8,
+                        False,
+                        dtype,
                     )
             else:
                 if varlen:
-                    test_mha_backward_varlen(BATCH, N_CTX_Q, N_CTX_K, HQ, HK, D_HEAD, dropout, causal, args.fp8, dtype)
+                    test_mha_backward_varlen(
+                        BATCH,
+                        N_CTX_Q,
+                        N_CTX_K,
+                        HQ,
+                        HK,
+                        D_HEAD,
+                        dropout,
+                        causal,
+                        args.fp8,
+                        dtype,
+                    )
                 else:
-                    test_mha_backward(BATCH, N_CTX_Q, N_CTX_K, HQ, HK, D_HEAD, dropout, causal, args.fp8, dtype)
-            
+                    test_mha_backward(
+                        BATCH,
+                        N_CTX_Q,
+                        N_CTX_K,
+                        HQ,
+                        HK,
+                        D_HEAD,
+                        dropout,
+                        causal,
+                        args.fp8,
+                        dtype,
+                    )
+
             print("Test passed!")
             return 0
-        
+
         # Generate base inputs
         q = torch.randn((BATCH, N_CTX_Q, HQ, D_HEAD), device=device, dtype=dtype)
         k = torch.randn((BATCH, N_CTX_K, HK, D_HEAD), device=device, dtype=dtype)
@@ -365,7 +432,7 @@ def run_benchmark(custom, args):
         q.requires_grad = requires_grad
         k.requires_grad = requires_grad
         v.requires_grad = requires_grad
-    
+
         # FLOPS calculation variables
         flops_per_matmul = 0
 

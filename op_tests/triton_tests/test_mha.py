@@ -789,7 +789,6 @@ def test_mha_fused_backward(
         )
 
 
-
 @pytest.mark.parametrize("BATCH", [4])
 @pytest.mark.parametrize(
     "SEQLEN_Q, SEQLEN_K",

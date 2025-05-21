@@ -1318,7 +1318,11 @@ def _persistent_attn_fwd(
     # persistent loop: persistent workgroup loops over multiple workgroups of work
     while wid < total_num_blocks:
         # map workgroup id to pid
-        off_z, off_q_head, start_m = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_BLOCKS, NUM_XCD)
+        # off_z, off_q_head, start_m = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_BLOCKS, NUM_XCD)
+        start_m = wid % NUM_BLOCKS
+        off_q_head = (wid // NUM_BLOCKS) % NUM_Q_HEADS
+        off_z = (wid // NUM_BLOCKS) // NUM_Q_HEADS % BATCH
+    
         # offsets
         offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
         offs_n = tl.arange(0, BLOCK_N)

@@ -1323,7 +1323,7 @@ def _persistent_attn_fwd(
         # off_z, off_q_head, start_m = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_BLOCKS, NUM_XCD)
         start_m = wid % NUM_BLOCKS
         off_q_head = ((wid // NUM_BLOCKS) % GROUP_SIZE + wid // (NUM_BLOCKS * GROUP_SIZE) * GROUP_SIZE) % NUM_Q_HEADS
-        off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS, 8)
+        off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS - 1, 8)
         off_z = (wid // NUM_BLOCKS) // NUM_Q_HEADS % BATCH
 
         # offsets

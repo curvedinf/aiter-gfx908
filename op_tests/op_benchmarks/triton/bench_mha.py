@@ -2,6 +2,16 @@ import torch.test
 import triton
 import triton.language as tl
 from utils.benchmark_utils import get_model_configs, get_available_models, print_vgpr
+from op_tests.triton_tests.test_mha import (
+    test_mha_backward,
+    test_mha_backward_varlen,
+    test_mha_fused_backward_varlen,
+    test_mha_fused_backward,
+    test_mha,
+    test_mha_varlen,
+    test_persistent_mha,
+    test_persistent_mha_varlen,
+)
 import torch
 
 import os
@@ -307,17 +317,11 @@ def run_benchmark(custom, args):
         Benchmark or test function for multi-head attention backward pass.
         In test_mode, verifies output matching with non-varlen inputs.
         """
-        # assert mode == "bwd"
-        requires_grad = True
+        assert dropout <= 0.0, "Dropout not supported in this benchmark."
+        requires_grad = mode == "bwd" or args.test_mode
         return_lse = True
-        return_attn_probs = True
-        warmup = 25
-        rep = 100
-        varlen = (
-            args.layout == "thd"
-            if not (hasattr(args, "test_mode") and args.test_mode)
-            else False
-        )  # Force non-varlen in test mode
+        return_attn_probs = False
+        varlen = args.layout == "thd"
 
         persistent_fwd = "persistent-fwd" in provider
 
@@ -332,7 +336,63 @@ def run_benchmark(custom, args):
         if sm_scale is None:
             sm_scale = 1.0 / (D_HEAD**0.5)
 
-        torch.manual_seed(20)
+        # Test mode: run tests from op_tests with specified shapes
+        if args.test_mode:
+            print(
+            f"Testing backward implementation <{provider}> against Torch with shape:"
+            )
+            print(
+            f"BATCH={BATCH}, HQ={HQ}, HK={HK}, N_CTX_Q={N_CTX_Q}, N_CTX_K={N_CTX_K}, D_HEAD={D_HEAD}"
+            )
+            # Select appropriate test function based on flags and layout.
+            if fused_backward or onekernel_backward:
+                func = test_mha_fused_backward_varlen if varlen else test_mha_fused_backward
+                is_fused = fused_backward  # onekernel_backward implies False.
+                func(
+                    BATCH,
+                    N_CTX_Q,
+                    N_CTX_K,
+                    HQ,
+                    HK,
+                    D_HEAD,
+                    dropout,
+                    causal,
+                    args.fp8,
+                    is_fused,
+                    dtype,
+                )
+            elif args.persistent_fwd:
+                func = test_persistent_mha_varlen if varlen else test_persistent_mha
+                func(
+                    BATCH,
+                    N_CTX_Q,
+                    N_CTX_K,
+                    HQ,
+                    HK,
+                    D_HEAD,
+                    dropout,
+                    False,
+                    False,
+                    causal,
+                    args.fp8,
+                    dtype,
+                )
+            else:
+                func = test_mha_backward_varlen if varlen else test_mha_backward
+                func(
+                    BATCH,
+                    N_CTX_Q,
+                    N_CTX_K,
+                    HQ,
+                    HK,
+                    D_HEAD,
+                    dropout,
+                    causal,
+                    args.fp8,
+                    dtype,
+                )
+            print("Test passed!")
+            return 0
 
         # Generate base inputs
         q = torch.randn((BATCH, N_CTX_Q, HQ, D_HEAD), device=device, dtype=dtype)
@@ -341,7 +401,6 @@ def run_benchmark(custom, args):
         q.requires_grad = requires_grad
         k.requires_grad = requires_grad
         v.requires_grad = requires_grad
-        do = torch.randn_like(q)
 
         # FLOPS calculation variables
         flops_per_matmul = 0
@@ -374,6 +433,7 @@ def run_benchmark(custom, args):
             q_unpad.requires_grad = True
             k_unpad.requires_grad = True
             v_unpad.requires_grad = True
+
             q_input, k_input, v_input = q_unpad, k_unpad, v_unpad
 
             num_contexts = len(cu_seqlens_q) - 1
@@ -403,17 +463,10 @@ def run_benchmark(custom, args):
             else:
                 flops_per_matmul = 2.0 * BATCH * HQ * N_CTX_Q * N_CTX_K * D_HEAD
 
-        # Test mode: Verify outputs match
-        if hasattr(args, "test_mode") and args.test_mode:
-            print(
-                f"Testing kernel implementation <{provider}> against Torch with shape:"
-            )
-            print(
-                f"BATCH={BATCH}, HQ={HQ}, HK={HK}, N_CTX_Q={N_CTX_Q}, N_CTX_K={N_CTX_K}, D_HEAD={D_HEAD}"
-            )
-            # Triton
-            if varlen:
-                triton_fn = lambda: flash_attn_varlen_func(
+
+        if varlen:
+            if args.fp8:
+                fn = lambda: flash_attn_varlen_fp8_func(
                     q_input,
                     k_input,
                     v_input,
@@ -431,10 +484,14 @@ def run_benchmark(custom, args):
                     onekernel_backward=onekernel_backward,
                 )
             else:
-                triton_fn = lambda: flash_attn_func(
+                fn = lambda: flash_attn_varlen_func(
                     q_input,
                     k_input,
                     v_input,
+                    cu_seqlens_q,
+                    cu_seqlens_k,
+                    max_seqlen_q,
+                    max_seqlen_k,
                     dropout_p=dropout,
                     softmax_scale=sm_scale,
                     causal=causal,
@@ -444,139 +501,32 @@ def run_benchmark(custom, args):
                     fused_backward=fused_backward,
                     onekernel_backward=onekernel_backward,
                 )
-            with torch.enable_grad():
-                triton_out, _, sd_mask = triton_fn()
-                dropout_mask = sd_mask >= 0 if dropout > 0.0 else None
-                triton_dq, triton_dk, triton_dv = torch.autograd.grad(
-                    triton_out, (q_input, k_input, v_input), do.clone()
-                )
 
-            triton_dq = dq_pad_fn(triton_dq)
-            triton_dk = dk_pad_fn(triton_dk)
-            triton_dv = dk_pad_fn(triton_dv)
-
-            # Torch
-            torch_fn = lambda: attention_ref(
-                q, k, v, dropout_p=dropout, dropout_mask=dropout_mask, causal=causal
+        else:
+            fn = lambda: flash_attn_func(
+                q_input,
+                k_input,
+                v_input,
+                dropout_p=dropout,
+                softmax_scale=sm_scale,
+                causal=causal,
+                return_lse=return_lse,
+                return_attn_probs=return_attn_probs,
+                fused_backward=fused_backward,
+                onekernel_backward=onekernel_backward,
             )
+        if mode == "bwd":
             with torch.enable_grad():
-                torch_out, _ = torch_fn()
-                torch_dq, torch_dk, torch_dv = torch.autograd.grad(
-                    torch_out, (q, k, v), do
+                triton_out = fn()[0]
+                d_out = torch.randn_like(triton_out)
+                fn = lambda: torch.autograd.grad(
+                    triton_out,
+                    (q_input, k_input, v_input),
+                    d_out,
+                    retain_graph=True,
                 )
 
-            # compare forward outputs
-            try:
-                torch.testing.assert_close(
-                    triton_out, torch_out.to(triton_out.dtype), atol=1e-2, rtol=1e-2
-                )
-                print("Forward outputs match.")
-            except AssertionError as e:
-                print(e)
-            # Compare gradients
-            try:
-                torch.testing.assert_close(
-                    triton_dq, torch_dq.to(triton_out.dtype), atol=1e-2, rtol=1e-2
-                )
-                torch.testing.assert_close(
-                    triton_dv, torch_dv.to(triton_out.dtype), atol=1e-2, rtol=1e-2
-                )
-                torch.testing.assert_close(
-                    triton_dk, torch_dk.to(triton_out.dtype), atol=1e-2, rtol=1e-2
-                )
-                print(f"Backward gradients match.")
-            except AssertionError as e:
-                print(e)
-
-            return 0
-
-        # Benchmark mode
-        if "Torch" in provider:
-            fn = lambda: attention_ref(q, k, v, dropout_p=dropout, causal=causal)
-            if mode == "bwd":
-                with torch.enable_grad():
-                    torch_out, _ = fn()
-                    fn = lambda: torch.autograd.grad(
-                        torch_out, (q, k, v), do, retain_graph=True
-                    )
-        else:  # Triton
-            if varlen:
-                if args.fp8:
-                    fn = lambda: flash_attn_varlen_fp8_func(
-                        q_input,
-                        k_input,
-                        v_input,
-                        cu_seqlens_q,
-                        cu_seqlens_k,
-                        max_seqlen_q,
-                        max_seqlen_k,
-                        dropout_p=dropout,
-                        softmax_scale=sm_scale,
-                        causal=causal,
-                        return_lse=return_lse,
-                        return_attn_probs=return_attn_probs,
-                        persistent_forward=persistent_fwd,
-                        fused_backward=fused_backward,
-                        onekernel_backward=onekernel_backward,
-                    )
-                else:
-                    fn = lambda: flash_attn_varlen_func(
-                        q_input,
-                        k_input,
-                        v_input,
-                        cu_seqlens_q,
-                        cu_seqlens_k,
-                        max_seqlen_q,
-                        max_seqlen_k,
-                        dropout_p=dropout,
-                        softmax_scale=sm_scale,
-                        causal=causal,
-                        return_lse=return_lse,
-                        return_attn_probs=return_attn_probs,
-                        persistent_forward=persistent_fwd,
-                        fused_backward=fused_backward,
-                        onekernel_backward=onekernel_backward,
-                    )
-            else:
-                if args.fp8:
-                    fn = lambda: flash_attn_fp8_func(
-                        q_input,
-                        k_input,
-                        v_input,
-                        dropout_p=dropout,
-                        softmax_scale=sm_scale,
-                        causal=causal,
-                        return_lse=return_lse,
-                        return_attn_probs=return_attn_probs,
-                        fused_backward=fused_backward,
-                        onekernel_backward=onekernel_backward,
-                    )
-                else:
-                    fn = lambda: flash_attn_func(
-                        q_input,
-                        k_input,
-                        v_input,
-                        dropout_p=dropout,
-                        softmax_scale=sm_scale,
-                        causal=causal,
-                        return_lse=return_lse,
-                        return_attn_probs=return_attn_probs,
-                        fused_backward=fused_backward,
-                        onekernel_backward=onekernel_backward,
-                    )
-            if mode == "bwd":
-                with torch.enable_grad():
-                    triton_out, _, _ = fn()
-                    if varlen:
-                        triton_out = output_pad_fn(triton_out)
-                    fn = lambda: torch.autograd.grad(
-                        triton_out,
-                        (q_input, k_input, v_input),
-                        do.clone(),
-                        retain_graph=True,
-                    )
-
-        ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
+        ms = triton.testing.do_bench(fn, warmup=25, rep=100)
 
         total_flops = 2 * flops_per_matmul
         if mode == "bwd":
@@ -595,7 +545,6 @@ def run_benchmark(custom, args):
             + 2 * total_num_tokens_k * HK * D_HEAD * input_bytes
             + total_num_tokens_q * HQ * D_HEAD * output_bytes
         )
-
         # return ms
         if "ms" in provider:
             return ms

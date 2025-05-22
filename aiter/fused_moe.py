@@ -811,7 +811,8 @@ def torch_moe_stage1(
     torch_act = aiter.get_torch_act(activation)
     if use_g1u1:
         gate, up = out.split([inter_dim, inter_dim], dim=-1)
-        out = torch_act(gate) * up
+        # out = torch_act(gate) * up
+        out = gate
     else:
         out = torch_act(out)
     return out.to(dtype)

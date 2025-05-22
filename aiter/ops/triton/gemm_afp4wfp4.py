@@ -538,7 +538,7 @@ def gemm_afp4wfp4(
             # NOTE: REDUCE_BLOCK_SIZE_N=16 gives best perf with fp32 partials and
             # REDUCE_BLOCK_SIZE_N=128 gives best perf with bf16 partials
             REDUCE_BLOCK_SIZE_N = (
-                128 if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1" else 64
+                128 if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_QUANT") == "1" else 64
             )
 
         ACTUAL_KSPLIT = triton.cdiv(K, (SPLITK_BLOCK_SIZE // 2))

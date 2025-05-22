@@ -5,7 +5,9 @@ import triton.language as tl
 from typing import Optional, Tuple
 from aiter.ops.triton.utils.pid_preprocessing import _wid2pid, _remap_XCD
 from aiter.ops.triton.mha_bwd_onekernel import _flash_attn_onekernel_backward
-from aiter.ops.triton.mha_fused_bwd import _flash_attn_fused_backward
+# from aiter.ops.triton.mha_fused_bwd import _flash_attn_fused_backward
+from aiter.ops.triton.mha_persistent import _persistent_flash_attn_forward
+from aiter.ops.triton.mha_persistent_bwd import _flash_attn_persistent_backward as _flash_attn_fused_backward
 from aiter import dtypes
 from einops import rearrange, repeat
 from typing import Literal, Optional, Union
@@ -2685,6 +2687,7 @@ class FlashAttnFunc(torch.autograd.Function):
         return_lse,
         return_softmax,
         is_grad_enabled,
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     ):
@@ -2696,23 +2699,43 @@ class FlashAttnFunc(torch.autograd.Function):
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
             k = torch.nn.functional.pad(k, [0, 8 - head_size_og % 8])
             v = torch.nn.functional.pad(v, [0, 8 - head_size_og % 8])
-        out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
-            _flash_attn_forward(
-                q,
-                k,
-                v,
-                dropout_p,
-                softmax_scale,
-                causal=causal,
-                window_size_left=window_size[0],
-                window_size_right=window_size[1],
-                alibi_slopes=alibi_slopes,
-                return_lse=return_lse,
-                return_softmax=return_softmax and dropout_p > 0,
-                max_seqlen_q=q.shape[1],
-                max_seqlen_k=k.shape[1],
+        
+        if persistent_forward:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _persistent_flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0,
+                    max_seqlen_q=q.shape[1],
+                    max_seqlen_k=k.shape[1],
+                )
             )
-        )
+        else:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0,
+                    max_seqlen_q=q.shape[1],
+                    max_seqlen_k=k.shape[1],
+                )
+            )
 
         if is_grad:
             ctx.save_for_backward(q, k, v, out_padded, softmax_lse)
@@ -2834,6 +2857,7 @@ class FlashAttnFunc(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
@@ -2849,6 +2873,7 @@ def flash_attn_func(
     deterministic=True,
     return_lse=False,
     return_attn_probs=False,
+    persistent_forward=False,
     fused_backward=False,
     onekernel_backward=False,
 ):
@@ -2913,6 +2938,7 @@ def flash_attn_func(
         return_lse,
         return_attn_probs,
         torch.is_grad_enabled(),
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     )
@@ -2934,6 +2960,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
         return_lse,
         return_softmax,
         is_grad_enabled,
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     ):
@@ -2952,28 +2979,52 @@ class FlashAttnFP8Func(torch.autograd.Function):
         k_fp8, descale_k = cast_to_fp8(k, fp8_dtype, "bshd")
         v_fp8, descale_v = cast_to_fp8(v, fp8_dtype, "bshd")
 
-        out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
-            _flash_attn_forward(
-                q,
-                k,
-                v,
-                dropout_p,
-                softmax_scale,
-                causal=causal,
-                window_size_left=window_size[0],
-                window_size_right=window_size[1],
-                alibi_slopes=alibi_slopes,
-                return_lse=return_lse,
-                return_softmax=return_softmax and dropout_p > 0,
-                max_seqlen_q=q.shape[1],
-                max_seqlen_k=k.shape[1],
-                cu_seqlens_q=None,
-                cu_seqlens_k=None,
-                descale_q=descale_q,
-                descale_k=descale_k,
-                descale_v=descale_v,
+        if persistent_forward:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _persistent_flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0,
+                    max_seqlen_q=q.shape[1],
+                    max_seqlen_k=k.shape[1],
+                    cu_seqlens_q=None,
+                    cu_seqlens_k=None,
+                    descale_q=descale_q,
+                    descale_k=descale_k,
+                    descale_v=descale_v,
+                )
             )
-        )
+        else:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0,
+                    max_seqlen_q=q.shape[1],
+                    max_seqlen_k=k.shape[1],
+                    cu_seqlens_q=None,
+                    cu_seqlens_k=None,
+                    descale_q=descale_q,
+                    descale_k=descale_k,
+                    descale_v=descale_v,
+                )
+            )
 
         if is_grad:
             ctx.save_for_backward(
@@ -3103,7 +3154,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
         # dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
         # dk = dk[..., : k_fp8.shape[-1]]
         # dv = dv[..., : v_fp8.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
 
 
 def flash_attn_fp8_func(
@@ -3118,6 +3169,7 @@ def flash_attn_fp8_func(
     deterministic=False,
     return_lse=False,
     return_attn_probs=False,
+    persistent_forward=False,
     fused_backward=False,
     onekernel_backward=False,
 ):
@@ -3134,6 +3186,7 @@ def flash_attn_fp8_func(
         return_lse,
         return_attn_probs,
         torch.is_grad_enabled(),
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     )
@@ -3160,6 +3213,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         return_softmax,
         block_table,
         is_grad_enabled,
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     ):
@@ -3171,25 +3225,46 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             q = torch.nn.functional.pad(q, [0, 8 - head_size_og % 8])
             k = torch.nn.functional.pad(k, [0, 8 - head_size_og % 8])
             v = torch.nn.functional.pad(v, [0, 8 - head_size_og % 8])
-        out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
-            _flash_attn_forward(
-                q,
-                k,
-                v,
-                dropout_p,
-                softmax_scale,
-                causal=causal,
-                window_size_left=window_size[0],
-                window_size_right=window_size[1],
-                alibi_slopes=alibi_slopes,
-                return_lse=return_lse,
-                return_softmax=return_softmax and dropout_p > 0.0,
-                max_seqlen_q=max_seqlen_q,
-                max_seqlen_k=max_seqlen_k,
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_k=cu_seqlens_k,
+        if persistent_forward:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _persistent_flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0.0,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_q=cu_seqlens_q,
+                    cu_seqlens_k=cu_seqlens_k,
+                )
             )
-        )
+        else:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _flash_attn_forward(
+                    q,
+                    k,
+                    v,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0.0,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_q=cu_seqlens_q,
+                    cu_seqlens_k=cu_seqlens_k,
+                )
+            )
         if is_grad:
             ctx.save_for_backward(
                 q, k, v, out_padded, softmax_lse, cu_seqlens_q, cu_seqlens_k
@@ -3313,6 +3388,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             None,
             None,
             None,
+            None,
         )
 
 
@@ -3333,6 +3409,7 @@ def flash_attn_varlen_func(
     return_lse=False,
     return_attn_probs=False,
     block_table=None,
+    persistent_forward=False,
     fused_backward=False,
     onekernel_backward=False,
 ):
@@ -3408,6 +3485,7 @@ def flash_attn_varlen_func(
         return_attn_probs,
         block_table,
         torch.is_grad_enabled(),
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     )
@@ -3434,6 +3512,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
         return_softmax,
         block_table,
         is_grad_enabled,
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     ):
@@ -3452,28 +3531,52 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
         k_fp8, descale_k = cast_varlen_to_fp8(k, fp8_dtype, cu_seqlens=cu_seqlens_k)
         v_fp8, descale_v = cast_varlen_to_fp8(v, fp8_dtype, cu_seqlens=cu_seqlens_k)
 
-        out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
-            _flash_attn_forward(
-                q_fp8,
-                k_fp8,
-                v_fp8,
-                dropout_p,
-                softmax_scale,
-                causal=causal,
-                window_size_left=window_size[0],
-                window_size_right=window_size[1],
-                alibi_slopes=alibi_slopes,
-                return_lse=return_lse,
-                return_softmax=return_softmax and dropout_p > 0,
-                max_seqlen_q=max_seqlen_q,
-                max_seqlen_k=max_seqlen_k,
-                cu_seqlens_q=cu_seqlens_q,
-                cu_seqlens_k=cu_seqlens_k,
-                descale_q=descale_q,
-                descale_k=descale_k,
-                descale_v=descale_v,
+        if persistent_forward:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _persistent_flash_attn_forward(
+                    q_fp8,
+                    k_fp8,
+                    v_fp8,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_q=cu_seqlens_q,
+                    cu_seqlens_k=cu_seqlens_k,
+                    descale_q=descale_q,
+                    descale_k=descale_k,
+                    descale_v=descale_v,
+                )
             )
-        )
+        else:
+            out_padded, softmax_lse, S_dmask, philox_seed, philox_offset = (
+                _flash_attn_forward(
+                    q_fp8,
+                    k_fp8,
+                    v_fp8,
+                    dropout_p,
+                    softmax_scale,
+                    causal=causal,
+                    window_size_left=window_size[0],
+                    window_size_right=window_size[1],
+                    alibi_slopes=alibi_slopes,
+                    return_lse=return_lse,
+                    return_softmax=return_softmax and dropout_p > 0,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    cu_seqlens_q=cu_seqlens_q,
+                    cu_seqlens_k=cu_seqlens_k,
+                    descale_q=descale_q,
+                    descale_k=descale_k,
+                    descale_v=descale_v,
+                )
+            )
         if is_grad:
             ctx.save_for_backward(
                 q_fp8,
@@ -3617,7 +3720,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
         dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : k_fp8.shape[-1]]
         dv = dv[..., : v_fp8.shape[-1]]
-        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None
+        return dq, dk, dv, None, None, None, None, None, None, None, None, None, None, None
 
 
 def flash_attn_varlen_fp8_func(
@@ -3637,6 +3740,7 @@ def flash_attn_varlen_fp8_func(
     return_lse=False,
     return_attn_probs=False,
     block_table=None,
+    persistent_forward=False,
     fused_backward=False,
     onekernel_backward=False,
 ):
@@ -3658,6 +3762,7 @@ def flash_attn_varlen_fp8_func(
         return_attn_probs,
         block_table,
         torch.is_grad_enabled(),
+        persistent_forward,
         fused_backward,
         onekernel_backward,
     )

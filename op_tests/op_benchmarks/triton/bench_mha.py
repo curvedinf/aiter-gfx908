@@ -2,12 +2,9 @@ import torch.test
 import triton
 import triton.language as tl
 from utils.benchmark_utils import get_model_configs, get_available_models, print_vgpr
-from op_tests.triton_tests.test_mha import (
-    test_mha_backward,
-    test_mha_backward_varlen,
-    test_mha_fused_backward_varlen,
-    test_mha_fused_backward,
-)
+import op_tests.triton_tests.test_mha as test_mha
+import op_tests.triton_tests.test_mha_fused_bwd as test_fused_bwd
+import op_tests.triton_tests.test_mha_onekernel_bwd as test_onekernel_bwd
 import torch
 import os
 import sys
@@ -25,88 +22,6 @@ from aiter.test_mha_common import (
     generate_qkv,
 )
 import sys
-
-
-# thd layout
-def mha_varlen_input_helper(
-    Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, equal_seqlens=False, requires_grad=True
-):
-    torch.manual_seed(20)
-
-    # Random sequence lengths. Using N_CTX * Z as kind of maximum possible sum of individual seqs
-    if not equal_seqlens:
-        max_seqlens_q = N_CTX_Q
-        max_seqlens_k = N_CTX_K
-        if N_CTX_Q == N_CTX_K:
-            seqlens_q = torch.randint(1, max_seqlens_q + 1, (Z,), dtype=torch.int32)
-            seqlens_k = seqlens_q
-        else:
-            seqlens_q = torch.randint(1, max_seqlens_q + 1, (Z,), dtype=torch.int32)
-            seqlens_k = torch.randint(1, max_seqlens_k + 1, (Z,), dtype=torch.int32)
-    else:
-        seqlens_q = torch.full((Z,), N_CTX_Q)
-        seqlens_k = torch.full((Z,), N_CTX_K)
-
-    # Calculate cumulative sequence lengths
-    cu_seqlens_q = torch.cat(
-        [
-            torch.tensor([0], dtype=torch.int32),
-            seqlens_q.cumsum(dim=0, dtype=torch.int32),
-        ]
-    )
-    cu_seqlens_k = torch.cat(
-        [
-            torch.tensor([0], dtype=torch.int32),
-            seqlens_k.cumsum(dim=0, dtype=torch.int32),
-        ]
-    )
-
-    cu_seqlens_q = cu_seqlens_q.to(device="cuda")
-    cu_seqlens_k = cu_seqlens_k.to(device="cuda")
-    # Initialize q, k, v with variable lengths
-    total_q = cu_seqlens_q[-1].item()
-    total_k = cu_seqlens_k[-1].item()
-
-    q = (
-        torch.randn((total_q, HQ, D_HEAD), dtype=dtype, device="cuda")
-        .normal_(mean=0.0, std=0.5)
-        .requires_grad_(requires_grad)
-    )
-    k = (
-        torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda")
-        .normal_(mean=0.0, std=0.5)
-        .requires_grad_(requires_grad)
-    )
-    v = (
-        torch.randn((total_k, HK, D_HEAD), dtype=dtype, device="cuda")
-        .normal_(mean=0.0, std=0.5)
-        .requires_grad_(requires_grad)
-    )
-    sm_scale = D_HEAD**-0.5
-    return q, k, v, cu_seqlens_q, cu_seqlens_k, sm_scale
-
-
-# bshd layout
-def mha_input_helper(Z, HQ, HK, N_CTX_Q, N_CTX_K, D_HEAD, dtype, requires_grad=True):
-    torch.manual_seed(20)
-
-    # Initialize q, k, v
-    q_tensor_shape = (Z, N_CTX_Q, HQ, D_HEAD)
-    k_tensor_shape = (Z, N_CTX_K, HK, D_HEAD)
-
-    q = torch.randn(
-        q_tensor_shape, dtype=dtype, device="cuda", requires_grad=requires_grad
-    )
-    k = torch.randn(
-        k_tensor_shape, dtype=dtype, device="cuda", requires_grad=requires_grad
-    )
-    v = torch.randn(
-        k_tensor_shape, dtype=dtype, device="cuda", requires_grad=requires_grad
-    )
-
-    sm_scale = D_HEAD**-0.5
-
-    return q, k, v, sm_scale
 
 
 def nonvarlen_benchmark_configs():
@@ -176,36 +91,6 @@ def model_benchmark_configs(args):
     return fa_configs
 
 
-def pad_rearrange_dropout_mask(
-    S_dmask,
-    cu_seqlens_q,
-    cu_seqlens_k,
-    max_seqlen_q,
-    max_seqlen_k,
-    seqlen_q,
-    seqlen_k,
-    num_q_heads,
-):
-    batch_size = cu_seqlens_q.numel() - 1
-
-    padded_dropout_mask = torch.ones(
-        (batch_size, num_q_heads, seqlen_q, seqlen_k), device="cuda"
-    )
-    for b in range(batch_size):
-        start_q = cu_seqlens_q[b].item()
-        end_q = cu_seqlens_q[b + 1].item()
-        start_k = cu_seqlens_k[b].item()
-        end_k = cu_seqlens_k[b + 1].item()
-
-        seqlen_q = end_q - start_q
-        seqlen_k = end_k - start_k
-        for h in range(S_dmask.shape[1]):
-            padded_dropout_mask[b, h, :max_seqlen_q, :max_seqlen_k] = S_dmask[
-                b, h, :, :
-            ]
-
-    return padded_dropout_mask
-
 
 def create_benchmark_configs(custom, args):
     dtype = arg_to_torch_dtype[args.dtype]
@@ -250,7 +135,10 @@ def create_benchmark_configs(custom, args):
         else:
             line_vals = [f"fused-bwd({unit})", f"onekernel-bwd({unit})", f"bwd({unit})"]
     else:
-        line_vals = [f"fwd({unit})"]
+        if args.persistent_fwd:
+            line_vals = [f"persistent-fwd({unit})"]
+        else:
+            line_vals = [f"fwd({unit})", f"persistent-fwd({unit})"]
 
     if args.bench_torch:
         line_vals = [f"Triton({unit})", f"Torch({unit})"]
@@ -283,7 +171,7 @@ def run_benchmark(custom, args):
     torch.manual_seed(20)
 
     @triton.testing.perf_report(create_benchmark_configs(custom, args))
-    def bench_mha_backward(
+    def bench_mha(
         BATCH,
         HQ,
         HK,
@@ -312,6 +200,8 @@ def run_benchmark(custom, args):
         fused_backward = "fused-bwd" in provider
         onekernel_backward = "onekernel-bwd" in provider
 
+        persistent_forward = "persistent-fwd" in provider
+
         assert (not fused_backward) or (
             not onekernel_backward
         ), "fused_backward and onekernel_backward cannot be used together."
@@ -330,7 +220,7 @@ def run_benchmark(custom, args):
             )
             if fused_backward:
                 if varlen:
-                    test_mha_fused_backward_varlen(
+                    test_fused_bwd.test_mha_fused_backward_varlen(
                         BATCH,
                         N_CTX_Q,
                         N_CTX_K,
@@ -344,7 +234,7 @@ def run_benchmark(custom, args):
                         dtype,
                     )
                 else:
-                    test_mha_fused_backward(
+                    test_fused_bwd.test_mha_fused_backward(
                         BATCH,
                         N_CTX_Q,
                         N_CTX_K,
@@ -359,7 +249,7 @@ def run_benchmark(custom, args):
                     )
             elif onekernel_backward:
                 if varlen:
-                    test_mha_fused_backward_varlen(
+                    test_onekernel_bwd.test_mha_fused_backward_varlen(
                         BATCH,
                         N_CTX_Q,
                         N_CTX_K,
@@ -373,7 +263,7 @@ def run_benchmark(custom, args):
                         dtype,
                     )
                 else:
-                    test_mha_fused_backward(
+                    test_onekernel_bwd.test_mha_fused_backward(
                         BATCH,
                         N_CTX_Q,
                         N_CTX_K,
@@ -388,7 +278,7 @@ def run_benchmark(custom, args):
                     )
             else:
                 if varlen:
-                    test_mha_backward_varlen(
+                    test_mha.test_mha_backward_varlen(
                         BATCH,
                         N_CTX_Q,
                         N_CTX_K,
@@ -401,7 +291,7 @@ def run_benchmark(custom, args):
                         dtype,
                     )
                 else:
-                    test_mha_backward(
+                    test_mha.test_mha_backward(
                         BATCH,
                         N_CTX_Q,
                         N_CTX_K,
@@ -502,6 +392,7 @@ def run_benchmark(custom, args):
                     causal=causal,
                     return_lse=return_lse,
                     return_attn_probs=return_attn_probs,
+                    persistent_forward=persistent_forward,
                     fused_backward=fused_backward,
                     onekernel_backward=onekernel_backward,
                 )
@@ -519,6 +410,7 @@ def run_benchmark(custom, args):
                     causal=causal,
                     return_lse=return_lse,
                     return_attn_probs=return_attn_probs,
+                    persistent_forward=persistent_forward,
                     fused_backward=fused_backward,
                     onekernel_backward=onekernel_backward,
                 )
@@ -533,6 +425,7 @@ def run_benchmark(custom, args):
                     causal=causal,
                     return_lse=return_lse,
                     return_attn_probs=return_attn_probs,
+                    persistent_forward=persistent_forward,
                     fused_backward=fused_backward,
                     onekernel_backward=onekernel_backward,
                 )
@@ -546,6 +439,7 @@ def run_benchmark(custom, args):
                     causal=causal,
                     return_lse=return_lse,
                     return_attn_probs=return_attn_probs,
+                    persistent_forward=persistent_forward,
                     fused_backward=fused_backward,
                     onekernel_backward=onekernel_backward,
                 )
@@ -590,7 +484,7 @@ def run_benchmark(custom, args):
         else:  # GB/s
             return mem / ms * 1e-3
 
-    bench_mha_backward.run(save_path=None, print_data=True, show_plots=False)
+    bench_mha.run(save_path=None, print_data=True, show_plots=False)
 
 
 def supported_layouts():
@@ -654,6 +548,7 @@ def parse_args():
     parser.add_argument("-bench_torch", action="store_true", default=False)
     parser.add_argument("-fused_bwd", action="store_true", default=False)
     parser.add_argument("-onekernel_bwd", action="store_true", default=False)
+    parser.add_argument("-persistent_fwd", action="store_true", default=False)
     parser.add_argument("-print_vgpr", action="store_true", default=False)
     parser.add_argument(
         "-return_all",

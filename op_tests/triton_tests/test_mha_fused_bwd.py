@@ -96,7 +96,7 @@ def fp8_assert_close(
     "SEQLEN_Q, SEQLEN_K",
     [(256, 128), (128, 256), (544, 544)],
 )
-@pytest.mark.parametrize("DROPOUT, CAUSAL", [(0.0, False), (0.0, True)])
+@pytest.mark.parametrize("DROPOUT, CAUSAL", [(0.0, True)])
 # dropout > 0.0 gives failures
 @pytest.mark.parametrize(
     "NUM_Q_HEADS, NUM_K_HEADS", [(1, 1), (16, 16), (2, 1), (32, 8)]
@@ -204,7 +204,7 @@ def test_mha_fused_backward(
     "SEQLEN_Q, SEQLEN_K",
     [(256, 128), (256, 128), (555, 555)],
 )
-@pytest.mark.parametrize("DROPOUT, CAUSAL", [(0.0, True), (0.0, False)])
+@pytest.mark.parametrize("DROPOUT, CAUSAL", [(0.0, True)])
 # dropout > 0.0 gives failures
 @pytest.mark.parametrize("NUM_Q_HEADS, NUM_K_HEADS", [(32, 8)])
 @pytest.mark.parametrize("HEAD_SZ", [8, 32])

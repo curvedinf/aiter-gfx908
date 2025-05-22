@@ -4066,7 +4066,6 @@ def _flash_attn_fused_backward(
     NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
     if causal:
         grid_dkdvdq = (batch * num_q_heads * num_k_pids,)
-
         _bwd_kernel_dkdvdq_causal[grid_dkdvdq](
             q,
             k,

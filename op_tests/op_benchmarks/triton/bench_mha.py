@@ -439,10 +439,10 @@ def run_benchmark(custom, args):
         # Input preparation
         if varlen:
             query_padding_mask = generate_random_padding_mask(
-                N_CTX_Q, BATCH, device, mode="random"
+                N_CTX_Q, BATCH, device, mode="full" if args.equal_seqlens else "random"
             )
             key_padding_mask = generate_random_padding_mask(
-                N_CTX_K, BATCH, device, mode="random"
+                N_CTX_K, BATCH, device, mode="full" if args.equal_seqlens else "random"
             )
             (
                 q_unpad,

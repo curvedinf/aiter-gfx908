@@ -13,6 +13,7 @@ from aiter.ops.triton.utils.mha_onekernel_utils import (
 from aiter import dtypes
 from einops import rearrange, repeat
 
+
 @triton.jit
 def cdiv_fn(x, y):
     return (x + y - 1) // y
@@ -3745,8 +3746,7 @@ def _flash_attn_fused_backward(
             NUM_SMS=NUM_SMS,
             **config,
         )
-    
-    
+
     # if convert2thd:
     #     # Reshape the tensors back to their original shapes
     #     dq = dq.view(orig_dq_shape)
@@ -3758,9 +3758,7 @@ def _flash_attn_fused_backward(
     #     v = v.view(orig_v_shape)
     #     o = o.view(orig_o_shape)
     #     softmax_lse = softmax_lse.view(orig_softmax_lse_shape)
-    
-    
-    
+
     return delta
 
 
@@ -3788,7 +3786,7 @@ def _flash_attn_onekernel_backward(
     descale_k: Optional[torch.Tensor] = None,
     descale_v: Optional[torch.Tensor] = None,
     descale_do: Optional[torch.Tensor] = None,
-):    
+):
     IS_VARLEN = True if cu_seqlens_q is not None else False
 
     IS_FP8 = is_fp8(q)

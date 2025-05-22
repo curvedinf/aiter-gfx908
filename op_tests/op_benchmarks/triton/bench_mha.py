@@ -320,8 +320,8 @@ def run_benchmark(custom, args):
         fused_backward = "fused-bwd" in provider
         onekernel_backward = "onekernel-bwd" in provider
 
-        assert (
-            (not fused_backward) or (not onekernel_backward)
+        assert (not fused_backward) or (
+            not onekernel_backward
         ), "fused_backward and onekernel_backward cannot be used together."
 
         # Default softmax scale to match standard attention
@@ -561,6 +561,7 @@ def run_benchmark(custom, args):
             with torch.enable_grad():
                 triton_out = fn()[0]
                 d_out = torch.randn_like(triton_out)
+
                 def fn():
                     grads = torch.autograd.grad(
                         triton_out,

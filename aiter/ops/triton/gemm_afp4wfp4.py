@@ -23,16 +23,16 @@ def _gemm_afp4_wfp4_kernel(
     M: tl.constexpr,
     N: tl.constexpr,
     K: tl.constexpr,
-    stride_am: tl.constexpr,
-    stride_ak: tl.constexpr,
-    stride_bk: tl.constexpr,
+    stride_am,
+    stride_ak,
+    stride_bk,
     stride_bn,
-    stride_ck: tl.constexpr,
-    stride_cm: tl.constexpr,
-    stride_cn: tl.constexpr,
-    stride_asm: tl.constexpr,
+    stride_ck,
+    stride_cm,
+    stride_cn,
+    stride_asm,
     stride_ask: tl.constexpr,
-    stride_bsn: tl.constexpr,
+    stride_bsn,
     stride_bsk: tl.constexpr,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
@@ -301,6 +301,15 @@ def gemm_afp4wfp4(
         NUM_KSPLIT = 1
         SPLITK_BLOCK_SIZE = 2 * K
         y_pp = None
+
+    BLOCK_SIZE_M = int(os.environ['BLOCK_SIZE_M']) if 'BLOCK_SIZE_M' in os.environ else 128
+    BLOCK_SIZE_N = int(os.environ['BLOCK_SIZE_N']) if 'BLOCK_SIZE_N' in os.environ else 256
+    BLOCK_SIZE_K = int(os.environ['BLOCK_SIZE_K']) if 'BLOCK_SIZE_K' in os.environ else 256
+    waves_per_eu = int(os.environ['WAVES_PER_EU']) if 'WAVES_PER_EU' in os.environ else 2
+    num_warps = int(os.environ['NUM_WARPS']) if 'NUM_WARPS' in os.environ else 8
+    cache_modifier = os.environ['CACHE'] if 'CACHE' in os.environ else None
+    NUM_KSPLIT = 1
+    SPLITK_BLOCK_SIZE = 2 * K
 
     grid = lambda META: (  # noqa: E731
         (

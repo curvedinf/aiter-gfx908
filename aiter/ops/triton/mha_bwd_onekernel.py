@@ -2,406 +2,51 @@ import torch
 import triton  # type: ignore
 import triton.language as tl  # type: ignore
 from typing import Literal, Optional
-from aiter.ops.triton.utils.mha_onekernel_utils import (
-    DEBUG,
-    AUTOTUNE,
-    DROPOUT_USE_PYTORCH,
-    DROPOUT_DUMP,
-    get_shapes_from_layout,
+from aiter.ops.triton.utils.mha_kernel_utils import (
     compute_fp8_scaling_factors,
-    get_strides_from_layout,
-    create_dropout_mask,
-    create_dropout_mask_varlen,
-    is_cdna,
     is_fp8,
-    is_rdna,
 )
 
+
+
 # NOTE: triton fails to import tl.constexprs so create them here for the file
+DROPOUT_USE_PYTORCH = False
+DROPOUT_DUMP = False
+
 tl_DROPOUT_USE_PYTORCH: tl.constexpr = triton.language.constexpr(DROPOUT_USE_PYTORCH)
 tl_DROPOUT_DUMP: tl.constexpr = triton.language.constexpr(DROPOUT_DUMP)
-
-
-@triton.jit
-def _remap_XCD(k, last_k, NUM_XCD):
-    """
-    Parameters:
-        NUM_XCD: number of XCDs in the GPU, e.g. 38 for MI300x.
-        last_k: the last index of the set, i.e. len(set) - 1
-        k: the index to be remapped
-    Function maps indices k = 0, ..., last_k so that [multiples of NUM_XCD] come first (those present in the set),
-    then [multiples of NUM_XCD] + 1, ..., until [multiples of NUM_XCD] + NUM_XCD - 1
-    As indices are distributed to the XCDs in a round robin fashion, this remaps the indices at the XCDs back to consecutive indices.
-    """
-    r = k % NUM_XCD
-    m = k // NUM_XCD
-    q = last_k // NUM_XCD
-    t = last_k - NUM_XCD * q
-    u = min(r, t + 1)
-    new_index = u * q + (r - u) * (q - 1) + r + m
-    return new_index
-
-
-@triton.jit
-def _balance_attn_workload(
-    wid,
-    NUM_XCD: tl.constexpr,
-    BATCH,
-    NUM_Q_HEADS,
-    SEQLEN_Q,
-    BLOCK_M,
-):
-    # Traversal strategy along dims: seqlen, q_head, batch
-    # 1. Fastest changing dim is the q_head dim. At every <NUM_XCD>th wid, increase the sequence block id (start_m).
-    # 2. When we are done with <CHUNK_BLOCKS_SIZE> blocks along seqlen, we move to the next set of <NUM_XCD> q_heads.
-    # 3. Batch changes last.
-
-    # so XCD 0 should get workgroups with indices (batch, head q idx, start_m)
-    # (0, 0, 0), (0, 0, 1), (0, 0, 2), ..., (0, 0, CHUNK_BLOCKS_SIZE), (0, NUM_XCD, 0)
-    # XCD 1
-    # (0, 1, 0), (0, 1, 1), (0, 1, 2), ..., (0, 1, CHUNK_BLOCKS_SIZE), (0, NUM_XCD+1, 0)
-    # ...
-    # XCD <NUM_XCD - 1>
-    # (0, NUM_XCD-1, 0), (0, NUM_XCD-1, 1), (0, NUM_XCD-1, 2), ..., (0, NUM_XCD-1, CHUNK_BLOCKS_SIZE), (0, 2 * NUM_XCD-1, 0)
-
-    # Notice that on the same round robin turn, XCDs get the same start_m, i.e. workgroups with equal workloads.
-    # But also consequent sequence blocks are sent to the same XCD, so they can benefit from L2 caching.
-
-    NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
-    CHUNK_BLOCKS_SIZE = 1  # (NUM_CUs_PER_XCD // (NUM_Q_HEADS // NUM_K_HEADS))
-    off_q_head = (
-        wid % NUM_XCD + wid // (CHUNK_BLOCKS_SIZE * NUM_XCD) * NUM_XCD
-    ) % NUM_Q_HEADS
-    start_m = (
-        (wid // NUM_XCD) % CHUNK_BLOCKS_SIZE
-        + wid // (CHUNK_BLOCKS_SIZE * NUM_Q_HEADS) * CHUNK_BLOCKS_SIZE
-    ) % NUM_BLOCKS
-    off_z = wid // (NUM_BLOCKS * NUM_Q_HEADS) % BATCH
-    off_q_head = _remap_XCD(off_q_head, NUM_Q_HEADS - 1, NUM_XCD)
-
-    return off_z, off_q_head, start_m
-
-
-def get_autotune_configs():
-    if True:
-        if is_cdna():
-            # shared meta-parameters
-            NUM_STAGES = 1
-            NUM_WARPS = 4
-            WAVES_PER_EU = 2
-            MATRIX_INSTR_NONKDIM = 16
-
-            preprocess_autotune_configs = [
-                triton.Config(
-                    {
-                        "PRE_BLOCK": 128,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),  # og config
-                triton.Config(
-                    {
-                        "PRE_BLOCK": 64,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),
-                triton.Config(
-                    {
-                        "PRE_BLOCK": 32,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),
-                triton.Config(
-                    {
-                        "PRE_BLOCK": 16,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),
-            ]
-            preprocess_autotune_keys = [
-                "IS_CAUSAL",
-                "dropout_p",
-                "MAX_SEQLENS_Q",
-                "MAX_SEQLENS_K",
-                "ACTUAL_HEAD_DIM",
-                "IS_VARLEN",
-                "HQ",
-                "HK",
-            ]
-            causal_autotune_configs = [
-                triton.Config(
-                    {
-                        "BLOCK_M1": 32,
-                        "BLOCK_N1": 128,
-                        "BLOCK_M2": 128,
-                        "BLOCK_N2": 32,
-                        "BLK_SLICE_FACTOR": 2,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),  # og config
-                triton.Config(
-                    {
-                        "BLOCK_M1": 16,
-                        "BLOCK_N1": 128,
-                        "BLOCK_M2": 128,
-                        "BLOCK_N2": 16,
-                        "BLK_SLICE_FACTOR": 2,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),
-                triton.Config(
-                    {
-                        "BLOCK_M1": 16,
-                        "BLOCK_N1": 64,
-                        "BLOCK_M2": 64,
-                        "BLOCK_N2": 16,
-                        "BLK_SLICE_FACTOR": 2,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),
-                triton.Config(
-                    {
-                        "BLOCK_M1": 32,
-                        "BLOCK_N1": 64,
-                        "BLOCK_M2": 64,
-                        "BLOCK_N2": 32,
-                        "BLK_SLICE_FACTOR": 2,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),
-            ]
-            causal_autotune_keys = [
-                "IS_CAUSAL",
-                "dropout_p",
-                "MAX_SEQLENS_Q",
-                "MAX_SEQLENS_K",
-                "ACTUAL_HEAD_DIM",
-                "IS_VARLEN",
-                "HQ",
-                "HK",
-            ]
-            noncausal_autotune_configs = [
-                triton.Config(
-                    {
-                        "BLOCK_M1": 32,
-                        "BLOCK_N1": 128,
-                        "BLOCK_M2": 128,
-                        "BLOCK_N2": 32,
-                        "BLK_SLICE_FACTOR": 2,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),  # og config
-                triton.Config(
-                    {
-                        "BLOCK_M1": 16,
-                        "BLOCK_N1": 128,
-                        "BLOCK_M2": 128,
-                        "BLOCK_N2": 16,
-                        "BLK_SLICE_FACTOR": 2,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),
-                triton.Config(
-                    {
-                        "BLOCK_M1": 16,
-                        "BLOCK_N1": 64,
-                        "BLOCK_M2": 64,
-                        "BLOCK_N2": 16,
-                        "BLK_SLICE_FACTOR": 2,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),
-                triton.Config(
-                    {
-                        "BLOCK_M1": 32,
-                        "BLOCK_N1": 64,
-                        "BLOCK_M2": 64,
-                        "BLOCK_N2": 32,
-                        "BLK_SLICE_FACTOR": 2,
-                        "waves_per_eu": WAVES_PER_EU,
-                        "matrix_instr_nonkdim": MATRIX_INSTR_NONKDIM,
-                    },
-                    num_stages=NUM_STAGES,
-                    num_warps=NUM_WARPS,
-                ),
-            ]
-            noncausal_autotune_keys = [
-                "IS_CAUSAL",
-                "dropout_p",
-                "MAX_SEQLENS_Q",
-                "MAX_SEQLENS_K",
-                "ACTUAL_HEAD_DIM",
-                "IS_VARLEN",
-                "HQ",
-                "HK",
-            ]
-
-            return (
-                (preprocess_autotune_configs, preprocess_autotune_keys),
-                (causal_autotune_configs, causal_autotune_keys),
-                (noncausal_autotune_configs, noncausal_autotune_keys),
-            )
-        else:
-            raise ValueError("Unknown Device Type")
-    else:
-        # meta-parameters
-        # TODO: fix num_stages later
-        NUM_WARPS, NUM_STAGES = 4, 1
-        WAVES_PER_EU = 1
-        PRE_BLOCK = 128
-        BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
-        BLK_SLICE_FACTOR = 2
-
-        assert BLOCK_N1 == BLOCK_M2
-
-        # configs for the kernels
-        preprocess_autotune_configs = [
-            triton.Config(
-                {"PRE_BLOCK": PRE_BLOCK, "waves_per_eu": WAVES_PER_EU},
-                num_stages=NUM_STAGES,
-                num_warps=NUM_WARPS,
-            ),
-        ]
-        preprocess_autotune_keys = [
-            "IS_CAUSAL",
-            "dropout_p",
-            "MAX_SEQLENS_Q",
-            "MAX_SEQLENS_K",
-            "ACTUAL_HEAD_DIM",
-            "IS_VARLEN",
-            "HQ",
-            "HK",
-        ]
-        causal_autotune_configs = [
-            triton.Config(
-                {
-                    "BLOCK_M1": BLOCK_M1,
-                    "BLOCK_N1": BLOCK_N1,
-                    "BLOCK_M2": BLOCK_M2,
-                    "BLOCK_N2": BLOCK_N2,
-                    "BLK_SLICE_FACTOR": BLK_SLICE_FACTOR,
-                    "waves_per_eu": WAVES_PER_EU,
-                },
-                num_stages=NUM_STAGES,
-                num_warps=NUM_WARPS,
-            ),
-        ]
-        causal_autotune_keys = [
-            "IS_CAUSAL",
-            "dropout_p",
-            "MAX_SEQLENS_Q",
-            "MAX_SEQLENS_K",
-            "ACTUAL_HEAD_DIM",
-            "IS_VARLEN",
-            "HQ",
-            "HK",
-        ]
-        noncausal_autotune_configs = [
-            triton.Config(
-                {
-                    "BLOCK_M1": BLOCK_M1,
-                    "BLOCK_N1": BLOCK_N1,
-                    "BLOCK_M2": BLOCK_M2,
-                    "BLOCK_N2": BLOCK_N2,
-                    "BLK_SLICE_FACTOR": BLK_SLICE_FACTOR,
-                    "waves_per_eu": WAVES_PER_EU,
-                },
-                num_stages=NUM_STAGES,
-                num_warps=NUM_WARPS,
-            ),
-        ]
-        noncausal_autotune_keys = [
-            "IS_CAUSAL",
-            "dropout_p",
-            "MAX_SEQLENS_Q",
-            "MAX_SEQLENS_K",
-            "ACTUAL_HEAD_DIM",
-            "IS_VARLEN",
-            "HQ",
-            "HK",
-        ]
-        return (
-            (preprocess_autotune_configs, preprocess_autotune_keys),
-            (causal_autotune_configs, causal_autotune_keys),
-            (noncausal_autotune_configs, noncausal_autotune_keys),
-        )
-
-
-(
-    (preprocess_autotune_configs, preprocess_autotune_keys),
-    (causal_autotune_configs, causal_autotune_keys),
-    (noncausal_autotune_configs, noncausal_autotune_keys),
-) = get_autotune_configs()
-
 
 # This function computes delta given output Out and gradient DO
 # Here is the I/O shape:
 # Out: (batch, nhead_q, max_seqlens_q, headDim)
 # DO: (batch, nhead_q, max_seqlens_q, headDim)
 # Delta: (batch, nheads_q, max_seqlens_q), same as softmax_lse defined at
-#   fwd_prefill.py line 607
-@triton.autotune(
-    configs=preprocess_autotune_configs,
-    key=preprocess_autotune_keys,
-    use_cuda_graph=True,
-)
 @triton.jit
 def _bwd_preprocess(
-    O,
-    DO,  # noqa: E741
-    Delta,
-    stride_ob,
-    stride_oh,
-    stride_om,
-    stride_od,
-    stride_deltab,
-    stride_deltah,
-    stride_deltam,
+    o_ptr,
+    do_ptr,  # noqa: E741
+    delta_ptr,
+    stride_o_b,
+    stride_o_h,
+    stride_o_m,
+    stride_o_k,
+    stride_delta_b,
+    stride_delta_h,
+    stride_delta_m,
     stride_descale_do_z,
     cu_seqlens_q,
     max_seqlen_q,
-    Descale_do,
-    PRE_BLOCK: tl.constexpr,
-    HEAD_DIM: tl.constexpr,
-    ACTUAL_HEAD_DIM: tl.constexpr,
+    descale_do_ptr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_D_MODEL: tl.constexpr,
+    BLOCK_D_MODEL_POW2: tl.constexpr,
     IS_VARLEN: tl.constexpr,
     IS_FP8: tl.constexpr,
 ):
-    pid_m = tl.program_id(0)
-    bid = tl.program_id(1)
-    hid = tl.program_id(2)
+    pid_m = tl.program_id(0)  # seqlen
+    bid = tl.program_id(1)  # batch
+    hid = tl.program_id(2)  # head
+
     # Handle varlen
     q_start = 0
     seqlen_q = max_seqlen_q
@@ -414,36 +59,45 @@ def _bwd_preprocess(
         seqlen_q = max_seqlen_q
 
     # Compute offsets
-    offs_m = pid_m * PRE_BLOCK + tl.arange(0, PRE_BLOCK)
-    offs_d = tl.arange(0, HEAD_DIM)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_k = tl.arange(0, BLOCK_D_MODEL_POW2)
+
     # Offset O/DO by batch, head and q_start
-    O += bid * stride_ob + hid * stride_oh + q_start * stride_om  # noqa: E741
-    DO += bid * stride_ob + hid * stride_oh + q_start * stride_om
+    offs = (
+        bid * stride_o_b
+        + hid * stride_o_h
+        + q_start * stride_o_m
+        + offs_m[:, None] * stride_o_m
+        + offs_k[None, :] * stride_o_k
+    )
+
     # create masks
     mask_m = offs_m < seqlen_q
-    mask_md = mask_m[:, None]
-    PADDED_HEAD: tl.constexpr = ACTUAL_HEAD_DIM != HEAD_DIM
+    mask = mask_m[:, None]
+    PADDED_HEAD: tl.constexpr = BLOCK_D_MODEL != BLOCK_D_MODEL_POW2
     if PADDED_HEAD:
-        mask_md &= offs_d[None, :] < ACTUAL_HEAD_DIM
-    # compute pointers
-    offs_do = offs_m[:, None] * stride_om + offs_d[None, :] * stride_od
-    out_ptrs = O + offs_do
-    do_ptrs = DO + offs_do
-    # load
-    o = tl.load(out_ptrs, mask=mask_md, other=0.0)
-    do = tl.load(do_ptrs, mask=mask_md, other=0.0)
+        mask &= offs_k[None, :] < BLOCK_D_MODEL
+
+    # load [BLOCK_M, BLOCK_D_MODEL_POW2]
+    o = tl.load(o_ptr + offs, mask=mask, other=0.0)
+    do = tl.load(do_ptr + offs, mask=mask, other=0.0)
+
     # compute and write-back to delta
     if IS_FP8:
-        descale_do = tl.load(Descale_do + bid * stride_descale_do_z + hid)
+        descale_do = tl.load(descale_do_ptr + bid * stride_descale_do_z + hid)
 
         # NOTE: do is in the fp8 range and o is not in fp8
         delta = tl.sum(o.to(tl.float32) * (do.to(tl.float32) * descale_do), axis=1)
     else:
         delta = tl.sum(o.to(tl.float32) * do.to(tl.float32), axis=1)
-    delta_offset = (
-        Delta + bid * stride_deltab + hid * stride_deltah + q_start * stride_deltam
+
+    offs_delta = (
+        bid * stride_delta_b
+        + hid * stride_delta_h
+        + q_start * stride_delta_m
+        + offs_m * stride_delta_m
     )
-    tl.store(delta_offset + offs_m * stride_deltam, delta, mask=mask_m)
+    tl.store(delta_ptr + offs_delta, delta, mask=mask_m)
 
 
 # The main inner-loop logic for computing dK and dV.
@@ -892,7 +546,6 @@ def bwd_kernel_causal(  # grid = (tl.cdiv(max_seqlen_q // BLOCK_M2), batch, nhea
     # program ids
     hkid = tl.program_id(0)
     pid = tl.program_id(1)
-    # pid = _remap_XCD(pid, tl.cdiv(max_seqlen_k, BLOCK_N1) - 1, 8)
     bid = tl.program_id(2)
     if DEBUG_TRITON:
         print(f"\npid: {pid}, bid: {bid}, hkid: {hkid}")  # noqa: E701
@@ -1699,3 +1352,386 @@ def is_contiguous(x, name):
     else:
         print(f"{name} is not contiguous")
         return x.contiguous()
+
+
+def _flash_attn_onekernel_backward(
+    do: torch.Tensor,
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    o: torch.Tensor,
+    softmax_lse: torch.Tensor,
+    dq: torch.Tensor,
+    dk: torch.Tensor,
+    dv: torch.Tensor,
+    sm_scale: float,
+    alibi_slopes: Optional[torch.Tensor],
+    causal: bool,
+    cu_seqlens_q: Optional[torch.Tensor],
+    cu_seqlens_k: Optional[torch.Tensor],
+    max_seqlen_q: int,
+    max_seqlen_k: int,
+    dropout_p: float,
+    philox_seed: Optional[int] = 0,
+    philox_offset: Optional[int] = 0,
+    descale_q: Optional[torch.Tensor] = None,
+    descale_k: Optional[torch.Tensor] = None,
+    descale_v: Optional[torch.Tensor] = None,
+    descale_do: Optional[torch.Tensor] = None,
+):
+    # IS_VARLEN = True if cu_seqlens_q is not None else False
+
+    # IS_FP8 = is_fp8(q)
+    # if IS_FP8:
+    #     FP8_MAX = torch.finfo(q.dtype).max
+    #     # assert that the main inputs are fp8
+
+    #     stride_descale_q_z = descale_q.stride(0) if descale_q is not None else None
+    #     stride_descale_k_z = descale_k.stride(0) if descale_k is not None else None
+    #     stride_descale_v_z = descale_v.stride(0) if descale_v is not None else None
+    #     stride_descale_do_z = descale_do.stride(0) if descale_do is not None else None
+    # else:
+    #     FP8_MAX = None
+    #     stride_descale_q_z = stride_descale_k_z = stride_descale_v_z = (
+    #         stride_descale_o_z
+    #     ) = stride_descale_do_z = None
+    # if IS_VARLEN:
+    #     layout = "thd"
+    # elif q.shape[2] == max_seqlen_q:
+    #     layout = "bhsd"
+    # elif q.shape[1] == max_seqlen_q:
+    #     layout = "bshd"
+    # else:
+    #     raise ValueError("invalid layout")
+
+    # # get strides and shape
+    # batch, nheads_q, nheads_k, head_size, max_seqlen_q_final, max_seqlen_k_final = (
+    #     get_shapes_from_layout(
+    #         q, k, layout, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k
+    #     )
+    # )
+    # q_strides, k_strides, v_strides, o_strides = get_strides_from_layout(
+    #     q, k, v, o, layout
+    # )
+    # stride_qb, stride_qh, stride_qm, stride_qd = q_strides
+    # stride_kb, stride_kh, stride_kn, stride_kd = k_strides
+    # stride_vb, stride_vh, stride_vn, stride_vd = v_strides
+    # stride_ob, stride_oh, stride_om, stride_od = o_strides
+    # dq_strides, dk_strides, dv_strides, do_strides = get_strides_from_layout(
+    #     dq, dk, dv, do, layout
+    # )
+    # stride_dqb, stride_dqh, stride_dqm, stride_dqd = dq_strides
+    # stride_dkb, stride_dkh, stride_dkn, stride_dkd = dk_strides
+    # stride_dvb, stride_dvh, stride_dvn, stride_dvd = dv_strides
+    # stride_dob, stride_doh, stride_dom, stride_dod = do_strides
+    # use_dropout = dropout_p > 0.0
+    use_alibi, (stride_az, stride_ah) = (
+        (True, alibi_slopes.stride()) if alibi_slopes is not None else (False, (0, 0))
+    )
+
+    # # get closest power of 2 over or equal to 32.
+    # padded_d_model = 1 << (head_size - 1).bit_length()
+    # padded_d_model = max(padded_d_model, 32)
+    # HEAD_DIM = padded_d_model
+    # ACTUAL_HEAD_DIM = head_size
+
+    # # init delta
+    # delta = torch.zeros_like(softmax_lse)
+    # if IS_VARLEN:
+    #     stride_deltab = 0
+    #     stride_deltam, stride_deltah = delta.stride()
+    # else:
+    #     stride_deltab, stride_deltah, stride_deltam = delta.stride()
+    # PRE_BLOCK = 128
+    # pre_grid = (triton.cdiv(max_seqlen_q, PRE_BLOCK), batch, nheads_q)
+
+    # _bwd_preprocess[pre_grid](
+    #     o,
+    #     do,
+    #     delta,
+    #     stride_ob,
+    #     stride_oh,
+    #     stride_om,
+    #     stride_od,
+    #     stride_deltab,
+    #     stride_deltah,
+    #     stride_deltam,
+    #     stride_descale_do_z,
+    #     cu_seqlens_q,
+    #     max_seqlen_q,
+    #     descale_do,
+    #     BLOCK_M=PRE_BLOCK,
+    #     BLOCK_D_MODEL=HEAD_DIM,
+    #     BLOCK_D_MODEL_POW2=ACTUAL_HEAD_DIM,
+    #     IS_VARLEN=IS_VARLEN,
+    #     IS_FP8=IS_FP8,
+    # )
+
+    # # dropout mask tensor for debugging. We dump the dropout mask created in
+    # #   the kernel for testing
+    # dropout_mask = None
+    # stride_dropoutb, stride_dropouth, stride_dropoutm, stride_dropoutn = (0, 0, 0, 0)
+    # if use_dropout:
+    #     dropout_mask = torch.zeros(
+    #         (batch, nheads_q, max_seqlen_q_final, max_seqlen_k_final),
+    #         device=q.device,
+    #         dtype=torch.float32,
+    #     )
+
+    IS_FP8 = is_fp8(q)
+    if IS_FP8:
+        FP8_MAX = torch.finfo(q.dtype).max
+        descale_strides = (
+            descale_q.stride(0),
+            descale_k.stride(0),
+            descale_v.stride(0),
+            descale_do.stride(0),
+        )
+    else:
+        FP8_MAX = None
+        stride_descale_q_z = stride_descale_k_z = stride_descale_v_z = (
+            stride_descale_do_z
+        ) = None
+        descale_strides = (
+            stride_descale_q_z,
+            stride_descale_k_z,
+            stride_descale_v_z,
+            stride_descale_do_z,
+        )
+
+    IS_VARLEN = True if cu_seqlens_q is not None else False
+
+    # get strides and shape
+    if IS_VARLEN:
+        # Layout for q,k,v is thd ie [total tokens, num_head, head_dim]
+        batch, seqlen_q, num_q_heads, head_sz = (
+            len(cu_seqlens_q) - 1,
+            max_seqlen_q,
+            q.shape[1],
+            q.shape[2],
+        )
+        _, num_k_heads = max_seqlen_k, k.shape[1]
+        q_strides = (0, q.stride(1), q.stride(0), q.stride(2))
+        q_strides = (0, q.stride(1), q.stride(0), q.stride(2))
+        k_strides = (0, k.stride(1), k.stride(0), k.stride(2))
+        v_strides = (0, v.stride(1), v.stride(0), v.stride(2))
+        o_strides = (0, o.stride(1), o.stride(0), o.stride(2))
+        dq_strides = (0, dq.stride(1), dq.stride(0), dq.stride(2))
+        dk_strides = (0, dk.stride(1), dk.stride(0), dk.stride(2))
+        dv_strides = (0, dv.stride(1), dv.stride(0), dv.stride(2))
+        do_strides = (0, do.stride(1), do.stride(0), do.stride(2))
+    else:
+        # Layout for q,k,v is bshd ie [batch, seq_len, num_head, head_dim]
+        batch, seqlen_q, num_q_heads, head_sz = q.shape
+        _, num_k_heads = k.shape[1], k.shape[2]
+        q_strides = (q.stride(0), q.stride(2), q.stride(1), q.stride(3))
+        k_strides = (k.stride(0), k.stride(2), k.stride(1), k.stride(3))
+        v_strides = (v.stride(0), v.stride(2), v.stride(1), v.stride(3))
+        o_strides = (o.stride(0), o.stride(2), o.stride(1), o.stride(3))
+        dq_strides = (dq.stride(0), dq.stride(2), dq.stride(1), dq.stride(3))
+        dk_strides = (dk.stride(0), dk.stride(2), dk.stride(1), dk.stride(3))
+        dv_strides = (dv.stride(0), dv.stride(2), dv.stride(1), dv.stride(3))
+        do_strides = (do.stride(0), do.stride(2), do.stride(1), do.stride(3))
+
+    # BLOCK_D_MODEL, BLOCK_D_MODEL_POW2
+    # padding for head_dim. Power of 2 or 16
+    BLOCK_D_MODEL_POW2 = triton.next_power_of_2(head_sz)
+    BLOCK_D_MODEL_POW2 = max(BLOCK_D_MODEL_POW2, 16)
+
+    # Configs
+    # PRE_BLOCK, BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2
+    # BLK_SLICE_FACTOR
+    # NUM_WARPS, NUM_STAGES = 4, 1
+    # WAVES_PER_EU = 1
+    # PRE_BLOCK = 128
+    # # BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
+    # BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 16, 64, 64, 16
+    # BLK_SLICE_FACTOR = 2
+
+    NUM_WARPS, NUM_STAGES = 4, 1
+    WAVES_PER_EU = 1
+    PRE_BLOCK = 128
+    BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
+    BLK_SLICE_FACTOR = 2
+    matrix_instr_nonkdim = 16
+
+    # init delta
+    delta = torch.zeros_like(softmax_lse)
+    if IS_VARLEN:
+        # [total_tokens, num_q_heads, seqlen_q]
+        delta_strides = (0, delta.stride(1), delta.stride(0))
+    else:
+        # [batch, num_q_heads, seqlen_q]
+        delta_strides = delta.stride()
+
+    # preprocess
+    # compute D(delta) = rowsum(dO*O). Note, multiplication is element-wise.
+    pre_grid = (triton.cdiv(max_seqlen_q, PRE_BLOCK), batch, num_q_heads)
+    _bwd_preprocess[pre_grid](
+        o,
+        do,
+        delta,
+        *o_strides,
+        *delta_strides,
+        descale_strides[3],
+        cu_seqlens_q,
+        max_seqlen_q,
+        descale_do,
+        BLOCK_M=PRE_BLOCK,
+        BLOCK_D_MODEL=head_sz,
+        BLOCK_D_MODEL_POW2=BLOCK_D_MODEL_POW2,
+        IS_VARLEN=IS_VARLEN,
+        IS_FP8=IS_FP8,
+    )
+
+    # dropout_mask
+    use_dropout = dropout_p > 0.0
+    if use_dropout:
+        dropout_mask = torch.zeros(
+            (batch, num_q_heads, max_seqlen_q, max_seqlen_k),
+            device=q.device,
+            dtype=torch.float32,
+        )
+        dropout_strides = dropout_mask.stride()
+    else:
+        dropout_mask = None
+        dropout_strides = (0, 0, 0, 0)
+
+
+
+    seqlen = max(max_seqlen_q, max_seqlen_k)
+    grid = lambda META: (
+        num_k_heads,
+        (seqlen + META["BLOCK_N1"] - 1) // META["BLOCK_N1"],
+        batch,
+    )
+    NUM_WARPS, NUM_STAGES = 4, 1
+    WAVES_PER_EU = 1
+    BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
+    BLK_SLICE_FACTOR = 2
+    matrix_instr_nonkdim = 16
+
+    onekernel_config = {
+        "BLOCK_M1": BLOCK_M1,
+        "BLOCK_N1": BLOCK_N1,
+        "BLOCK_M2": BLOCK_M2,
+        "BLOCK_N2": BLOCK_N2,
+        "BLK_SLICE_FACTOR": BLK_SLICE_FACTOR,
+        "waves_per_eu": WAVES_PER_EU,
+        "matrix_instr_nonkdim": matrix_instr_nonkdim,
+        "num_warps": NUM_WARPS,
+        "num_ctas": 1,
+        "num_stages": NUM_STAGES,
+    }
+    if causal:
+        bwd_kernel_causal[grid](
+            q,
+            k,
+            v,
+            sm_scale,
+            do,
+            dq,
+            dk,
+            dv,
+            softmax_lse,
+            delta,
+            *q_strides,
+            *k_strides,
+            *v_strides,
+            *dq_strides,
+            *dk_strides,
+            *dv_strides,
+            *delta_strides,
+            *do_strides,
+            *dropout_strides,
+            stride_descale_q_z,
+            stride_descale_k_z,
+            stride_descale_v_z,
+            stride_descale_do_z,
+            stride_az,
+            stride_ah,
+            num_q_heads,
+            num_k_heads,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            dropout_mask,
+            dropout_p,
+            philox_seed,
+            philox_offset,
+            alibi_slopes,
+            descale_q,
+            descale_k,
+            descale_v,
+            descale_do,
+            HEAD_DIM=head_sz,
+            ACTUAL_HEAD_DIM=BLOCK_D_MODEL_POW2,
+            ENABLE_DROPOUT=use_dropout,
+            IS_VARLEN=IS_VARLEN,
+            USE_ALIBI=use_alibi,
+            USE_EXP2=True,
+            IS_FP8=IS_FP8,
+            FP8_MAX=FP8_MAX,
+            FP8_OUTPUT=False,
+            DEBUG_TRITON=False,
+            DEBUG_TRITON_DETAIL=False,
+            **onekernel_config,
+        )
+    else:
+        bwd_kernel_noncausal[grid](
+            q,
+            k,
+            v,
+            sm_scale,
+            do,
+            dq,
+            dk,
+            dv,
+            softmax_lse,
+            delta,
+            *q_strides,
+            *k_strides,
+            *v_strides,
+            *dq_strides,
+            *dk_strides,
+            *dv_strides,
+            *delta_strides,
+            *do_strides,
+            *dropout_strides,
+            stride_descale_q_z,
+            stride_descale_k_z,
+            stride_descale_v_z,
+            stride_descale_do_z,
+            stride_az,
+            stride_ah,
+            num_q_heads,
+            num_k_heads,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            dropout_mask,
+            dropout_p,
+            philox_seed,
+            philox_offset,
+            alibi_slopes,
+            descale_q,
+            descale_k,
+            descale_v,
+            descale_do,
+            HEAD_DIM=head_sz,
+            ACTUAL_HEAD_DIM=BLOCK_D_MODEL_POW2,
+            ENABLE_DROPOUT=use_dropout,
+            IS_VARLEN=IS_VARLEN,
+            USE_ALIBI=use_alibi,
+            USE_EXP2=True,
+            IS_FP8=IS_FP8,
+            FP8_MAX=FP8_MAX,
+            FP8_OUTPUT=False,
+            DEBUG_TRITON=False,
+            DEBUG_TRITON_DETAIL=False,
+            **onekernel_config,
+        )
+
+    return delta

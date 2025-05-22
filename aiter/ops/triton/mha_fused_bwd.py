@@ -303,7 +303,7 @@ def _bwd_dkdvdq_inner(
         tl.atomic_add(
             dq_ptrs,
             dq_partial * sm_scale,
-            mask=mask_m[:, None],
+            mask=mask_m[:, None] & (offs_k[None, :] < BLOCK_D_MODEL),
             sem="relaxed",
         )
 

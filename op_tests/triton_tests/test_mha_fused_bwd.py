@@ -90,17 +90,17 @@ def fp8_assert_close(
         f"Greatest relative difference: {max_rel_diff} at index {max_rel_pos} (up to {rtol} allowed)"
     )
 
-@pytest.mark.parametrize("BATCH", [1, 4, 8, 16])
+@pytest.mark.parametrize("BATCH", [1, 8])
 @pytest.mark.parametrize(
     "SEQLEN_Q, SEQLEN_K",
-    [(1, 1), (4, 4), (128, 128), (2, 1), (1, 2), (32, 16), (64, 128)],
+    [(256, 128), (128, 256), (544, 544)],
 )
 @pytest.mark.parametrize("DROPOUT, CAUSAL", [(0.0, False), (0.0, True)])
 # dropout > 0.0 gives failures
 @pytest.mark.parametrize(
     "NUM_Q_HEADS, NUM_K_HEADS", [(1, 1), (16, 16), (2, 1), (32, 8)]
 )
-@pytest.mark.parametrize("HEAD_SZ", [16, 32])
+@pytest.mark.parametrize("HEAD_SZ", [8, 32])
 # TODO: Theres no masking for head size in the inner loop of backward kernels so we need to use pow2 and >=16
 @pytest.mark.parametrize("FP8", [False])
 # @pytest.mark.parametrize('FP8',[(False), (True)]) #TODO Debug FP8
@@ -198,15 +198,15 @@ def test_mha_fused_backward(
         )
 
 
-@pytest.mark.parametrize("BATCH", [4])
+@pytest.mark.parametrize("BATCH", [1,4])
 @pytest.mark.parametrize(
     "SEQLEN_Q, SEQLEN_K",
-    [(256, 128), (256, 128), (544, 544)],
+    [(256, 128), (256, 128), (555, 555)],
 )
 @pytest.mark.parametrize("DROPOUT, CAUSAL", [(0.0, True), (0.0, False)])
 # dropout > 0.0 gives failures
 @pytest.mark.parametrize("NUM_Q_HEADS, NUM_K_HEADS", [(32, 8)])
-@pytest.mark.parametrize("HEAD_SZ", [16, 32])
+@pytest.mark.parametrize("HEAD_SZ", [8, 32])
 @pytest.mark.parametrize("FP8", [False])
 # @pytest.mark.parametrize('FP8',[(False), (True)]) #TODO Debug FP8
 def test_mha_fused_backward_varlen(

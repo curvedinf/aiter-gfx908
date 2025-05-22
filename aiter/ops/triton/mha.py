@@ -3966,8 +3966,6 @@ def _flash_attn_fused_backward(
         )
 
     IS_VARLEN = True if cu_seqlens_q is not None else False
-    print("Running fused backward...")
-    print("IS_VARLEN", IS_VARLEN)
 
     # get strides and shape
     if IS_VARLEN:

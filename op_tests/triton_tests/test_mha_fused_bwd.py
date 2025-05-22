@@ -90,6 +90,7 @@ def fp8_assert_close(
         f"Greatest relative difference: {max_rel_diff} at index {max_rel_pos} (up to {rtol} allowed)"
     )
 
+
 @pytest.mark.parametrize("BATCH", [1, 8])
 @pytest.mark.parametrize(
     "SEQLEN_Q, SEQLEN_K",
@@ -198,7 +199,7 @@ def test_mha_fused_backward(
         )
 
 
-@pytest.mark.parametrize("BATCH", [1,4])
+@pytest.mark.parametrize("BATCH", [1, 4])
 @pytest.mark.parametrize(
     "SEQLEN_Q, SEQLEN_K",
     [(256, 128), (256, 128), (555, 555)],
@@ -301,7 +302,7 @@ def test_mha_fused_backward_varlen(
     triton_dq = dq_pad_fn(triton_dq)
     triton_dk = dk_pad_fn(triton_dk)
     triton_dv = dk_pad_fn(triton_dv)
- 
+
     with torch.enable_grad():
         torch_out = attention_ref(
             q,

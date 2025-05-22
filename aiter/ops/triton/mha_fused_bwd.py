@@ -774,7 +774,7 @@ def _bwd_kernel_dkdvdq_noncausal(
     PADDED_HEAD: tl.constexpr = BLOCK_D_MODEL != BLOCK_D_MODEL_POW2
     tl.static_print("PADDED_HEAD: ", PADDED_HEAD)
     if PADDED_HEAD:
-        mask_kv &= (offs_k < BLOCK_D_MODEL)
+        mask_kv &= offs_k < BLOCK_D_MODEL
 
     GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
     adj_k = (

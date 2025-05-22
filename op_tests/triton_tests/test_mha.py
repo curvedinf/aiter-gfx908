@@ -489,7 +489,7 @@ def test_mha_backward(
 @pytest.mark.parametrize(
     "NUM_Q_HEADS, NUM_K_HEADS", [(1, 1), (16, 16), (2, 1), (48, 8)]
 )
-@pytest.mark.parametrize("HEAD_SZ", [8])
+@pytest.mark.parametrize("HEAD_SZ", [8, 32, 128])
 @pytest.mark.parametrize("FP8", [False])
 # @pytest.mark.parametrize('FP8',[(False), (True)]) #TODO Debug FP8
 def test_mha_backward_varlen(

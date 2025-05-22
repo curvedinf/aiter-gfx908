@@ -9,16 +9,10 @@ from op_tests.triton_tests.test_mha import (
     test_mha_fused_backward,
 )
 import torch
-
 import os
 import sys
 import warnings
 import argparse
-
-# Add two parent directories to sys.path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(os.path.dirname(current_dir))
-sys.path.append(parent_dir)
 
 from aiter.ops.triton.mha import (
     flash_attn_func,
@@ -27,10 +21,8 @@ from aiter.ops.triton.mha import (
     flash_attn_varlen_fp8_func,
 )
 from aiter.test_mha_common import (
-    attention_ref,
     generate_random_padding_mask,
     generate_qkv,
-    pad_rearrange_dropout_mask_hts_to_bhss,
 )
 import sys
 

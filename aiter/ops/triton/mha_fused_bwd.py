@@ -11,7 +11,6 @@ from aiter.ops.triton.utils.mha_kernel_utils import (
 )
 
 
-
 # This function computes delta given output Out and gradient DO
 # Here is the I/O shape:
 # Out: (batch, nhead_q, max_seqlens_q, headDim)
@@ -94,6 +93,7 @@ def _bwd_preprocess(
         + offs_m * stride_delta_m
     )
     tl.store(delta_ptr + offs_delta, delta, mask=mask_m)
+
 
 @triton.jit
 def _bwd_dkdvdq_inner(
@@ -1128,4 +1128,3 @@ def _flash_attn_fused_backward(
         )
 
     return delta
-

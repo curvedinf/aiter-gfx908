@@ -2,6 +2,7 @@ import torch
 import triton
 import triton.language as tl
 
+
 def get_arch():
     return triton.runtime.driver.active.get_current_target().arch
 
@@ -12,6 +13,7 @@ def is_hip():
 
 def arch_supports_fp8():
     return is_hip() and get_arch() in ("gfx942")
+
 
 @triton.jit
 def compute_fp8_scaling_factors(x, fp8_max: tl.constexpr):

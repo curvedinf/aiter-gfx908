@@ -2668,6 +2668,7 @@ def _flash_attn_backward(
 
     return delta
 
+
 class FlashAttnFunc(torch.autograd.Function):
     @staticmethod
     def forward(

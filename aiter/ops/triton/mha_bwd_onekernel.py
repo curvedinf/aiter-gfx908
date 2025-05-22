@@ -8,13 +8,13 @@ from aiter.ops.triton.utils.mha_kernel_utils import (
 )
 
 
-
 # NOTE: triton fails to import tl.constexprs so create them here for the file
 DROPOUT_USE_PYTORCH = False
 DROPOUT_DUMP = False
 
 tl_DROPOUT_USE_PYTORCH: tl.constexpr = triton.language.constexpr(DROPOUT_USE_PYTORCH)
 tl_DROPOUT_DUMP: tl.constexpr = triton.language.constexpr(DROPOUT_DUMP)
+
 
 # This function computes delta given output Out and gradient DO
 # Here is the I/O shape:
@@ -1596,8 +1596,6 @@ def _flash_attn_onekernel_backward(
     else:
         dropout_mask = None
         dropout_strides = (0, 0, 0, 0)
-
-
 
     seqlen = max(max_seqlen_q, max_seqlen_k)
     grid = lambda META: (

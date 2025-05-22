@@ -10,7 +10,8 @@ from aiter.ops.triton.utils.mha_onekernel_utils import (
     get_strides_from_layout,
     is_cdna,
 )
-
+from aiter import dtypes
+from einops import rearrange, repeat
 
 @triton.jit
 def cdiv_fn(x, y):
@@ -3509,6 +3510,46 @@ def _flash_attn_fused_backward(
             stride_descale_do_z,
         )
 
+    # convert2thd = len(q.shape) == 4
+    # if convert2thd: # turn 'bshd' into 'thd' layout
+    #     orig_q_shape = q.shape
+    #     orig_k_shape = k.shape
+    #     orig_v_shape = v.shape
+    #     orig_o_shape = o.shape
+    #     orig_dq_shape = dq.shape
+    #     orig_dk_shape = dk.shape
+    #     orig_dv_shape = dv.shape
+    #     orig_do_shape = do.shape
+    #     orig_softmax_lse_shape = softmax_lse.shape
+    #     seqlen_q = q.shape[1]
+    #     seqlen_k = k.shape[1]
+    #     batch_size = q.shape[0]
+    #     cu_seqlens_q = torch.arange(
+    #         0,
+    #         (batch_size + 1) * seqlen_q,
+    #         step=seqlen_q,
+    #         dtype=dtypes.i32,
+    #         device=q.device,
+    #     )
+    #     max_seqlen_q = seqlen_q
+    #     cu_seqlens_k = torch.arange(
+    #         0,
+    #         (batch_size + 1) * seqlen_k,
+    #         step=seqlen_k,
+    #         dtype=dtypes.i32,
+    #         device=k.device,
+    #     )
+    #     max_seqlen_k = seqlen_k
+    #     q = rearrange(q, "b s h d -> (b s) h d")
+    #     k = rearrange(k, "b s h d -> (b s) h d")
+    #     v = rearrange(v, "b s h d -> (b s) h d")
+    #     o = rearrange(o, "b s h d -> (b s) h d")
+    #     dq = rearrange(dq, "b s h d -> (b s) h d")
+    #     dk = rearrange(dk, "b s h d -> (b s) h d")
+    #     dv = rearrange(dv, "b s h d -> (b s) h d")
+    #     do = rearrange(do, "b s h d -> (b s) h d")
+    #     softmax_lse = rearrange(softmax_lse, "b h s -> (b s) h")
+
     IS_VARLEN = True if cu_seqlens_q is not None else False
 
     # get strides and shape
@@ -3704,6 +3745,22 @@ def _flash_attn_fused_backward(
             NUM_SMS=NUM_SMS,
             **config,
         )
+    
+    
+    # if convert2thd:
+    #     # Reshape the tensors back to their original shapes
+    #     dq = dq.view(orig_dq_shape)
+    #     dk = dk.view(orig_dk_shape)
+    #     dv = dv.view(orig_dv_shape)
+    #     do = do.view(orig_do_shape)
+    #     q = q.view(orig_q_shape)
+    #     k = k.view(orig_k_shape)
+    #     v = v.view(orig_v_shape)
+    #     o = o.view(orig_o_shape)
+    #     softmax_lse = softmax_lse.view(orig_softmax_lse_shape)
+    
+    
+    
     return delta
 
 
@@ -3731,7 +3788,7 @@ def _flash_attn_onekernel_backward(
     descale_k: Optional[torch.Tensor] = None,
     descale_v: Optional[torch.Tensor] = None,
     descale_do: Optional[torch.Tensor] = None,
-):
+):    
     IS_VARLEN = True if cu_seqlens_q is not None else False
 
     IS_FP8 = is_fp8(q)
@@ -4119,7 +4176,7 @@ class FlashAttnFunc(torch.autograd.Function):
                 philox_seed=ctx.philox_seed,
                 philox_offset=ctx.philox_offset,
             )
-        if ctx.onekernel_backward:
+        elif ctx.onekernel_backward:
             _flash_attn_onekernel_backward(
                 do_padded,
                 q,

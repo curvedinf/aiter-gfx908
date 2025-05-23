@@ -127,7 +127,15 @@ CK_DIR = f"{bd_dir}/ck"
 def validate_and_update_archs():
     archs = os.getenv("GPU_ARCHS", "native").split(";")
     # List of allowed architectures
-    allowed_archs = ["native", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx1100"]
+    allowed_archs = [
+        "native",
+        "gfx90a",
+        "gfx940",
+        "gfx941",
+        "gfx942",
+        "gfx1100",
+        "gfx950",
+    ]
 
     # Validate if each element in archs is in allowed_archs
     assert all(
@@ -138,9 +146,7 @@ def validate_and_update_archs():
 
 @functools.lru_cache()
 def hip_flag_checker(flag_hip: str):
-    ret = os.system(
-        f"echo 'int main() {{ return 0; }}' | hipcc {flag_hip} -x hip -c -fsyntax-only -Wno-unused-command-line-argument -"
-    )
+    ret = os.system(f"hipcc {flag_hip} -x hip -c /dev/null -o /dev/null")
     if ret == 0:
         return [flag_hip]
     else:
@@ -275,7 +281,7 @@ def build_module(
             "-U__HIP_NO_HALF_CONVERSIONS__",
             "-U__HIP_NO_HALF_OPERATORS__",
             "-mllvm --amdgpu-kernarg-preload-count=16",
-            # "-v", "--save-temps",
+            # "-v --save-temps",
             "-Wno-unused-result",
             "-Wno-switch-bool",
             "-Wno-vla-cxx-extension",
@@ -388,7 +394,7 @@ def build_module(
     mp_lock(lockPath=lock_path, MainFunc=MainFunc, FinalFunc=FinalFunc)
 
 
-def get_args_of_build(ops_name: str, exclue=[]):
+def get_args_of_build(ops_name: str, exclude=[]):
     d_opt_build_args = {
         "srcs": [],
         "md_name": "",
@@ -438,8 +444,7 @@ def get_args_of_build(ops_name: str, exclue=[]):
                     # Cannot contain tune ops
                     if ops_name.endswith("tune"):
                         continue
-                    # exclude
-                    if ops_name in exclue:
+                    if ops_name in exclude:
                         continue
                     single_ops = convert(d_ops)
                     for k in d_all_ops.keys():

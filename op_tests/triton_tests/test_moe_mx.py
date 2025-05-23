@@ -12,6 +12,10 @@ from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
 
 from aiter.ops.shuffle import shuffle_weight
 
+from aiter.test_common import (
+    checkAllclose
+)
+
 DEBUG_MODE = False
 
 def ck_moe_stage1(
@@ -30,7 +34,7 @@ def ck_moe_stage1(
     sorted_weights=None,  # [max_num_tokens_padded]
 ):
     token_num = hidden_states.shape[0]
-    D = w2.shape[1]
+    D = w1.shape[1] // 2
     # max_num_tokens_padded = sorted_expert_ids.shape[0]*block_size
     if Activation == ActivationType.Silu:
         act_op = 1
@@ -101,7 +105,7 @@ def ck_moe_stage2(
     )
     return out
 
-def torch_moe(
+def torch_moe_stage1(
     a,
     b,
     c,
@@ -115,6 +119,7 @@ def torch_moe(
     sorted_token_ids,
     expert_ids,
     num_tokens_post_padded,
+    activation,
     dtype,
 ):
     M, top_k, N = c.shape
@@ -130,7 +135,45 @@ def torch_moe(
     if routed_weight:
         c *= topk_weights.unsqueeze(-1)
 
+    use_g1u1 = b.shape[1] == (2 * N)
+    torch_act = aiter.get_torch_act(activation)
+    if use_g1u1:
+        gate, up = c.split([N, N], dim=-1)
+        c = torch_act(gate) * up
+    else:
+        c = torch_act(c)
+
     return c
+
+def torch_moe_stage2(
+    a,
+    b,
+    c,
+    a_scale,
+    b_scale,
+    b_zp,
+    group_size,
+    topk_ids,
+    topk_weights,
+    routed_weight,
+    sorted_token_ids,
+    expert_ids,
+    num_tokens_post_padded,
+    dtype,
+):
+    M, N = c.shape
+    _, topk, K = a.shape
+    # Repeat a -> (M, top_k, K)
+    a_expanded = a
+    # (M, top_k, N, K)
+    b_indexed = b[topk_ids]
+
+    c = torch.einsum("mek,menk->men", a_expanded.to(dtype), b_indexed.to(dtype))
+
+    if routed_weight:
+        c *= topk_weights.unsqueeze(-1)
+
+    return c.sum(1).to(dtype)
 
 
 def get_cdna_version():
@@ -408,7 +451,7 @@ def mxfp4_to_f32(x):
 
 def e8m0_to_f32(x):
     x_f32 = 2 ** ((x - 127).to(torch.float32))
-    x_f32[x_f32 == 128] = float("nan")
+    x_f32[x == 255] = float("nan")
     return x_f32
 
 
@@ -496,9 +539,9 @@ torch_to_tl_dtype = {
 @pytest.mark.parametrize("routed_weight", [False, True])
 @pytest.mark.parametrize("swizzle_mx_scale", [False])  # TODO Add support for swizzle
 def test_fused_moe(
-    M: int,
-    N: int,
-    K: int,
+    tokens: int,
+    model_dim: int,
+    inter_dim: int,
     top_k: int,
     E: int,
     a_dtype_str: str,
@@ -514,20 +557,28 @@ def test_fused_moe(
     a_dtype = str_to_torch_dtype[a_dtype_str]
     c_dtype = torch.bfloat16 if is_a_mixed_input else a_dtype
     fp16_dtype = torch.float16 if a_dtype_str == "fp16" else torch.bfloat16
-    a_tri = alloc_rand((M, K), dtype=fp16_dtype, device="cuda", requires_grad=False)
-    # b_tri = alloc_rand((E, N, K), dtype=fp16_dtype, device="cuda", requires_grad=False)
+    a_tri = alloc_rand((tokens, model_dim), dtype=c_dtype, device="cuda", requires_grad=False)
+    b1_tri = alloc_rand((E, inter_dim * 2, model_dim), dtype=c_dtype, device="cuda", requires_grad=False)
+    b2_tri = alloc_rand((E, model_dim, inter_dim), dtype=c_dtype, device="cuda", requires_grad=False)
+
     # a_tri = alloc_rand((1, 1), dtype=fp16_dtype, device="cuda", requires_grad=False)
-    # a_tri = a_tri.repeat(M, K)
-    b_tri = alloc_rand((1, 1, 1), dtype=fp16_dtype, device="cuda", requires_grad=False)
-    b_tri = b_tri.repeat(E, N, K)
-    c_tri = torch.zeros(
-        (M, top_k, N), dtype=c_dtype, device="cuda", requires_grad=False
+    # a_tri = a_tri.repeat(tokens, inter_dim)
+    # b_tri = alloc_rand((1, 1, 1), dtype=fp16_dtype, device="cuda", requires_grad=False)
+    # b_tri = b_tri.repeat(E, model_dim, inter_dim)
+
+    c1_tri = torch.zeros(
+        (tokens, top_k, inter_dim), dtype=c_dtype, device="cuda", requires_grad=False
+    )
+
+    c2_tri = torch.zeros(
+        (tokens, model_dim), dtype=c_dtype, device="cuda", requires_grad=False
     )
     a_scale = torch.tensor([1.00], dtype=torch.float32, device="cuda")
     b_scale = torch.tensor([1.00] * E, dtype=torch.float32, device="cuda")
     # a_tri = torch.ones_like(a_tri)
+    # b_tri = torch.ones_like(b_tri)
     # Reference inputs
-    a_ref, b_ref, c_ref = a_tri.clone(), b_tri.clone(), c_tri.clone()
+    a_ref, b1_ref, b2_ref, c1_ref, c2_ref = a_tri.clone(), b1_tri.clone(), b2_tri.clone(), c1_tri.clone(), c2_tri.clone()
 
     # Try fixed config for now
     config = {
@@ -542,30 +593,36 @@ def test_fused_moe(
         "kpack": 1,
     }
 
-    values = torch.ones((M, E), dtype=torch.float16, device="cuda")
+    values = torch.ones((tokens, E), dtype=c_dtype, device="cuda")
     # softmax_vals = torch.softmax(values, dim=1)
-    topk_weights, topk_ids = fused_topk(a_tri, values, 1, True)
+    topk_weights, topk_ids = fused_topk(a_tri, values, top_k, True)
 
     sorted_token_ids, sorted_weights, expert_ids, num_tokens_post_padded, moe_buf = moe_sorting(
-        topk_ids, topk_weights, E, 6144, torch.float16, 128
+        topk_ids, topk_weights, E, model_dim, c_dtype, 128
     )
     # expert_ids = torch.zeros_like(expert_ids)
     # sorted_token_ids = torch.load('./sorted_token_ids.pt')
     # sorted_token_ids = torch.arange(sorted_token_ids.shape[-1])
-    print(f"{sorted_token_ids=}")
-    print(f"{expert_ids=}")
-    print(f"{num_tokens_post_padded=}")
+    # print(f"{sorted_token_ids=}")
+    # print(f"{expert_ids=}")
+    # print(f"{num_tokens_post_padded=}")
+    # print(f"{sorted_token_ids[num_tokens_post_padded - 1]=}, {sorted_token_ids[num_tokens_post_padded]=} ")
     # sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
     #     topk_ids, config["BLOCK_SIZE_M"], E
     # )
+    # for i in range(num_tokens_post_padded):
+    #     if sorted_token_ids[i] >= 1024:
+    #         sorted_token_ids[i] = sorted_token_ids[i] % 1024
 
+    # for i in range(num_tokens_post_padded):
+    #     print(f"{i=}:{sorted_token_ids[i]=}")
     # Downcast a tensor to mxfp4 and upcast back for reference
     if is_a_mixed_input:
         # a_ref = a_tri
 
         # swizzle_axis = 0 if swizzle_mx_scale else None  # TODO Add Swizzle support
         a_tri, a_mx_scales = torch_dynamic_mxfp4_quant(a_tri)
-        a_mx_scales = torch.ones_like(a_mx_scales) * 127
+        # a_mx_scales = torch.ones_like(a_mx_scales) * 127
         # TODO Add Upcast support
         # a_ref = torch_upcast_from_mxfp(
         #    a_tri, a_mx_scales, fp16_dtype, axis=1, swizzle_axis=swizzle_axisv
@@ -579,17 +636,23 @@ def test_fused_moe(
         # b_ref = b_tri
 
         # swizzle_axis = 1 if swizzle_mx_scale else None  # TODO Add Swizzle support
-        b_tri, b_mx_scales = torch_dynamic_mxfp4_quant(b_tri)
-        b_mx_scales = torch.ones_like(b_mx_scales) * 127
+        b1_tri, b1_mx_scales = torch_dynamic_mxfp4_quant(b1_tri)
+        b2_tri, b2_mx_scales = torch_dynamic_mxfp4_quant(b2_tri)
+        # b_tri = b_tri.repeat(1 ,2, 1)
+        # b_mx_scales = b_mx_scales.repeat(1, 2, 1)
+        # b_mx_scales = torch.ones_like(b_mx_scales) * 127
         # TODO Add Upcast support
         # b_ref = torch_upcast_from_mxfp(
         #    b_tri, b_mx_scales, fp16_dtype, axis=2, swizzle_axis=swizzle_axis
         # )
-        b_ref = torch_mxfp4_to_fp32(b_tri, b_mx_scales)
+        b1_ref = torch_mxfp4_to_fp32(b1_tri, b1_mx_scales)
+        b2_ref = torch_mxfp4_to_fp32(b2_tri, b2_mx_scales)
         print(
-            f"b_ref.shape={b_ref.shape} b_tri.shape={b_tri.shape} b_tri., b_mx_scales.shape={b_mx_scales.shape}"
+            f"b1_ref.shape={b1_ref.shape} b1_tri.shape={b1_tri.shape} b1_tri., b1_mx_scales.shape={b1_mx_scales.shape}"
         )
-    b_tri = shuffle_weight(b_tri, layout=(16, 16))
+        print(
+            f"b2_ref.shape={b2_ref.shape} b2_tri.shape={b2_tri.shape} b2_tri., b2_mx_scales.shape={b2_mx_scales.shape}"
+        )
     # Triton
     # fused_moe_mxfp4(
     #     a_tri,
@@ -616,10 +679,10 @@ def test_fused_moe(
     b_zp = None
     group_size = 0
     # a_scale and b_scale not used actually
-    c_ref = torch_moe(
+    c1_ref = torch_moe_stage1(
         a_ref,
-        b_ref,
-        c_ref,
+        b1_ref,
+        c1_ref,
         a_scale,
         b_scale,
         b_zp,
@@ -630,18 +693,24 @@ def test_fused_moe(
         sorted_token_ids,
         expert_ids,
         num_tokens_post_padded,
+        ActivationType.Silu,
         dtype=fp16_dtype,
     )
+
+
     # b_tri = shuffle_weight(b_tri, layout=(16,16))
     
-    out2_ck = ck_moe_stage1(
+    b1_tri = shuffle_weight(b1_tri, layout=(16, 16))
+    print(f"{a_tri.shape=}")
+    print(f"{b1_tri.shape=}")
+    out1_ck = ck_moe_stage1(
         a_tri,
-        b_tri,
-        b_tri,
+        b1_tri,
+        b2_tri,
         sorted_token_ids,
         expert_ids,
         num_tokens_post_padded,
-        b_mx_scales,
+        b1_mx_scales,
         a_mx_scales,
         fp16_dtype,
         top_k,
@@ -649,23 +718,69 @@ def test_fused_moe(
         ActivationType.Silu,
         sorted_weights=None,
     )
-    # out2_ck = ck_moe_stage2(
-    #     a_tri,
-    #     b_tri,
-    #     b_tri,
-    #     sorted_token_ids,
-    #     expert_ids,
-    #     num_tokens_post_padded,
-    #     b_mx_scales,
-    #     a_mx_scales,
-    #     fp16_dtype,
-    #     top_k,
-    #     128,
-    #     sorted_weights=None,
-    # )
-    print(f"{c_ref=}")
-    print(f"{out2_ck.shape=}")
-    print(f"{out2_ck=}")
-    print(torch.testing.assert_close(out2_ck.to(fp16_dtype), c_ref.to(fp16_dtype)))
 
-test_fused_moe(1024, 6144, 4096, 1, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+    checkAllclose(
+        c1_ref,
+        out1_ck,
+        msg=f"ck_moe_stage1:",
+    )
+    # print(torch.testing.assert_close(out1_ck.to(fp16_dtype), c1_ref.to(fp16_dtype)))
+
+    if is_a_mixed_input:
+        # a_ref = a_tri
+
+        # swizzle_axis = 0 if swizzle_mx_scale else None  # TODO Add Swizzle support
+        a2_tri, a2_mx_scales = torch_dynamic_mxfp4_quant(out1_ck)
+        # a_mx_scales = torch.ones_like(a_mx_scales) * 127
+        # TODO Add Upcast support
+        # a_ref = torch_upcast_from_mxfp(
+        #    a_tri, a_mx_scales, fp16_dtype, axis=1, swizzle_axis=swizzle_axisv
+        # )
+        a2_ref = torch_mxfp4_to_fp32(a2_tri, a2_mx_scales)
+    else:
+        a2_ref = a2_ref.to(fp16_dtype)
+        a2_mx_scales = None
+
+    c2_ref = torch_moe_stage2(
+        a2_ref,
+        b2_ref,
+        c2_ref,
+        a_scale,
+        b_scale,
+        b_zp,
+        group_size,
+        topk_ids,
+        topk_weights,
+        False,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        # ActivationType.Silu,
+        dtype=fp16_dtype,
+    )
+
+    b2_tri = shuffle_weight(b2_tri, layout=(16, 16))
+    out2_ck = ck_moe_stage2(
+        a2_tri,
+        b2_tri,
+        b2_tri,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        b2_mx_scales,
+        a2_mx_scales,
+        fp16_dtype,
+        top_k,
+        128,
+        sorted_weights=None,
+    )
+    print(f"{c2_ref.shape=}")
+    print(f"{out2_ck.shape=}")
+    checkAllclose(
+        c2_ref,
+        out2_ck,
+        msg=f"ck_moe_stage2:",
+    )
+    
+
+test_fused_moe(1024, 1024, 5120, 2, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)

@@ -680,9 +680,9 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
     int tokens = inter_states.size(0);
     int sorted_size = sorted_token_ids.size(0);
     int E = w1.size(0);
-    int N = w2.size(1) * 2;
+    int N = w2.size(1);
     int K = inter_states.size(-1) * 2;
-    printf("%dx%dx%d\n", E, N, K);
+    // printf("%dx%dx%d\n", E, N, K);
     // int max_num_tokens_padded = sorted_token_ids.size(0);
     // int agvtokens_per_expert = max_num_tokens_padded / E;
     int MPerBlock = block_m.value();

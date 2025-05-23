@@ -320,7 +320,7 @@ using DeviceOpInstance                     = ck::tensor_operation::device::Devic
     8,    2,
     S<4, 64, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 32, 32, 0,
     S<4, 64, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 32, 32, 0,
-    2,    2,   S<1, 32, 1, 8>, S<2, 1, 1, 1>,
+    2,    2,   S<1, 8, 1, 32>, S<2, 1, 1, 1>,
     ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v1, 0, Nswizzle, false, MulRoutedWeight, ck::index_t, A0DataType>;
 // clang-format on
 

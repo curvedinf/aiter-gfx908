@@ -809,5 +809,5 @@ def test_fused_moe(
 
     
 
-# test_fused_moe(1024, 1024, 5120, 2, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
-# test_fused_moe(512, 2048, 2048, 2, 4, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(1024, 1024, 5120, 2, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(512, 2048, 2048, 2, 4, "mxfp4_e2m1", "mxfp4_e2m1", False, False)

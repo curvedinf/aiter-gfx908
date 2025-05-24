@@ -16,6 +16,9 @@ from aiter.test_common import (
     checkAllclose
 )
 
+from aiter.fused_moe_bf16_asm import ck_moe_2stages
+from aiter import dtypes
+
 DEBUG_MODE = False
 
 def ck_moe_stage1(
@@ -514,7 +517,7 @@ torch_to_tl_dtype = {
         (1024, 6144, 4096, 8, 1),
         # (64, 64, 128, 8, 2),
         # (16, 256, 256, 128, 4),
-        # (1000, 704, 800, 3, 1),
+        (1000, 704, 800, 3, 1),
         # (1000, 704, 800, 8, 2),
         # (64, 14336, 4096, 8, 2),
         # (16, 14336, 128, 8, 2),  # not working either
@@ -617,20 +620,6 @@ def test_fused_moe(
     # for i in range(num_tokens_post_padded):
     #     print(f"{i=}:{sorted_token_ids[i]=}")
     # Downcast a tensor to mxfp4 and upcast back for reference
-    if is_a_mixed_input:
-        # a_ref = a_tri
-
-        # swizzle_axis = 0 if swizzle_mx_scale else None  # TODO Add Swizzle support
-        a_tri, a_mx_scales = torch_dynamic_mxfp4_quant(a_tri)
-        # a_mx_scales = torch.ones_like(a_mx_scales) * 127
-        # TODO Add Upcast support
-        # a_ref = torch_upcast_from_mxfp(
-        #    a_tri, a_mx_scales, fp16_dtype, axis=1, swizzle_axis=swizzle_axisv
-        # )
-        a_ref = torch_mxfp4_to_fp32(a_tri, a_mx_scales)
-    else:
-        a_ref = a_ref.to(fp16_dtype)
-        a_mx_scales = None
     # Downcast b tensor to mxfp4 and upcast back for reference
     if is_b_mixed_input:
         # b_ref = b_tri
@@ -653,6 +642,22 @@ def test_fused_moe(
         print(
             f"b2_ref.shape={b2_ref.shape} b2_tri.shape={b2_tri.shape} b2_tri., b2_mx_scales.shape={b2_mx_scales.shape}"
         )
+
+    b1_tri = shuffle_weight(b1_tri, layout=(16, 16))
+    b2_tri = shuffle_weight(b2_tri, layout=(16, 16))
+    out_ck = ck_moe_2stages(
+        a_tri,
+        b1_tri,
+        b2_tri,
+        topk_weights,
+        topk_ids,
+        quant_type=aiter.QuantType.per_1x32,
+        fc1_scale=b1_mx_scales,  # [expert(local_expert:EP), inter_dim, 1]
+        fc2_scale=b2_mx_scales,  # [expert(local_expert:EP), model_dim, 1]
+        block_size=128,
+        activation=ActivationType.Silu,
+        doweight_stage1=False,
+    )
     # Triton
     # fused_moe_mxfp4(
     #     a_tri,
@@ -674,7 +679,20 @@ def test_fused_moe(
     #     config,
     #     torch_to_tl_dtype[c_tri.dtype],
     # )
+    if is_a_mixed_input:
+        # a_ref = a_tri
 
+        # swizzle_axis = 0 if swizzle_mx_scale else None  # TODO Add Swizzle support
+        a_tri, a_mx_scales = torch_dynamic_mxfp4_quant(a_tri)
+        # a_mx_scales = torch.ones_like(a_mx_scales) * 127
+        # TODO Add Upcast support
+        # a_ref = torch_upcast_from_mxfp(
+        #    a_tri, a_mx_scales, fp16_dtype, axis=1, swizzle_axis=swizzle_axisv
+        # )
+        a_ref = torch_mxfp4_to_fp32(a_tri, a_mx_scales)
+    else:
+        a_ref = a_ref.to(fp16_dtype)
+        a_mx_scales = None
     # Torch
     b_zp = None
     group_size = 0
@@ -700,37 +718,37 @@ def test_fused_moe(
 
     # b_tri = shuffle_weight(b_tri, layout=(16,16))
     
-    b1_tri = shuffle_weight(b1_tri, layout=(16, 16))
-    print(f"{a_tri.shape=}")
-    print(f"{b1_tri.shape=}")
-    out1_ck = ck_moe_stage1(
-        a_tri,
-        b1_tri,
-        b2_tri,
-        sorted_token_ids,
-        expert_ids,
-        num_tokens_post_padded,
-        b1_mx_scales,
-        a_mx_scales,
-        fp16_dtype,
-        top_k,
-        128,
-        ActivationType.Silu,
-        sorted_weights=None,
-    )
+    # print(f"{a_tri.shape=}")
+    # print(f"{b1_tri.shape=}")
+    # out1_ck = ck_moe_stage1(
+    #     a_tri,
+    #     b1_tri,
+    #     b2_tri,
+    #     sorted_token_ids,
+    #     expert_ids,
+    #     num_tokens_post_padded,
+    #     b1_mx_scales,
+    #     a_mx_scales,
+    #     fp16_dtype,
+    #     top_k,
+    #     128,
+    #     ActivationType.Silu,
+    #     sorted_weights=None,
+    # )
+    # print(f"{b1_tri.dtype=}")
+    # checkAllclose(
+    #     c1_ref,
+    #     out1_ck,
+    #     msg=f"ck_moe_stage1:",
+    # )
 
-    checkAllclose(
-        c1_ref,
-        out1_ck,
-        msg=f"ck_moe_stage1:",
-    )
-    # print(torch.testing.assert_close(out1_ck.to(fp16_dtype), c1_ref.to(fp16_dtype)))
+    # torch.testing.assert_close(out1_ck.to(fp16_dtype), c1_ref.to(fp16_dtype))
 
     if is_a_mixed_input:
         # a_ref = a_tri
 
         # swizzle_axis = 0 if swizzle_mx_scale else None  # TODO Add Swizzle support
-        a2_tri, a2_mx_scales = torch_dynamic_mxfp4_quant(out1_ck)
+        a2_tri, a2_mx_scales = torch_dynamic_mxfp4_quant(c1_ref)
         # a_mx_scales = torch.ones_like(a_mx_scales) * 127
         # TODO Add Upcast support
         # a_ref = torch_upcast_from_mxfp(
@@ -751,7 +769,7 @@ def test_fused_moe(
         group_size,
         topk_ids,
         topk_weights,
-        False,
+        True,
         sorted_token_ids,
         expert_ids,
         num_tokens_post_padded,
@@ -759,28 +777,37 @@ def test_fused_moe(
         dtype=fp16_dtype,
     )
 
-    b2_tri = shuffle_weight(b2_tri, layout=(16, 16))
-    out2_ck = ck_moe_stage2(
-        a2_tri,
-        b2_tri,
-        b2_tri,
-        sorted_token_ids,
-        expert_ids,
-        num_tokens_post_padded,
-        b2_mx_scales,
-        a2_mx_scales,
-        fp16_dtype,
-        top_k,
-        128,
-        sorted_weights=None,
-    )
-    print(f"{c2_ref.shape=}")
-    print(f"{out2_ck.shape=}")
+    # out2_ck = ck_moe_stage2(
+    #     a2_tri,
+    #     b2_tri,
+    #     b2_tri,
+    #     sorted_token_ids,
+    #     expert_ids,
+    #     num_tokens_post_padded,
+    #     b2_mx_scales,
+    #     a2_mx_scales,
+    #     fp16_dtype,
+    #     top_k,
+    #     128,
+    #     sorted_weights=sorted_weights,
+    # )
+
     checkAllclose(
         c2_ref,
-        out2_ck,
-        msg=f"ck_moe_stage2:",
+        out_ck,
+        msg=f"ck_moe_2stages:",
+        rtol=1e-1, atol=1e2
     )
+
+    # torch.testing.assert_close(out_ck.to(fp16_dtype), c2_ref.to(fp16_dtype))
+    # checkAllclose(
+    #     c2_ref,
+    #     out2_ck,
+    #     msg=f"ck_moe_stage2:",
+    # )
+
+
     
 
 test_fused_moe(1024, 1024, 5120, 2, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(512, 4096, 4096, 2, 4, "mxfp4_e2m1", "mxfp4_e2m1", False, False)

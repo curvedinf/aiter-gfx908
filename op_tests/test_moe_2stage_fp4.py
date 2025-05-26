@@ -1,50 +1,33 @@
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
-
+import pytest
 import torch
-import torch.nn.functional as F
-import math
-import sys
-import os
-from typing import Any, Callable, Dict, Optional, Tuple
-import itertools
+import triton
+import triton.language as tl
 import aiter
-from aiter import dtypes
-from aiter.test_common import (
-    checkAllclose,
-    perftest,
-    benchmark,
-    tensor_dump,
-    run_perftest,
-)
-from aiter.int4_utils import *
 
-from aiter.fused_moe import (
-    fused_topk,
-    get_inter_dim,
-    torch_moe,
-    moe_sorting,
-    fused_moe,
-    asm_stage1,
-    ck_stage1,
-    torch_moe_stage1,
-    torch_moe_stage2,
-    get_block_size_M,
-)
-
-from aiter import get_hip_quant, get_torch_quant, get_triton_quant, per_1x32_f4_quant
-
-from aiter.fused_moe_bf16_asm import ck_moe_2stages
-
-from aiter.ops.shuffle import shuffle_weight
 from aiter import ActivationType
 
-from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
-from op_tests.triton_tests.utils.fused_moe_ref import torch_moe
+from aiter.fused_moe import fused_topk, moe_sorting
 
-torch.int4 = getattr(torch, "int4", torch.uint32)
-torch.set_default_device("cuda")
-torch.manual_seed(0)
+from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
+
+from aiter.ops.shuffle import shuffle_weight
+
+# from aiter.quant import get_triton_quant
+from aiter.utility.fp4_utils import moe_mxfp4_sort
+
+from aiter.test_common import (
+    checkAllclose,
+    benchmark,
+    run_perftest,
+)
+
+from aiter.fused_moe_bf16_asm import ck_moe_2stages
+from aiter import dtypes
+
+from aiter.ops.triton.quant import dynamic_mxfp4_quant
+# from aiter.utility.fp4_utils import moe_mxfp4_sort
+
+DEBUG_MODE = False
 
 def ck_moe_stage1(
     hidden_states,
@@ -62,7 +45,7 @@ def ck_moe_stage1(
     sorted_weights=None,  # [max_num_tokens_padded]
 ):
     token_num = hidden_states.shape[0]
-    D = w2.shape[-1] * 2
+    D = w1.shape[1] // 2
     # max_num_tokens_padded = sorted_expert_ids.shape[0]*block_size
     if Activation == ActivationType.Silu:
         act_op = 1
@@ -72,7 +55,7 @@ def ck_moe_stage1(
     if w1.dtype is torch.uint32:
         D = D * 8
 
-    out = torch.empty((token_num, topk, D), dtype=dtype)
+    out = torch.empty((token_num, topk, D), dtype=dtype).cuda()
 
     aiter.ck_moe_stage1(
         hidden_states,
@@ -92,7 +75,6 @@ def ck_moe_stage1(
     )
 
     return out
-
 
 def ck_moe_stage2(
     hidden_states,
@@ -134,314 +116,729 @@ def ck_moe_stage2(
     )
     return out
 
-
-@benchmark()
-def test_fmoe(
+def torch_moe_stage1(
+    a,
+    b,
+    c,
+    a_scale,
+    b_scale,
+    b_zp,
+    group_size,
+    topk_ids,
+    topk_weights,
+    routed_weight,
+    sorted_token_ids,
+    expert_ids,
+    num_tokens_post_padded,
+    activation,
     dtype,
-    token,
-    model_dim,
-    inter_dim,
-    E,
-    topk,
-    actType,
-    qType,
-    AQDType,
-    WQDType,
-    use_g1u1=False,
-    doweight_stage1=False,
 ):
-    torch_quant = aiter.get_triton_quant(qType)
-    torch_act = aiter.get_torch_act(actType)
-    input = torch.randn((token, model_dim), dtype=dtype)
+    M, top_k, N = c.shape
+    _, K = a.shape
+
+    # Repeat a -> (M, top_k, K)
+    a_expanded = a.unsqueeze(1).repeat(1, top_k, 1)
+    # (M, top_k, N, K)
+    b_indexed = b[topk_ids]
+
+    c = torch.einsum("mek,menk->men", a_expanded.to(float), b_indexed.to(float))
+
+    if routed_weight:
+        c *= topk_weights.unsqueeze(-1)
+
+    use_g1u1 = b.shape[1] == (2 * N)
+    torch_act = aiter.get_torch_act(activation)
     if use_g1u1:
-        w1 = torch.randn((E, inter_dim * 2, model_dim), dtype=dtype)
+        gate, up = c.split([N, N], dim=-1)
+        c = torch_act(gate) * up
     else:
-        w1 = torch.randn((E, inter_dim, model_dim), dtype=dtype)
-    w2 = torch.randn((E, model_dim, inter_dim), dtype=dtype)
+        c = torch_act(c)
 
-    # for i in range(inter_dim * 2):
-    #     w1[:, i, :] = i
-    
-    # for i in range(model_dim):
-    #     w1[:, :, i] = i
+    return c.to(dtype)
 
-    score = torch.ones((token, E), dtype=dtype)
-    topk_weights, topk_ids = fused_topk(input, score, topk, True)
-
-    M, _ = topk_ids.shape
-
-    BLOCK_SIZE_M = get_block_size_M(M, topk, E, inter_dim)
-    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
-        topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M
-    )
-
-    if qType == aiter.QuantType.per_Tensor:
-        w1_qt, w1_scale = aiter.pertoken_quant(w1.view(E, -1), quant_dtype=WQDType)
-        w2_qt, w2_scale = aiter.pertoken_quant(w2.view(E, -1), quant_dtype=WQDType)
-    elif qType == aiter.QuantType.per_Token and WQDType == torch.int4:  # int4 w quant
-        w1_qt, w1_scale = aiter.pertoken_quant(w1, quant_dtype=dtypes.i8, dtypeMax=7)
-        w2_qt, w2_scale = aiter.pertoken_quant(w2, quant_dtype=dtypes.i8, dtypeMax=7)
-    else:
-        w1_qt, w1_scale = torch_quant(w1.view(-1, model_dim), quant_dtype=WQDType)
-        w2_qt, w2_scale = torch_quant(w2.view(-1, model_dim), quant_dtype=WQDType)
-    w1_qt = w1_qt_aiter = w1_qt.view(E, inter_dim * 2, -1)
-    w2_qt = w2_qt_aiter = w2_qt.view(E, model_dim, -1)
-
-
-    # w1_scale = 0
-    # w2_scale = 0
-
-    a1_qt, a1_scale = torch_quant(input, quant_dtype=AQDType)
-    a1_scale = torch.ones_like(a1_scale) * 126
-    w1_scale = torch.ones_like(w1_scale) * 126
-    w2_scale = torch.ones_like(w2_scale) * 126
-    # w1_scale = w1_scale.fill_(1)
-    # a1_scale = a1_scale.fill_(1)
-
-    out1_ref, us_ref = run_perftest(
-        torch_moe_stage1,
-        a1_qt,
-        w1_qt,
-        w2_qt,
-        topk_weights,
-        topk_ids,
-        dtype=dtype,
-        activation=actType,
-        quant_type=qType,
-        a1_scale=a1_scale,
-        w1_scale=w1_scale,
-        num_iters=3,
-        doweight=doweight_stage1,
-    )
-    # for i in range(3072):
-    #     w1_qt_aiter[:, :, i] = i % 256
-    if WQDType == torch.int4:  # int4 w quant
-        w1_qt_aiter = rearrange_4bit_elements(
-            convert_int8_to_uint32_int4(
-                shuffle_weight(w1_qt_aiter, (16, 16), use_int4=True)
-            )
-        )
-        w2_qt_aiter = rearrange_4bit_elements(
-            convert_int8_to_uint32_int4(
-                shuffle_weight(w2_qt_aiter, (16, 16), use_int4=True)
-            )
-        )
-    # else:
-        # w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(16, 16))
-        # w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(16, 16))
-    # print(f"{w1_qt_aiter.view(-1)[0:128]=}")
-    # ######################## stage 1 start ###########
-    # out1_ck, us = run_perftest(
-    #     ck_moe_stage1,
-    #     a1_qt,
-    #     w1_qt_aiter,
-    #     w2_qt_aiter,
-    #     sorted_ids,
-    #     sorted_expert_ids,
-    #     num_valid_ids,
-    #     w1_scale,
-    #     a1_scale,
-    #     dtype,
-    #     topk,
-    #     BLOCK_SIZE_M,
-    #     actType,
-    #     sorted_weights=sorted_weights if doweight_stage1 else None,
-    # )
-
-    # print(f"{out1_ref=}")
-    # print(f"{out1_ck=}")
-    # checkAllclose(
-    #     out1_ref,
-    #     out1_ck,
-    #     msg=f"[perf]  ck_moe_stage1:{us:>8.2f} us, {token*model_dim*inter_dim*2*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
-    # )
-    # ######################## stage 2 end ###########
-
-    # if WQDType != torch.int4:
-    #     # asm int4 2 stage not support yet
-    #     if qType == aiter.QuantType.per_Tensor:
-    #         a1_scale = a1_scale.view(1).repeat(token)
-    #         w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
-
-    #     out1_asm = torch.empty((token, topk, inter_dim), dtype=dtype)
-    #     _, us = run_perftest(
-    #         asm_stage1,
-    #         a1_qt,
-    #         shuffle_weight(w1_qt, (16, 16)),
-    #         shuffle_weight(w2_qt, (16, 16)),
-    #         sorted_ids,
-    #         sorted_expert_ids,
-    #         num_valid_ids,
-    #         out1_asm,
-    #         kernelName="fmoe_stage1_bf16_pertokenFp8_g1u1_128x128_pf2",
-    #         w1_scale=w1_scale,
-    #         a1_scale=a1_scale,
-    #         activation=actType,
-    #         quant_type=qType,
-    #         block_m=BLOCK_SIZE_M,
-    #     )
-    #     checkAllclose(
-    #         out1_ref,
-    #         out1_asm,
-    #         msg=f"[perf] asm_moe_stage1:{us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
-    #     )
-
-    # ######################## stage 2 start ###########
-    if qType == aiter.QuantType.per_Token:
-        out1_ref = out1_ref.view(token, -1)
-    a2_qt, a2_scale = torch_quant(out1_ref.view(token, -1), quant_dtype=AQDType)
-    a2_scale = torch.ones_like(a2_scale) * 129
-    # a2_scale = a2_scale.fill_(1)
-    out2_ref, us_ref = run_perftest(
-        torch_moe_stage2,
-        a2_qt,
-        w1_qt,  # E, inter_dim*2, model_dim
-        w2_qt,  # E, model_dim, inter_dim
-        topk_weights,
-        topk_ids,
-        dtype=dtype,
-        quant_type=qType,
-        w2_scale=w2_scale,
-        a2_scale=a2_scale,
-        num_iters=3,
-        doweight=not doweight_stage1,
-    )
-    # # # out_ref = torch_moe(
-    # #     input,
-    # #     w1_qt,
-    # #     w2_qt,
-    # #     topk_weights,
-    # #     topk_ids,
-    # #     fc1_scale=w1_scale,
-    # #     fc2_scale=w2_scale,
-    # # )
-    # # checkAllclose(out_ref, out2_ref, msg="[torch] 1_stage vs 2_stage")
-
-    # if qType == aiter.QuantType.per_Token:
-    #     out1_ck = out1_ref.view(token, -1)
-    # a2_qt, a2_scale = torch_quant(out1_ref.view(token, -1), quant_dtype=AQDType)
-    a2_qt = a2_qt.view(M, topk, -1)
-
-    out2_ck, us = run_perftest(
-        ck_moe_stage2,
-        a2_qt,
-        w1_qt_aiter,
-        w2_qt_aiter,
-        sorted_ids,
-        sorted_expert_ids,
-        num_valid_ids,
-        w2_scale,
-        a2_scale,
-        dtype,
-        topk,
-        BLOCK_SIZE_M,
-        sorted_weights if not doweight_stage1 else None,
-    )
-    print(f"{out2_ref.shape=}")
-    print(f"{out2_ck.shape=}")
-    checkAllclose(
-        out2_ref,
-        out2_ck,
-        msg=f"[perf]  ck_moe_stage2:{us:>8.2f} us, {token*model_dim*inter_dim*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
-    )
-    # ######################## stage 2 end ###########
-
-    # ######################## fused 2 stage #########
-    # out2_ck, us = run_perftest(
-    #     ck_moe_2stages,
-    #     input,
-    #     w1_qt_aiter,
-    #     w2_qt_aiter,
-    #     topk_weights,
-    #     topk_ids,
-    #     quant_type=qType,
-    #     fc1_scale=w1_scale,  # [expert(local_expert:EP), inter_dim, 1]
-    #     fc2_scale=w2_scale,  # [expert(local_expert:EP), model_dim, 1]
-    #     block_size=BLOCK_SIZE_M,
-    #     activation=actType,
-    #     doweight_stage1=doweight_stage1,
-    # )
-    # checkAllclose(
-    #     out2_ref,
-    #     out2_ck,
-    #     msg=f"ck_moe_2stages:{us:>8.2f} us, {token*model_dim*inter_dim*3*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
-    # )
-
-    # out2_aiter, us_fuse = run_perftest(
-    #     fused_moe,
-    #     input,
-    #     w1_qt_aiter,
-    #     w2_qt_aiter,
-    #     topk_weights,
-    #     topk_ids,
-    #     w1_scale=w1_scale,
-    #     w2_scale=w2_scale,
-    #     quant_type=qType,
-    #     activation=actType,
-    #     doweight_stage1=doweight_stage1,
-    # )
-
-    # err = checkAllclose(
-    #     out2_ref,
-    #     out2_aiter,
-    #     msg=f"aiter_all_stages:{us_fuse:>8.2f} us......",
-    # )
-
-    return {"us": 0, "err": 0}
-
-
-list_dtype = [dtypes.bf16, dtypes.fp16][:1]
-list_dim = [(6144, 4096)]
-list_tokenNum = [
-    # 1,
-    # 3,
-    # 5,
-    # 16,
-    # 32,
-    # 64,
-    # 128,
-    # 256,
-    1024,
-    # 4096,
-    # 163840,
-]
-list_quant = [
-    # (aiter.QuantType.No, None, None),  # a16w16
-    (aiter.QuantType.per_1x32, dtypes.fp4x2, dtypes.fp4x2),  # a8w8
-    # (aiter.QuantType.per_Token, dtypes.fp8, torch.int4),  # a8w4
-    # (aiter.QuantType.per_128x128, dtypes.fp8, dtypes.fp8),  # a8w8 TODO add test
-]
-list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][1:]
-list_doweight_stage1 = [False, True][1:]
-expert, topk = 8, 2
-
-import pandas as pd
-
-for (
+def torch_moe_stage2(
+    a,
+    b,
+    c,
+    a_scale,
+    b_scale,
+    b_zp,
+    group_size,
+    topk_ids,
+    topk_weights,
+    routed_weight,
+    sorted_token_ids,
+    expert_ids,
+    num_tokens_post_padded,
     dtype,
-    act_type,
-    (quant_type, aq_dtype, wq_dtype),
-    (model_dim, inter_dim),
-    doweight_stage1,
-) in itertools.product(
-    list_dtype, list_act, list_quant, list_dim, list_doweight_stage1
 ):
-    df = []
-    for m in list_tokenNum:
-        ret = test_fmoe(
-            dtype,
-            m,
-            model_dim,
-            inter_dim,
-            expert,
-            topk,
-            act_type,
-            quant_type,
-            aq_dtype,
-            wq_dtype,
-            use_g1u1=True,
-            doweight_stage1=doweight_stage1,
+    M, N = c.shape
+    _, topk, K = a.shape
+    # Repeat a -> (M, top_k, K)
+    a_expanded = a
+    # (M, top_k, N, K)
+    b_indexed = b[topk_ids]
+
+    c = torch.einsum("mek,menk->men", a_expanded.to(dtype), b_indexed.to(dtype))
+
+    if routed_weight:
+        c *= topk_weights.unsqueeze(-1)
+
+    return c.sum(1).to(dtype)
+
+
+def get_cdna_version():
+    """
+    Gets the AMD architecture version, i.e. CDNA3 or CDNA4, currently
+    only supports 3 (gfx942) or 4 (gfx950). Returns -1 if it is not AMD
+    hardware or unsupported architecture
+    """
+    target = triton.runtime.driver.active.get_current_target()
+    if target.backend != "hip":
+        return -1
+    if target.arch == "gfx942":
+        return 3
+    if target.arch == "gfx950":
+        return 4
+    return -1
+
+
+def _moe_align_block_size(
+    topk_ids: torch.Tensor,
+    num_experts: int,
+    top_k: int,
+    block_size: int,
+    sorted_token_ids: torch.Tensor,
+    expert_ids: torch.Tensor,
+    num_tokens_post_pad: torch.Tensor,
+) -> None:
+    M, top_k = topk_ids.shape
+
+    expert_to_tokens = [[] for _ in range(num_experts)]
+    # For each token, for each selected expert, we append (token_id, expert)
+    for token_id in range(M):
+        for j in range(top_k):
+            e_id = topk_ids[token_id, j].item()
+            expert_to_tokens[e_id].append(token_id * top_k + j)
+
+    # Reorder tokens block by block, padding if needed
+    reordered_token_ids = []
+    reordered_expert_ids = []
+
+    for e_id in range(num_experts):
+        tokens_for_expert = expert_to_tokens[e_id]
+        num_tokens = len(tokens_for_expert)
+
+        n_blocks = (num_tokens + block_size - 1) // block_size
+        # If not a multiple of block_size, pad up to the next multiple
+        padded_size = n_blocks * block_size
+
+        # Reorder all actual tokens for expert e_id
+        reordered_token_ids.extend(tokens_for_expert)
+        # reordered_expert_ids.extend([e_id]*num_tokens)
+        reordered_expert_ids.extend([e_id] * n_blocks)
+
+        # Pad with dummy token_id = topk_ids.numel()
+        if padded_size > num_tokens:
+            pad_count = padded_size - num_tokens
+            reordered_token_ids.extend([topk_ids.numel()] * pad_count)
+
+    token_length = len(reordered_token_ids)
+    expert_length = len(reordered_expert_ids)
+
+    sorted_token_ids[:token_length] = torch.tensor(
+        reordered_token_ids,
+        dtype=sorted_token_ids.dtype,
+        device=sorted_token_ids.device,
+    )
+    expert_ids[:expert_length] = torch.tensor(
+        reordered_expert_ids, dtype=expert_ids.dtype, device=expert_ids.device
+    )
+
+    # Fill remainder with topk_ids.numel() if these arrays are bigger than total_length
+    if token_length < sorted_token_ids.numel():
+        sorted_token_ids[token_length:] = topk_ids.numel()
+    if expert_length < expert_ids.numel():
+        expert_ids[expert_length:] = topk_ids.numel()
+
+    num_tokens_post_pad.fill_(token_length)
+
+
+def moe_align_block_size(
+    topk_ids: torch.Tensor, block_size: int, num_experts: int
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Aligns the token distribution across experts to be compatible with block size for matrix multiplication.
+
+    Parameters:
+    - topk_ids: A tensor of shape [total_tokens, top_k] representing the top-k expert indices for each token.
+    - block_size: The block size used in block matrix multiplication.
+    - num_experts: The total number of experts.
+
+    Returns:
+    - sorted_token_ids: A tensor containing the sorted token indices according to their allocated expert.
+    - expert_ids: A tensor indicating the assigned expert index for each block.
+    - num_tokens_post_padded: The total number of tokens after padding, ensuring divisibility by block_size.
+
+    This function pads the number of tokens that each expert needs to process so that it is divisible by block_size.
+    Padding ensures that during block matrix multiplication, the dimensions align correctly.
+
+    Example:
+    Given topk_ids = [[2, 3, 4], [1, 2, 4], [1, 3, 4], [1, 2, 3]], block_size = 4, and num_experts = 4:
+    - We initially have 12 tokens (after repeating 'top_k' times) and 4 experts, with each expert needing to process 3 tokens.
+    - As block_size is 4, we pad 1 token for each expert.
+    - First, flatten topk_ids to [2, 3, 4, 1, 2, 4, 1, 3, 4, 1, 2, 3].
+    - Then append padding tokens [12, 12, 12, 12] for each block.
+    - After sorting by expert index, we obtain token_ids [3, 6, 9, 12, 0, 4, 10, 12, 1, 7, 11, 12, 2, 5, 8, 12].
+        Tokens 12 are non-existent (padding) and are ignored in the subsequent matrix multiplication.
+    - The padding ensures that the total number of tokens is now divisible by block_size for proper block matrix operations.
+    """
+    top_k = topk_ids.shape[1]
+    sorted_ids = torch.empty(
+        (topk_ids.numel() + num_experts * (block_size - 1),),
+        dtype=torch.int32,
+        device=topk_ids.device,
+    )
+    expert_ids = torch.empty(
+        (topk_ids.numel() + num_experts,), dtype=torch.int32, device=topk_ids.device
+    )
+    sorted_ids.fill_(topk_ids.numel())
+    num_tokens_post_pad = torch.empty((1), dtype=torch.int32, device=topk_ids.device)
+    _moe_align_block_size(
+        topk_ids,
+        num_experts,
+        top_k,
+        block_size,
+        sorted_ids,
+        expert_ids,
+        num_tokens_post_pad,
+    )
+
+    return sorted_ids, expert_ids, num_tokens_post_pad
+
+
+def torch_dynamic_mxfp4_quant(
+    x: torch.Tensor, scaling_mode: str = "even"
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Quantize a tensor to MX FP4 format based of AMD Quark Spec.
+
+    Math equivalent:
+        blockscale_e8m0 = 2^(floor(log2(rounding(max_abs(x_block)))-max_exp))
+        x_block_fp4 = x_block / blockscale_e8m0
+        where max_exp = 2 for fp4_e2m1.
+
+    Args:
+        x: The input tensor, typically fp16 or bf16.
+        scaling_mode: The method to calculate MX block scaling.
+            - "even" (default): `even_round`.
+    Returns:
+        A tuple of (x_fp4, blockscale_e8m0).
+    """
+    # Create padded x. Needed because mxfp4 works with block of 32 elements
+    MXFP4_QUANT_BLOCK_SIZE = 32
+    x_shape = x.shape
+    if x.shape[-1] % MXFP4_QUANT_BLOCK_SIZE != 0:
+        shape = list(x_shape)
+        shape = shape[:-1] + [
+            ((shape[-1] - 1 + MXFP4_QUANT_BLOCK_SIZE) // MXFP4_QUANT_BLOCK_SIZE)
+            * MXFP4_QUANT_BLOCK_SIZE
+        ]
+        shape = tuple(shape)
+        x_padded = torch.zeros((shape), device=x.device, dtype=x.dtype)
+        x_padded[..., : x.shape[-1]] = x
+    else:
+        x_padded = x
+
+    # Calculate scale
+    x_padded = x_padded.reshape(
+        -1, x_padded.shape[-1] // MXFP4_QUANT_BLOCK_SIZE, MXFP4_QUANT_BLOCK_SIZE
+    ).to(torch.float32)
+    # print(f"x_padded.shape={x_padded.shape}")
+    amax, _ = torch.max(torch.abs(x_padded), dim=-1)
+    amax = amax.view(torch.int32)
+    amax = (amax + 0x200000) & 0xFF800000
+    amax = amax.view(torch.float32)
+    scale_e8m0_unbiased = torch.log2(amax).floor() - 2
+    scale_e8m0_unbiased = torch.clamp(scale_e8m0_unbiased, min=-127, max=127)
+    quant_scale = torch.exp2(-scale_e8m0_unbiased)
+
+    # Compute quantized x
+    qx = x_padded * quant_scale.unsqueeze(-1)
+
+    # blockscale_e8m0
+    bs_e8m0 = scale_e8m0_unbiased.to(torch.uint8) + 127
+
+    # Convert to mxfp4 format
+    #
+    # Note: This code is adapted from Triton Bench numerics mxfp4 code
+    #
+    # Note: MXFP4  S:1-bit, E:2-bit, M:1-bit
+    #   Zeros: S000 -> +/-0
+    #   Denormal Numbers: S001 -> +/- 0.5
+    #   Normal Numbers:
+    #           S010 -> +/- 1.0
+    #           S011 -> +/- 1.5
+    #           S100 -> +/- 2.0
+    #           S101 -> +/- 3.0
+    #           S110 -> +/- 4.0
+    #           S111 -> +/- 6.0
+    # Convert quantized fp32 tensor to int32 before converting to mxfp4 format
+    qx = qx.view(torch.int32)
+
+    # Extract sign, exponents and mantissa fields from int32
+    s = qx & 0x80000000
+    e = (qx >> 23) & 0xFF
+    m = qx & 0x7FFFFF
+
+    E8_BIAS = 127
+    E2_BIAS = 1
+
+    # Denormal numbers
+    # If exponent is less than 127, then it's a denormal number
+    # See above, for denormal number mantissa is always 1 and we set bit 1 of mantissa
+    adjusted_exponents = E8_BIAS - e - 1
+    m = torch.where(e < E8_BIAS, (0x400000 | (m >> 1)) >> adjusted_exponents, m)
+
+    # For normal numbers, bias is changed from 127 to 1, and for subnormals, we keep exponent as 0.
+    # Note: E8_BIAS - E2_BIAS = 126, so for normals we subtract that.
+    e = torch.where(e > E8_BIAS - E2_BIAS, e, E8_BIAS - E2_BIAS) - (E8_BIAS - E2_BIAS)
+
+    # Combine sign, exponent, and mantissa, while saturating
+    # rounding nearest with tie breaking up by adding +1 to one bit right of the LSB, then shift right
+    combined_val = (((e << 2) | (m >> 21)) + 1) >> 1
+    e2m1_tmp = torch.where(combined_val < 0x7, combined_val, 0x7)
+    e2m1_value = (((s >> 28) & 0xF) | e2m1_tmp).to(torch.uint8)
+
+    # Pack 2 4-bit values into 8-bit
+    x_mxfp4 = e2m1_value[..., ::2] | (e2m1_value[..., 1::2] << 4)
+
+    # Recover last dimension's shape
+    x_mxfp4 = torch.flatten(x_mxfp4, -2, -1)
+
+    # Remove padded values
+    if x.shape[-1] % MXFP4_QUANT_BLOCK_SIZE != 0:
+        x_mxfp4 = x_mxfp4[..., : x.shape[-1] // 2]
+
+    # Reshape back to original
+    mxfp4_shape = list(x_shape)
+    mxfp4_shape = tuple(mxfp4_shape[:-1] + [mxfp4_shape[-1] // 2])
+    x_mxfp4 = x_mxfp4.reshape(mxfp4_shape)
+    bs_e8m0_shape = list(x_shape)
+    bs_e8m0_shape = tuple(
+        bs_e8m0_shape[:-1] + [bs_e8m0_shape[-1] // MXFP4_QUANT_BLOCK_SIZE]
+    )
+    bs_e8m0 = bs_e8m0.reshape(bs_e8m0_shape)
+
+    return x_mxfp4, bs_e8m0
+
+
+def mxfp4_to_f32(x):
+    # 2 because we pack fp4 in uint8.
+    x = x.repeat_interleave(2, dim=-1)
+    x[..., ::2] = x[..., ::2] & 0xF
+    x[..., 1::2] = x[..., 1::2] >> 4
+    mxfp4_list = [
+        0.0,
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        3.0,
+        4.0,
+        6.0,
+        -0.0,
+        -0.5,
+        -1.0,
+        -1.5,
+        -2.0,
+        -3.0,
+        -4.0,
+        -6.0,
+    ]
+    mxfp4_in_f32 = torch.tensor(mxfp4_list, dtype=torch.float32, device="cuda")
+    return mxfp4_in_f32[x.long()]
+
+
+def e8m0_to_f32(x):
+    x_f32 = 2 ** ((x - 127).to(torch.float32))
+    x_f32[x == 255] = float("nan")
+    return x_f32
+
+
+def torch_mxfp4_to_fp32(x, x_scales):
+    # First convert the x to f32.
+    x_f32 = mxfp4_to_f32(x)
+    print(
+        f"x.shape={x.shape} x_f32.shape={x_f32.shape} x_scales.shape={x_scales.shape}"
+    )
+
+    # Next convert the e8m0 scale to f32.
+    x_scales = x_scales.repeat_interleave(32, dim=-1).to(torch.float32)
+    x_scales_f32 = e8m0_to_f32(x_scales)
+    x_f32 = x_f32 * x_scales_f32
+
+    return x_f32
+
+
+def alloc_rand(shape, device, dtype, requires_grad=True):
+    if dtype.itemsize == 1:
+        tmp = 2 ** -(torch.randint(4, 8, shape, device=device, dtype=torch.float16))
+        return tmp.to(dtype).requires_grad_(requires_grad)
+    return torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+
+
+# OCP mixed-format fp4 (mxfp4) has two elements packed in one uint8
+str_to_torch_dtype = {
+    "fp32": torch.float32,
+    "bf16": torch.bfloat16,
+    "fp16": torch.float16,
+    "fp8_e4m3": (
+        torch.float8_e4m3fn if get_cdna_version() == 4 else torch.float8_e4m3fnuz
+    ),
+    "fp8_e5m2": torch.float8_e5m2 if get_cdna_version() == 4 else torch.float8_e5m2fnuz,
+    "mxfp4_e2m1": torch.uint8,
+}
+
+torch_to_tl_dtype = {
+    torch.float32: tl.float32,
+    torch.bfloat16: tl.bfloat16,
+    torch.float16: tl.float16,
+    torch.float8_e4m3fn: tl.float8e4nv,
+    torch.float8_e4m3fnuz: tl.float8e4b8,
+    torch.float8_e5m2: tl.float8e5,
+    torch.float8_e5m2fnuz: tl.float8e5b16,
+    torch.uint8: tl.uint8,
+}
+
+
+# Note: Eventually all these combinations will be supported
+# Hardware native OCP
+# ("fp8_e5m2", "mxfp4_e2m1"),
+# ("mxfp4_e2m1", "mxfp4_e2m1"),
+# Software emulation that upcasts mxfp4 to fp16
+# ("fp16", "mxfp4_e2m1"),
+# ("bf16", "mxfp4_e2m1"),
+@pytest.mark.parametrize(
+    "M, N, K, E, top_k",
+    [
+        (1024, 6144, 4096, 8, 1),
+        # (64, 64, 128, 8, 2),
+        # (16, 256, 256, 128, 4),
+        (1000, 704, 800, 3, 1),
+        # (1000, 704, 800, 8, 2),
+        # (64, 14336, 4096, 8, 2),
+        # (16, 14336, 128, 8, 2),  # not working either
+        # (16, 14336, 4096, 4, 1),
+        # (1, 14336, 128, 4, 2),
+        # (3, 14336, 128, 4, 2),
+        # (16, 14336, 128, 1, 1),
+        # (64, 7186, 128, 8, 2),
+        # (64, 3584, 128, 8, 2),
+        # (64, 1792, 128, 8, 2),
+        # (64, 64, 128, 8, 2),
+        # (1, 1024, 16384, 2, 1),
+    ],
+)
+@pytest.mark.parametrize(
+    "a_dtype_str, b_dtype_str",
+    [
+        # Hardware native OCP
+        ("mxfp4_e2m1", "mxfp4_e2m1"),  # TODO Add support for other types
+    ],
+)
+@pytest.mark.parametrize("routed_weight", [False, True])
+@pytest.mark.parametrize("swizzle_mx_scale", [False])  # TODO Add support for swizzle
+def test_fused_moe(
+    tokens: int,
+    model_dim: int,
+    inter_dim: int,
+    top_k: int,
+    E: int,
+    a_dtype_str: str,
+    b_dtype_str: str,
+    routed_weight: bool,
+    swizzle_mx_scale: bool,
+):
+    if triton.runtime.driver.active.get_current_target().arch not in ("gfx950"):
+        pytest.skip("MXFP4 not supported on this architecture")
+    aiter_quant = aiter.get_torch_quant(aiter.QuantType.per_1x32)
+    is_a_mixed_input = a_dtype_str.startswith("mx")
+    is_b_mixed_input = b_dtype_str.startswith("mx")
+    a_dtype = str_to_torch_dtype[a_dtype_str]
+    c_dtype = torch.bfloat16 if is_a_mixed_input else a_dtype
+    fp16_dtype = torch.float16 if a_dtype_str == "fp16" else torch.bfloat16
+    a_tri = alloc_rand((tokens, model_dim), dtype=c_dtype, device="cuda", requires_grad=False)
+    b1_tri = alloc_rand((E, inter_dim * 2, model_dim), dtype=c_dtype, device="cuda", requires_grad=False)
+    b2_tri_ = alloc_rand((E, model_dim, inter_dim), dtype=c_dtype, device="cuda", requires_grad=False)
+
+    # a_tri = alloc_rand((1, 1), dtype=fp16_dtype, device="cuda", requires_grad=False)
+    # a_tri = a_tri.repeat(tokens, inter_dim)
+    # b_tri = alloc_rand((1, 1, 1), dtype=fp16_dtype, device="cuda", requires_grad=False)
+    # b_tri = b_tri.repeat(E, model_dim, inter_dim)
+
+    c1_tri = torch.zeros(
+        (tokens, top_k, inter_dim), dtype=c_dtype, device="cuda", requires_grad=False
+    )
+
+    c2_tri = torch.zeros(
+        (tokens, model_dim), dtype=c_dtype, device="cuda", requires_grad=False
+    )
+    a_scale = torch.tensor([1.00], dtype=torch.float32, device="cuda")
+    b_scale = torch.tensor([1.00] * E, dtype=torch.float32, device="cuda")
+    # a_tri = torch.ones_like(a_tri)
+    # b_tri = torch.ones_like(b_tri)
+    # Reference inputs
+    a_ref, b1_ref, b2_ref, c1_ref, c2_ref = a_tri.clone(), b1_tri.clone(), b2_tri_.clone(), c1_tri.clone(), c2_tri.clone()
+
+    # Try fixed config for now
+    config = {
+        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_K": 128,
+        "GROUP_SIZE_M": 4,
+        "num_warps": 8,
+        "num_stages": 2,
+        "waves_per_eu": 0,
+        "matrix_instr_nonkdim": 16,
+        "kpack": 1,
+    }
+
+    values = torch.ones((tokens, E), dtype=c_dtype, device="cuda")
+    # softmax_vals = torch.softmax(values, dim=1)
+    topk_weights, topk_ids = fused_topk(a_tri, values, top_k, True)
+
+    sorted_token_ids, sorted_weights, expert_ids, num_tokens_post_padded, moe_buf = moe_sorting(
+        topk_ids, topk_weights, E, model_dim, c_dtype, 64
+    )
+    # expert_ids = torch.zeros_like(expert_ids)
+    # sorted_token_ids = torch.load('./sorted_token_ids.pt')
+    # sorted_token_ids = torch.arange(sorted_token_ids.shape[-1])
+    # print(f"{sorted_token_ids=}")
+    # print(f"{expert_ids=}")
+    # print(f"{num_tokens_post_padded=}")
+    # print(f"{sorted_token_ids[num_tokens_post_padded - 1]=}, {sorted_token_ids[num_tokens_post_padded]=} ")
+    # sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
+    #     topk_ids, config["BLOCK_SIZE_M"], E
+    # )
+    # for i in range(num_tokens_post_padded):
+    #     if sorted_token_ids[i] >= 1024:
+    #         sorted_token_ids[i] = sorted_token_ids[i] % 1024
+
+    # for i in range(num_tokens_post_padded):
+    #     print(f"{i=}:{sorted_token_ids[i]=}")
+    # Downcast a tensor to mxfp4 and upcast back for reference
+    # Downcast b tensor to mxfp4 and upcast back for reference
+    if is_b_mixed_input:
+        # b_ref = b_tri
+
+        # swizzle_axis = 1 if swizzle_mx_scale else None  # TODO Add Swizzle support
+        b1_tri, b1_mx_scales = torch_dynamic_mxfp4_quant(b1_tri)
+        b2_tri, b2_mx_scales = aiter_quant(b2_tri_.view(-1, inter_dim), shuffle=False)
+        b2_tri = b2_tri.view(E, model_dim, -1).cuda()
+        b2_mx_scales = b2_mx_scales.view(E, model_dim, -1).cuda()
+        # b_tri = b_tri.repeat(1 ,2, 1)
+        # b_mx_scales = b_mx_scales.repeat(1, 2, 1)
+        b1_mx_scales = torch.ones_like(b1_mx_scales) * 127
+        # b2_mx_scales = torch.ones_like(b2_mx_scales) * 127
+        # TODO Add Upcast support
+        # b_ref = torch_upcast_from_mxfp(
+        #    b_tri, b_mx_scales, fp16_dtype, axis=2, swizzle_axis=swizzle_axis
+        # )
+        b1_ref = torch_mxfp4_to_fp32(b1_tri, b1_mx_scales)
+        b2_ref = torch_mxfp4_to_fp32(b2_tri, b2_mx_scales)
+        print(
+            f"b1_ref.shape={b1_ref.shape} b1_tri.shape={b1_tri.shape} b1_tri., b1_mx_scales.shape={b1_mx_scales.shape}"
         )
-        df.append(ret)
-    df = pd.DataFrame(df)
-    aiter.logger.info(f"summary:\n{df}")
+        print(
+            f"b2_ref.shape={b2_ref.shape} b2_tri.shape={b2_tri.shape} b2_tri., b2_mx_scales.shape={b2_mx_scales.shape}"
+        )
+
+    # b1_tri = shuffle_weight(b1_tri, layout=(16, 16))
+    # b2_tri = shuffle_weight(b2_tri, layout=(16, 16))
+    # out_ck = ck_moe_2stages(
+    #     a_tri,
+    #     b1_tri,
+    #     b2_tri,
+    #     topk_weights,
+    #     topk_ids,
+    #     quant_type=aiter.QuantType.per_1x32,
+    #     fc1_scale=b1_mx_scales,  # [expert(local_expert:EP), inter_dim, 1]
+    #     fc2_scale=b2_mx_scales,  # [expert(local_expert:EP), model_dim, 1]
+    #     block_size=128,
+    #     activation=ActivationType.Silu,
+    #     doweight_stage1=False,
+    # )
+
+    # checkAllclose(
+    #     c2_ref,
+    #     out_ck,
+    #     msg=f"ck_moe_2stages:",
+    #     # rtol=1e-1, atol=1e2
+    # )
+    # Triton
+    # fused_moe_mxfp4(
+    #     a_tri,
+    #     b_tri,
+    #     c_tri,
+    #     a_scale,
+    #     b_scale,
+    #     a_mx_scales,
+    #     b_mx_scales,
+    #     topk_weights,
+    #     topk_ids,
+    #     sorted_token_ids,
+    #     expert_ids,
+    #     num_tokens_post_padded,
+    #     routed_weight,
+    #     top_k,
+    #     swizzle_mx_scale,
+    #     swizzle_mx_scale,
+    #     config,
+    #     torch_to_tl_dtype[c_tri.dtype],
+    # )
+    if is_a_mixed_input:
+        # a_ref = a_tri
+
+        # swizzle_axis = 0 if swizzle_mx_scale else None  # TODO Add Swizzle support
+        a_tri, a_mx_scales = torch_dynamic_mxfp4_quant(a_tri)
+        # TODO Add Upcast support
+        # a_ref = torch_upcast_from_mxfp(
+        #    a_tri, a_mx_scales, fp16_dtype, axis=1, swizzle_axis=swizzle_axisv
+        # )
+        a_ref = torch_mxfp4_to_fp32(a_tri, a_mx_scales)
+    else:
+        a_ref = a_ref.to(fp16_dtype)
+        a_mx_scales = None
+    # Torch
+    b_zp = None
+    group_size = 0
+    # a_scale and b_scale not used actually
+    c1_ref = torch_moe_stage1(
+        a_ref,
+        b1_ref,
+        c1_ref,
+        a_scale,
+        b_scale,
+        b_zp,
+        group_size,
+        topk_ids,
+        topk_weights,
+        False,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        ActivationType.Silu,
+        dtype=fp16_dtype,
+    )
+
+    a_mx_scales = moe_mxfp4_sort(a_mx_scales, sorted_ids=sorted_token_ids, num_valid_ids=num_tokens_post_padded, token_num=tokens, block_size=64)
+
+    # b_tri = shuffle_weight(b_tri, layout=(16,16))
+    
+    # print(f"{a_tri.shape=}")
+    # print(f"{b1_tri.shape=}")
+    out1_ck, us = run_perftest(
+        ck_moe_stage1,
+        a_tri,
+        b1_tri,
+        b2_tri,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        b1_mx_scales,
+        a_mx_scales,
+        fp16_dtype,
+        top_k,
+        64,
+        ActivationType.Silu,
+        sorted_weights=None,
+    )
+    checkAllclose(
+        c1_ref,
+        out1_ck,
+        msg=f"[perf]  ck_moe_stage1:{us:>8.2f} us, {tokens*model_dim*inter_dim*top_k*3/us/1000/1000:>8.2f} tflops......(quant)",
+    )
+
+    # torch.testing.assert_close(out1_ck.to(fp16_dtype), c1_ref.to(fp16_dtype))
+
+    if is_a_mixed_input:
+        # a_ref = a_tri
+
+        # swizzle_axis = 0 if swizzle_mx_scale else None  # TODO Add Swizzle support
+        a2_tri, a2_mx_scales = torch_dynamic_mxfp4_quant(c1_ref)
+        # a2_mx_scales = torch.ones_like(a2_mx_scales) * 127
+        # TODO Add Upcast support
+        # a_ref = torch_upcast_from_mxfp(
+        #    a_tri, a_mx_scales, fp16_dtype, axis=1, swizzle_axis=swizzle_axisv
+        # )
+        a2_ref = torch_mxfp4_to_fp32(a2_tri, a2_mx_scales)
+    else:
+        a2_ref = a2_ref.to(fp16_dtype)
+        a2_mx_scales = None
+
+    c2_ref = torch_moe_stage2(
+        a2_ref,
+        b2_ref,
+        c2_ref,
+        a_scale,
+        b_scale,
+        b_zp,
+        group_size,
+        topk_ids,
+        topk_weights,
+        False,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        # ActivationType.Silu,
+        dtype=fp16_dtype,
+    )
+
+    # a2_tri = alloc_rand((tokens, top_k, inter_dim), dtype=c_dtype, device="cuda", requires_grad=False)
+    # a2_tri, a2_mx_scales = aiter_quant(a2_tri.view(-1, inter_dim))
+    # a2_tri = alloc_rand((tokens, model_dim), dtype=c_dtype, device="cuda", requires_grad=False)
+    # a2_tri = a2_tri.view(tokens, top_k, -1)
+
+    a2_mx_scales = moe_mxfp4_sort(a2_mx_scales, sorted_ids=sorted_token_ids, num_valid_ids=num_tokens_post_padded, token_num=tokens, block_size=64)
+    # aiter_quant = aiter.get_triton_quant(aiter.QuantType.per_1x32)
+    b2_tri2, b2_mx_scales2 = aiter_quant(b2_tri_.view(-1, inter_dim), shuffle=True)
+
+    # torch.testing.assert_close(b2_tri2.view(b2_tri.shape).to(torch.float), b2_tri.to(torch.float))
+    # print(f"{b2_tri2.view(b2_tri.shape).to(torch.float)}=")
+    # print(f"{b2_mx_scales2.shape}=")
+    # torch.testing.assert_close(b2_mx_scales2.view(b2_mx_scales.shape).to(torch.float), b2_mx_scales.to(torch.float))
+    b2_tri2 = b2_tri2.view(E, model_dim, -1)
+    b2_mx_scales2 = b2_mx_scales2.view(E, model_dim, -1)
+    # b2_mx_scales2 = torch.ones_like(b2_mx_scales) * 127
+    
+    out2_ck, us= run_perftest(
+        ck_moe_stage2,
+        a2_tri,
+        b2_tri2,
+        b2_tri2,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        b2_mx_scales2,
+        a2_mx_scales,
+        fp16_dtype,
+        top_k,
+        128,
+        sorted_weights=None,
+    )
+
+    print(f"{c2_ref=}")
+    print(f"{out2_ck=}")
+    # torch.testing.assert_close(out2_ck.to(fp16_dtype), c2_ref.to(fp16_dtype))
+    checkAllclose(
+        c2_ref,
+        out2_ck,
+        msg=f"[perf]  ck_moe_stage2:{us:>8.2f} us, {tokens*model_dim*inter_dim*top_k*2/us/1000/1000:>8.2f} tflops......(quant)",
+    )
+
+
+    
+
+test_fused_moe(1024, 4096, 1024, 2, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+# test_fused_moe(512, 2048, 2048, 2, 4, "mxfp4_e2m1", "mxfp4_e2m1", False, False)

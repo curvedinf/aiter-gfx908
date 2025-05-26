@@ -129,11 +129,15 @@
         {                                                                                                                                                                                                                                                                                                                                                                   \
             if (MPerBlock == 128)                                                                                                                                                                                                                                                                                                                                      \
                 ck_moe_stage1_gemm_mxfp4<A0DataType, A1DataType, B0DataType, B1DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 128, 128 / sizeof(A0DataType), 1, 4, Nswizzle, true, MulRoutedWeight, 0>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr,  num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);  \
+            else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                                                                      \
+                ck_moe_stage1_gemm_mxfp4<A0DataType, A1DataType, B0DataType, B1DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 64, 128 / sizeof(A0DataType), 1, 4, Nswizzle, true, MulRoutedWeight, 0>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr,  num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);  \
         }                                                                                                                                                                                                                                                                                                                                                                   \
         else                                                                                                                                                                                                                                                                                                                                                                \
         {                                                                                                                                                                                                                                                                                                                                                                   \
             if (MPerBlock == 128)                                                                                                                                                                                                                                                                                                                                      \
                 ck_moe_stage1_gemm_mxfp4<A0DataType, A1DataType, B0DataType, B1DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 128, 128 / sizeof(A0DataType), 1, 4, Nswizzle, false, MulRoutedWeight, 0>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr,  num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
+            else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                                                                      \
+                ck_moe_stage1_gemm_mxfp4<A0DataType, A1DataType, B0DataType, B1DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 64, 128 / sizeof(A0DataType), 1, 4, Nswizzle, false, MulRoutedWeight, 0>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr,  num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
         }   \
     }\
     else if (ActOP == 1)                                                                                       \
@@ -142,11 +146,15 @@
         {                                                                                                                                                                                                                                                                                                                                                                   \
             if (MPerBlock == 128)                                                                                                                                                                                                                                                                                                                                      \
                 ck_moe_stage1_gemm_mxfp4<A0DataType, A1DataType, B0DataType, B1DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 128, 128 / sizeof(A0DataType), 1, 4, Nswizzle, true, MulRoutedWeight, 1>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr,  num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);  \
+            else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                                                                      \
+                ck_moe_stage1_gemm_mxfp4<A0DataType, A1DataType, B0DataType, B1DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 64, 128 / sizeof(A0DataType), 1, 4, Nswizzle, true, MulRoutedWeight, 1>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr,  num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);  \
         }                                                                                                                                                                                                                                                                                                                                                                   \
         else                                                                                                                                                                                                                                                                                                                                                                \
         {                                                                                                                                                                                                                                                                                                                                                                   \
             if (MPerBlock == 128)                                                                                                                                                                                                                                                                                                                                      \
                 ck_moe_stage1_gemm_mxfp4<A0DataType, A1DataType, B0DataType, B1DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 128, 128 / sizeof(A0DataType), 1, 4, Nswizzle, false, MulRoutedWeight, 1>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
+            else if (MPerBlock == 64)                                                                                                                                                                                                                                                                                                                                      \
+                ck_moe_stage1_gemm_mxfp4<A0DataType, A1DataType, B0DataType, B1DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 64, 128 / sizeof(A0DataType), 1, 4, Nswizzle, false, MulRoutedWeight, 1>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr, num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr); \
         }   \
     }                                                                                                                                                                                                                                                                                                                                                                  \
 
@@ -220,9 +228,10 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
 
     int tokens = hidden_states.size(0);
     int sorted_size = sorted_token_ids.size(0);
-    int E = 8;
-    int N = 4096;
-    int K = 6144;
+    int E = w1.size(0);
+    int N = w1.size(1) / 2;
+    int K = hidden_states.size(-1) * 2;
+    // printf("%dx%dx%d\n", E, N, K);
     // int max_num_tokens_padded = sorted_token_ids.size(0);
     // int agvtokens_per_expert = max_num_tokens_padded / E;
     int MPerBlock = block_m.value();
@@ -682,7 +691,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
     int E = w1.size(0);
     int N = w2.size(1);
     int K = inter_states.size(-1) * 2;
-    printf("%dx%dx%d\n", E, N, K);
+    // printf("%dx%dx%d\n", E, N, K);
     // int max_num_tokens_padded = sorted_token_ids.size(0);
     // int agvtokens_per_expert = max_num_tokens_padded / E;
     int MPerBlock = block_m.value();

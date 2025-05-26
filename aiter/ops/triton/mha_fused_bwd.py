@@ -2,8 +2,8 @@ import torch
 import triton
 import triton.language as tl
 
-from typing import Optional, Tuple
-from aiter.ops.triton.utils.pid_preprocessing import _wid2pid
+from typing import Optional
+from aiter.ops.triton.utils.pid_preprocessing import remap_xcd
 from typing import Optional
 from aiter.ops.triton.utils.mha_kernel_utils import (
     compute_fp8_scaling_factors,
@@ -414,12 +414,12 @@ def _bwd_kernel_dkdvdq_causal(
 
     GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
     wid = tl.program_id(0)  # workgoup id: 0, ..., NUM_Q_PIDS * BATCH * NUM_K_HEADS - 1
-    batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(
-        wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, NUM_XCD=8
-    )
-    # batch_idx = wid % BATCH
-    # head_q_idx = (wid // BATCH) % NUM_Q_HEADS
-    # seq_k_blk_idx = (wid // BATCH // NUM_Q_HEADS) % NUM_K_PIDS
+
+    NUM_XCD: tl.constexpr = 8
+    head_q_idx = wid % NUM_Q_HEADS
+    head_q_idx = remap_xcd(head_q_idx, NUM_Q_HEADS, NUM_XCD)
+    seq_k_blk_idx = (wid // NUM_Q_HEADS) % NUM_K_PIDS
+    batch_idx = (wid // (NUM_K_PIDS * NUM_Q_HEADS)) % BATCH
 
     # In the backward we dont want concurrent workgroups to handle consecutive heads or blocks, so remap them to be far apart.
     head_q_idx = (head_q_idx * 29) % NUM_Q_HEADS

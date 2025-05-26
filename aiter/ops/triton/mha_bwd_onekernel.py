@@ -1,7 +1,7 @@
 import torch
 import triton  # type: ignore
 import triton.language as tl  # type: ignore
-from typing import Literal, Optional
+from typing import Optional
 from aiter.ops.triton.utils.mha_kernel_utils import (
     compute_fp8_scaling_factors,
     is_fp8,
@@ -1598,9 +1598,9 @@ def _flash_attn_onekernel_backward(
         dropout_strides = (0, 0, 0, 0)
 
     seqlen = max(max_seqlen_q, max_seqlen_k)
-    grid = lambda META: (
+    grid = (
         num_k_heads,
-        (seqlen + META["BLOCK_N1"] - 1) // META["BLOCK_N1"],
+        triton.cdiv(seqlen, BLOCK_N1),
         batch,
     )
     NUM_WARPS, NUM_STAGES = 4, 1

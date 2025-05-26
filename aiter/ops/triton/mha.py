@@ -3,12 +3,10 @@ import triton
 import triton.language as tl
 
 from typing import Optional, Tuple
-from aiter.ops.triton.utils.pid_preprocessing import _wid2pid, _remap_XCD
+from aiter.ops.triton.utils.pid_preprocessing import remap_xcd
 from aiter.ops.triton.mha_bwd_onekernel import _flash_attn_onekernel_backward
 from aiter.ops.triton.mha_fused_bwd import _flash_attn_fused_backward
-from aiter import dtypes
-from einops import rearrange, repeat
-from typing import Literal, Optional, Union
+from typing import Optional
 
 
 @triton.jit
@@ -426,7 +424,10 @@ def _attn_fwd(
     )  # workgroup id ranging: 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
     # num blocks along seqlen
 
-    off_z, off_q_head, start_m = _wid2pid(wid, BATCH, NUM_Q_HEADS, NUM_BLOCKS, NUM_XCD)
+    off_q_head = wid % NUM_Q_HEADS
+    off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS - 1, NUM_XCD)
+    start_m = (wid // NUM_Q_HEADS) % NUM_BLOCKS
+    off_z = (wid // (NUM_BLOCKS * NUM_Q_HEADS)) % BATCH
 
     # offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -2434,7 +2435,6 @@ def _flash_attn_backward(
     PRE_BLOCK = 128
     BLOCK_M1, BLOCK_N1, BLOCK_M2, BLOCK_N2 = 32, 128, 128, 32
     BLK_SLICE_FACTOR = 2
-    matrix_instr_nonkdim = 16
 
     # init delta
     delta = torch.zeros_like(softmax_lse)

@@ -5,7 +5,6 @@ import op_tests.triton_tests.test_mha as test_mha
 import op_tests.triton_tests.test_mha_fused_bwd as test_fused_bwd
 import op_tests.triton_tests.test_mha_onekernel_bwd as test_onekernel_bwd
 import torch
-import os
 import sys
 import warnings
 import argparse
@@ -361,9 +360,9 @@ def run_benchmark(custom, args):
                 q,
                 k,
                 v,
-                output_pad_fn,
-                dq_pad_fn,
-                dk_pad_fn,
+                _,
+                _,
+                _,
             ) = generate_qkv(
                 q, k, v, query_padding_mask, key_padding_mask, kvpacked=False
             )

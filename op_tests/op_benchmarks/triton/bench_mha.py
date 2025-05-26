@@ -253,7 +253,6 @@ def run_benchmark(custom, args):
                         dropout,
                         causal,
                         args.fp8,
-                        True,
                         dtype,
                     )
                 else:
@@ -267,7 +266,6 @@ def run_benchmark(custom, args):
                         dropout,
                         causal,
                         args.fp8,
-                        True,
                         dtype,
                     )
             elif onekernel_backward:
@@ -282,7 +280,6 @@ def run_benchmark(custom, args):
                         dropout,
                         causal,
                         args.fp8,
-                        False,
                         dtype,
                     )
                 else:
@@ -296,7 +293,6 @@ def run_benchmark(custom, args):
                         dropout,
                         causal,
                         args.fp8,
-                        False,
                         dtype,
                     )
             else:

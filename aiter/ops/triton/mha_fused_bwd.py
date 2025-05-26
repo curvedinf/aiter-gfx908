@@ -188,7 +188,8 @@ def _bwd_dkdvdq_inner(
 
     for iter in range(num_steps):
         # Permute the iteration order to reduce the probability that concurrent workgroups (that share the same q head idx and batch idx) are at the same iteration
-        blk_idx = (iter + workgroup_id) % num_steps
+        # blk_idx = (iter + workgroup_id) % num_steps
+        blk_idx = iter
 
         curr_m = start_m + blk_idx * step_m
         qT_ptrs = qT_ptrs_start + blk_idx * step_m * stride_q_m
@@ -418,11 +419,11 @@ def _bwd_kernel_dkdvdq_causal(
     NUM_XCD: tl.constexpr = 8
     head_q_idx = wid % NUM_Q_HEADS
     head_q_idx = remap_xcd(head_q_idx, NUM_Q_HEADS, NUM_XCD)
-    seq_k_blk_idx = (wid // NUM_Q_HEADS) % NUM_K_PIDS
-    batch_idx = (wid // (NUM_K_PIDS * NUM_Q_HEADS)) % BATCH
+    batch_idx = (wid // (NUM_Q_HEADS)) % BATCH
+    seq_k_blk_idx = (wid // (NUM_Q_HEADS * BATCH)) % NUM_K_PIDS
 
     # In the backward we dont want concurrent workgroups to handle consecutive heads or blocks, so remap them to be far apart.
-    head_q_idx = (head_q_idx * 29) % NUM_Q_HEADS
+    # head_q_idx = (head_q_idx * 29) % NUM_Q_HEADS
     # seq_k_blk_idx = (seq_k_blk_idx * 29) % NUM_K_PIDS
 
     head_k_idx = head_q_idx // GROUP_SIZE
@@ -945,7 +946,6 @@ def _flash_attn_fused_backward(
         )
         _, num_k_heads = max_seqlen_k, k.shape[1]
         q_strides = (0, q.stride(1), q.stride(0), q.stride(2))
-        q_strides = (0, q.stride(1), q.stride(0), q.stride(2))
         k_strides = (0, k.stride(1), k.stride(0), k.stride(2))
         v_strides = (0, v.stride(1), v.stride(0), v.stride(2))
         o_strides = (0, o.stride(1), o.stride(0), o.stride(2))
@@ -1001,6 +1001,38 @@ def _flash_attn_fused_backward(
         IS_VARLEN=IS_VARLEN,
         IS_FP8=IS_FP8,
     )
+    # --- Reshape to reversed dim order ---
+    if IS_VARLEN:
+        # From [T, H, D] → [D, H, T]
+        print(q.shape)
+        print(q_strides)
+        q = q.permute(2, 1, 0).contiguous()
+        k = k.permute(2, 1, 0).contiguous()
+        v = v.permute(2, 1, 0).contiguous()
+        do = do.permute(2, 1, 0).contiguous()
+        o = o.permute(2, 1, 0).contiguous()
+        # Update strides for new layout [D, H, T]
+        q_strides = (0, q.stride(2), q.stride(0), q.stride(1))
+        k_strides = (0, k.stride(2), k.stride(0), k.stride(1))
+        v_strides = (0, v.stride(2), v.stride(0), v.stride(1))
+        o_strides = (0, o.stride(2), o.stride(0), o.stride(1))
+        do_strides = (0, do.stride(2), do.stride(0), do.stride(1))
+        print(q.shape)
+        print(q_strides)
+    else:
+        # From [B, S, H, D] → [D, H, S, B]
+        q = q.permute(3, 2, 1, 0).contiguous()
+        k = k.permute(3, 2, 1, 0).contiguous()
+        v = v.permute(3, 2, 1, 0).contiguous()
+        do = do.permute(3, 2, 1, 0).contiguous()
+        o = o.permute(3, 2, 1, 0).contiguous()
+        # Update strides for new layout [D, H, S, B]
+        q_strides = (q.stride(3), q.stride(1), q.stride(2), q.stride(0))
+        k_strides = (k.stride(3), k.stride(1), k.stride(2), k.stride(0))
+        v_strides = (v.stride(3), v.stride(1), v.stride(2), v.stride(0))
+        o_strides = (o.stride(3), o.stride(1), o.stride(2), o.stride(0))
+        do_strides = (do.stride(3), do.stride(1), do.stride(2), do.stride(0))
+
     # dropout_mask
     use_dropout = dropout_p > 0.0
     if use_dropout:

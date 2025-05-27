@@ -485,6 +485,8 @@ def ck_moe_2stages(
     if quant_type == QuantType.per_Token:
         a2 = a2.view(M, -1)
     a2, a2_scale = quant_func(a2.view(-1, inter_dim), scale=a2_scale, shuffle=False)
+    # if (a2_scale.shape[0] * a2_scale.shape[1]) % (M * topk) != 0:
+    print(f'xxxx a2_scale: {a2_scale.shape}, a2: {a2.shape}, M: {M}, topk: {topk}, block_size: {block_size}, a1: {a1.shape}')
     a2 = a2.view(M, topk, -1)
     a2_scale = a2_scale.view(M, topk, -1)
 

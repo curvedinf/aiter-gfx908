@@ -96,7 +96,7 @@ void ck_moe_stage1_gemm_mxfp4(const hipStream_t &stream, int tokens, int sorted_
     // static constexpr ck::index_t MPerBlock = 128;
     static constexpr ck::index_t MNPerXDL = 16;
     static constexpr ck::index_t BLOCKSIZE = 256;
-    static constexpr ck::index_t NPerBlock = PipelineVer == ck::BlockGemmPipelineVersion::v1 ? 128 : 256;
+    static constexpr ck::index_t NPerBlock = 128; //PipelineVer == ck::BlockGemmPipelineVersion::v1 ? 128 : 256;
     static constexpr ck::index_t WAVES = BLOCKSIZE / 64;
     // static constexpr ck::index_t MWaves = 1;
     // static constexpr ck::index_t NWaves = WAVES / MWaves;
@@ -128,10 +128,10 @@ void ck_moe_stage1_gemm_mxfp4(const hipStream_t &stream, int tokens, int sorted_
         A0DataType,  A1DataType,  B0DataType,  B1DataType,  DsDataType, EDataType, AccDataType, CShuffleDataType,
         AElementOp,  BElementOp, CDEElementOp, GemmSpec,   
         ScaleBlockSize, 256,   
-        64,      128,    128,
+        MPerBlock,      128,    128,
         16,   16,
         16,   16,
-        4,     2,
+        MXDLPerWave,     NXDLPerWave,
         S<8, 32, 1>, S<1, 0, 2>,     S<1, 0, 2>,    2, 16, 16, 0,
         S<8, 32, 1>, S<1, 0, 2>,     S<1, 0, 2>,    2, 16, 16, 0,
         2,    2,     S<1, 32, 1, 8>, S<8, 1, 1, 1>,
@@ -269,7 +269,7 @@ void ck_moe_stage2_gemm_mxfp4(const hipStream_t &stream, int tokens, int sorted_
     ck::index_t Scale_Stride_BN      = (K + ScaleBlockSize - 1) / ScaleBlockSize;
     ck::index_t KBatch = 1;
 
-    printf("%dx%dx%d", tokens, N, K);
+    // printf("%dx%dx%d", tokens, N, K);
     // using AccDataType = F32;
     using CShuffleDataType = F32;
     using DsDataType = ck::Tuple<F32, F32, F32>;
@@ -315,10 +315,10 @@ using DeviceOpInstance                     = ck::tensor_operation::device::Devic
     A0DataType,  A1DataType,  B0DataType,  B1DataType,  DsDataType, EDataType, AccDataType, CShuffleDataType,
     AElementOp,  BElementOp, CDEElementOp, GemmSpec,   
     ScaleBlockSize,      256,   
-    128,   128,    128,
+    MPerBlock,      128,    128,
     16,   16,
     16,   16,
-    8,    2,
+    MXDLPerWave,     NXDLPerWave,
     S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
     S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
     2,    2,   S<1, 32, 1, 8>, S<2, 1, 1, 1>,

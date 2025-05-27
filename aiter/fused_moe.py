@@ -9,9 +9,10 @@ import aiter
 from aiter import logger
 from aiter import ActivationType, QuantType, dtypes
 
-# from aiter import get_hip_quant as get_quant
+from aiter import get_hip_quant as get_quant
+
 # from aiter import get_torch_quant as get_quant
-from aiter import get_triton_quant as get_quant
+# from aiter import get_triton_quant as get_quant
 from aiter.jit.core import AITER_ROOT_DIR, PY, get_asm_dir, bd_dir, mp_lock
 from aiter.jit.utils.chip_info import get_cu_num
 
@@ -155,6 +156,7 @@ def fused_moe(
     dtype = hidden_states.dtype
     q_dtype_w = w1.dtype
     q_dtype_a = w1.dtype if w1.dtype != torch.uint32 else dtypes.fp8
+    q_dtype_a = dtypes.fp4x2 if quant_type == QuantType.per_1x32 else q_dtype_a
 
     if block_size_M is None:
         _, _, block_size_M, *_ = get_2stage_cfgs(
@@ -172,7 +174,7 @@ def fused_moe(
             doweight_stage1,
         )
     run_1stage = M < 256
-    run_1stage = quant_type == QuantType.per_128x128
+    run_1stage = quant_type in [QuantType.per_128x128, QuantType.per_1x32]
     block_size_M = 32 if run_1stage else block_size_M
 
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
@@ -757,23 +759,21 @@ def torch_moe_stage1(
     doweight=False,
 ):
     ctype = dtypes.fp32  # compute type
-    # hidden_states = hidden_states.to(ctype)
-    # w1 = w1.to(ctype)
-    w1_shape = w1.shape
-    w2_shape = w2.shape
-
-    w1 = mxfp4_to_f32(w1)
-    w2 = mxfp4_to_f32(w2)
-    hidden_states = mxfp4_to_f32(hidden_states)
-
-    w1 = w1.view([w1_shape[0], w1_shape[1], w1_shape[2] * 2])
-
     B, D = hidden_states.shape
     topk = topk_weight.shape[1]
     N = w1.shape[1]
     E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
-    inter_dim = w1_shape[1] // 2
-    # inter_dim=4096
+    if quant_type == QuantType.per_1x32:
+        from aiter.utility import fp4_utils
+
+        hidden_states = fp4_utils.mxfp4_to_f32(hidden_states)
+        w1 = fp4_utils.mxfp4_to_f32(w1)
+        w1_scale = fp4_utils.e8m0_to_f32(w1_scale)
+        a1_scale = fp4_utils.e8m0_to_f32(a1_scale)
+    else:
+        hidden_states = hidden_states.to(ctype)
+        w1 = w1.to(ctype)
+
     if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
         w1 = w1 * w1_scale.view(w1_scale.shape[0], -1, 1)
         hidden_states = hidden_states * a1_scale
@@ -796,29 +796,20 @@ def torch_moe_stage1(
         pass
     elif quant_type == QuantType.per_1x32:
         w1_shape = w1.shape
-
-        w1_scale = torch.exp2(w1_scale.view(
-            w1.shape[0], w1.shape[1], w1.shape[2] // 32, 1
-        ).float() - 127)
-
-        w1 = w1.view(
-            w1.shape[0], w1.shape[1], w1.shape[2] // 32, 32
-        ) * w1_scale
-        
-        w1 = w1.view(w1_shape)
-        # print(f"{w1=}")
-        # print(f"{w1_scale=}")
-        a1_scale = torch.exp2(a1_scale.view(hidden_states.shape[0], hidden_states.shape[1] // 32, -1).float() - 127)
-        hidden_states = hidden_states.view(
-            hidden_states.shape[0], hidden_states.shape[1] // 32, 32
+        w1 = w1.view(E, N, model_dim // 32, 32) * w1_scale.view(
+            E, N, model_dim // 32, 1
         )
-        hidden_states = hidden_states * a1_scale
+        w1 = w1.view(w1_shape)
 
-        # print(f"{a1_scale=}")
+        a1_shape = hidden_states.shape
+        a1_scale = a1_scale[: a1_shape[0]]
+        hidden_states = hidden_states.view(a1_shape[0], a1_shape[1] // 32, 32)
+        hidden_states = hidden_states * a1_scale.view(a1_shape[0], a1_shape[1] // 32, 1)
+        hidden_states = hidden_states.view(a1_shape)
     else:
         assert False, f"Unsupported quant_type: {quant_type}"
 
-    hidden_states = hidden_states.view(B, -1, D).repeat(1, topk, 1)
+    hidden_states = hidden_states.view(B, -1, model_dim).repeat(1, topk, 1)
 
     out = torch.zeros(
         (B, topk, N),
@@ -859,28 +850,29 @@ def torch_moe_stage2(
     doweight=True,
 ):
     ctype = dtypes.fp32  # compute type
-    # hidden_states = hidden_states.to(ctype)
-    # w2 = w2.to(ctype)
-    w1 = mxfp4_to_f32(w1)
-    w2 = mxfp4_to_f32(w2)
-    hidden_states = mxfp4_to_f32(hidden_states)
+    E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
+    if quant_type == QuantType.per_1x32:
+        from aiter.utility import fp4_utils
 
-    # print(f"{w2=}")
-    # print(f"{hidden_states=}")
-    # print(f"{a2_scale=}")
-    # print(f"{w2_scale=}")
+        hidden_states = fp4_utils.mxfp4_to_f32(hidden_states)
+        w2 = fp4_utils.mxfp4_to_f32(w2)
+        w2_scale = fp4_utils.e8m0_to_f32(w2_scale)
+        a2_scale = fp4_utils.e8m0_to_f32(a2_scale)
+    else:
+        hidden_states = hidden_states.to(ctype)
+        w2 = w2.to(ctype)
 
     token_num, topk = topk_ids.shape
-    num_experts, model_dim, inter_dim = w2.shape
-    inter_dim *= 2
-    model_dim = model_dim // 2
     hidden_states = hidden_states.view(token_num, topk, inter_dim)
-    w2 = w2.view(num_experts, model_dim, inter_dim)
-    print(w2.shape)
+    
     if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
+        hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
         w2 = w2 * w2_scale.view(w2_scale.shape[0], -1, 1)
-    # per_128x128
     elif quant_type == QuantType.per_128x128:
+        a2_scale = a2_scale.view(hidden_states.shape[0], topk, -1, 1)
+        a2_scale = a2_scale.repeat(1, 1, 1, 128).view(hidden_states.shape[0], topk, -1)
+        hidden_states = hidden_states * a2_scale
+
         w2_shape = w2.shape
         w2 = w2.view(
             w2.shape[0], w2.shape[1] // 128, 128, w2.shape[2] // 128, 128
@@ -889,31 +881,18 @@ def torch_moe_stage2(
         )
         w2 = w2.view(w2_shape)
     elif quant_type == QuantType.per_1x32:
+        a2_shape = hidden_states.shape
+        a2_scale = a2_scale.view(token_num, topk, inter_dim // 32, 1)
+        hidden_states = (
+            hidden_states.view(token_num, topk, inter_dim // 32, 32) * a2_scale
+        )
+        hidden_states = hidden_states.view(a2_shape)
+
         w2_shape = w2.shape
-
-        w2_scale = torch.exp2(w2_scale.view(
-            w2.shape[0], w2.shape[1], w2.shape[2] // 32, 1
-        ).float() - 127)
-
-        w2 = w2.view(
-            w2.shape[0], w2.shape[1], w2.shape[2] // 32, 32
-        ) * w2_scale
-        
+        w2 = w2.view(E, model_dim, inter_dim // 32, 32) * w2_scale.view(
+            E, model_dim, inter_dim // 32, 1
+        )
         w2 = w2.view(w2_shape)
-        a2_scale = torch.exp2(a2_scale.view(hidden_states.shape[0], hidden_states.shape[1], hidden_states.shape[2] // 32, -1).float() - 127)
-        
-        
-        hidden_states = hidden_states.view(
-            hidden_states.shape[0], hidden_states.shape[1], hidden_states.shape[2] // 32, 32
-        ) * a2_scale
-        hidden_states = hidden_states.view(token_num, topk, inter_dim)
-
-    if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
-        hidden_states = hidden_states * a2_scale.view(a2_scale.shape[0], -1, 1)
-    elif quant_type == QuantType.per_128x128:
-        a2_scale = a2_scale.view(hidden_states.shape[0], topk, -1, 1)
-        a2_scale = a2_scale.repeat(1, 1, 1, 128).view(hidden_states.shape[0], topk, -1)
-        hidden_states = hidden_states * a2_scale
 
     out = torch.zeros(
         (token_num, topk, model_dim),

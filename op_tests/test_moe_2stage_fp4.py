@@ -690,7 +690,7 @@ def test_fused_moe(
         a_ref = torch_mxfp4_to_fp32(a_tri, a_mx_scales)
     else:
         a_ref = a_ref.to(fp16_dtype)
-        a_mx_scales = None
+
     # Torch
     b_zp = None
     group_size = 0
@@ -713,7 +713,7 @@ def test_fused_moe(
         dtype=fp16_dtype,
     )
 
-    a_mx_scales_sorting = moe_mxfp4_sort(a_mx_scales, sorted_ids=sorted_token_ids, num_valid_ids=num_tokens_post_padded, token_num=tokens, block_size=block_size_m)
+    a_mx_scales = moe_mxfp4_sort(a_mx_scales, sorted_ids=sorted_token_ids, num_valid_ids=num_tokens_post_padded, token_num=tokens, block_size=block_size_m)
     # print(f"{sorted_token_ids=}, {num_tokens_post_padded=}, {tokens=}, {block_size_m=}")
     b1_tri, b1_mx_scales = aiter_quant(b1_tri_.view(-1, model_dim), shuffle=True)
  
@@ -721,27 +721,27 @@ def test_fused_moe(
     b1_mx_scales = b1_mx_scales.view(E, inter_dim * 2, -1).cuda()
 
 
-    # out1_ck, us = run_perftest(
-    #     ck_moe_stage1,
-    #     a_tri,
-    #     b1_tri,
-    #     b2_tri,
-    #     sorted_token_ids,
-    #     expert_ids,
-    #     num_tokens_post_padded,
-    #     b1_mx_scales,
-    #     a_mx_scales,
-    #     fp16_dtype,
-    #     top_k,
-    #     block_size_m,
-    #     ActivationType.Silu,
-    #     sorted_weights=None,
-    # )
-    # checkAllclose(
-    #     c1_ref,
-    #     out1_ck,
-    #     msg=f"[perf]  ck_moe_stage1:{us:>8.2f} us, {tokens*model_dim*inter_dim*2*top_k*2/us/1000/1000:>8.2f} tflops......(quant)",
-    # )
+    out1_ck, us = run_perftest(
+        ck_moe_stage1,
+        a_tri,
+        b1_tri,
+        b2_tri,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        b1_mx_scales,
+        a_mx_scales,
+        fp16_dtype,
+        top_k,
+        block_size_m,
+        ActivationType.Silu,
+        sorted_weights=None,
+    )
+    checkAllclose(
+        c1_ref,
+        out1_ck,
+        msg=f"[perf]  ck_moe_stage1:{us:>8.2f} us, {(tokens * model_dim * inter_dim * 2 * top_k * 2 + tokens * model_dim * inter_dim * 2 * top_k * 2 / 32)/us/1000/1000:>8.2f} tflops......(quant)",
+    )
 
 
     if is_a_mixed_input:
@@ -781,37 +781,34 @@ def test_fused_moe(
     )
 
 
-    # a2_mx_scales = moe_mxfp4_sort(a2_mx_scales, sorted_ids=sorted_token_ids, num_valid_ids=num_tokens_post_padded, token_num=tokens, block_size=block_size_m)
+    a2_mx_scales = moe_mxfp4_sort(a2_mx_scales, sorted_ids=sorted_token_ids, num_valid_ids=num_tokens_post_padded, token_num=tokens, block_size=block_size_m)
     # aiter_quant = aiter.get_triton_quant(aiter.QuantType.per_1x32)
     b2_tri2, b2_mx_scales2 = aiter_quant(b2_tri_.view(-1, inter_dim), shuffle=True)
     b2_tri2 = b2_tri2.view(E, model_dim, -1)
     b2_mx_scales2 = b2_mx_scales2.view(E, model_dim, -1)
     
-    # out2_ck, us= run_perftest(
-    #     ck_moe_stage2,
-    #     a2_tri,
-    #     b2_tri2,
-    #     b2_tri2,
-    #     sorted_token_ids,
-    #     expert_ids,
-    #     num_tokens_post_padded,
-    #     b2_mx_scales2,
-    #     a2_mx_scales,
-    #     fp16_dtype,
-    #     top_k,
-    #     block_size_m,
-    #     sorted_weights=sorted_weights,
-    # )
+    out2_ck, us= run_perftest(
+        ck_moe_stage2,
+        a2_tri,
+        b2_tri2,
+        b2_tri2,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        b2_mx_scales2,
+        a2_mx_scales,
+        fp16_dtype,
+        top_k,
+        block_size_m,
+        sorted_weights=sorted_weights,
+    )
 
-    # print(f"{c2_ref=}")
-    # print(f"{out2_ck=}")
-    # torch.testing.assert_close(out2_ck.to(fp16_dtype), c2_ref.to(fp16_dtype))
-    # checkAllclose(
-    #     c2_ref,
-    #     out2_ck,
-    #     msg=f"[perf]  ck_moe_stage2:{us:>8.2f} us, {tokens*model_dim*inter_dim*top_k*2/us/1000/1000:>8.2f} tflops......(quant)",
-    # )
-    (a1_scale_fused, a1_scale_sorting), us = run_perftest(
+    checkAllclose(
+        c2_ref,
+        out2_ck,
+        msg=f"[perf]  ck_moe_stage2:{us:>8.2f} us, {((2 * tokens * model_dim * inter_dim * top_k) + (2 * tokens * model_dim * inter_dim * top_k / 32)) /us/1000/1000:>8.2f} tflops......(quant)",
+    )
+    out_ck, us = run_perftest(
         ck_moe_2stages,
         a_tri_,
         b1_tri,
@@ -827,19 +824,13 @@ def test_fused_moe(
     )
     
     checkAllclose(
-        a_mx_scales,
-        a1_scale_fused,
-        msg=f"ck_moe_2stages_no_sorting:{us:>8.2f} us, {tokens*model_dim*inter_dim*3*top_k*2/us/1000/1000:>8.2f} tflops......(quant)",
-        # rtol=1e-1, atol=1e2
-    )
-
-    checkAllclose(
-        a_mx_scales_sorting,
-        a1_scale_sorting,
-        msg=f"ck_moe_2stages_sorting:{us:>8.2f} us, {tokens*model_dim*inter_dim*3*top_k*2/us/1000/1000:>8.2f} tflops......(quant)",
-        # rtol=1e-1, atol=1e2
+        c2_ref,
+        out_ck,
+        msg=f"ck_moe_2stages:{us:>8.2f} us, {(2 * tokens * model_dim * inter_dim * top_k * 3 + 2 * tokens * model_dim * inter_dim * top_k * 3 / 32)/us/1000/1000:>8.2f} tflops......(quant)",
+        # rtol=5e-2, atol=5e-2
     )
 
 
-test_fused_moe(248, 4096, 6144, 2, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+
+test_fused_moe(1024, 4096, 6144, 2, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
 # test_fused_moe(512, 2048, 2048, 2, 4, "mxfp4_e2m1", "mxfp4_e2m1", False, False)

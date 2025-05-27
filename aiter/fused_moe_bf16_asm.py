@@ -461,7 +461,7 @@ def ck_moe_2stages(
     # a1, a1_scale = quant_func(a1, scale=a1_scale, shuffle=False)
     # return a1
     a1, a1_scale = dynamic_mxfp4_quant(a1)
-    a1_scale_sorting = moe_mxfp4_sort(a1_scale, sorted_ids=sorted_ids, num_valid_ids=num_valid_ids, token_num=M, block_size=block_size)
+    a1_scale = moe_mxfp4_sort(a1_scale, sorted_ids=sorted_ids, num_valid_ids=num_valid_ids, token_num=M, block_size=block_size)
     # print(f"{sorted_ids=}, {num_valid_ids=}, {M=}, {block_size=}")
     a2 = torch.empty(
         (M, topk, inter_dim),
@@ -473,7 +473,7 @@ def ck_moe_2stages(
         act_op = 1  # silu_and_mul
     else:
         act_op = 0  # gelu_and_mul
-    return a1_scale, a1_scale_sorting
+    # return a1_scale, a1_scale_sorting
     aiter.ck_moe_stage1(
         a1,
         w1,
@@ -489,7 +489,7 @@ def ck_moe_2stages(
         sorted_weights if doweight_stage1 else None,
         act_op,
     )
- 
+    # return a2
     if quant_type == QuantType.per_Token:
         a2 = a2.view(M, -1)
     # a2, a2_scale = quant_func(a2.view(-1, inter_dim), scale=a2_scale, shuffle=False)
@@ -497,7 +497,7 @@ def ck_moe_2stages(
     a2 = a2.view(M, topk, -1)
     a2_scale = a2_scale.view(M, topk, -1)
 
-    # a2_scale = moe_mxfp4_sort(a2_scale, sorted_ids=sorted_ids, num_valid_ids=num_valid_ids, token_num=M, block_size=block_size)
+    a2_scale = moe_mxfp4_sort(a2_scale, sorted_ids=sorted_ids, num_valid_ids=num_valid_ids, token_num=M, block_size=block_size)
 
     
     aiter.ck_moe_stage2(

@@ -102,7 +102,7 @@ def ref_masked_attention(
 @pytest.mark.parametrize("q_init_min,q_init_max", [(-10, 10)])
 @pytest.mark.parametrize("kv_init_min,kv_init_max", [(-5, 5)])
 @pytest.mark.parametrize("seed", [19378])
-def test_batch_prefill_with_paged_kv_cache(
+def test_batch_decode_with_paged_kv_cache(
     batch_size,
     kv_len,
     page_size,
@@ -134,6 +134,7 @@ def test_batch_prefill_with_paged_kv_cache(
     q = create_tensor(
         q_init_min, q_init_max, batch_size, num_qo_heads, head_dim, dtype=dtype
     ).to(0)
+    # q = torch.ones_like(q)
     max_num_pages_per_seq = (kv_len + page_size - 1) // page_size
     total_num_pages = max_num_pages_per_seq * batch_size
     kv_shape = [total_num_pages, 2, num_kv_heads, page_size, head_dim]
@@ -146,6 +147,7 @@ def test_batch_prefill_with_paged_kv_cache(
         kv_data_fp32 = create_tensor(
             kv_init_min, kv_init_max, *kv_shape, dtype=torch.float32
         ).to(0)
+        kv_data_fp32 = torch.ones_like(kv_data_fp32)
         kv_data = kv_data_fp32.to(dtype)
         kv_data = kv_data[:, 1, :, 1, :, 1, :, 1, :]
         kv_data_fp32 = kv_data_fp32[:, 1, :, 1, :, 1, :, 1, :]
@@ -158,6 +160,7 @@ def test_batch_prefill_with_paged_kv_cache(
         kv_data_fp32 = create_tensor(
             kv_init_min, kv_init_max, *kv_shape, dtype=torch.float32
         ).to(0)
+        # kv_data_fp32 = torch.ones_like(kv_data_fp32)
         kv_data = kv_data_fp32.to(dtype)
     if 1 < batch_size:
         kv_lens = torch.randint(1, kv_len + 1, (batch_size,))
@@ -174,8 +177,8 @@ def test_batch_prefill_with_paged_kv_cache(
     kv_indices_gpu = kv_indices_cpu.to(0)
 
     chunks = torch.chunk(kv_data, 2, dim=1)
-    k_cache = chunks[0].squeeze(2).squeeze(2)
-    v_cache = chunks[1].squeeze(2).squeeze(2)
+    k_cache = chunks[0].squeeze(2).squeeze(2).contiguous()
+    v_cache = chunks[1].squeeze(2).squeeze(2).contiguous()
 
     o_ck_flash_attn = aiter.flashinfer_batch_decode_func(
         q,
@@ -243,10 +246,9 @@ if __name__ == "__main__":
         logits_soft_cap,
         dtype,
     ) in itertools.product([False, True], [0.0, 30.0], [torch.float16, torch.bfloat16]):
-        test_batch_prefill_with_paged_kv_cache(
+        test_batch_decode_with_paged_kv_cache(
             batch_size=1,
             kv_len=8192,
-            qo_len=8192,
             page_size=1,
             num_qo_heads=6,
             num_kv_heads=1,

@@ -11,7 +11,7 @@ import math
 
 import triton
 
-Block_M = 64
+Block_M = 16
 Block_N = 64
 
 def setup_seed(seed):
@@ -154,8 +154,8 @@ def scaled_dot_product_attention(query, key, value, h_q, h_kv, batch_id=0, parti
 
                 bv = value[0][i_block_n * Block_N - Block_N : i_block_n * Block_N]
 
-                if batch_id == 0 and i <= 1:
-                    import pdb; pdb.set_trace()
+                # if batch_id == 0 and i <= 1:
+                #     import pdb; pdb.set_trace()
                 oacc = p_compute @ bv + oacc * scale_o.unsqueeze(-1)
                 oacc_log2 = p_compute_log2 @ bv + oacc_log2 * scale_o_log2.unsqueeze(-1)
                 i_block_n -= 1
@@ -198,7 +198,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
 
     q = torch.randn(b, s_q, h_q, d, device="cuda", dtype=dtype)
 
-    block_size = 16
+    block_size = 64
 
     block_table = torch.arange(
         b * max_seqlen_pad // block_size, dtype=torch.int32, device="cuda"
@@ -219,7 +219,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     #     cache_seqlens, s_q * h_q // h_kv, h_kv
     # )
 
-    # @perftest(num_iters=3)
+    @perftest(num_iters=10)
     def flash_mla():
         return aiter.flash_mla_fwd_with_kvcache(
             q,
@@ -250,7 +250,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
 
                 begin = j * max_seqlen_pad
                 end = begin + cache_seqlens[j]
-                import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
                 O, LSE = scaled_dot_product_attention(
                     q[j].transpose(0, 1),
                     blocked_k.view(-1, h_kv, d)[begin:end].transpose(0, 1),
@@ -289,17 +289,18 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
             lse[i] = LSE
         return out, lse
 
-    # out, us = flash_mla()
-    # # out_flash, lse_flash = out
+    out, us = flash_mla()
+    out_flash, lse_flash = out
 
     # out_torch, lse_torch = ref_mla_cu_partition(out_acc, lse_acc)
-    out_flash, lse_flash, debug_m, debug_p, debug_v, debug_o = flash_mla()
+    # out_flash, lse_flash, debug_m, debug_p, debug_v, debug_o = flash_mla()
+    # out_flash, lse_flash = flash_mla()
     bk =  blocked_k[4096//64-1, :, 0]
     bv = bk[:, :512]
     bvt =bv.transpose(0,1)
 
-    import pdb; pdb.set_trace()
-    out_torch, lse_torch = ref_mla(debug_p, debug_v)
+    # import pdb; pdb.set_trace()
+    # out_torch, lse_torch = ref_mla(debug_p, debug_v)
     # import pdb; pdb.set_trace()
 
     # def ref_mla_combine():
@@ -330,8 +331,8 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
     # cal_diff(out_flash, out_torch.cuda(), "out")
     # cal_diff(lse_flash, lse_torch.cuda(), "lse")
 
-    # t = us / 1000
-    t = triton.testing.do_bench(flash_mla)
+    t = us / 1000
+    # t = triton.testing.do_bench(flash_mla)
 
     FLOPS = s_q * total_seqlens * h_q * (d + dv) * 2
     bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d + b * s_q * h_q * dv) * (
@@ -344,8 +345,8 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
 
 if __name__ == "__main__":
     h_kv = 1
-    d, dv = 192, 128
-    # d, dv = 576, 512 
+    # d, dv = 192, 128
+    d, dv = 576, 512 
     causal = True
 
     # for (dtype, b, s, h_q, s_q, causal, varlen) in itertools.product(
@@ -359,8 +360,8 @@ if __name__ == "__main__":
     # ):
     for (dtype, b, s, h_q, s_q, causal, varlen) in itertools.product(
         (torch.float16, ),
-        (128,),
-        (8192,),
+        (96,),
+        (6001,),
         (16,),
         (1,),
         (True,),

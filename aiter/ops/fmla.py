@@ -71,7 +71,8 @@ def flash_mla_fwd_with_kvcache(
     """
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
-    out, softmax_lse, debug_m, debug_p, debug_v, debug_o = flash_mla_fwd_with_kvcache_impl(
+    # out, softmax_lse, debug_m, debug_p, debug_v, debug_o = flash_mla_fwd_with_kvcache_impl(
+    out, softmax_lse = flash_mla_fwd_with_kvcache_impl(
         q,
         k_cache,
         k_cache,
@@ -83,4 +84,5 @@ def flash_mla_fwd_with_kvcache(
         tile_scheduler_metadata,
         num_splits,
     )
-    return out, softmax_lse, debug_m, debug_p, debug_v, debug_o
+    # return out, softmax_lse, debug_m, debug_p, debug_v, debug_o
+    return out, softmax_lse

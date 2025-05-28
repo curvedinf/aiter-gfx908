@@ -21,6 +21,7 @@ from aiter.fused_moe_bf16_asm import ck_moe_2stages
 from aiter import dtypes
 
 from aiter.ops.triton.quant import dynamic_mxfp4_quant
+from aiter import fp4_utils
 # from aiter.utility.fp4_utils import moe_mxfp4_sort
 
 DEBUG_MODE = False
@@ -489,8 +490,8 @@ def torch_mxfp4_to_fp32(x, x_scales):
     )
 
     # Next convert the e8m0 scale to f32.
-    x_scales = x_scales.repeat_interleave(32, dim=-1).to(torch.float32)
-    x_scales_f32 = e8m0_to_f32(x_scales)
+    x_scales = x_scales.repeat_interleave(32, dim=-1)
+    x_scales_f32 = fp4_utils.e8m0_to_f32(x_scales)
     x_f32 = x_f32 * x_scales_f32
 
     return x_f32

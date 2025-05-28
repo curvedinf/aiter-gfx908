@@ -100,6 +100,19 @@
             "                str kv_cache_dtype,"                   \
             "                float k_scale, float v_scale) -> ()");
 
+#define ATTENTION_V1_PYBIND                                                    \
+  m.def("paged_attention_v1", &paged_attention_v1,                             \
+        "paged_attention_v1(Tensor! out, Tensor exp_sums,"                     \
+        "                Tensor max_logits, Tensor tmp_out,"                   \
+        "                Tensor query, Tensor key_cache,"                      \
+        "                Tensor value_cache, int num_kv_heads,"                \
+        "                float scale, Tensor block_tables,"                    \
+        "                Tensor context_lens, int block_size,"                 \
+        "                int max_context_len,"                                 \
+        "                Tensor? alibi_slopes,"                                \
+        "                str kv_cache_dtype,"                                  \
+        "                float k_scale, float v_scale) -> ()");
+
 #define BATCHED_GEMM_A8W8_PYBIND                                                                        \
       m.def("batched_gemm_a8w8", &batched_gemm_a8w8, "batched_gemm_a8w8", py::arg("XQ"), py::arg("WQ"), \
             py::arg("x_scale"), py::arg("w_scale"), py::arg("Out"),                                     \
@@ -344,6 +357,7 @@
             py::arg("cu_seqlens_k"),                              \
             py::arg("max_seqlen_q"),                              \
             py::arg("max_seqlen_k"),                              \
+            py::arg("min_seqlen_q"),                              \
             py::arg("dropout_p"),                                 \
             py::arg("softmax_scale"),                             \
             py::arg("logits_soft_cap"),                           \

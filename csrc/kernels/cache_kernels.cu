@@ -1,6 +1,6 @@
 /*
  * Copyright © Advanced Micro Devices, Inc. All rights reserved.
- * Copyright (c) 2024, The vLLM team.
+ * Copyright (C) 2024-2025, The vLLM team.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@
 #include <hip/hip_bf16.h>
 
 template <typename T, typename F>
-__device__ constexpr T block_reduce(T val, F reduce_f)
+__device__ constexpr T blockReduce(T val, F reduce_f)
 {
   __shared__ T smem[256];
   T wave_local = wave_reduce(val, reduce_f);
@@ -630,8 +630,12 @@ namespace vllm
       tokens_in_block = slot_mapping[first_token_idx + threadIdx.x] / block_size;
       tokens_in_block = tokens_in_block == block_idx ? 1 : 0;
     }
-    int numtokens_in_block = block_reduce(tokens_in_block, [](float a, float b)
-                                          { return a + b; });
+    auto sum = [](float a, float b)
+    {
+      return a + b;
+    };
+    int numtokens_in_block = block_reduce<int, decltype(sum), wg_size, true>(tokens_in_block, sum);
+    // int numtokens_in_block = blockReduce(tokens_in_block, sum);
 
     auto f_absmax_f32 = [](float v_0_, float v_1_)
     {
@@ -660,8 +664,10 @@ namespace vllm
       }
     }
 
-    k_max_val = block_reduce(k_max_val, f_max_f32);
-    v_max_val = block_reduce(v_max_val, f_max_f32);
+    k_max_val = block_reduce<float, decltype(f_max_f32), wg_size, true>(k_max_val, f_max_f32);
+    v_max_val = block_reduce<float, decltype(f_max_f32), wg_size, true>(v_max_val, f_max_f32);
+    // k_max_val = blockReduce(k_max_val, f_max_f32);
+    // v_max_val = blockReduce(v_max_val, f_max_f32);
 
     float k_block_scale = k_max_val / dtypeMax;
     float v_block_scale = v_max_val / dtypeMax;
@@ -1082,7 +1088,7 @@ void reshape_and_cache_with_block_quant(
 
   int key_stride = key.stride(0) / seq_len;
   int value_stride = value.stride(0) / seq_len;
-  int blockDimx = (block_size + 255) / 256 * 256;
+  int blockDimx = 256; //(block_size + 255) / 256 * 256;
 
   dim3 grid(batch_size, (seq_len + block_size - 1) / block_size + 1, num_heads);
   dim3 block(blockDimx);

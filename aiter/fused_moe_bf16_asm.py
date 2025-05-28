@@ -6,8 +6,12 @@ import torch.nn.functional as F
 from typing import Optional
 import aiter
 from aiter import logger
-from aiter import pertoken_quant, get_hip_quant
+from aiter import pertoken_quant, get_hip_quant, get_triton_quant
 from aiter import ActivationType, QuantType, dtypes
+from aiter.utility.fp4_utils import moe_mxfp4_sort
+
+from aiter.ops.triton.quant import dynamic_mxfp4_quant
+from aiter.fused_moe import moe_sorting
 
 BLOCK_SIZE_M = 32
 
@@ -428,30 +432,37 @@ def ck_moe_2stages(
     doweight_stage1=False,
 ):
 
-    quant_func = get_hip_quant(quant_type)
-    q_dtype_a = w1.dtype if w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
+    # quant_func = get_torch_quant(quant_type)
+    # q_dtype_a = w1.dtype if w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
 
     # quant_func = get_torch_quant(quant_type)
     E, model_dim, inter_dim = w2.shape
+    inter_dim = inter_dim * 2
     if w1.dtype is torch.uint32:
         inter_dim = inter_dim * 8
 
     global_E = E
     if expert_mask is not None:
         global_E = expert_mask.numel()
-    M, topk = topk_ids.shape
+    
+    _, topk = topk_ids.shape
+    M, _ = a1.shape 
     dtype = a1.dtype
     device = topk_ids.device
     if block_size is None:
         block_size = get_block_size(M, topk, E)
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
-        moe_sorting_ck(
-            topk_ids, topk_weight, global_E, model_dim, dtype, block_size, expert_mask
+        moe_sorting(
+            topk_ids, topk_weight, global_E, model_dim, dtype, block_size
         )
     )
+    # print(f"{topk_ids=}, {topk_weight=}, {global_E=}, {model_dim=}, {dtype=}, {block_size=}")
     # print("block_size:", block_size, sorted_expert_ids)
-    a1, a1_scale = quant_func(a1, scale=a1_scale, quant_dtype=q_dtype_a)
-
+    # a1, a1_scale = quant_func(a1, scale=a1_scale, shuffle=False)
+    # return a1
+    a1, a1_scale = dynamic_mxfp4_quant(a1)
+    a1_scale = moe_mxfp4_sort(a1_scale, sorted_ids=sorted_ids, num_valid_ids=num_valid_ids, token_num=M, block_size=block_size)
+    # print(f"{sorted_ids=}, {num_valid_ids=}, {M=}, {block_size=}")
     a2 = torch.empty(
         (M, topk, inter_dim),
         dtype=dtype,
@@ -462,7 +473,7 @@ def ck_moe_2stages(
         act_op = 1  # silu_and_mul
     else:
         act_op = 0  # gelu_and_mul
-
+    # return a1_scale, a1_scale_sorting
     aiter.ck_moe_stage1(
         a1,
         w1,
@@ -478,12 +489,17 @@ def ck_moe_2stages(
         sorted_weights if doweight_stage1 else None,
         act_op,
     )
-
+    # return a2
     if quant_type == QuantType.per_Token:
         a2 = a2.view(M, -1)
-    a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
+    # a2, a2_scale = quant_func(a2.view(-1, inter_dim), scale=a2_scale, shuffle=False)
+    a2, a2_scale = dynamic_mxfp4_quant(a2.view(-1, inter_dim))
     a2 = a2.view(M, topk, -1)
+    a2_scale = a2_scale.view(M, topk, -1)
 
+    a2_scale = moe_mxfp4_sort(a2_scale, sorted_ids=sorted_ids, num_valid_ids=num_valid_ids, token_num=M, block_size=block_size)
+
+    
     aiter.ck_moe_stage2(
         a2,
         w1,
@@ -498,6 +514,7 @@ def ck_moe_2stages(
         block_size,
         sorted_weights if not doweight_stage1 else None,
     )
+
     return moe_buf
 
 

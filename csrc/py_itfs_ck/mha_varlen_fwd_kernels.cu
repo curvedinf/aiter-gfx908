@@ -20,7 +20,6 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                                           const int h_k,
                                           const int d,
                                           const int d_v,
-                                          const int min_seqlen_q,
                                           // device pointers
                                           const at::Tensor q,
                                           const at::Tensor k,
@@ -109,7 +108,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          b,
                          max_seqlen_q,
                          d,             // hdim_q
-                         d_v,           // hdim_v
+                         d_v,             // hdim_v
                          h,             // nhead
                          h_k,           // nhead_k
                          softmax_scale, // scale_s
@@ -139,7 +138,6 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          mask.left,
                          mask.right,
                          static_cast<ck_tile::index_t>(mask.type),
-                         min_seqlen_q,
                          p_dropout,
                          has_dropout_randval,
                          drop_seed_offset};
@@ -303,7 +301,6 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                std::optional<const at::Tensor> &cu_seqlens_k, // [b+1]
                int max_seqlen_q,
                int max_seqlen_k,
-               int min_seqlen_q,
                float p_dropout,
                float softmax_scale,
                float logits_soft_cap,
@@ -548,7 +545,6 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                     num_heads_k,
                     head_size_q,
                     head_size_v,
-                    min_seqlen_q,
                     q,
                     k,
                     v,

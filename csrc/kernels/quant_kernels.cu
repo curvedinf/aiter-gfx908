@@ -297,6 +297,8 @@ namespace aiter
     scaled_quant_impl<DTYPE_I>(out, input, &token_scale, cols);
   }
 
+} // namespace aiter
+
 void static_per_tensor_quant(torch::Tensor &out,         // [..., d]
                              torch::Tensor const &input, // [..., d]
                              torch::Tensor const &scale) // [1]
@@ -446,5 +448,3 @@ void dynamic_per_token_scaled_quant(
     }
   }
 }
-
-} // namespace aiter

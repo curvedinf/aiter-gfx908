@@ -3,9 +3,42 @@
 #pragma once
 #include "moe_ck_gemm.hpp"
 #include <iostream>
+
+// void preShuffleBuffer(const F4* src, F4* dst, int N, int K, int NXdl)
+// {
+//     int KPack = 32;
+//     int NLane = NXdl;
+//     int KLane = 64 / NLane;
+
+//     int K0 = K / (KLane * KPack);
+//     // K -> K0 KLane KPack
+//     // N -> N0 NLane
+//     // N, K -> N0 K0 KLane NLane KPack
+//     int tempk;
+//     for(int n = 0; n < N; ++n)
+//     {
+//         for(int k = 0; k < K; ++k)
+//         {
+//             int n0 = n / NLane;
+//             int n1 = n % NLane;
+
+//             int k0 = k / (KLane * KPack);
+//             tempk  = k % (KLane * KPack);
+//             int k1 = tempk / KPack;
+//             int k2 = tempk % KPack;
+
+//             int outputIndex = n0 * KPack * NLane * KLane * K0 + k0 * KPack * NLane * KLane +
+//                               k1 * KPack * NLane + n1 * KPack + k2;
+
+//             dst[outputIndex / 2] = src[(n * K + k) / 2];
+//         }
+//     }
+// }
 template <
     typename A0DataType, 
+    typename A1DataType, 
     typename B0DataType, 
+    typename B1DataType, 
     typename AccDataType, 
     typename EDataType, 
     typename CDEElementOp, 
@@ -19,7 +52,7 @@ template <
     bool MulRoutedWeight, 
     int ActOP
     >
-void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
+void ck_moe_stage1_gemm_mxfp4(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
                         int topk,
                         void *&hidden_states,           // [m, k], input token
                         void *&w1,                      // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
@@ -34,10 +67,13 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
 )
 {
     // ~~~~~~~~~~~~~~~~~~~~~~~~following start with ck things
+    static constexpr ck::index_t ScaleBlockSize  = 32; // scaling block size
     ck::index_t StrideA = K;
     ck::index_t StrideB = K;
     ck::index_t StrideD = 0;
     ck::index_t StrideE = N;
+    ck::index_t Scale_Stride_AM      = (K + ScaleBlockSize - 1) / ScaleBlockSize;
+    ck::index_t Scale_Stride_BN      = (K + ScaleBlockSize - 1) / ScaleBlockSize;
     ck::index_t KBatch = 1;
     // using AccDataType = F32;
     using CShuffleDataType = F32;
@@ -60,17 +96,17 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     // static constexpr ck::index_t MPerBlock = 128;
     static constexpr ck::index_t MNPerXDL = 16;
     static constexpr ck::index_t BLOCKSIZE = 256;
-    static constexpr ck::index_t NPerBlock = PipelineVer == ck::BlockGemmPipelineVersion::v1 ? 128 : 256;
+    static constexpr ck::index_t NPerBlock = 128; //PipelineVer == ck::BlockGemmPipelineVersion::v1 ? 128 : 256;
     static constexpr ck::index_t WAVES = BLOCKSIZE / 64;
     // static constexpr ck::index_t MWaves = 1;
     // static constexpr ck::index_t NWaves = WAVES / MWaves;
     static constexpr ck::index_t MXDLPerWave = MPerBlock / (MNPerXDL * MWaves);
     static constexpr ck::index_t NXDLPerWave = NPerBlock / (MNPerXDL * NWaves);
-    static constexpr ck::index_t CShuffleMXDLPerWave = ck::is_same_v<B0DataType, I4> ? 2 : MXDLPerWave;
-    static constexpr ck::index_t CShuffleNXDLPerWave = ck::is_same_v<B0DataType, I4> ? 1 : NXDLPerWave;
+    static constexpr ck::index_t CShuffleMXDLPerWave = MXDLPerWave;
+    static constexpr ck::index_t CShuffleNXDLPerWave = NXDLPerWave;
     // static constexpr ck::index_t KPerBlock = ck::is_same_v<B0DataType, I4> ? 128 : 256 / sizeof(A0DataType);
     static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);
-    static constexpr ck::index_t BK1 = ck::is_same_v<B0DataType, I4> ? 32 : 16 / sizeof(B0DataType);
+    static constexpr ck::index_t BK1 = 32 / sizeof(B0DataType);
     static constexpr ck::index_t EVec = 16 / sizeof(EDataType);
     static constexpr ck::index_t K0_A = KPerBlock / AK1;
     static constexpr ck::index_t K0_B = KPerBlock / BK1;
@@ -80,40 +116,27 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t D1Vec = PerTensorQuant ? 1 : EVec;
     static constexpr ck::index_t D2Vec = 1;
 
-    using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemm
-        // clang-format off
-///######|  ALayout|  BLayout| DsLayout| ELayout|      AData|      BData|     DsData|     EData|     AccData|         CShuffle|           A|           B|          CDE|           GEMM| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MXdl| NXdl|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
-///######|         |         |         |        |       Type|       Type|       Type|      Type|        Type|         DataType| Elementwise| Elementwise|  Elementwise| Spacialization|  Size| Block| Block| Block|    |    |  XDL|  XDL|  Per|  Per|   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
-///######|         |         |         |        |           |           |           |          |            |                 |   Operation|   Operation|    Operation|               |      |      |      |      |    |    |     |     | Wave| Wave| Lengths_K0_M_K1|   ArrangeOrder|               |               |      PerVector|   PerVector_K1|          | Lengths_K0_N_K1|   ArrangeOrder|               |              |      PerVector|   PerVector_K1|          |  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|
-///######|         |         |         |        |           |           |           |          |            |                 |            |            |             |               |      |      |      |      |    |    |     |     |     |     |                |               |               |               |               |               |          |                |               |               |              |               |               |          |            |            |                             |    S<C, D0, D1>|
-///###### RCR
-        // kernel 1: 256->32x128x128 
-        // <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,  AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   256,   32,   128,    128,  16,  16,  32,   32,    1,    1,     S<8, 32, 1>,     S<1, 0, 2>,    S<1, 0, 2>,               2,             16,             16,          0,     S<8, 32, 1>,    S<1, 0, 2>,     S<1, 0, 2>,             2,              16,             16,          0,          1,           1,               S<1, 32, 1, 8>,      S<8, 8, 1>,  ck::BlockGemmPipelineScheduler::Interwave, ck::BlockGemmPipelineVersion::v1, EDataType>;
-        // <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,  AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   256,   32,   128,    256,  16,  16,  32,   32,    1,    1,     S<16, 16, 1>,     S<1, 0, 2>,    S<1, 0, 2>,               2,             16,             16,          0,     S<16, 16, 1>,    S<1, 0, 2>,     S<1, 0, 2>,             2,              16,             16,          0,          1,           1,               S<1, 32, 1, 8>,      S<8, 8, 1>,  ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, EDataType>;
-        <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
-               AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   
-               //threadnum, mblock, nblock, kblock
-               256,   MPerBlock,   NPerBlock,    KPerBlock,
-               // ak1, bk1
-               AK1,   BK1,
-               // mn_perxdl
-               MNPerXDL,   MNPerXDL,
-               // mn_xdlperwave 
-               MXDLPerWave,    NXDLPerWave,
-               // a,b: loadtranfer cluster, cluster order, srcorder,VECDIM, srcpervec, dstpervec, lds_extra
-            //    S<16, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0,
-            //    S<16, 16, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 8, 8, 0,
-               S<K0_A, K0_M_A, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, AK1, AK1, 0,
-               S<K0_B, K0_N_B, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, BK1, BK1, 0,
-               //    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
-               //    MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
-                //  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|
-               2,    1,   S<1, 32, 1, 8>, S<EVec, D0Vec, D1Vec>,
-               ck::BlockGemmPipelineScheduler::Intrawave, PipelineVer, ActOP, Nswizzle, true, MulRoutedWeight, !PerTensorQuant, ck::index_t, A0DataType>;
-        // kernel 2: 128->32x128x128
-        //  <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,  AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   128,   32,   128,    128,  16,  16,  32,   32,    1,    2,     S<8, 16, 1>,     S<1, 0, 2>,    S<1, 0, 2>,               2,             16,             16,          0,     S<8, 16, 1>,    S<1, 0, 2>,     S<1, 0, 2>,             2,              16,             16,          0,          1,           1,               S<1, 16, 1, 8>,      S<8, 8, 1>,  ck::BlockGemmPipelineScheduler::Interwave, ck::BlockGemmPipelineVersion::v1, EDataType>;
+    // preShuffleBuffer((cosntF4*)w1_scale, w1, 4096, 6144, 16);
 
-    // clang-format on
+    // std::cout << "ck_preshuffle" << std::endl;
+    // for (int i = 0; i < 128; i++) {
+    //     std::cout << (int)((uint8_t*)w1)[i] << ", ";
+    // }
+    
+    using DeviceOpInstance                     = ck::tensor_operation::device::DeviceMoeGemmMXBNS<      
+        A0Layout,    B0Layout,    DsLayout,    ELayout, 
+        A0DataType,  A1DataType,  B0DataType,  B1DataType,  DsDataType, EDataType, AccDataType, CShuffleDataType,
+        AElementOp,  BElementOp, CDEElementOp, GemmSpec,   
+        ScaleBlockSize, 256,   
+        MPerBlock,      128,    128,
+        16,   16,
+        16,   16,
+        MXDLPerWave,     NXDLPerWave,
+        S<8, 32, 1>, S<1, 0, 2>,     S<1, 0, 2>,    2, 16, 16, 0,
+        S<8, 32, 1>, S<1, 0, 2>,     S<1, 0, 2>,    2, 16, 16, 0,
+        2,    2,     S<1, 32, 1, 8>, S<8, 1, 1, 1>,
+        ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, 
+        ActOP, Nswizzle, true, MulRoutedWeight, ck::index_t, A0DataType>;// clang-format on
 
     auto a_element_op = AElementOp{};
     auto b_element_op = BElementOp{};
@@ -125,7 +148,29 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     constexpr auto I1 = ck::Number<1>{};
     static constexpr auto DStride = PerTensorQuant ? I0 : I1;
 
-    // do GEMM
+    // Tensor<A0DataType> a0_t_k(HostTensorDescriptor({1024, K}, {K, 1}));
+    // Tensor<A1DataType> a1_t_k(HostTensorDescriptor(
+    //     {1024, (K + ScaleBlockSize - 1) / ScaleBlockSize}, {Scale_Stride_AM, 1}));
+    // Tensor<B0DataType> b0_e_n_k(HostTensorDescriptor({8, K, N * 2}, {N * 2 * K, 1, K}));
+    // Tensor<B1DataType> b1_e_n_k(
+    //     HostTensorDescriptor({8, (K + ScaleBlockSize - 1) / ScaleBlockSize, N * 2},
+    //                          {(N * 2 * Scale_Stride_BN), 1, Scale_Stride_BN}));
+    
+    // a0_t_k.GenerateTensorValue(GeneratorTensor_3<A0DataType>{6, 6});
+    // b0_e_n_k.GenerateTensorValue(GeneratorTensor_3<B0DataType>{6, 6});
+    // a1_t_k.GenerateTensorValue(GeneratorTensor_3<A1DataType>{125, 125});
+    // b1_e_n_k.GenerateTensorValue(GeneratorTensor_3<B1DataType>{125, 125});
+
+    // DeviceMem a0_device_buf(sizeof(A0DataType) * a0_t_k.mDesc.GetElementSpaceSize() / 2);
+    // DeviceMem a1_device_buf(sizeof(A1DataType) * a1_t_k.mDesc.GetElementSpaceSize());
+    // DeviceMem b0_device_buf(sizeof(B0DataType) * b0_e_n_k.mDesc.GetElementSpaceSize() / 2);
+    // DeviceMem b1_device_buf(sizeof(B1DataType) * b1_e_n_k.mDesc.GetElementSpaceSize());
+
+    // a0_device_buf.ToDevice(a0_t_k.mData.data());
+    // a1_device_buf.ToDevice(a1_t_k.mData.data());
+    // b0_device_buf.ToDevice(b0_e_n_k.mData.data);
+    // b1_device_buf.ToDevice(b1_e_n_k.mData.data());
+    // // do GEMM
     auto device_op = DeviceOpInstance{};
 
     auto invoker = device_op.MakeInvoker();
@@ -134,9 +179,11 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                                sorted_expert_ids,
                                num_valid_ids,
                                hidden_states,
+                               a1_scale.value(),
                                w1,
-                               std::array<const void *, NumDTensor>{a1_scale.has_value() ? a1_scale.value() : nullptr,
-                                                                    w1_scale.has_value() ? w1_scale.value() : nullptr,
+                               w1_scale.value(),
+                               std::array<const void *, NumDTensor>{nullptr,
+                                                                    nullptr,
                                                                     MulRoutedWeight ? sorted_weights : nullptr},
                                out,
                                tokens,
@@ -145,8 +192,10 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                                N,
                                K,
                                StrideA,
+                               Scale_Stride_AM,
                                StrideB,
-                               std::array<ck::index_t, NumDTensor>{DStride, DStride, I0},
+                               Scale_Stride_BN,
+                               std::array<ck::index_t, NumDTensor>{I0, I0, I0},
                                StrideE,
                                KBatch,
                                a_element_op,
@@ -163,8 +212,8 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     invoker.Run(argument, StreamConfig{stream});
 }
 
-#define CK_MOE_STAGE1_GEMM_DEFINE(MPerfBlock, KPerBlock, MWaves, NWaves, PipelineVer, MulRoutedWeight, ActOP)                                                                                                                            \
-    template void ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, MPerfBlock, KPerBlock, MWaves, NWaves, Nswizzle, PerTensorQuant, MulRoutedWeight, ActOP>( \
+#define CK_MOE_STAGE1_GEMM_MXFP4_DEFINE(MPerfBlock, KPerBlock, MWaves, NWaves, PipelineVer, MulRoutedWeight, ActOP)                                                                                                                            \
+    template void ck_moe_stage1_gemm_mxfp4<A0DataType, A1DataType, B0DataType, B1DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, MPerfBlock, KPerBlock, MWaves, NWaves, Nswizzle, PerTensorQuant, MulRoutedWeight, ActOP>( \
         const hipStream_t &stream,                                                                                                                                          \
         int tokens, int sorted_size, int N, int K,                                                                                                                          \
         int topk,                                                                                                                                                           \
@@ -181,7 +230,9 @@ void ck_moe_stage1_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
 
 template <
     typename A0DataType, 
+    typename A1DataType, 
     typename B0DataType, 
+    typename B1DataType, 
     typename AccDataType, 
     typename EDataType, 
     typename CDEElementOp, 
@@ -194,7 +245,7 @@ template <
     bool PerTensorQuant, 
     bool MulRoutedWeight
 >
-void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
+void ck_moe_stage2_gemm_mxfp4(const hipStream_t &stream, int tokens, int sorted_size, int N, int K,
                         int topk,
                         void *&inter_states,            // [max_num_tokens_padded, k], input token
                         void *&w1,                      // [e, n, k]/[e, 2*n, k], pre-shuffle([e, nr, kr, w])
@@ -209,12 +260,16 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
 )
 {
     // ~~~~~~~~~~~~~~~~~~~~~~~~following start with ck things
+    static constexpr ck::index_t ScaleBlockSize  = 32; // scaling block size
     ck::index_t StrideA = K;
     ck::index_t StrideB = K;
     ck::index_t StrideD = 0;
     ck::index_t StrideE = N;
+    ck::index_t Scale_Stride_AM      = (K + ScaleBlockSize - 1) / ScaleBlockSize;
+    ck::index_t Scale_Stride_BN      = (K + ScaleBlockSize - 1) / ScaleBlockSize;
     ck::index_t KBatch = 1;
 
+    // printf("%dx%dx%d", tokens, N, K);
     // using AccDataType = F32;
     using CShuffleDataType = F32;
     using DsDataType = ck::Tuple<F32, F32, F32>;
@@ -233,7 +288,7 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::Default;
     static constexpr ck::index_t BLOCKSIZE = 256;
     static constexpr ck::index_t WAVES = BLOCKSIZE / 64;
-    static constexpr ck::index_t NPerBlock = PipelineVer == ck::BlockGemmPipelineVersion::v1 ? 128 : 256;
+    static constexpr ck::index_t NPerBlock = 128;
     static constexpr ck::index_t MNPerXDL = 16;
     // static constexpr ck::index_t MWaves = 1;
     // static constexpr ck::index_t NWaves = WAVES / MWaves;
@@ -245,7 +300,7 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t CShuffleNLane = ck::is_same_v<B0DataType, I4> ? 32 : NPerBlock / 2 / NXDLPerWave; // 64
     static constexpr ck::index_t CShuffleMLane = BLOCKSIZE / CShuffleNLane;
     static constexpr ck::index_t AK1 = 16 / sizeof(A0DataType);
-    static constexpr ck::index_t BK1 = ck::is_same_v<B0DataType, I4> ? 32 / sizeof(B0DataType) : 16 / sizeof(B0DataType);
+    static constexpr ck::index_t BK1 = 32 / sizeof(B0DataType);
     static constexpr ck::index_t EVec = 2;
     static constexpr ck::index_t D0Vec = 1;
     static constexpr ck::index_t D1Vec = PerTensorQuant ? 1 : EVec;
@@ -254,38 +309,21 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     static constexpr ck::index_t K0_B = KPerBlock / BK1;
     static constexpr ck::index_t K0_M = BLOCKSIZE / K0_A;
     static constexpr ck::index_t K0_N = BLOCKSIZE / K0_B;
-
-    using DeviceOpInstance = ck::tensor_operation::device::DeviceMoeGemm
-        // clang-format off
-///#####|  ALayout|  BLayout| DsLayout| ELayout|      AData|      BData|     DsData|     EData|     AccData|         CShuffle|           A|           B|          CDE|           GEMM| Block|  MPer|  NPer|  KPer| AK1| BK1| MPer| NPer| MXdl| NXdl|  ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockTransfer| ABlockLds|  BBlockTransfer| BBlockTransfer| BBlockTransfer| BlockTransfer| BBlockTransfer| BBlockTransfer| BBlockLds|    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
-///#####|         |         |         |        |       Type|       Type|       Type|      Type|        Type|         DataType| Elementwise| Elementwise|  Elementwise| Spacialization|  Size| Block| Block| Block|    |    |  XDL|  XDL|  Per|  Per|   ThreadCluster|  ThreadCluster| SrcAccessOrder|   SrcVectorDim|      SrcScalar|      DstScalar| AddExtraM|   ThreadCluster|  ThreadCluster| SrcAccessOrder|  SrcVectorDim|      SrcScalar|      DstScalar| AddExtraN| MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
-///#####|         |         |         |        |           |           |           |          |            |                 |   Operation|   Operation|    Operation|               |      |      |      |      |    |    |     |     | Wave| Wave| Lengths_K0_M_K1|   ArrangeOrder|               |               |      PerVector|   PerVector_K1|          | Lengths_K0_N_K1|   ArrangeOrder|               |              |      PerVector|   PerVector_K1|          |  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|
-///#####|         |         |         |        |           |           |           |          |            |                 |            |            |             |               |      |      |      |      |    |    |     |     |     |     |                |               |               |               |               |               |          |                |               |               |              |               |               |          |            |            |                             |    S<C, D0, D1>|
-///##### RCR
-       // kernel 1: 256->32x128x128 
-       // <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,  AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   256,   32,   128,    128,  16,  16,  32,   32,    1,    1,     S<8, 32, 1>,     S<1, 0, 2>,    S<1, 0, 2>,               2,             16,             16,          0,     S<8, 32, 1>,    S<1, 0, 2>,     S<1, 0, 2>,             2,              16,             16,          0,          1,           1,               S<1, 32, 1, 8>,      S<8, 8, 1>,  ck::BlockGemmPipelineScheduler::Interwave, ck::BlockGemmPipelineVersion::v1, EDataType>;
-       // <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,  AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   256,   32,   128,    256,  16,  16,  32,   32,    1,    1,     S<16, 16, 1>,     S<1, 0, 2>,    S<1, 0, 2>,               2,             16,             16,          0,     S<16, 16, 1>,    S<1, 0, 2>,     S<1, 0, 2>,             2,              16,             16,          0,          1,           1,               S<1, 32, 1, 8>,      S<8, 8, 1>,  ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, EDataType>;
-       <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
-              AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   
-              //threadnum, mblock, nblock, kblock
-              BLOCKSIZE,   MPerBlock,   NPerBlock,    KPerBlock,
-              // ak1, bk1
-              AK1,   BK1,
-              // mn_perxdl
-              MNPerXDL,   MNPerXDL,
-              // mn_xdlperwave 
-              MXDLPerWave, NXDLPerWave,
-              // a,b: loadtranfer cluster, cluster order, srcorder,VECDIM, srcpervec, dstpervec, lds_extra
-              S<K0_A, K0_M, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, AK1, AK1, 0,
-              S<K0_B, K0_N, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, BK1, BK1, 0,
-              //    CShuffle|    CShuffle| CBlockTransferClusterLengths|  CBlockTransfer|
-              //    MXdlPerWave| NXdlPerWave|         _MBlock_MWaveMPerXdl| ScalarPerVector|
-               //  PerShuffle|  PerShuffle|         _NBlock_NWaveNPerXdl|   _NWaveNPerXdl|
-              CShuffleMXDLPerWave,    1,   S<1, CShuffleMLane, 1, CShuffleNLane>, S<EVec, D0Vec, D1Vec, D2Vec>,
-              ck::BlockGemmPipelineScheduler::Intrawave, PipelineVer, 0, Nswizzle, false, MulRoutedWeight, !PerTensorQuant, ck::index_t, A0DataType>;
-       // kernel 2: 128->32x128x128
-       //  <      Row,      Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,  AElementOp,  BElementOp, CDEElementOp,       GemmSpec,   128,   32,   128,    128,  16,  16,  32,   32,    1,    2,     S<8, 16, 1>,     S<1, 0, 2>,    S<1, 0, 2>,               2,             16,             16,          0,     S<8, 16, 1>,    S<1, 0, 2>,     S<1, 0, 2>,             2,              16,             16,          0,          1,           1,               S<1, 16, 1, 8>,      S<8, 8, 1>,  ck::BlockGemmPipelineScheduler::Interwave, ck::BlockGemmPipelineVersion::v1, EDataType>;
-
+// clang-format off
+using DeviceOpInstance                     = ck::tensor_operation::device::DeviceMoeGemmMXBNS<      
+    A0Layout,    B0Layout,    DsLayout,    ELayout, 
+    A0DataType,  A1DataType,  B0DataType,  B1DataType,  DsDataType, EDataType, AccDataType, CShuffleDataType,
+    AElementOp,  BElementOp, CDEElementOp, GemmSpec,   
+    ScaleBlockSize,      256,   
+    MPerBlock,      128,    128,
+    16,   16,
+    16,   16,
+    MXDLPerWave,     NXDLPerWave,
+    S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
+    S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
+    2,    2,   S<1, 32, 1, 8>, S<2, 1, 1, 1>,
+    ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, 0, false, false, MulRoutedWeight, ck::index_t, A0DataType>;
+// clang-format on
 
     auto a_element_op = AElementOp{};
     auto b_element_op = BElementOp{};
@@ -306,9 +344,11 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                                sorted_expert_ids,
                                num_valid_ids,
                                inter_states,
+                               a2_scale.value(),
                                w2,
-                               std::array<const void *, NumDTensor>{a2_scale.has_value() ? a2_scale.value() : nullptr,
-                                                                    w2_scale.has_value() ? w2_scale.value() : nullptr,
+                               w2_scale.value(),
+                               std::array<const void *, NumDTensor>{nullptr,
+                                                                    nullptr,
                                                                     MulRoutedWeight ? sorted_weights : nullptr},
                                out,
                                tokens,
@@ -317,7 +357,9 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
                                N,
                                K,
                                StrideA,
+                               Scale_Stride_AM,
                                StrideB,
+                               Scale_Stride_BN,
                                std::array<ck::index_t, NumDTensor>{DStride, DStride, I0},
                                StrideE,
                                KBatch,
@@ -334,8 +376,8 @@ void ck_moe_stage2_gemm(const hipStream_t &stream, int tokens, int sorted_size, 
     invoker.Run(argument, StreamConfig{stream});
 }
 
-#define CK_MOE_STAGE2_GEMM_DEFINE(MPerfBlock, KPerBlock, MWaves, NWaves, PipelineVer, MulRoutedWeight)                                                                                    \
-    template void ck_moe_stage2_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, MPerfBlock, KPerBlock, MWaves, NWaves, Nswizzle, PerTensorQuant, MulRoutedWeight>( \
+#define CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(MPerfBlock, KPerBlock, MWaves, NWaves, PipelineVer, MulRoutedWeight)                                                                                    \
+    template void ck_moe_stage2_gemm_mxfp4<A0DataType, A1DataType, B0DataType, B1DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, MPerfBlock, KPerBlock, MWaves, NWaves, Nswizzle, PerTensorQuant, MulRoutedWeight>( \
         const hipStream_t &stream,                                                                                                                                   \
         int tokens, int sorted_size, int N, int K,                                                                                                                   \
         int topk,                                                                                                                                                    \

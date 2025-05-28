@@ -20,6 +20,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                                           const int h_k,
                                           const int d,
                                           const int d_v,
+                                          const int min_seqlen_q,
                                           // device pointers
                                           const at::Tensor q,
                                           const at::Tensor k,
@@ -33,6 +34,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                                           at::Tensor softmax_lse,
                                           at::Tensor dropout_randval,
                                           float softmax_scale,
+                                          float logits_soft_cap,
                                           float p_dropout,
                                           std::pair<uint64_t*, uint64_t*> drop_seed_offset)
 {
@@ -107,12 +109,13 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          b,
                          max_seqlen_q,
                          d,             // hdim_q
-                         d_v,             // hdim_v
+                         d_v,           // hdim_v
                          h,             // nhead
                          h_k,           // nhead_k
                          softmax_scale, // scale_s
                          1,             // scale_p
                          1,             // scale_o
+                         logits_soft_cap,
                          stride_q,
                          stride_k,
                          stride_v,
@@ -136,6 +139,7 @@ fmha_fwd_args get_ck_fmha_varlen_fwd_args(bool has_lse,
                          mask.left,
                          mask.right,
                          static_cast<ck_tile::index_t>(mask.type),
+                         min_seqlen_q,
                          p_dropout,
                          has_dropout_randval,
                          drop_seed_offset};
@@ -152,6 +156,7 @@ fmha_fwd_splitkv_args get_ck_fmha_varlen_fwd_splitkv_args(bool has_lse,
                                                           const int page_block_size,
                                                           const int num_splits,
                                                           float softmax_scale,
+                                                          float logits_soft_cap,
                                                           // device pointers
                                                           const at::Tensor q,
                                                           const at::Tensor k,
@@ -232,6 +237,8 @@ fmha_fwd_splitkv_args get_ck_fmha_varlen_fwd_splitkv_args(bool has_lse,
     args.scale_p = 1;
     args.scale_o = 1;
 
+    args.logits_soft_cap = logits_soft_cap;
+
     args.batch_stride_q = 0;
     args.stride_q = q.stride(0);
     args.nhead_stride_q = q.stride(1);
@@ -296,8 +303,10 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                std::optional<const at::Tensor> &cu_seqlens_k, // [b+1]
                int max_seqlen_q,
                int max_seqlen_k,
+               int min_seqlen_q,
                float p_dropout,
                float softmax_scale,
+               float logits_soft_cap,
                bool zero_tensors,
                bool is_causal,
                int window_size_left,
@@ -500,6 +509,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                     page_block_size,
                     num_splits,
                     softmax_scale,
+                    logits_soft_cap,
                     q,
                     k,
                     v,
@@ -518,7 +528,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                                              stream_config,
                                              q_dtype_str,
                                              true, //is_group_mode
-                                             mask,
+                                             mask.type,
                                              bias_type,
                                              has_lse);
             TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd_splitkv");
@@ -538,6 +548,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                     num_heads_k,
                     head_size_q,
                     head_size_v,
+                    min_seqlen_q,
                     q,
                     k,
                     v,
@@ -550,6 +561,7 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                     softmax_lse,
                     p,
                     softmax_scale,
+                    logits_soft_cap,
                     p_dropout,
                     drop_seed_offset);
 
@@ -557,9 +569,10 @@ mha_varlen_fwd(at::Tensor &q,                  // [total_q, hq, d]
                                      stream_config,
                                      q_dtype_str,
                                      true, //is_group_mode
-                                     mask,
+                                     mask.type,
                                      bias_type,
-                                     has_lse);
+                                     has_lse,
+                                     false);
             TORCH_CHECK(t >= 0, "invalid argument for fmha_fwd");
         }
     }

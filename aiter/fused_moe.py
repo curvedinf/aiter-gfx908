@@ -43,6 +43,34 @@ def mxfp4_to_f32(x):
     mxfp4_in_f32 = torch.tensor(mxfp4_list, dtype=torch.float32, device="cuda")
     return mxfp4_in_f32[x.long()]
  
+BLOCK_SIZE_M = 128
+
+def mxfp4_to_f32(x):
+    # 2 because we pack fp4 in uint8.
+    x = x.repeat_interleave(2, dim=1)
+    x[:, ::2] = x[:, ::2] & 0xF
+    x[:, 1::2] = x[:, 1::2] >> 4
+    mxfp4_list = [
+        0.0,
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        3.0,
+        4.0,
+        6.0,
+        -0.0,
+        -0.5,
+        -1.0,
+        -1.5,
+        -2.0,
+        -3.0,
+        -4.0,
+        -6.0,
+    ]
+    mxfp4_in_f32 = torch.tensor(mxfp4_list, dtype=torch.float32, device="cuda")
+    return mxfp4_in_f32[x.long()]
+ 
 
 def moe_sorting(
     topk_ids,

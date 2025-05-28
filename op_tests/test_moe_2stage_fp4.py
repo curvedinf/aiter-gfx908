@@ -577,7 +577,7 @@ def test_fused_moe(
     routed_weight: bool,
     swizzle_mx_scale: bool,
 ):
-    block_size_m = 64
+    block_size_m = 128
     if triton.runtime.driver.active.get_current_target().arch not in ("gfx950"):
         pytest.skip("MXFP4 not supported on this architecture")
     aiter_quant = aiter.get_torch_quant(aiter.QuantType.per_1x32)
@@ -833,5 +833,5 @@ def test_fused_moe(
 
 
 
-test_fused_moe(1024, 4096, 6144, 2, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(8192, 6144, 4096, 2, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
 # test_fused_moe(512, 2048, 2048, 2, 4, "mxfp4_e2m1", "mxfp4_e2m1", False, False)

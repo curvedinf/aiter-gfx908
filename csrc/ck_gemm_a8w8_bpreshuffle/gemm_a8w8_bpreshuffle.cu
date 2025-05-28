@@ -6,7 +6,7 @@
 #include "gemm_a8w8_bpreshuffle_lookup.h"
 #include <cmath>
 
-using BlockwiseKernel = std::function<
+using RowwiseKernel = std::function<
     torch::Tensor(torch::Tensor &, torch::Tensor &,
                   torch::Tensor &, torch::Tensor &,
                   torch::Tensor &)>;
@@ -23,29 +23,21 @@ struct IntTupleHash
   }
 };
 
-using BlockwiseKernelMap = std::unordered_map<
+using RowwiseKernelMap = std::unordered_map<
     std::tuple<int, int, int>,
-    BlockwiseKernel,
+    RowwiseKernel,
     IntTupleHash>;
 
 template <typename DDataType, typename EDataType = DDataType>
-BlockwiseKernel blockwise_heuristic_dispatch(int M, int N, int K)
+RowwiseKernel blockwise_heuristic_dispatch(int M, int N, int K)
 {
-  // if (M <= 16  || (M <= 128 && N * K <= 512 * 7168))
-  // {
-  //   return a8w8_bpreshuffle_1x128x128_256x16x64x256_16x16_16x16_16x16x1_16x16x1_1x16x1x16_4_1x1_intrawave_v1<DDataType, EDataType>;
-  // }
-  // else if (M <= 32)
-  // {
-  //   return a8w8_bpreshuffle_1x128x128_256x32x64x256_16x16_16x16_16x16x1_16x16x1_1x32x1x8_8_2x1_intrawave_v1<DDataType, EDataType>;
-  // }
-  // else if (K < 320)
-  // {
-  //   return a8w8_bpreshuffle_1x128x128_256x16x128x256_16x16_16x16_16x16x1_16x16x1_1x16x1x16_8_1x2_intrawave_v1<DDataType, EDataType>;
-  // }
-  // else
+  if(K <= 2048)
   {
-    return a8w8_bpreshuffle_256x128x128x128_16x16_32x32_8x32x1_8x32x1_1x32x1x8_8x8x1_1x1_intrawave_v3<DDataType, EDataType>;
+    return a8w8_bpreshuffle_256x128x128x128_16x16_16x16_8x32x1_8x32x1_1x32x1x8_8x8x1_2x1_intrawave_v3<DDataType, EDataType>;
+  }
+  else
+  {
+    return a8w8_bpreshuffle_256x128x128x256_16x16_16x16_16x16x1_16x16x1_1x32x1x8_8x8x1_1x2_intrawave_v3<DDataType, EDataType>;
   }
 }
 
@@ -58,7 +50,7 @@ static constexpr int nextPow2(unsigned int num)
 }
 
 template <typename DDataType, typename EDataType = DDataType>
-BlockwiseKernel blockscale_dispatch(int M, int N, int K)
+RowwiseKernel rowwise_dispatch(int M, int N, int K)
 {
   // For a given shape, either find the best kernel via lookup or heuristic.
   // For many small M shapes, we bucket them to the next largest kernel.
@@ -67,11 +59,11 @@ BlockwiseKernel blockscale_dispatch(int M, int N, int K)
   static const auto lookup = []
   {
       if constexpr (std::is_same_v<EDataType, F16>) {
-          return BlockwiseKernelMap{GENERATE_LOOKUP_TABLE(DDataType,F16)};
+          return RowwiseKernelMap{GENERATE_LOOKUP_TABLE(DDataType,F16)};
       } else if constexpr (std::is_same_v<EDataType, B16>) {
-          return BlockwiseKernelMap{GENERATE_LOOKUP_TABLE(DDataType,B16)};
+          return RowwiseKernelMap{GENERATE_LOOKUP_TABLE(DDataType,B16)};
       } else {
-          static_assert(false, "blockscale_dispatch used with unsupported dtype!");
+          static_assert(false, "rowwise_dispatch used with unsupported dtype!");
       } }();
 
   // First check if this shape(M,N,K) is available in the direct lookup.
@@ -99,7 +91,7 @@ BlockwiseKernel blockscale_dispatch(int M, int N, int K)
   it = lookup.find({padded_m, N, K});
   // If we found an optimal kernel, use it.
   if (it != lookup.end())
-  {
+  { 
     return it->second;
   }
   // Otherwise, use heuristics.
@@ -113,7 +105,6 @@ torch::Tensor gemm_a8w8_bpreshuffle(
     torch::Tensor &w_scale,
     torch::Tensor &Y)
 {
-  // printf("solin:=====gemm_a8w8_bpreshuffle==.\n");
   TORCH_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
   TORCH_CHECK(x_scale.dtype() == w_scale.dtype(),
               "Scales should have the same dtype!");
@@ -121,14 +112,14 @@ torch::Tensor gemm_a8w8_bpreshuffle(
   int M = XQ.size(0);
   int N = WQ.size(0);
   int K = XQ.size(1);
- // printf("solin:=====gemm_a8w8_bpreshuffle=m=%d,n=%d,k=%d=.\n",M,N,K);
+  
   if (x_scale.dtype() == at::ScalarType::Float && Y.dtype() == at::ScalarType::Half)
   {
-    blockscale_dispatch<F32, F16>(M, N, K)(XQ, WQ, x_scale, w_scale, Y);
+    rowwise_dispatch<F32, F16>(M, N, K)(XQ, WQ, x_scale, w_scale, Y);
   }
   else if (x_scale.dtype() == at::ScalarType::Float && Y.dtype() == at::ScalarType::BFloat16)
   {
-    blockscale_dispatch<F32, B16>(M, N, K)(XQ, WQ, x_scale, w_scale, Y);
+    rowwise_dispatch<F32, B16>(M, N, K)(XQ, WQ, x_scale, w_scale, Y);
   }
   else
   {

@@ -171,10 +171,39 @@ def test_flatmm(dtype, m, n, k):
     checkAllclose(a, b, msg="a,b: " + msg, rtol=1e-2, atol=0.01)
     checkAllclose(a, c, msg="ck_preshuffle: ", rtol=1e-2, atol=0.01)
 
+@benchmark()
+def test_flatmm_ck(dtype, m, n, k):
+    dim = (m, n, k)
+    block_shape_n, block_shape_k = block_shape
+    scale_m = m
+    scale_n = (n + block_shape_n - 1) // block_shape_n
+    scale_k = (k + block_shape_k - 1) // block_shape_k
+
+    x = (torch.rand((m, k), dtype=torch.float32, device="cuda") / 10).to(
+        torch.float8_e4m3fnuz
+    )
+    weight = (torch.rand((n, k), dtype=torch.float32, device="cuda") / 10).to(
+        torch.float8_e4m3fnuz
+    )
+
+    x_scale = torch.ones([scale_k, scale_m], dtype=torch.float32, device="cuda")
+    w_scale = torch.ones([scale_k, scale_n], dtype=torch.float32, device="cuda")
+
+    x_scale_trans = torch.transpose(x_scale, 0, 1)
+    w_scale_trans = torch.transpose(w_scale, 0, 1)
+
+    flat_weight = weight.view(n // 16, 16, k // 64, 4, 16)
+    flat_weight = flat_weight.permute(0, 2, 3, 1, 4).contiguous()
+    flat_weight = flat_weight.view(n, -1)
+    a, avg_a = run_torch2(x, weight, x_scale_trans, w_scale_trans, dtype)
+    c, avg_c = run_gemm_ck_bpreshuffle(x, flat_weight, x_scale, w_scale, dtype)
+    tflops = 2 * m *n *k /avg_c /1e6
+    msg = f"[solin  perf] tflops: {tflops} ,dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us,ck wpreshuffle avg: {avg_c:<8.2f} us,uplift: {avg_a/avg_c -1:<5.1%}"
+    checkAllclose(a, c, msg="ck_preshuffle: " + msg, rtol=1e-2, atol=0.01)
 
 for dtype in [torch.float16]:
-    for m in [2048]:
-        for (n, k) in [(4096, 5120),]:
-            test_flatmm(dtype, m, n, k)
+    for m in [8192]:
+        for (n, k) in [(8192, 8192),]:
+            test_flatmm_ck(dtype, m, n, k)
             break
 

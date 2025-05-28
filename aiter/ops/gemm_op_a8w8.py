@@ -207,9 +207,6 @@ def gemm_a8w8_bpreshuffle_CK(
     m = XQ.shape[0]
     n = WQ.shape[0]
     k = XQ.shape[-1]
-    # print(f"[solindebug] GEMM dimensions: m={m}, n={n}, k={k}")
-    # print(f"XQ shape: {XQ.shape}")                          
-    # print(f"WQ shape: {WQ.shape}")
     Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
     return gemm_a8w8_bpreshuffle(XQ, WQ, x_scale, w_scale, Y)
 
@@ -256,7 +253,6 @@ def flatmm_CK(
     m = XQ.shape[0]
     n = WQ.shape[0]
     k = XQ.shape[-1]
-    #print(f"solin:--flatmm_CKm = {m}, n = {n}, k = {k}") 
     Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
     return flatmm_ck(XQ, WQ, x_scale, w_scale, Y)
 

@@ -130,47 +130,28 @@ template <typename AccDataType, typename EDataType,
           ck::BlockGemmPipelineScheduler BlkGemmPipeSched = ck::BlockGemmPipelineScheduler::Intrawave,
           ck::BlockGemmPipelineVersion BlkGemmPipelineVer = ck::BlockGemmPipelineVersion::v3,
           auto GemmSpec = ck::tensor_operation::device::GemmSpecialization::Default>
-// using DeviceGemmHelperF8Flatmm = ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3_BPreshuffle
-//     // clang-format off
-//          <A0Layout, B0Layout, DsLayout, ELayout,
-//           A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType, 
-//           AElementOp,  BElementOp, CDEElementOp, GemmSpec, BlockSize,
-//           MPerBlock, NPerBlock, KPerBlock, 
-//           AK1, BK1, 
-//           MPerXDL, NPerXDL, 
-//           MXdlPerWave, NXdlPerWave, 
-//           ABlockTransferThreadClusterLengths_AK0_M_AK1, 
-//           S<1, 0, 2>, S<1, 0, 2>, 
-//           2, AK1, AK1, 0, 
-//           BBlockTransferThreadClusterLengths_BK0_N_BK1, 
-//           S<1, 0, 2>, S<1, 0, 2>, 
-//           2, BK1, BK1, 0, 
-//           CSHUFFLE_MX_PER_WAVE_PERSHUFFLE,
-//           CSHUFFLE_NX_PER_WAVE_PERSHUFFLE, 
-//           CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock, 
-//           CDEShuffleBlockTransferScalarPerVectors,  
-//           BlkGemmPipeSched, 
-//           BlkGemmPipelineVer, A0DataType>;
-// clang-format on
 using DeviceGemmHelperF8Flatmm = ck::tensor_operation::device::DeviceGemmMultiD_Xdl_CShuffle_V3_BPreshuffle
-              // clang-format off
-              <   Row, Col, DsLayout, ELayout, A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType,
-                  AElementOp,  BElementOp, CDEElementOp, GemmSpec, 256,
-                  128,   128,    128,
-                  16,   16,
-                  16,   16,
-                  8,    2,
-                  S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
-                  S<8, 32, 1>, S<1, 0, 2>, S<1, 0, 2>, 2, 16, 16, 0,
-                  2,    1,   S<1, 32, 1, 8>, S<8, 8, 1>,
-                  ck::BlockGemmPipelineScheduler::Intrawave, ck::BlockGemmPipelineVersion::v3, FP8>;
+    // clang-format off
+         <A0Layout, B0Layout, DsLayout, ELayout,
+          A0DataType, B0DataType, DsDataType, EDataType, AccDataType, CShuffleDataType, 
+          AElementOp,  BElementOp, CDEElementOp, GemmSpec, BlockSize,
+          MPerBlock, NPerBlock, KPerBlock, 
+          AK1, BK1, 
+          MPerXDL, NPerXDL, 
+          MXdlPerWave, NXdlPerWave, 
+          ABlockTransferThreadClusterLengths_AK0_M_AK1, 
+          S<1, 0, 2>, S<1, 0, 2>, 
+          2, AK1, AK1, 0, 
+          BBlockTransferThreadClusterLengths_BK0_N_BK1, 
+          S<1, 0, 2>, S<1, 0, 2>, 
+          2, BK1, BK1, 0, 
+          CSHUFFLE_MX_PER_WAVE_PERSHUFFLE,
+          CSHUFFLE_NX_PER_WAVE_PERSHUFFLE, 
+          CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock, 
+          CDEShuffleBlockTransferScalarPerVectors,  
+          BlkGemmPipeSched, 
+          BlkGemmPipelineVer, A0DataType>;
 
-                //   template <typename T>
-// struct CppTypeToDtype;
-// template <>
-// struct CppTypeToDtype<float> {
-//   static constexpr c10::ScalarType value = torch::kFloat;
-// };
 template <typename DDataType, typename EDataType, typename DeviceGemmInstance>
 __forceinline__ torch::Tensor gemm_a8w8_bpreshuffle_impl(
     torch::Tensor &XQ,
@@ -186,7 +167,7 @@ __forceinline__ torch::Tensor gemm_a8w8_bpreshuffle_impl(
     int StrideA = XQ.stride(-2);
     int StrideB = WQ.stride(-2);
     int StrideE = N;
-//printf("solin:====M=%d,N=%d,k=%d.strida=%d b=%d,e=%d.\n",M,N,K,StrideA,StrideB,StrideE);
+
     auto a_element_op = AElementOp{};
     auto b_element_op = BElementOp{};
     auto cde_element_op = CDEElementOp{};
@@ -194,24 +175,10 @@ __forceinline__ torch::Tensor gemm_a8w8_bpreshuffle_impl(
     constexpr ck::index_t NumDTensor = DsDataType::Size();
     constexpr auto I0 = ck::Number<0>{};
 
-    // auto options = torch::TensorOptions()
-    // .dtype(CppTypeToDtype<DDataType>::value)  
-    // .device(Y.device())                       
-    // .layout(Y.layout());                      
-    // torch::Tensor D0 = torch::empty(Y.sizes(), options); 
-    // torch::Tensor D1 = torch::empty(Y.sizes(), options);
-    // D0.copy_(XQ.to(options));  
-    // D1.copy_(XQ.to(options));
-
     EDataType* a_ptr = reinterpret_cast<EDataType*>(XQ.data_ptr());
     EDataType* b_ptr = reinterpret_cast<EDataType*>(WQ.data_ptr());
     EDataType* y_ptr = reinterpret_cast<EDataType*>(Y.data_ptr());
-    // for (int i = 0; i < 8; ++i) {
-    //     printf(" aptr %.4f ", static_cast<float>(a_ptr[i]));
-    //     printf(" bptr %.4f ", static_cast<float>(b_ptr[i]));
-    //     printf(" yptr %.4f ", static_cast<float>(y_ptr[i]));
-    // }
-    // printf("\n");
+
     // do GEMM
     auto device_gemm = DeviceGemmInstance{};
     auto invoker = device_gemm.MakeInvoker();
@@ -236,12 +203,6 @@ __forceinline__ torch::Tensor gemm_a8w8_bpreshuffle_impl(
     TORCH_CHECK(device_gemm.IsSupportedArgument(argument), "This GEMM is not supported!");
 
     invoker.Run(argument, StreamConfig{at::cuda::getCurrentCUDAStream().stream()});
-    // for (int i = 0; i < 8; ++i) {
-    //     printf(" aptr %.4f ", static_cast<float>(a_ptr[i]));
-    //     printf(" bptr %.4f ", static_cast<float>(b_ptr[i]));
-    //     printf(" yptr %.4f ", static_cast<float>(y_ptr[i]));
-    // }
-    // printf("\n");
     return Y;
 }
 

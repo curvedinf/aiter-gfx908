@@ -115,8 +115,8 @@ template torch::Tensor
         # TODO: dFP8_eFP8 
 
         if self.istune:
-            Path(os.path.join(self.instances_path, f"{k.name}_dBF16_eBF16.cpp")).write_text(
-                INSTANCE_dFP32_eBF16)
+            Path(os.path.join(self.instances_path, f"{k.name}_dFP32_eFP16.cpp")).write_text(
+                INSTANCE_dFP32_eFP16)
         else:
             Path(os.path.join(self.instances_path, f"{k.name}_dFP32_eBF16.cpp")).write_text(
                 INSTANCE_dFP32_eBF16)
@@ -231,9 +231,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-f",
         "--tune_file",
-        default="aiter/configs/a8w8_blockscale_tuned_gemm.csv",
+        default="aiter/configs/a8w8_bpreshuffle_tuned_gemm.csv",
         required=False,
-        help="tune_file include the result after run gemm_a8w8_tune.py"
+        help="tune_file include the result after run gemm_a8w8_bpreshuffle_tune.py"
     )
     
     parser.add_argument(

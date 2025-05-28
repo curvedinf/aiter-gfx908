@@ -13,6 +13,7 @@ from aiter.ops.shuffle import shuffle_weight
 from gemm_a8w8_bpreshuffle_common import kernelInstance, kernels_list
 import argparse
 from einops import rearrange
+from einops import repeat as eirp
 
 block_shape = (128, 128)
 
@@ -51,8 +52,25 @@ def run_torch(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16):
         out = out.to(bias) + bias
     return out.to(dtype)
 
+def run_torch2(x, weight, x_scale, w_scale, dtype=torch.float16):
+    block_shape_n, block_shape_k = block_shape
+    m, k = x.shape
+    n = weight.shape[0]
+
+    x_scale_ = eirp(x_scale, "m k -> m (k repeat)", repeat=block_shape_k)
+    x_scale_ = x_scale_[:m, :k]
+
+    w_scale_ = eirp(w_scale, "n k -> (n repeat) k", repeat=block_shape_n)
+    w_scale_ = eirp(w_scale_, "n k -> n (k repeat)", repeat=block_shape_k)
+    w_scale_ = w_scale_[:n, :k]
+
+    x_ = x.to(x_scale.dtype) * x_scale_
+    weight_ = weight.to(w_scale.dtype) * w_scale_
+
+    out = F.linear(x_.to(torch.float32), weight_.to(torch.float32))
+    return out.to(dtype)
 def get_untuned_gemm_list(untuned_gemm_file):
-    assert os.path.exists(untuned_gemm_file), f"Not exist a8w8_untuned_gemm.csv file: {untuned_gemm_file}"
+    assert os.path.exists(untuned_gemm_file), f"Not exist a8w8_bpreshuffle_untuned_gemm.csv file: {untuned_gemm_file}"
     untunedf = pd.read_csv(untuned_gemm_file)
     return untunedf
 
@@ -72,19 +90,32 @@ def kernel_instance_test(x, weight, x_scale, w_scale, out, kernel_id, splitK=0):
 def tune_gemm(m, n, k, useSplitK = False):
     dim = (m, n, k)
     block_shape_n, block_shape_k = block_shape
-    scale_n =  (n + block_shape_n - 1) // block_shape_n
-    scale_k =  (k + block_shape_k - 1) // block_shape_k
-    x = (torch.rand((m, k), dtype=torch.float16, device="cuda")/10).to(dtypes.fp8)
-    weight = (torch.rand( (n, k), dtype=torch.float16, device="cuda")/10).to(dtypes.fp8)
-    weight_shuffle = shuffle_weight(weight, layout=(16, 16))
-    x_scale = torch.rand([m, scale_k], dtype=torch.float32, device="cuda")
-    w_scale = torch.rand([scale_n, scale_k], dtype=torch.float32, device="cuda")
-    out = torch.empty(m, n, dtype=torch.bfloat16, device="cuda")
+    scale_m = m
+    scale_n = (n + block_shape_n - 1) // block_shape_n
+    scale_k = (k + block_shape_k - 1) // block_shape_k
 
-    ref_out = run_torch(x, weight, x_scale, w_scale)
+    x = (torch.rand((m, k), dtype=torch.float32, device="cuda") / 10).to(
+        torch.float8_e4m3fnuz
+    )
+    weight = (torch.rand((n, k), dtype=torch.float32, device="cuda") / 10).to(
+        torch.float8_e4m3fnuz
+    )
+
+    x_scale = torch.ones([scale_k, scale_m], dtype=torch.float32, device="cuda")
+    w_scale = torch.ones([scale_k, scale_n], dtype=torch.float32, device="cuda")
+
+    x_scale_trans = torch.transpose(x_scale, 0, 1)
+    w_scale_trans = torch.transpose(w_scale, 0, 1)
+
+    flat_weight = weight.view(n // 16, 16, k // 64, 4, 16)
+    flat_weight = flat_weight.permute(0, 2, 3, 1, 4).contiguous()
+    flat_weight = flat_weight.view(n, -1)
+    ref_out = run_torch2(x, weight, x_scale_trans, w_scale_trans, torch.float16)
+    # avg_c = run_gemm_ck_bpreshuffle(x, flat_weight, x_scale, w_scale, dtype)
+    out = torch.empty(m, n, dtype=torch.float16, device="cuda")
 
     print(f"*******************M:{m} X N:{n} X K:{k}**************************")
-    print(f"Start tuning a8w8 gemm kernel for M:{m}, N:{n}, K:{k}")
+    print(f"Start tuning a8w8 bpreshuffle gemm kernel for M:{m}, N:{n}, K:{k}")
     kernels_num = len(kernels_list)
     best_kernelConfig = (-1, 0)
     best_time = -1
@@ -94,7 +125,7 @@ def tune_gemm(m, n, k, useSplitK = False):
             if useSplitK else 0
         for splitK in range(maxsplitK+1):
             try:
-                (out), avg_t = kernel_instance_test(x, weight_shuffle, x_scale, w_scale, out, i, splitK)
+                (out), avg_t = kernel_instance_test(x, flat_weight, x_scale, w_scale, out, i, splitK)
                 isClosed = checkClose(ref_out, out, rtol=1e-2, atol=0.1)
                 if isClosed:
                     print(f"{str(dim):<20} kernelid:{i:<3d}\t avg: {avg_t:<8.2f} us, {kernel.name}, {splitK=}")

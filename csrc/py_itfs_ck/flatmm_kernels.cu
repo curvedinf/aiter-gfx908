@@ -6,29 +6,7 @@
  #include "py_itfs_common.h"
 
  #include "flatmm_basic.hpp"
-// #include "ck_tile/ops/flatmm/kernel/flatmm_kernel.hpp"
- 
-//  struct __attribute__((packed)) KernelArgs
-// {
-//     const void* a_ptr;  // [m, k]
-//     const void* b_ptr;  // [n, k] -> [n/128, k*128]
-//     const void* c_ptr;  // 
-//     const void* sa_ptr; // [k/128, m]
-//     const void* sb_ptr; // [k/128, n/128]
-//     void* d_ptr;        // 
-//     void* d_f16_ptr;    // [m, n]
-//     // void* dbg_int_ptr;
-//     // void* dbg_fp8_ptr;
-//     // void* dbg_f16_ptr;
-//     // void* dbg_fp32_ptr;
-//     index_t k_batch;
-//     index_t M;
-//     index_t N;
-//     index_t K;
-//     index_t stride_A;
-//     index_t stride_B;
-//     index_t stride_C;   
-// };
+
 template <typename ADataType,
           typename BDataType,
           typename AccDataType,
@@ -144,7 +122,6 @@ torch::Tensor flatmm_ck(
     torch::Tensor &out      // Out:[M, N] fp16
     )
  {
-    // TORCH_CHECK(false, "solin----flatmm_ck ----");
     TORCH_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
     TORCH_CHECK(x_scale.dtype() == w_scale.dtype(), "Scales should have the same dtype!");
     using ADataType   = typename GemmBasicTypeConfig<ck_tile::fp8_t>::ADataType;
@@ -157,19 +134,12 @@ torch::Tensor flatmm_ck(
     int m = XQ.size(0);
     int n = out.size(1);
     int k = XQ.size(1);
-   
-    // std::cout << "m = " << m 
-    // << ", n = " << n 
-    // << ", k = " << k 
-    // << std::endl; 
+
     ck_tile::FlatmmHostArgs args;
     args.a_ptr         = (void *)XQ.data_ptr();
     args.b_shuffle_ptr = (void *)WQ.data_ptr();
     args.c_ptr = (void *)out.data_ptr();
-    
-    // args.a_ptr         = reinterpret_cast<ADataType *>(XQ.data_ptr());
-    // args.b_shuffle_ptr = reinterpret_cast<BDataType *>(WQ.data_ptr());
-    // args.c_ptr = reinterpret_cast<CDataType *>(out.data_ptr());
+
     args.k_batch  = 1;
     args.M        = m;
     args.N        = n;
@@ -179,21 +149,12 @@ torch::Tensor flatmm_ck(
     args.stride_C = n;
 
     CDataType* c_ptr = reinterpret_cast<CDataType*>(out.data_ptr());
-    //size_t num_elements = out.numel(); 
-    // for (int i = 0; i < 8; ++i) {
-    //     printf(" cptr %.4f ", static_cast<float>(c_ptr[i]));
-    // }
-    // printf("\n");
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(XQ));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     ck_tile::stream_config naive_config{stream};
     flatmm_calc<ADataType, BDataType, AccDataType, CDataType, ALayout, BLayout, CLayout>(args, naive_config);
-    // for (int i = 0; i < 8; ++i) {
-    //     printf(" cptr %.4f ", static_cast<float>(c_ptr[i]));
-    // }
-    // printf("\n");
-    return out;
 
+    return out;
  }
  

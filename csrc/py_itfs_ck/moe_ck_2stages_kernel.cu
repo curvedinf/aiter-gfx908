@@ -239,7 +239,6 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     int E = w1.size(0);
     int N = w1.size(1) / 2;
     int K = hidden_states.size(-1) * 2;
-    // printf("%dx%dx%d\n", E, N, K);
     // int max_num_tokens_padded = sorted_token_ids.size(0);
     // int agvtokens_per_expert = max_num_tokens_padded / E;
     int MPerBlock = block_m.value();
@@ -250,10 +249,6 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
 
     void *hidden_states_ptr = hidden_states.data_ptr();
     void *w1_ptr = w1.transpose(1, 2).data_ptr();
-    // for (int i = 0; i < 128; i++) 
-    // {
-    //     std::cout << i << ":" << (uint)((uint8_t*)w1_ptr)[i] << std::endl;
-    // }
     void *w2_ptr = w2.data_ptr();
     void *sorted_token_ids_ptr = sorted_token_ids.data_ptr();
     void *sorted_expert_ids_ptr = sorted_expert_ids.data_ptr();

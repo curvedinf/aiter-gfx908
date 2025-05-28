@@ -43,6 +43,34 @@ def mxfp4_to_f32(x):
     mxfp4_in_f32 = torch.tensor(mxfp4_list, dtype=torch.float32, device="cuda")
     return mxfp4_in_f32[x.long()]
  
+BLOCK_SIZE_M = 128
+
+def mxfp4_to_f32(x):
+    # 2 because we pack fp4 in uint8.
+    x = x.repeat_interleave(2, dim=1)
+    x[:, ::2] = x[:, ::2] & 0xF
+    x[:, 1::2] = x[:, 1::2] >> 4
+    mxfp4_list = [
+        0.0,
+        0.5,
+        1.0,
+        1.5,
+        2.0,
+        3.0,
+        4.0,
+        6.0,
+        -0.0,
+        -0.5,
+        -1.0,
+        -1.5,
+        -2.0,
+        -3.0,
+        -4.0,
+        -6.0,
+    ]
+    mxfp4_in_f32 = torch.tensor(mxfp4_list, dtype=torch.float32, device="cuda")
+    return mxfp4_in_f32[x.long()]
+ 
 
 def moe_sorting(
     topk_ids,
@@ -744,7 +772,8 @@ def torch_moe_stage1(
     topk = topk_weight.shape[1]
     N = w1.shape[1]
     E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
-    inter_dim=4096
+    inter_dim = w1_shape[1] // 2
+    # inter_dim=4096
     if quant_type in [QuantType.per_Token, QuantType.per_Tensor]:
         w1 = w1 * w1_scale.view(w1_scale.shape[0], -1, 1)
         hidden_states = hidden_states * a1_scale
@@ -810,7 +839,8 @@ def torch_moe_stage1(
     torch_act = aiter.get_torch_act(activation)
     if use_g1u1:
         gate, up = out.split([inter_dim, inter_dim], dim=-1)
-        out = torch_act(gate) * up
+        # out = torch_act(gate) * up
+        out = gate
     else:
         out = torch_act(out)
     return out.to(dtype)

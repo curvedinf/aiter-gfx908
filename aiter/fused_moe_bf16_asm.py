@@ -15,6 +15,120 @@ from aiter.fused_moe import moe_sorting
 
 BLOCK_SIZE_M = 32
 
+def torch_dynamic_mxfp4_quant(
+    x: torch.Tensor, scaling_mode: str = "even"
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    Quantize a tensor to MX FP4 format based of AMD Quark Spec.
+
+    Math equivalent:
+        blockscale_e8m0 = 2^(floor(log2(rounding(max_abs(x_block)))-max_exp))
+        x_block_fp4 = x_block / blockscale_e8m0
+        where max_exp = 2 for fp4_e2m1.
+
+    Args:
+        x: The input tensor, typically fp16 or bf16.
+        scaling_mode: The method to calculate MX block scaling.
+            - "even" (default): `even_round`.
+    Returns:
+        A tuple of (x_fp4, blockscale_e8m0).
+    """
+    # Create padded x. Needed because mxfp4 works with block of 32 elements
+    MXFP4_QUANT_BLOCK_SIZE = 32
+    x_shape = x.shape
+    if x.shape[-1] % MXFP4_QUANT_BLOCK_SIZE != 0:
+        shape = list(x_shape)
+        shape = shape[:-1] + [
+            ((shape[-1] - 1 + MXFP4_QUANT_BLOCK_SIZE) // MXFP4_QUANT_BLOCK_SIZE)
+            * MXFP4_QUANT_BLOCK_SIZE
+        ]
+        shape = tuple(shape)
+        x_padded = torch.zeros((shape), device=x.device, dtype=x.dtype)
+        x_padded[..., : x.shape[-1]] = x
+    else:
+        x_padded = x
+
+    # Calculate scale
+    x_padded = x_padded.reshape(
+        -1, x_padded.shape[-1] // MXFP4_QUANT_BLOCK_SIZE, MXFP4_QUANT_BLOCK_SIZE
+    ).to(torch.float32)
+    # print(f"x_padded.shape={x_padded.shape}")
+    amax, _ = torch.max(torch.abs(x_padded), dim=-1)
+    amax = amax.view(torch.int32)
+    amax = (amax + 0x200000) & 0xFF800000
+    amax = amax.view(torch.float32)
+    scale_e8m0_unbiased = torch.log2(amax).floor() - 2
+    scale_e8m0_unbiased = torch.clamp(scale_e8m0_unbiased, min=-127, max=127)
+    quant_scale = torch.exp2(-scale_e8m0_unbiased)
+
+    # Compute quantized x
+    qx = x_padded * quant_scale.unsqueeze(-1)
+
+    # blockscale_e8m0
+    bs_e8m0 = scale_e8m0_unbiased.to(torch.uint8) + 127
+
+    # Convert to mxfp4 format
+    #
+    # Note: This code is adapted from Triton Bench numerics mxfp4 code
+    #
+    # Note: MXFP4  S:1-bit, E:2-bit, M:1-bit
+    #   Zeros: S000 -> +/-0
+    #   Denormal Numbers: S001 -> +/- 0.5
+    #   Normal Numbers:
+    #           S010 -> +/- 1.0
+    #           S011 -> +/- 1.5
+    #           S100 -> +/- 2.0
+    #           S101 -> +/- 3.0
+    #           S110 -> +/- 4.0
+    #           S111 -> +/- 6.0
+    # Convert quantized fp32 tensor to int32 before converting to mxfp4 format
+    qx = qx.view(torch.int32)
+
+    # Extract sign, exponents and mantissa fields from int32
+    s = qx & 0x80000000
+    e = (qx >> 23) & 0xFF
+    m = qx & 0x7FFFFF
+
+    E8_BIAS = 127
+    E2_BIAS = 1
+
+    # Denormal numbers
+    # If exponent is less than 127, then it's a denormal number
+    # See above, for denormal number mantissa is always 1 and we set bit 1 of mantissa
+    adjusted_exponents = E8_BIAS - e - 1
+    m = torch.where(e < E8_BIAS, (0x400000 | (m >> 1)) >> adjusted_exponents, m)
+
+    # For normal numbers, bias is changed from 127 to 1, and for subnormals, we keep exponent as 0.
+    # Note: E8_BIAS - E2_BIAS = 126, so for normals we subtract that.
+    e = torch.where(e > E8_BIAS - E2_BIAS, e, E8_BIAS - E2_BIAS) - (E8_BIAS - E2_BIAS)
+
+    # Combine sign, exponent, and mantissa, while saturating
+    # rounding nearest with tie breaking up by adding +1 to one bit right of the LSB, then shift right
+    combined_val = (((e << 2) | (m >> 21)) + 1) >> 1
+    e2m1_tmp = torch.where(combined_val < 0x7, combined_val, 0x7)
+    e2m1_value = (((s >> 28) & 0xF) | e2m1_tmp).to(torch.uint8)
+
+    # Pack 2 4-bit values into 8-bit
+    x_mxfp4 = e2m1_value[..., ::2] | (e2m1_value[..., 1::2] << 4)
+
+    # Recover last dimension's shape
+    x_mxfp4 = torch.flatten(x_mxfp4, -2, -1)
+
+    # Remove padded values
+    if x.shape[-1] % MXFP4_QUANT_BLOCK_SIZE != 0:
+        x_mxfp4 = x_mxfp4[..., : x.shape[-1] // 2]
+
+    # Reshape back to original
+    mxfp4_shape = list(x_shape)
+    mxfp4_shape = tuple(mxfp4_shape[:-1] + [mxfp4_shape[-1] // 2])
+    x_mxfp4 = x_mxfp4.reshape(mxfp4_shape)
+    bs_e8m0_shape = list(x_shape)
+    bs_e8m0_shape = tuple(
+        bs_e8m0_shape[:-1] + [bs_e8m0_shape[-1] // MXFP4_QUANT_BLOCK_SIZE]
+    )
+    bs_e8m0 = bs_e8m0.reshape(bs_e8m0_shape)
+
+    return x_mxfp4, bs_e8m0
 
 def moe_sorting_ck(
     topk_ids,
@@ -437,7 +551,19 @@ def ck_moe_2stages(
 
     # quant_func = get_torch_quant(quant_type)
     E, model_dim, inter_dim = w2.shape
-    inter_dim = inter_dim * 2
+    # import pdb; pdb.set_trace()
+
+    if w1.dtype == torch.uint8:
+        q_dtype_a = dtypes.fp4x2
+        inter_dim = inter_dim * 2
+    elif w1.dtype != torch.uint32:
+        q_dtype_a = w1.dtype
+    else:
+        q_dtype_a = torch.float8_e4m3fnuz
+    # q_dtype_a = w1.dtype if w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
+
+    
+    
     if w1.dtype is torch.uint32:
         inter_dim = inter_dim * 8
 
@@ -489,11 +615,13 @@ def ck_moe_2stages(
         sorted_weights if doweight_stage1 else None,
         act_op,
     )
-    # return a2
+
     if quant_type == QuantType.per_Token:
         a2 = a2.view(M, -1)
-    # a2, a2_scale = quant_func(a2.view(-1, inter_dim), scale=a2_scale, shuffle=False)
-    a2, a2_scale = dynamic_mxfp4_quant(a2.view(-1, inter_dim))
+    elif quant_type == QuantType.per_1x32:
+        a2 = a2.view(-1, inter_dim)
+    # a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
+    a2, a2_scale = dynamic_mxfp4_quant(a2)
     a2 = a2.view(M, topk, -1)
     a2_scale = a2_scale.view(M, topk, -1)
 

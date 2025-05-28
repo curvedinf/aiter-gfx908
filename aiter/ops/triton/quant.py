@@ -32,9 +32,7 @@ def _static_per_tensor_fp8_quant_kernel(
     tl.store(qx_ptr + offs, qx, mask=mask)
 
 
-def static_per_tensor_fp8_quant(
-    qx, x_in, scale_in
-):
+def static_per_tensor_fp8_quant(qx, x_in, scale_in):
     """
     #TODO: Add Doc
     """
@@ -75,9 +73,7 @@ def _dynamic_per_tensor_fp8_quant_kernel(
     tl.atomic_max(scale_out_ptr, m / FP8_MAX, sem="relaxed")
 
 
-def dynamic_per_tensor_fp8_quant(
-    qx, x_in, scale_out
-):
+def dynamic_per_tensor_fp8_quant(qx, x_in, scale_out):
     """
     #TODO: Add Doc
     """
@@ -299,9 +295,7 @@ def _dynamic_mxfp4_quant_kernel(
             )
 
 
-def dynamic_mxfp4_quant(
-    x, scaling_mode: str = "even"
-):
+def dynamic_mxfp4_quant(x, scaling_mode: str = "even"):
     """
     Quantize a tensor to MX FP4 format.
 

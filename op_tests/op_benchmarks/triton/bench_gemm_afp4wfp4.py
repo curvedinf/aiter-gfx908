@@ -142,10 +142,7 @@ def run_proton_benchmark(batch_range, N, K, name="skinny"):
         fpath.parent.mkdir(parents=True, exist_ok=True)
         proton.start(str(fpath.with_suffix('')), hook="triton")
         for _ in range(100):
-            if TRITON_HIP_PRESHUFFLE_SCALES:
-                gemm_afp4wfp4_preshuffled_scales(x, w, x_scale, w_scale, c_dtype, out)
-            else:
-                gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out)
+            gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out)
         proton.finalize()
 
         # -- analyze --

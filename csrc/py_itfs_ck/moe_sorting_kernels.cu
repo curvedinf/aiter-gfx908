@@ -30,7 +30,7 @@ void moe_sorting_fwd(torch::Tensor &topk_ids,          // [m, topk]
     const at::cuda::OptionalCUDAGuard device_guard(device_of(topk_ids));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-    int workspace_size = moe_sorting_get_workspace_size(num_tokens, num_experts);
+    int workspace_size = moe_sorting_get_workspace_size(num_tokens, num_experts, topk);
     void *ws_ptr = nullptr;
     if (workspace_size > 0)
     {

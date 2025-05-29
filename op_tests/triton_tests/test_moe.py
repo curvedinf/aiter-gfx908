@@ -454,13 +454,6 @@ def input_helper_int4_w4a16(
     )
 
 
-torch_to_tl_dtype = {
-    torch.float16: tl.float16,
-    torch.bfloat16: tl.bfloat16,
-    torch.float32: tl.float32,
-}
-
-
 # Note: TODO These 2 result in accuracy issues (64, 14336, 4096, 2, 8), (1, 1024, 16384, 1, 2)
 @pytest.mark.parametrize(
     "M, N, K, top_k, E",
@@ -558,7 +551,7 @@ def test_correctness(
         routed_weight,
         top_k,
         config,
-        torch_to_tl_dtype[dtype],
+        torch_to_triton_dtype[dtype],
         fp8_w8a8,
         int8_w8a16,
         False,
@@ -671,7 +664,7 @@ def test_fused_moe_int4_w4a16(
         routed_weight,
         top_k,
         config,
-        torch_to_tl_dtype[dtype],
+        torch_to_triton_dtype[dtype],
         use_fp8_w8a8=False,
         use_int8_w8a16=False,
         use_int4_w4a16=True,
@@ -801,7 +794,7 @@ def test_moe_fused_gelu(
         routed_weight,
         top_k,
         config,
-        torch_to_tl_dtype[dtype],
+        torch_to_triton_dtype[dtype],
         fp8_w8a8,
         int8_w8a16,
     )

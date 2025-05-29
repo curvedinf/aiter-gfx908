@@ -160,6 +160,7 @@ namespace ck_tile
         vec_t<dtype_##_t, vec_size_> out;                                                                                                                            \
         using vec_i2 = vec_t<stype_##_t, 2>;                                                                                                                         \
         using vec_o2 = vec_t<dtype_##_t, 2>;                                                                                                                         \
+        _Pragma("unroll")                                                                                                                                            \
         for (size_t i = 0; i < iter_num; i++)                                                                                                                        \
         {                                                                                                                                                            \
             vec_o2 tmp = stype_##x2##_t_to_##dtype_##x2##_t(x.template get_as<vec_i2>()(i), inverted_scale);                                                         \
@@ -197,6 +198,7 @@ namespace ck_tile
         vec_t<dtype_##_t, iter_num> out;                                                                                                                                 \
         using vec_i2 = vec_t<stype_##_t, 2>;                                                                                                                             \
         using vec_o2 = dtype_##_t;                                                                                                                                       \
+        _Pragma("unroll")                                                                                                                                                \
         for (size_t i = 0; i < iter_num; i++)                                                                                                                            \
         {                                                                                                                                                                \
             vec_o2 tmp = stype_##x2##_t_to_##dtype_##_t(x.template get_as<vec_i2>()(i), inverted_scale);                                                                 \

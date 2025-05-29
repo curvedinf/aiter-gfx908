@@ -98,7 +98,7 @@ namespace aiter
   __device__ inline std::tuple<float, DTYPE_I *, DTYPE_I> data_to_per_row_scale(const DTYPE_I *__restrict__ input,
                                                                                 const int cols)
   {
-    static constexpr int32_t vec_size_i = thread_data_size;
+    static constexpr int32_t vec_size_i = thread_data_size == 0 ? 16 / sizeof(DTYPE_I) : thread_data_size;
     static constexpr int32_t vec_size_o = std::is_same_v<DTYPE_O, ck_tile::fp4x2_t> ? vec_size_i / 2 : vec_size_i;
     using vec_i = ck_tile::vec_t<DTYPE_I, vec_size_i>;
     using tb_i = ck_tile::thread_buffer<DTYPE_I, vec_size_o>;
@@ -114,7 +114,7 @@ namespace aiter
     const int32_t num_elems_tail = cols % vec_size_i;
     const int32_t num_vecs = cols / vec_size_i;
     // const int32_t num_vecs = (cols + vec_size_i - 1) / vec_size_i * vec_size_i;
-    vec_i vec_nxt;
+    
     vec_i vec_cur;
     DTYPE_I tail_data;
     // size_t vec_idx = threadIdx.x * vec_size_i;
@@ -132,21 +132,36 @@ namespace aiter
     }
 
     float absMax = 0.f;
-    for (vec_idx += vec_stride; vec_idx < num_vecs; vec_idx += vec_stride)
+
+    if constexpr (thread_data_size == 0)
     {
-      vec_nxt = input_vecs[vec_idx];
-      // vec_nxt = ck_tile::bit_cast<vec_i>(buffer_i.template get<tb_i>(vec_idx, row_offset, true));
-      for (size_t j = 0; j < vec_size_i; j++)
+      vec_i vec_nxt;
+      for (vec_idx += vec_stride; vec_idx < num_vecs; vec_idx += vec_stride)
       {
-        absMax = max(absMax, abs(ck_tile::type_convert<float>(vec_cur[j])));
+        vec_nxt = input_vecs[vec_idx];
+        // vec_nxt = ck_tile::bit_cast<vec_i>(buffer_i.template get<tb_i>(vec_idx, row_offset, true));
+        for (size_t j = 0; j < vec_size_i; j++)
+        {
+          absMax = max(absMax, abs(ck_tile::type_convert<float>(vec_cur[j])));
+        }
+        vec_cur = vec_nxt;
       }
-      vec_cur = vec_nxt;
-    }
-    if (vec_idx - vec_stride < num_vecs)
-    {
-      for (size_t j = 0; j < vec_size_i; j++)
+      if (vec_idx - vec_stride < num_vecs)
       {
-        absMax = max(absMax, abs(ck_tile::type_convert<float>(vec_cur[j])));
+        for (size_t j = 0; j < vec_size_i; j++)
+        {
+          absMax = max(absMax, abs(ck_tile::type_convert<float>(vec_cur[j])));
+        }
+      }
+    }
+    else
+    {
+      if (vec_idx < num_vecs)
+      {
+        for (size_t j = 0; j < vec_size_i; j++)
+        {
+          absMax = max(absMax, abs(ck_tile::type_convert<float>(vec_cur[j])));
+        }
       }
     }
     // double load core loop end
@@ -285,10 +300,9 @@ namespace aiter
     const int32_t num_elems_tail = cols % vec_size_i;
     const int32_t num_vecs = cols / vec_size_i;
 
-    vec_i vec_cur = *input_vecs;
     if (threadIdx.x < num_vecs)
     {
-      out_vecs[threadIdx.x] = ck_tile::vec_convert<DTYPE_O, DTYPE_I, vec_size_i>(vec_cur, inverted_scale);
+      out_vecs[threadIdx.x] = ck_tile::vec_convert<DTYPE_O, DTYPE_I, vec_size_i>(*input_vecs, inverted_scale);
     }
     if (threadIdx.x < num_elems_tail)
     {
@@ -316,7 +330,7 @@ namespace aiter
       const int32_t cols)
   {
     const int token_idx = blockIdx.x;
-    auto res = data_to_per_row_scale<DTYPE_I, DTYPE_O, thread_data_size == 0 ? 16 : thread_data_size>(input, cols);
+    auto res = data_to_per_row_scale<DTYPE_I, DTYPE_O, thread_data_size>(input, cols);
     float row_scale = std::get<0>(res);
     DTYPE_I *vec_ptr = std::get<1>(res);
     DTYPE_I tail_data = std::get<2>(res);

@@ -1,14 +1,14 @@
-# Copyright © Advanced Micro Devices, Inc. All rights reserved.
-# Copyright 2023 The vLLM team.
+# Copyright (C) Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2023-2025 The vLLM team.
 # Adapted from
 # https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/parallel_state.py
-# Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
+# Copyright (C) 2022-2025, NVIDIA CORPORATION. All rights reserved.
 """vLLM distributed state.
 It takes over the control of the distributed environment from PyTorch.
 The typical workflow is:
 
 - call `init_distributed_environment` to initialize the distributed environment.
-- call `initialize_model_parallel` or `ensure_model_parallel_initialized` to 
+- call `initialize_model_parallel` or `ensure_model_parallel_initialized` to
  initialize the model parallel groups.
 
 - any code dealing with the distributed stuff

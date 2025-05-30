@@ -125,9 +125,11 @@ def _gemm_afp4_wfp4_kernel(
 
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
-        for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
-            a_scales = tl.load(a_scale_ptrs)
-            b_scales = tl.load(b_scale_ptrs)
+        for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter, 2):
+            aggregated_a_scales = tl.reshape(tl.load(a_scale_ptrs), (BLOCK_SIZE_M, 2, BLOCK_SIZE_K // 32))
+            aggregated_b_scales = tl.reshape(tl.load(b_scale_ptrs), (BLOCK_SIZE_N, 2, BLOCK_SIZE_K // 32))
+            a_scales0, a_scales1 = aggregated_scale_a.split()
+            b_scales0, b_scales1 = aggregated_scale_b.split()
             # a_scales = tl.full((BLOCK_SIZE_M, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)
             # b_scales = tl.full((BLOCK_SIZE_N, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)
             # Load the next block of A and B, generate a mask by checking the K dimension.
@@ -143,7 +145,25 @@ def _gemm_afp4_wfp4_kernel(
                     b_ptrs, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
                 )
 
-            accumulator += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
+            accumulator += tl.dot_scaled(a, a_scales0, "e2m1", b, b_scales0, "e2m1")
+
+            # Advance the ptrs to the next K block.
+            a_ptrs += (BLOCK_SIZE_K // 2) * stride_ak
+            b_ptrs += (BLOCK_SIZE_K // 2) * stride_bk
+            a_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_ask
+            b_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_bsk
+            if EVEN_K:
+                a = tl.load(a_ptrs)
+                b = tl.load(b_ptrs, cache_modifier=cache_modifier)
+            else:
+                a = tl.load(
+                    a_ptrs, mask=offs_k[None, :] < K - k * (BLOCK_SIZE_K // 2), other=0
+                )
+                b = tl.load(
+                    b_ptrs, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
+                )
+
+            accumulator += tl.dot_scaled(a, a_scales1, "e2m1", b, b_scales1, "e2m1")
 
             # Advance the ptrs to the next K block.
             a_ptrs += (BLOCK_SIZE_K // 2) * stride_ak
@@ -298,9 +318,41 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
 
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
-        for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
-            a_scales = tl.load(a_scale_ptrs)
-            b_scales = tl.load(b_scale_ptrs)
+        for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter, 2):
+            aggregated_a_scales = tl.reshape(tl.load(a_scale_ptrs), (BLOCK_SIZE_M, 2, BLOCK_SIZE_K // 32))
+            aggregated_b_scales = tl.reshape(tl.load(b_scale_ptrs), (BLOCK_SIZE_N, 2, BLOCK_SIZE_K // 32))
+            a_scales0, a_scales1 = aggregated_scale_a.split()
+            b_scales0, b_scales1 = aggregated_scale_b.split()
+            if BLOCK_SIZE_M >= 32:
+                a_scales = tl.reshape(
+                    a_scales, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+                )
+            b_scales = tl.reshape(
+                b_scales, (BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+            )
+
+            if EVEN_K:
+                a = tl.load(a_ptrs)
+                b = tl.load(b_ptrs, cache_modifier=cache_modifier)
+            else:
+                a = tl.load(
+                    a_ptrs, mask=offs_k[None, :] < K - k * (BLOCK_SIZE_K // 2), other=0
+                )
+                b = tl.load(
+                    b_ptrs, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
+                )
+
+            accumulator += tl.dot_scaled(a, a_scales0, "e2m1", b, b_scales0, "e2m1")
+
+            # Advance the ptrs to the next K block.
+            a_ptrs += (BLOCK_SIZE_K // 2) * stride_ak
+            b_ptrs += (BLOCK_SIZE_K // 2) * stride_bk
+            if BLOCK_SIZE_M < 32:
+                a_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_ask
+            else:
+                a_scale_ptrs += BLOCK_SIZE_K * stride_ask
+            b_scale_ptrs += BLOCK_SIZE_K * stride_bsk
+
             if BLOCK_SIZE_M >= 32:
                 a_scales = tl.reshape(
                     a_scales, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
@@ -324,7 +376,7 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
                     b_ptrs, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
                 )
 
-            accumulator += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
+            accumulator += tl.dot_scaled(a, a_scales1, "e2m1", b, b_scales1, "e2m1")
 
             # Advance the ptrs to the next K block.
             a_ptrs += (BLOCK_SIZE_K // 2) * stride_ak

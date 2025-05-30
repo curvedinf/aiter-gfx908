@@ -314,18 +314,53 @@ if __name__ == "__main__":
     mha_type = "mha"
     dtype = dtypes.bf16
 
-    test_flash_attn_output(
-        batch_size,
-        nheads,
-        seqlen_q,
-        seqlen_k,
-        d,
-        d_v,
-        dropout_p,
-        causal,
-        local,
-        bias_type,
-        deterministic,
-        mha_type,
-        dtype,
-    )
+    # test_flash_attn_output(
+    #     batch_size,
+    #     nheads,
+    #     seqlen_q,
+    #     seqlen_k,
+    #     d,
+    #     d_v,
+    #     dropout_p,
+    #     causal,
+    #     local,
+    #     bias_type,
+    #     deterministic,
+    #     mha_type,
+    #     dtype,
+    # )
+    q = torch.randn(
+        batch_size, seqlen_q, nheads, d, device="cuda", dtype=dtype
+    ).contiguous()
+    k = torch.randn(
+        batch_size, seqlen_k, nheads, d, device="cuda", dtype=dtype
+    ).contiguous()
+    v = torch.randn(
+        batch_size, seqlen_k, nheads, d_v, device="cuda", dtype=dtype
+    ).contiguous()
+    out = torch.randn(
+        batch_size, seqlen_q, nheads, d_v, device="cuda", dtype=dtype
+    ).contiguous()
+    dout = torch.randn(
+        batch_size, seqlen_q, nheads, d_v, device="cuda", dtype=dtype
+    ).contiguous()
+    softmax_lse = torch.zeros( # TODO: ?
+        batch_size, seqlen_q, nheads, device="cuda", dtype=dtype
+    ).contiguous()
+    causal = False
+    dq, dk, dv = torch.zeros_like(q), torch.zeros_like(k), torch.zeros_like(v)
+    dq, dk, dv = dq.contiguous(), dk.contiguous(), dv.contiguous()
+
+    softmax_scale = q.shape[-1] ** (-0.5)
+
+    assert q.storage().size() > 0
+    assert k.storage().size() > 0
+    assert v.storage().size() > 0
+    assert dq.storage().size() > 0
+    assert dk.storage().size() > 0
+    assert dv.storage().size() > 0
+    assert out.storage().size() > 0
+    assert dout.storage().size() > 0
+    assert softmax_lse.storage().size() > 0
+
+    (dq, dk, dv, softmax_d) = aiter.fmha_v3_bwd(dout, q, k, v, out, softmax_lse, 0.0, softmax_scale, causal, -1, -1, False, False, 0, dq, dk, dv)

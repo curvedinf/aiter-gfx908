@@ -33,8 +33,7 @@ fmha_bwd_args get_asm_fmha_bwd_args(const mask_info &mask,
                                     at::Tensor dk,
                                     at::Tensor dv,
                                     float softmax_scale,
-                                    float p_dropout,
-                                    std::pair<uint64_t*, uint64_t*> drop_seed_offset)
+                                    float p_dropout)
 {
     // q: (batch_size, seqlen_q, nheads, hdim_q)
     ck_tile::index_t batch_stride_q = q.stride(0);
@@ -175,8 +174,7 @@ fmha_bwd_args get_asm_fmha_bwd_args(const mask_info &mask,
         mask.right,
         static_cast<ck_tile::index_t>(mask.type),
         p_dropout,
-        p_undrop,
-        drop_seed_offset};
+        p_undrop};
 }
 
 std::vector<at::Tensor> fmha_v3_bwd(const at::Tensor &dout,         // [b, sq, hq, d_v]
@@ -200,6 +198,7 @@ std::vector<at::Tensor> fmha_v3_bwd(const at::Tensor &dout,         // [b, sq, h
                                     std::optional<const at::Tensor> rng_state_,
                                     std::optional<at::Generator> gen_)
 {
+    std::cout << "======================fmha_v3_bwd===================" << std::endl;
     if (is_causal) { window_size_right = 0; }
 
     bool is_dropout = p_dropout > 0.0;
@@ -294,6 +293,7 @@ std::vector<at::Tensor> fmha_v3_bwd(const at::Tensor &dout,         // [b, sq, h
     } else {
         dv = torch::empty_like(v);
     }
+    std::cout << "======================qkvdqdqdv check===================" << std::endl;
 
     at::cuda::CUDAGuard device_guard{q.device()};
 
@@ -308,6 +308,7 @@ std::vector<at::Tensor> fmha_v3_bwd(const at::Tensor &dout,         // [b, sq, h
         const ck_tile::index_t nsplits = ck_tile::integer_divide_ceil(seqlen_k, kN0);
         dq_accum = torch::zeros({nsplits, batch_size, num_heads, seqlen_q, head_size_v}, opts.dtype(at::kFloat));
     }
+    std::cout << "======================dq_accum check===================" << std::endl;
 
     at::Tensor dk_expanded, dv_expanded;
     if (num_heads_k != num_heads) {  // MQA / GQA
@@ -317,9 +318,11 @@ std::vector<at::Tensor> fmha_v3_bwd(const at::Tensor &dout,         // [b, sq, h
         dk_expanded = dk;
         dv_expanded = dv;
     }
+    std::cout << "======================dk/dv_expanded check===================" << std::endl;
 
     bias_enum bias_type = alibi_slopes_.has_value() ? bias_enum::alibi : bias_enum::no_bias;
 
+    std::cout << "======================alibi_slopes_ check===================" << std::endl;
     auto gen = at::get_generator_or_default<at::CUDAGeneratorImpl>(
     gen_, at::cuda::detail::getDefaultCUDAGenerator());
 
@@ -337,11 +340,13 @@ std::vector<at::Tensor> fmha_v3_bwd(const at::Tensor &dout,         // [b, sq, h
         aiter::ParsePhiloxCudaState, dim3(1), dim3(64), 0, 0,
         philox_args, reinterpret_cast<uint64_t*>(rng_state.data_ptr()));
     }
+    std::cout << "======================rng_state check===================" << std::endl;
 
     if (seqlen_q > 0) {
-        auto rng_state_ptr = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
-        auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
+        // auto rng_state_ptr = reinterpret_cast<uint64_t*>(rng_state.data_ptr());
+        // auto drop_seed_offset = std::make_pair(rng_state_ptr, rng_state_ptr + 1);
         ck_tile::stream_config stream_config{stream};
+        std::cout << "======================prepare args===================" << std::endl;
 
         auto args =
             get_asm_fmha_bwd_args(
@@ -366,8 +371,7 @@ std::vector<at::Tensor> fmha_v3_bwd(const at::Tensor &dout,         // [b, sq, h
                 dk_expanded,
                 dv_expanded,
                 softmax_scale,
-                p_dropout,
-                drop_seed_offset);
+                p_dropout);
 
         float t = aiter::mha_bwd(args,
                                  stream_config,

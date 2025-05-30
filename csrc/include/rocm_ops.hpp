@@ -100,6 +100,19 @@
             "                str kv_cache_dtype,"                   \
             "                float k_scale, float v_scale) -> ()");
 
+#define ATTENTION_V1_PYBIND                                                    \
+  m.def("paged_attention_v1", &paged_attention_v1,                             \
+        "paged_attention_v1(Tensor! out, Tensor exp_sums,"                     \
+        "                Tensor max_logits, Tensor tmp_out,"                   \
+        "                Tensor query, Tensor key_cache,"                      \
+        "                Tensor value_cache, int num_kv_heads,"                \
+        "                float scale, Tensor block_tables,"                    \
+        "                Tensor context_lens, int block_size,"                 \
+        "                int max_context_len,"                                 \
+        "                Tensor? alibi_slopes,"                                \
+        "                str kv_cache_dtype,"                                  \
+        "                float k_scale, float v_scale) -> ()");
+
 #define BATCHED_GEMM_A8W8_PYBIND                                                                        \
       m.def("batched_gemm_a8w8", &batched_gemm_a8w8, "batched_gemm_a8w8", py::arg("XQ"), py::arg("WQ"), \
             py::arg("x_scale"), py::arg("w_scale"), py::arg("Out"),                                     \
@@ -145,31 +158,31 @@
             "convert_fp8(Tensor! dst_cache, Tensor src_cache, float scale, "                        \
             "str kv_cache_dtype) -> ()");
 
-#define CUSTOM_ALL_REDUCE_PYBIND                                                                               \
-      m.def("init_custom_ar", &aiter::init_custom_ar,                                                          \
-            "init_custom_ar(Tensor meta, Tensor rank_data, "                                                   \
-            "str[] handles, int[] offsets, int rank, "                                                         \
-            "bool full_nvlink) -> int",                                                                        \
-            py::arg("meta"), py::arg("rank_data"),                                                             \
-            py::arg("handles"), py::arg("offsets"),                                                            \
-            py::arg("rank"), py::arg("full_nvlink"));                                                          \
-      m.def("all_reduce_reg", &aiter::all_reduce_reg, "all_reduce_reg(int fa, Tensor inp, Tensor! out) -> ()", \
-            py::arg("_fa"), py::arg("inp"), py::arg("out"));                                                   \
-      m.def("all_reduce_unreg", &aiter::all_reduce_unreg,                                                      \
-            "all_reduce_unreg(int fa, Tensor inp, Tensor reg_buffer, Tensor! out) -> ()",                      \
-            py::arg("_fa"), py::arg("inp"), py::arg("reg_buffer"), py::arg("out"));                            \
-      m.def("all_reduce_asm_", &all_reduce_asm, "");                                                           \
-      m.def("all_reduce_rmsnorm_", &all_reduce_rmsnorm, "all_reduce_rmsnorm");                                 \
-      m.def("all_reduce_rmsnorm_quant_", &all_reduce_rmsnorm_quant, "all_reduce_rmsnorm_quant");               \
-      m.def("dispose", &aiter::dispose, py::arg("_fa"));                                                       \
-      m.def("meta_size", &aiter::meta_size);                                                                   \
-      m.def("register_buffer", &aiter::register_buffer,                                                        \
-            "register_buffer(int fa, Tensor t, str[] handles, int[] offsets) -> ()",                           \
-            py::arg("_fa"), py::arg("t"), py::arg("handles"), py::arg("offsets"));                             \
-      m.def("get_graph_buffer_ipc_meta", &aiter::get_graph_buffer_ipc_meta, py::arg("_fa"));                   \
-      m.def("register_graph_buffers", &aiter::register_graph_buffers,                                          \
-            py::arg("_fa"), py::arg("handles"), py::arg("offsets"));                                           \
-      m.def("allocate_meta_buffer", &aiter::allocate_meta_buffer, py::arg("size"));                            \
+#define CUSTOM_ALL_REDUCE_PYBIND                                                                                                    \
+      m.def("init_custom_ar", &aiter::init_custom_ar,                                                                               \
+            "init_custom_ar(Tensor meta, Tensor rank_data, "                                                                        \
+            "str[] handles, int[] offsets, int rank, "                                                                              \
+            "bool full_nvlink) -> int",                                                                                             \
+            py::arg("meta"), py::arg("rank_data"),                                                                                  \
+            py::arg("handles"), py::arg("offsets"),                                                                                 \
+            py::arg("rank"), py::arg("full_nvlink"));                                                                               \
+      m.def("all_reduce_reg", &aiter::all_reduce_reg, "all_reduce_reg(int fa, Tensor inp, Tensor! out, bool open_fp8_quant) -> ()", \
+            py::arg("_fa"), py::arg("inp"), py::arg("out"), py::arg("open_fp8_quant"));                                             \
+      m.def("all_reduce_unreg", &aiter::all_reduce_unreg,                                                                           \
+            "all_reduce_unreg(int fa, Tensor inp, Tensor reg_buffer, Tensor! out) -> ()",                                           \
+            py::arg("_fa"), py::arg("inp"), py::arg("reg_buffer"), py::arg("out"));                                                 \
+      m.def("all_reduce_asm_", &all_reduce_asm, "");                                                                                \
+      m.def("all_reduce_rmsnorm_", &all_reduce_rmsnorm, "all_reduce_rmsnorm");                                                      \
+      m.def("all_reduce_rmsnorm_quant_", &all_reduce_rmsnorm_quant, "all_reduce_rmsnorm_quant");                                    \
+      m.def("dispose", &aiter::dispose, py::arg("_fa"));                                                                            \
+      m.def("meta_size", &aiter::meta_size);                                                                                        \
+      m.def("register_buffer", &aiter::register_buffer,                                                                             \
+            "register_buffer(int fa, Tensor t, str[] handles, int[] offsets) -> ()",                                                \
+            py::arg("_fa"), py::arg("t"), py::arg("handles"), py::arg("offsets"));                                                  \
+      m.def("get_graph_buffer_ipc_meta", &aiter::get_graph_buffer_ipc_meta, py::arg("_fa"));                                        \
+      m.def("register_graph_buffers", &aiter::register_graph_buffers,                                                               \
+            py::arg("_fa"), py::arg("handles"), py::arg("offsets"));                                                                \
+      m.def("allocate_meta_buffer", &aiter::allocate_meta_buffer, py::arg("size"));                                                 \
       m.def("get_meta_buffer_ipc_handle", &aiter::get_meta_buffer_ipc_handle, py::arg("inp"));
 
 #define CUSTOM_PYBIND                                                                                 \
@@ -344,6 +357,7 @@
             py::arg("cu_seqlens_k"),                              \
             py::arg("max_seqlen_q"),                              \
             py::arg("max_seqlen_k"),                              \
+            py::arg("min_seqlen_q"),                              \
             py::arg("dropout_p"),                                 \
             py::arg("softmax_scale"),                             \
             py::arg("logits_soft_cap"),                           \

@@ -60,6 +60,12 @@ float mha_bwd(mha_bwd_args args,
     int head_size_v = args.hdim_v;
     bool has_dropout = args.p_drop > 0;
     // bool enable_ailib = args.alibi_slopes_ptr == nullptr;
+    using convert_dq_trait_0 = fmha_bwd_convert_dq_traits_<128,
+                                                           FmhaBwdBf16,
+                                                           false,
+                                                           false,
+                                                           false,
+                                                           false>;
     auto traits = get_mha_bwd_traits(head_size_q,
                                      head_size_v,
                                      q_dtype_str,
@@ -83,7 +89,7 @@ float mha_bwd(mha_bwd_args args,
 
 V2_API = "t = fmha_bwd(traits, args, stream_config);"
 
-V3_API = "t = fmha_bwd_v3(traits, args, stream_config);"
+V3_API = "t = fmha_bwd_convert_dq_<convert_dq_trait_0>(stream_config, args);"
 
 COMBINED_API = """t = fmha_bwd_v3(traits, args, stream_config);
     if (t == -1) { t = fmha_bwd(traits, args, stream_config); }

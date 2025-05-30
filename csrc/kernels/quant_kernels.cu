@@ -39,13 +39,40 @@ namespace aiter
   __global__ void dynamic_per_group_scaled_quant_kernel(
       DTYPE_O *__restrict__ out, float *__restrict__ scale,
       DTYPE_I const *__restrict__ input, float const *__restrict__ scale_ub,
-      const int32_t rows, const int32_t cols)
+      const int32_t group_size, int32_t ori_rows, int32_t ori_cols = 1, bool shuffle_scale = true)
   {
-    int num_thread_per_group = cols / thread_data_size;
+    auto fp4_scale_shuffle_id = [](int32_t scaleN_pad, int32_t x, int32_t y)
+    {
+      // return ((((((x / 32 * scaleN_pad + y / 8)) * 4 + y % 4) * 16 + x % 16) * 2 + (y % 8) / 4) * 2 + (x % 32) / 16);
+      return (x / 32 * scaleN_pad) * 32 + (y / 8) * 256 + (y % 4) * 64 + (x % 16) * 4 + (y % 8) / 4 * 2 + (x % 32) / 16;
+    };
+
+    int num_thread_per_group = group_size / thread_data_size;
     int64_t row_offset = blockIdx.x * groupQuantBlockSize;
     int64_t groupId = (row_offset + threadIdx.x) / num_thread_per_group;
-    if (groupId > rows)
-      return;
+    int32_t scaleN = ori_cols / group_size;
+    int32_t scaleN_pad = (std::is_same_v<DTYPE_O, ck_tile::fp4x2_t> && shuffle_scale) ? (((scaleN + 7) / 8) * 8) : scaleN;
+    int32_t x = groupId / scaleN_pad;
+    int32_t y = groupId % scaleN_pad;
+    if constexpr (std::is_same_v<DTYPE_O, ck_tile::fp4x2_t>)
+    {
+      if (x >= ori_rows || y >= scaleN)
+      {
+        if (shuffle_scale && threadIdx.x % num_thread_per_group == 0)
+        {
+          auto *tmp = reinterpret_cast<uint8_t *>(scale);
+          groupId = fp4_scale_shuffle_id(scaleN_pad, x, y);
+          tmp[groupId] = 0x7f;
+        }
+        return;
+      }
+    }
+    else
+    {
+      if (x >= ori_rows)
+        return;
+    }
+
     row_offset *= thread_data_size;
     using vec_i = ck_tile::vec_t<DTYPE_I, thread_data_size>;
     static constexpr int32_t vec_size_o = std::is_same_v<DTYPE_O, ck_tile::fp4x2_t> ? thread_data_size / 2 : thread_data_size;
@@ -79,6 +106,10 @@ namespace aiter
       {
         auto *tmp = reinterpret_cast<uint8_t *>(scale);
         uint8_t exponent = (ck_tile::bit_cast<uint32_t>(inverted_scale) >> 23) & 0b11111111;
+        if (shuffle_scale)
+        {
+          groupId = fp4_scale_shuffle_id(scaleN_pad, x, y);
+        }
         tmp[groupId] = exponent;
       }
       else
@@ -114,7 +145,7 @@ namespace aiter
     const int32_t num_elems_tail = cols % vec_size_i;
     const int32_t num_vecs = cols / vec_size_i;
     // const int32_t num_vecs = (cols + vec_size_i - 1) / vec_size_i * vec_size_i;
-    
+
     vec_i vec_cur;
     DTYPE_I tail_data;
     // size_t vec_idx = threadIdx.x * vec_size_i;
@@ -322,7 +353,6 @@ namespace aiter
     scaled_quant_impl<DTYPE_I>(out, input, scale, cols);
   }
 
-
   template <typename DTYPE_I, typename DTYPE_O, int thread_data_size = 32>
   __global__ void dynamic_per_token_scaled_quant_kernel(
       DTYPE_O *__restrict__ out, float *__restrict__ scale,
@@ -404,40 +434,39 @@ namespace aiter
           reinterpret_cast<input_dtype *>(input.data_ptr()), scale.data_ptr<float>(), cols); });
   }
 
-
 #define DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, THREAD_DATA) \
-AITER_DISPATCH_FLOATING16_TYPES(\
-  input.scalar_type(), "quant_kernel", [&]\
-  { using input_dtype= typename t2ck<scalar_t>::type;\
+  AITER_DISPATCH_FLOATING16_TYPES(                                                     \
+      input.scalar_type(), "quant_kernel", [&]                                         \
+      { using input_dtype= typename t2ck<scalar_t>::type;\
     aiter::quant_kernel<input_dtype, DTYPE_O, THREAD_DATA><<<grid, block, 0, stream>>>(\
       reinterpret_cast<DTYPE_O *>(out.data_ptr()), scales.data_ptr<float>(),\
       reinterpret_cast<input_dtype*>(input.data_ptr()),\
       scale_ub.has_value() ? scale_ub->data_ptr<float>() : nullptr,\
       cols); });
 
-
 #define DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_DISPATCH(quant_kernel, DTYPE_O, cols) \
-if (cols <= 8 * BlockSize + 1) \
-{\
-  DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 8)\
-}\
-else if (cols <=16 * BlockSize + 1) \
-{\
-  DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 16)\
-}\
-else if (cols <= 32 * BlockSize + 1) \
-{\
-  DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 32)\
-}\
-else\
-{\
-  DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 0)\
-}
+  if (cols <= 8 * BlockSize + 1)                                                    \
+  {                                                                                 \
+    DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 8)            \
+  }                                                                                 \
+  else if (cols <= 16 * BlockSize + 1)                                              \
+  {                                                                                 \
+    DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 16)           \
+  }                                                                                 \
+  else if (cols <= 32 * BlockSize + 1)                                              \
+  {                                                                                 \
+    DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 32)           \
+  }                                                                                 \
+  else                                                                              \
+  {                                                                                 \
+    DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 0)            \
+  }
 
   void dynamic_per_token_scaled_quant(
       torch::Tensor &out,         // [..., d]
       torch::Tensor const &input, // [..., d]
-      torch::Tensor &scales, std::optional<at::Tensor> const &scale_ub)
+      torch::Tensor &scales, std::optional<at::Tensor> const &scale_ub,
+      bool shuffle_scale = true)
   {
     TORCH_CHECK(input.is_contiguous());
     TORCH_CHECK(out.is_contiguous());
@@ -450,13 +479,17 @@ else\
 
     if (cols == 32 || cols == 64 || cols == 128)
     {
+      int group_size = cols;
       int thread_data_size = 32;
-      int num_thread_per_group = cols / thread_data_size;
+      int num_thread_per_group = group_size / thread_data_size;
       int num_group_per_tg = groupQuantBlockSize / num_thread_per_group;
-      dim3 const grid((rows + num_group_per_tg - 1) / num_group_per_tg);
-      dim3 const block(groupQuantBlockSize);
       if (out.dtype() == torch_fp8)
       {
+        int ori_cols = cols;
+        int ori_rows = rows;
+        int num_group = rows;
+        dim3 const grid((num_group + num_group_per_tg - 1) / num_group_per_tg);
+        dim3 const block(groupQuantBlockSize);
         AITER_DISPATCH_FLOATING16_TYPES(
             input.scalar_type(), "dynamic_per_group_scaled_quant_kernel", [&]
             { using input_dtype= typename t2ck<scalar_t>::type;
@@ -464,10 +497,15 @@ else\
                 reinterpret_cast<FP8_TYPE *>(out.data_ptr()), scales.data_ptr<float>(),
                 reinterpret_cast<input_dtype*>(input.data_ptr()),
                 scale_ub.has_value() ? scale_ub->data_ptr<float>() : nullptr,
-                rows, cols); });
+                group_size, ori_rows, ori_cols, shuffle_scale); });
       }
       else if (out.dtype() == torch::kInt8)
       {
+        int ori_cols = cols;
+        int ori_rows = rows;
+        int num_group = rows;
+        dim3 const grid((num_group + num_group_per_tg - 1) / num_group_per_tg);
+        dim3 const block(groupQuantBlockSize);
         AITER_DISPATCH_FLOATING16_TYPES(
             input.scalar_type(), "dynamic_per_group_scaled_quant_kernel", [&]
             { using input_dtype= typename t2ck<scalar_t>::type;
@@ -475,11 +513,17 @@ else\
                 reinterpret_cast<ck_tile::int8_t *>(out.data_ptr()), scales.data_ptr<float>(),
                 reinterpret_cast<input_dtype *>(input.data_ptr()),
                 scale_ub.has_value() ? scale_ub->data_ptr<float>() : nullptr,
-                rows, cols); });
+                group_size, ori_rows, ori_cols, shuffle_scale); });
       }
 #if defined(__Float4_e2m1fn_x2)
       else if (out.dtype() == torch::kFloat4_e2m1fn_x2 || out.dtype() == torch::kUInt8)
       {
+        int ori_cols = out.size(-1) * 2;
+        int scaleN = ori_cols / cols;
+        int ori_rows = rows / scaleN;
+        int num_group = shuffle_scale ? ((ori_rows + 31) / 32 * 32) * ((scaleN + 7) / 8 * 8) : rows;
+        dim3 const grid((num_group + num_group_per_tg - 1) / num_group_per_tg);
+        dim3 const block(groupQuantBlockSize);
         AITER_DISPATCH_FLOATING16_TYPES(
             input.scalar_type(), "dynamic_per_group_scaled_quant_kernel", [&]
             { using input_dtype= typename t2ck<scalar_t>::type;
@@ -488,7 +532,7 @@ else\
             reinterpret_cast<float *>(scales.data_ptr()),
             reinterpret_cast<input_dtype *>(input.data_ptr()),
             scale_ub.has_value() ? scale_ub->data_ptr<float>() : nullptr,
-            rows, cols); });
+            group_size, ori_rows, ori_cols, shuffle_scale); });
       }
 #endif
       else
@@ -508,13 +552,13 @@ else\
       else if (out.dtype() == torch::kInt8)
       {
         DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_DISPATCH(
-          dynamic_per_token_scaled_quant_kernel, ck_tile::int8_t, cols);
+            dynamic_per_token_scaled_quant_kernel, ck_tile::int8_t, cols);
       }
 #if defined(__Float4_e2m1fn_x2)
       else if (out.dtype() == torch::kFloat4_e2m1fn_x2 || out.dtype() == torch::kUInt8)
       {
         DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_DISPATCH(
-          dynamic_per_token_scaled_quant_kernel, ck_tile::fp4x2_t, cols);
+            dynamic_per_token_scaled_quant_kernel, ck_tile::fp4x2_t, cols);
       }
 #endif
       else

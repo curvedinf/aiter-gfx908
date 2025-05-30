@@ -14,6 +14,7 @@ from typing import List, Optional
 this_dir = os.path.abspath(__file__)
 sys.path.insert(0, str(Path(this_dir).parents[2] / "aiter/"))
 from jit.core import get_asm_dir
+from jit.utils.chip_info import get_gfx
 
 GEN_DIR = ""  # in Cmake, have to generate files in same folder
 
@@ -527,15 +528,16 @@ template <typename fmha_bwd_dq_dk_dv_v3_traits_> struct FmhaBwdV3Ts;
 template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        0,      false,      0,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
 template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        0,      false,      1,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
 template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        0,      false,      2,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
-template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        0,       true,      0,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
-template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        0,       true,      1,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
-template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        0,       true,      2,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
+// This kernel will be replaced with new fx950 kernel
+template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        0,       true,      0,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = {F_tile_size_kv}; }};
+template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        0,       true,      1,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = {F_tile_size_kv}; }};
+template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        0,       true,      2,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = {F_tile_size_kv}; }};
 template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        1,      false,      0,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
 template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        1,      false,      1,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
 template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        1,      false,      2,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
-template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        1,       true,      0,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
-template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        1,       true,      1,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
-template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        1,       true,      2,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
+template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        1,       true,      0,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = {F_tile_size_kv}; }};
+template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        1,       true,      1,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = {F_tile_size_kv}; }};
+template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdBf16,        1,       true,      2,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = {F_tile_size_kv}; }};
 template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,        0,      false,      0,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
 template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,        0,       true,      0,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
 template<> struct FmhaBwdV3Ts<fmha_bwd_dq_dk_dv_v3_traits_<128, FmhaBwdFp16,        1,      false,      0,    false,   false>> {{ static constexpr int ts_qo = 16; static constexpr int ts_kv = 192; }};
@@ -1432,7 +1434,7 @@ float fmha_bwd_v3(mha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_confi
                     if((t.is_group_mode == false) && (t.mask_type == mask_enum::no_mask)){{
                         if((t.is_v3_atomic_fp32 == true) && (a.nhead_stride_dq_acc >= a.stride_dq_acc /*dq_acc only support BHSD*/)){{
                             if(t.how_v3_bf16_cvt == 0){{
-                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % 64 == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
+                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % {F_seqlen_limit} == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
                                             (a.stride_k == a.stride_v) && (a.nhead_stride_k == a.nhead_stride_v) && (a.batch_stride_k == a.batch_stride_v) && (a.nhead_stride_k == a.nhead_stride_dk) && (a.nhead_stride_v == a.nhead_stride_dv) &&
                                             (a.batch_stride_q >= a.stride_q) && (a.batch_stride_do >= a.stride_do) && ((a.batch_stride_dk / a.batch_stride_k) == (a.nhead_q / a.nhead_k)) && ((a.batch_stride_dv / a.batch_stride_v) == (a.nhead_q / a.nhead_k))){{
                                     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<128, FmhaBwdBf16, false, false, false>;
@@ -1476,7 +1478,7 @@ float fmha_bwd_v3(mha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_confi
                                 }}
                             }}
                             else if(t.how_v3_bf16_cvt == 1){{
-                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % 64 == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
+                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % {F_seqlen_limit} == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
                                             (a.stride_k == a.stride_v) && (a.nhead_stride_k == a.nhead_stride_v) && (a.batch_stride_k == a.batch_stride_v) && (a.nhead_stride_k == a.nhead_stride_dk) && (a.nhead_stride_v == a.nhead_stride_dv) &&
                                             (a.batch_stride_q >= a.stride_q) && (a.batch_stride_do >= a.stride_do) && ((a.batch_stride_dk / a.batch_stride_k) == (a.nhead_q / a.nhead_k)) && ((a.batch_stride_dv / a.batch_stride_v) == (a.nhead_q / a.nhead_k))){{
                                     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<128, FmhaBwdBf16, false, false, false>;
@@ -1520,7 +1522,7 @@ float fmha_bwd_v3(mha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_confi
                                 }}
                             }}
                             else if(t.how_v3_bf16_cvt == 2){{
-                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % 64 == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
+                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % {F_seqlen_limit} == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
                                             (a.stride_k == a.stride_v) && (a.nhead_stride_k == a.nhead_stride_v) && (a.batch_stride_k == a.batch_stride_v) && (a.nhead_stride_k == a.nhead_stride_dk) && (a.nhead_stride_v == a.nhead_stride_dv) &&
                                             (a.batch_stride_q >= a.stride_q) && (a.batch_stride_do >= a.stride_do) && ((a.batch_stride_dk / a.batch_stride_k) == (a.nhead_q / a.nhead_k)) && ((a.batch_stride_dv / a.batch_stride_v) == (a.nhead_q / a.nhead_k))){{
                                     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<128, FmhaBwdBf16, false, false, false>;
@@ -1678,7 +1680,7 @@ float fmha_bwd_v3(mha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_confi
                     else if((t.is_group_mode == false) && (t.mask_type != mask_enum::no_mask) && ((a.window_size_left == -1) && (a.window_size_right == 0))){{
                         if((t.is_v3_atomic_fp32 == true) && (a.nhead_stride_dq_acc >= a.stride_dq_acc /*dq_acc only support BHSD*/)){{
                             if(t.how_v3_bf16_cvt == 0){{
-                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % 64 == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
+                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % {F_seqlen_limit} == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
                                             (a.stride_k == a.stride_v) && (a.nhead_stride_k == a.nhead_stride_v) && (a.batch_stride_k == a.batch_stride_v) && (a.nhead_stride_k == a.nhead_stride_dk) && (a.nhead_stride_v == a.nhead_stride_dv) &&
                                             (a.batch_stride_q >= a.stride_q) && (a.batch_stride_do >= a.stride_do) && ((a.batch_stride_dk / a.batch_stride_k) == (a.nhead_q / a.nhead_k)) && ((a.batch_stride_dv / a.batch_stride_v) == (a.nhead_q / a.nhead_k))){{
                                     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<128, FmhaBwdBf16, false, false, false>;
@@ -1724,7 +1726,7 @@ float fmha_bwd_v3(mha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_confi
                                 }}
                             }}
                             else if(t.how_v3_bf16_cvt == 1){{
-                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % 64 == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
+                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % {F_seqlen_limit} == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
                                             (a.stride_k == a.stride_v) && (a.nhead_stride_k == a.nhead_stride_v) && (a.batch_stride_k == a.batch_stride_v) && (a.nhead_stride_k == a.nhead_stride_dk) && (a.nhead_stride_v == a.nhead_stride_dv) &&
                                             (a.batch_stride_q >= a.stride_q) && (a.batch_stride_do >= a.stride_do) && ((a.batch_stride_dk / a.batch_stride_k) == (a.nhead_q / a.nhead_k)) && ((a.batch_stride_dv / a.batch_stride_v) == (a.nhead_q / a.nhead_k))){{
                                     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<128, FmhaBwdBf16, false, false, false>;
@@ -1770,7 +1772,7 @@ float fmha_bwd_v3(mha_bwd_traits t, fmha_bwd_args a, const ck_tile::stream_confi
                                 }}
                             }}
                             else if(t.how_v3_bf16_cvt == 2){{
-                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % 64 == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
+                                if((a.hdim_q == 128) && (a.seqlen_q == a.seqlen_k) && (a.seqlen_k % {F_seqlen_limit} == 0) && (a.stride_q == a.stride_do) && (a.nhead_stride_q == a.nhead_stride_do) && (a.batch_stride_q == a.batch_stride_do) &&
                                             (a.stride_k == a.stride_v) && (a.nhead_stride_k == a.nhead_stride_v) && (a.batch_stride_k == a.batch_stride_v) && (a.nhead_stride_k == a.nhead_stride_dk) && (a.nhead_stride_v == a.nhead_stride_dv) &&
                                             (a.batch_stride_q >= a.stride_q) && (a.batch_stride_do >= a.stride_do) && ((a.batch_stride_dk / a.batch_stride_k) == (a.nhead_q / a.nhead_k)) && ((a.batch_stride_dv / a.batch_stride_v) == (a.nhead_q / a.nhead_k))){{
                                     using dot_do_o_trait_ = fmha_bwd_dot_do_o_traits_<128, FmhaBwdBf16, false, false, false>;
@@ -2377,151 +2379,18 @@ class FmhaBwdDQDKDVTileSize:
 
 # TODO: design a more practical way to do it
 # this is current supported tile size & pipeline.
+# fmt: off
 def get_fmha_bwd_dq_dk_dv_tile_ppl_dict_from_dtype(dtype: str) -> Optional[dict]:
     if dtype == "fp16" or dtype == "bf16":
         return {
-            "32": [
-                FmhaBwdDQDKDVTileSize(
-                    32,
-                    128,
-                    32,
-                    32,
-                    32,
-                    32,
-                    64,
-                    32,
-                    32,
-                    1,
-                    4,
-                    1,
-                    4,
-                    1,
-                    1,
-                    2,
-                    2,
-                    1,
-                    16,
-                    16,
-                    32,
-                    16,
-                    16,
-                    16,
-                    1,
-                ),
-                "kr_ktr_vr_iglp",
-                "kr_ktr_vr",
-            ],
-            "64": [
-                FmhaBwdDQDKDVTileSize(
-                    32,
-                    128,
-                    64,
-                    32,
-                    64,
-                    32,
-                    32,
-                    64,
-                    64,
-                    1,
-                    4,
-                    1,
-                    4,
-                    1,
-                    1,
-                    1,
-                    4,
-                    1,
-                    16,
-                    16,
-                    32,
-                    16,
-                    16,
-                    16,
-                    1,
-                ),
-                "kr_ktr_vr_iglp",
-                "kr_ktr_vr",
-            ],
-            "128": [
-                FmhaBwdDQDKDVTileSize(
-                    16,
-                    128,
-                    128,
-                    16,
-                    128,
-                    16,
-                    32,
-                    128,
-                    128,
-                    1,
-                    4,
-                    1,
-                    4,
-                    1,
-                    1,
-                    1,
-                    4,
-                    1,
-                    16,
-                    16,
-                    32,
-                    16,
-                    16,
-                    16,
-                    1,
-                ),
-                "kr_ktr_vr_iglp",
-                "kr_ktr_vr",
-            ],
-            "256": [
-                FmhaBwdDQDKDVTileSize(
-                    16,
-                    64,
-                    256,
-                    16,
-                    256,
-                    16,
-                    32,
-                    256,
-                    256,
-                    1,
-                    4,
-                    1,
-                    4,
-                    1,
-                    1,
-                    1,
-                    4,
-                    1,
-                    16,
-                    16,
-                    32,
-                    16,
-                    16,
-                    16,
-                    1,
-                ),
-                "kr_ktr_vr_iglp",
-                "kr_ktr_vr",
-            ],
+            "32":  [FmhaBwdDQDKDVTileSize(32, 128, 32,  32, 32,  32, 64, 32,  32,  1, 4, 1, 4, 1, 1, 2, 2, 1, 16, 16, 32, 16, 16, 16, 1), "kr_ktr_vr_iglp", "kr_ktr_vr"],
+            "64":  [FmhaBwdDQDKDVTileSize(32, 128, 64,  32, 64,  32, 32, 64,  64,  1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1), "kr_ktr_vr_iglp", "kr_ktr_vr"],
+            "128": [FmhaBwdDQDKDVTileSize(16, 128, 128, 16, 128, 16, 32, 128, 128, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1), "kr_ktr_vr_iglp", "kr_ktr_vr"],
+            "256": [FmhaBwdDQDKDVTileSize(16, 64,  256, 16, 256, 16, 32, 256, 256, 1, 4, 1, 4, 1, 1, 1, 4, 1, 16, 16, 32, 16, 16, 16, 1), "kr_ktr_vr_iglp", "kr_ktr_vr"],
         }
     else:
         return None
-
-
-class FmhaBwdApiPool:
-    @property
-    def api(self) -> str:
-        return FMHA_BWD_KERNEL_HEADER + FMHA_BWD_API.format(
-            F_AITER_ASM_DIR=get_asm_dir()
-        )
-
-
-def get_bwd_dq_dk_dv_blobs() -> FmhaBwdApiPool:
-    # TODO: we don't support tuning yet, so pick up one value for pad
-    #       support this in future
-    api_pool = FmhaBwdApiPool()
-    return api_pool
+# fmt: on
 
 
 FMHA_BWD_DOT_DO_O_KERNEL_BODY = """
@@ -2844,26 +2713,6 @@ def write_single_bwd_convert_dq_kernel(
     (autogen_dir / kernel.filename).write_text(kernel.template)
 
 
-def write_bwd_api(api_pool: FmhaBwdApiPool, autogen_dir: Path) -> None:
-    (autogen_dir / FMHA_BWD_API_FILENAME).write_text(api_pool.api)
-
-
-def write_bwd_blobs(output_dir: Path, filter_list: str, receipt: int) -> None:
-    api_pool = FmhaBwdApiPool()
-    write_bwd_api(api_pool, output_dir)
-
-    if receipt == 0:
-        filter_list = filter_list.split("@")
-        filter_list.extend([""] * (3 - len(filter_list)))
-
-        kernels = get_bwd_dot_do_o_blobs(filter_list[0])
-        for kernel in kernels:
-            write_single_bwd_dot_do_o_kernel(kernel, output_dir)
-        kernels = get_bwd_convert_dq_blobs(filter_list[1])
-        for kernel in kernels:
-            write_single_bwd_convert_dq_kernel(kernel, output_dir)
-
-
 def write_blobs(
     output_dir: Optional[str], filters_list: List[str], receipt: int
 ) -> None:
@@ -2874,8 +2723,24 @@ def write_blobs(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for kernel_filter in filters_list:
-        write_bwd_blobs(output_dir, kernel_filter, receipt)
+    ts_kv = 192 if get_gfx() == "gfx942" else 256
+    seqlen_limit = 64 if get_gfx() == "gfx942" else 256
+    dqdkdv_kernel = FMHA_BWD_KERNEL_HEADER + FMHA_BWD_API.format(
+        F_AITER_ASM_DIR=get_asm_dir(), F_tile_size_kv=ts_kv, F_seqlen_limit=seqlen_limit
+    )
+    (output_dir / FMHA_BWD_API_FILENAME).write_text(dqdkdv_kernel)
+
+    if receipt == 0:
+        for kernel_filter in filters_list:
+            kernel_filter = kernel_filter.split("@")
+            kernel_filter.extend([""] * (3 - len(kernel_filter)))
+
+            kernels = get_bwd_dot_do_o_blobs(kernel_filter[0])
+            for kernel in kernels:
+                write_single_bwd_dot_do_o_kernel(kernel, output_dir)
+            kernels = get_bwd_convert_dq_blobs(kernel_filter[1])
+            for kernel in kernels:
+                write_single_bwd_convert_dq_kernel(kernel, output_dir)
 
 
 if __name__ == "__main__":
@@ -2907,8 +2772,6 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    api_list = ["bwd"]
     filter_list = args.filter.split(",")
-    filter_list.extend([""] * (len(api_list) - len(filter_list)))
 
     write_blobs(args.output_dir, filter_list, int(args.receipt))

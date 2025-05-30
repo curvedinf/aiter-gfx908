@@ -1,6 +1,6 @@
 '''
- * Copyright © Advanced Micro Devices, Inc. All rights reserved.
- * Copyright (c) 2024, The vLLM team.
+ * Copyright (C) Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2025, The vLLM team.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -206,7 +206,7 @@ class CustomAllreduce:
     @contextmanager
     def capture(self):
         """
-        The main responsibility of this context manager is the 
+        The main responsibility of this context manager is the
         `register_graph_buffers` call at the end of the context.
         It records all the buffer addresses used in the CUDA graph.
         """

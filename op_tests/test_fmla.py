@@ -291,6 +291,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen):
 
     out, us = flash_mla()
     out_flash, lse_flash = out
+    # print(out_flash)
 
     # out_torch, lse_torch = ref_mla_cu_partition(out_acc, lse_acc)
     # out_flash, lse_flash, debug_m, debug_p, debug_v, debug_o = flash_mla()
@@ -360,11 +361,11 @@ if __name__ == "__main__":
     # ):
     for (dtype, b, s, h_q, s_q, causal, varlen) in itertools.product(
         (torch.float16, ),
-        (96,),
+        (32,),
         (6001,),
         (16,),
-        (1,),
-        (True,),
+        (3,),
+        (False,),
         (False,)
     ):
         test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen)

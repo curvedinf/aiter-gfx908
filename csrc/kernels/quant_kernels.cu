@@ -58,12 +58,12 @@ namespace aiter
     {
       if (x >= ori_rows || y >= scaleN)
       {
-        if (shuffle_scale && threadIdx.x % num_thread_per_group == 0)
-        {
-          auto *tmp = reinterpret_cast<uint8_t *>(scale);
-          groupId = fp4_scale_shuffle_id(scaleN_pad, x, y);
-          tmp[groupId] = 0x7f;
-        }
+        // if (shuffle_scale && threadIdx.x % num_thread_per_group == 0)
+        // {
+        //   auto *tmp = reinterpret_cast<uint8_t *>(scale);
+        //   groupId = fp4_scale_shuffle_id(scaleN_pad, x, y);
+        //   tmp[groupId] = 0x7f;
+        // }
         return;
       }
     }
@@ -445,15 +445,15 @@ namespace aiter
       cols); });
 
 #define DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_DISPATCH(quant_kernel, DTYPE_O, cols) \
-  if (cols <= 8 * BlockSize + 1)                                                    \
+  if (cols <= 8 * BlockSize + 8)                                                    \
   {                                                                                 \
     DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 8)            \
   }                                                                                 \
-  else if (cols <= 16 * BlockSize + 1)                                              \
+  else if (cols <= 16 * BlockSize + 16)                                              \
   {                                                                                 \
     DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 16)           \
   }                                                                                 \
-  else if (cols <= 32 * BlockSize + 1)                                              \
+  else if (cols <= 32 * BlockSize + 32)                                              \
   {                                                                                 \
     DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 32)           \
   }                                                                                 \
@@ -521,7 +521,7 @@ namespace aiter
         int ori_cols = out.size(-1) * 2;
         int scaleN = ori_cols / cols;
         int ori_rows = rows / scaleN;
-        int num_group = shuffle_scale ? ((ori_rows + 31) / 32 * 32) * ((scaleN + 7) / 8 * 8) : rows;
+        int num_group = shuffle_scale ? ((ori_rows + 255) / 256 * 256) * ((scaleN + 7) / 8 * 8) : rows;
         dim3 const grid((num_group + num_group_per_tg - 1) / num_group_per_tg);
         dim3 const block(groupQuantBlockSize);
         AITER_DISPATCH_FLOATING16_TYPES(

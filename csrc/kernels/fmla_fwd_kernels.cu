@@ -34,7 +34,7 @@ struct FlashMlaKernelTrait
 };
 
 // using FlashMlaKernelTraitsInstance = FlashMlaKernelTrait<576, 512, 64, 64, 4>;
-using FlashMlaKernelTraitsInstance = FlashMlaKernelTrait<192, 128, 64, 64, 4>;
+using FlashMlaKernelTraitsInstance = FlashMlaKernelTrait<192, 128, 16, 64, 4>;
 
 union TileSchedulerMetaData
 {
@@ -263,10 +263,15 @@ std::vector<torch::Tensor> get_mla_metadata(
     hipDeviceProp_t dev_prop;
     ck_tile::hip_check_error(hipGetDevice(&dev));
     ck_tile::hip_check_error(hipGetDeviceProperties(&dev_prop, dev));
-    const int32_t cu_count = dev_prop.multiProcessorCount;
+    // const int32_t cu_count = dev_prop.multiProcessorCount;
+    const int32_t cu_count = dev_prop.multiProcessorCount * 2;
     const int32_t cu_parts = cu_count / num_heads_k /
                              ck_tile::integer_divide_ceil(num_heads_per_head_k, Traits::kBlockM);
 
+    // printf("cu_count %d \n", cu_count);
+    // printf("num_heads_k %d \n", num_heads_k);
+    // printf("ck_tile::integer_divide_ceil(num_heads_per_head_k, Traits::kBlockM)%d \n", ck_tile::integer_divide_ceil(num_heads_per_head_k, Traits::kBlockM));
+    // printf("cu_parts %d \n", cu_parts);
     auto tile_scheduler_metadata = torch::empty({cu_parts, TileSchedulerMetaDataSizeInDw}, tensor_options);
     auto num_splits = torch::empty({batch_size + 1}, tensor_options);
 

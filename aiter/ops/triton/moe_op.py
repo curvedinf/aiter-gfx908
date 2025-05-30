@@ -1,9 +1,12 @@
+import functools
+import json
 import torch
 import triton
 import triton.language as tl
 from typing import Any, Dict, Optional, List
 from aiter.ops.triton.quant import dynamic_per_tensor_fp8_quant
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
+from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
 
 # Source:
 # MoE Kernel adapted from VLLM
@@ -925,6 +928,19 @@ def _fused_moe_persistent_kernel(
         # advance tile_id
         tile_id += NUM_SMS
 
+@functools.lru_cache(maxsize=1024)
+def _get_config(
+    M: int,
+    dtype: str
+):
+    if not hasattr(_get_config, "_config_dict"):
+        dev = arch_info.get_device()
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-A16W16.json"
+        with open(fpath, "r") as file:
+            config = json.load(file)
+        _get_config._config_dict = config
+
+    return _get_config._config_dict["any"]
 
 def fused_moe(
     A: torch.Tensor,
@@ -940,12 +956,12 @@ def fused_moe(
     num_tokens_post_padded: torch.Tensor,
     mul_routed_weight: bool,
     top_k: int,
-    config: Dict[str, Any],
     compute_type: tl.dtype,
     use_fp8_w8a8: bool,
     use_int8_w8a16: bool,
     use_int4_w4a16: bool,
     block_shape: Optional[List[int]] = None,
+    config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     #TODO: Add doc

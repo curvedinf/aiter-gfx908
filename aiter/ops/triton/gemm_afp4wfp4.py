@@ -113,7 +113,7 @@ def _gemm_afp4_wfp4_kernel(
         )
         # Create pointers for the first block of A and B scales
         offs_ks = (pid_k * (SPLITK_BLOCK_SIZE // SCALE_GROUP_SIZE)) + tl.arange(
-            0, BLOCK_SIZE_K // SCALE_GROUP_SIZE
+            0, BLOCK_SIZE_K * 2 // SCALE_GROUP_SIZE
         )
         a_scale_ptrs = (
             a_scales_ptr + offs_am[:, None] * stride_asm + offs_ks[None, :] * stride_ask
@@ -299,7 +299,7 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
 
         if BLOCK_SIZE_M < 32:
             offs_ks_non_shufl = (pid_k * (SPLITK_BLOCK_SIZE // SCALE_GROUP_SIZE)) + tl.arange(
-            0, BLOCK_SIZE_K // SCALE_GROUP_SIZE
+            0, BLOCK_SIZE_K * 2 // SCALE_GROUP_SIZE
             )
             a_scale_ptrs = (
                 a_scales_ptr

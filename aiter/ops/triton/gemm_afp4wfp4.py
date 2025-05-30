@@ -127,9 +127,11 @@ def _gemm_afp4_wfp4_kernel(
 
         for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter, 2):
             aggregated_a_scales = tl.reshape(tl.load(a_scale_ptrs), (BLOCK_SIZE_M, 2, BLOCK_SIZE_K // 32))
+            aggregated_a_scales = tl.permute(aggregated_a_scales, (0, 2, 1))
             aggregated_b_scales = tl.reshape(tl.load(b_scale_ptrs), (BLOCK_SIZE_N, 2, BLOCK_SIZE_K // 32))
-            a_scales0, a_scales1 = aggregated_scale_a.split()
-            b_scales0, b_scales1 = aggregated_scale_b.split()
+            aggregated_b_scales = tl.permute(aggregated_b_scales, (0, 2, 1))
+            a_scales0, a_scales1 = aggregated_a_scales.split()
+            b_scales0, b_scales1 = aggregated_b_scales.split()
             # a_scales = tl.full((BLOCK_SIZE_M, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)
             # b_scales = tl.full((BLOCK_SIZE_N, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)
             # Load the next block of A and B, generate a mask by checking the K dimension.
@@ -288,7 +290,7 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
             pid_n * (BLOCK_SIZE_N // 32) + tl.arange(0, (BLOCK_SIZE_N // 32))
         ) % N
         offs_ks = (pid_k * (SPLITK_BLOCK_SIZE // SCALE_GROUP_SIZE) * 32) + tl.arange(
-            0, BLOCK_SIZE_K // SCALE_GROUP_SIZE * 32
+            0, BLOCK_SIZE_K * 2 // SCALE_GROUP_SIZE * 32
         )
             # B scales are N x K even though B operand is K x N.
         b_scale_ptrs = (
@@ -320,15 +322,17 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
 
         for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter, 2):
             aggregated_a_scales = tl.reshape(tl.load(a_scale_ptrs), (BLOCK_SIZE_M, 2, BLOCK_SIZE_K // 32))
+            aggregated_a_scales = tl.permute(aggregated_a_scales, (0, 2, 1))
             aggregated_b_scales = tl.reshape(tl.load(b_scale_ptrs), (BLOCK_SIZE_N, 2, BLOCK_SIZE_K // 32))
-            a_scales0, a_scales1 = aggregated_scale_a.split()
-            b_scales0, b_scales1 = aggregated_scale_b.split()
+            aggregated_b_scales = tl.permute(aggregated_b_scales, (0, 2, 1))
+            a_scales0, a_scales1 = aggregated_a_scales.split()
+            b_scales0, b_scales1 = aggregated_b_scales.split()
             if BLOCK_SIZE_M >= 32:
-                a_scales = tl.reshape(
-                    a_scales, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+                a_scales0 = tl.reshape(
+                    a_scales0, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
                 )
-            b_scales = tl.reshape(
-                b_scales, (BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+            b_scales0 = tl.reshape(
+                b_scales0, (BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
             )
 
             if EVEN_K:
@@ -354,11 +358,11 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
             b_scale_ptrs += BLOCK_SIZE_K * stride_bsk
 
             if BLOCK_SIZE_M >= 32:
-                a_scales = tl.reshape(
-                    a_scales, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+                a_scales1 = tl.reshape(
+                    a_scales1, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
                 )
-            b_scales = tl.reshape(
-                b_scales, (BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+            b_scales1 = tl.reshape(
+                b_scales1, (BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
             )
 
             # a_scales = tl.full((BLOCK_SIZE_M, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)

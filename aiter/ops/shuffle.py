@@ -2,7 +2,7 @@
 # Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
-from aiter import dtypes
+from aiter.utility import dtypes
 
 
 def shuffle_weight(x: torch.Tensor, layout=(16, 16), use_int4=False) -> torch.Tensor:

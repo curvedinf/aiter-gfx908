@@ -1,6 +1,6 @@
 /*
  * Copyright © Advanced Micro Devices, Inc. All rights reserved.
- * Copyright (c) 2024, The vLLM team.
+ * Copyright (C) 2024-2025, The vLLM team.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,13 +33,15 @@
 #include <hip/hip_bf16.h>
 
 template <typename T, typename F>
-__device__ constexpr T block_reduce(T val, F reduce_f)
+__device__ constexpr T blockReduce(T val, F reduce_f)
 {
   __shared__ T smem[256];
   T wave_local = wave_reduce(val, reduce_f);
   T v_local = cross_wave_reduce(wave_local, reduce_f, smem);
   return v_local;
 }
+
+namespace aiter {
 
 void swap_blocks(torch::Tensor &src, torch::Tensor &dst,
                  const torch::Tensor &block_mapping)
@@ -91,6 +93,8 @@ void swap_blocks(torch::Tensor &src, torch::Tensor &dst,
   }
 }
 
+} // namespace aiter
+
 namespace vllm
 {
 
@@ -127,6 +131,8 @@ namespace vllm
   }
 
 } // namespace vllm
+
+namespace aiter {
 
 // Note: the key_caches and value_caches vectors are constant but
 // not the Tensors they contain. The vectors need to be const refs
@@ -181,6 +187,8 @@ void copy_blocks(std::vector<torch::Tensor> const &key_caches,
                                                                 value_cache_ptrs_tensor.data_ptr<int64_t>(),
                                                                 block_mapping.data_ptr<int64_t>(), numel_per_block); }));
 }
+
+} // namespace aiter
 
 namespace vllm
 {
@@ -622,8 +630,12 @@ namespace vllm
       tokens_in_block = slot_mapping[first_token_idx + threadIdx.x] / block_size;
       tokens_in_block = tokens_in_block == block_idx ? 1 : 0;
     }
-    int numtokens_in_block = block_reduce(tokens_in_block, [](float a, float b)
-                                          { return a + b; });
+    auto sum = [](float a, float b)
+    {
+      return a + b;
+    };
+    int numtokens_in_block = block_reduce<int, decltype(sum), wg_size, true>(tokens_in_block, sum);
+    // int numtokens_in_block = blockReduce(tokens_in_block, sum);
 
     auto f_absmax_f32 = [](float v_0_, float v_1_)
     {
@@ -652,8 +664,10 @@ namespace vllm
       }
     }
 
-    k_max_val = block_reduce(k_max_val, f_max_f32);
-    v_max_val = block_reduce(v_max_val, f_max_f32);
+    k_max_val = block_reduce<float, decltype(f_max_f32), wg_size, true>(k_max_val, f_max_f32);
+    v_max_val = block_reduce<float, decltype(f_max_f32), wg_size, true>(v_max_val, f_max_f32);
+    // k_max_val = blockReduce(k_max_val, f_max_f32);
+    // v_max_val = blockReduce(v_max_val, f_max_f32);
 
     float k_block_scale = k_max_val / dtypeMax;
     float v_block_scale = v_max_val / dtypeMax;
@@ -824,6 +838,8 @@ namespace vllm
           slot_mapping.data_ptr<int64_t>(), key_stride, value_stride, \
           num_heads, head_size, block_size, x, k_scale, v_scale);
 
+namespace aiter {
+
 void reshape_and_cache(
     torch::Tensor &key,   // [num_tokens, num_heads, head_size]
     torch::Tensor &value, // [num_tokens, num_heads, head_size]
@@ -862,6 +878,8 @@ void reshape_and_cache(
   }
 }
 
+} // namespace aiter
+
 // KV_T is the stored data type of kv-cache.
 // CACHE_T is the data type of key and value tensors.
 // KV_DTYPE is the real data type of kv-cache.
@@ -874,6 +892,8 @@ void reshape_and_cache(
           reinterpret_cast<CACHE_T *>(value_cache.data_ptr()),        \
           slot_mapping.data_ptr<int64_t>(), block_stride, key_stride, \
           value_stride, num_heads, head_size, block_size, k_scale.data_ptr<float>(), v_scale.data_ptr<float>());
+
+namespace aiter {
 
 void reshape_and_cache_flash(
     torch::Tensor &key,       // [num_tokens, num_heads, head_size]
@@ -904,6 +924,7 @@ void reshape_and_cache_flash(
   DISPATCH_BY_KV_CACHE_DTYPE(key.dtype(), kv_cache_dtype,
                              CALL_RESHAPE_AND_CACHE_FLASH);
 }
+} // namespace aiter
 
 // KV_T is the stored data type of kv-cache.
 // CACHE_T is the data type of key and value tensors.
@@ -963,6 +984,8 @@ void reshape_and_cache_flash(
             slot_mapping.data_ptr<int64_t>(), key_stride, value_stride, num_heads,        \
             num_blocks, head_size, block_size, x, num_tokens, seq_len, dtypeMax);         \
   }
+
+namespace aiter {
 
 void reshape_and_cache_with_pertoken_quant(
     torch::Tensor &key,   // [num_tokens, num_heads, head_size]
@@ -1065,7 +1088,7 @@ void reshape_and_cache_with_block_quant(
 
   int key_stride = key.stride(0) / seq_len;
   int value_stride = value.stride(0) / seq_len;
-  int blockDimx = (block_size + 255) / 256 * 256;
+  int blockDimx = 256; //(block_size + 255) / 256 * 256;
 
   dim3 grid(batch_size, (seq_len + block_size - 1) / block_size + 1, num_heads);
   dim3 block(blockDimx);
@@ -1122,6 +1145,7 @@ void reshape_and_cache_with_block_quant(
     TORCH_CHECK(false, "Unsupported data type of kv cache: ", key_cache.dtype());
   }
 }
+} // namespace aiter
 
 namespace vllm
 {
@@ -1147,6 +1171,8 @@ namespace vllm
   vllm::convert_fp8_kernel<Tout, Tin, KV_DTYPE><<<grid, block, 0, stream>>>( \
       reinterpret_cast<Tin *>(src_cache.data_ptr()),                         \
       reinterpret_cast<Tout *>(dst_cache.data_ptr()), scale, block_stride);
+
+namespace aiter {
 
 // Only for testing.
 void convert_fp8(torch::Tensor &dst_cache, torch::Tensor &src_cache,
@@ -1228,3 +1254,4 @@ void convert_fp8(torch::Tensor &dst_cache, torch::Tensor &src_cache,
     TORCH_CHECK(false, "Unsupported data type: ", kv_cache_dtype);
   }
 }
+} // namespace aiter

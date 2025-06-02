@@ -384,7 +384,7 @@ def _flash_attn_backward(
     deterministic: bool,
     rng_state: Optional[torch.Tensor] = None,
     is_v3_atomic_fp32: Optional[bool] = True,
-    how_v3_bf16_cvt: Optional[int] = 1,
+    how_v3_bf16_cvt: Optional[int] = 0,
 ) -> torch.Tensor:
     if get_gfx() == "gfx950" and how_v3_bf16_cvt != 0:
         logger.warning(

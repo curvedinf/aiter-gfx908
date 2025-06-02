@@ -702,7 +702,7 @@ def _flash_attn_backward_fake(
     deterministic: bool,
     rng_state: Optional[torch.Tensor] = None,
     is_v3_atomic_fp32: Optional[bool] = True,
-    how_v3_bf16_cvt: Optional[int] = 1,
+    how_v3_bf16_cvt: Optional[int] = 0,
 ) -> torch.Tensor:
     dout, q, k, v, out = [maybe_contiguous(x) for x in (dout, q, k, v, out)]
     if dq is None:
@@ -741,7 +741,7 @@ class FlashAttnFunc(torch.autograd.Function):
         return_softmax,
         is_grad_enabled,
         is_v3_atomic_fp32: Optional[bool] = False,
-        how_v3_bf16_cvt: Optional[int] = 2,
+        how_v3_bf16_cvt: Optional[int] = 0,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
@@ -1104,7 +1104,7 @@ def _flash_attn_varlen_backward(
     deterministic: bool,
     rng_state: Optional[torch.Tensor] = None,
     is_v3_atomic_fp32: Optional[bool] = True,
-    how_v3_bf16_cvt: Optional[int] = 1,
+    how_v3_bf16_cvt: Optional[int] = 0,
     zero_tensors: bool = False,
 ) -> torch.Tensor:
     md_name = "mha_varlen_bwd"
@@ -1325,7 +1325,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         out,
         is_grad_enabled,
         is_v3_atomic_fp32: Optional[bool] = True,
-        how_v3_bf16_cvt: Optional[int] = 1,
+        how_v3_bf16_cvt: Optional[int] = 0,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:

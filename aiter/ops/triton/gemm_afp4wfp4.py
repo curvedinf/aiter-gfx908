@@ -160,10 +160,14 @@ def _gemm_afp4_wfp4_kernel(
             c_ptr
             + stride_cm * offs_cm[:, None]
             + stride_cn * offs_cn[None, :]
-            + pid_k * stride_ck
+            # + pid_k * stride_ck
         )
         c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-        tl.store(c_ptrs, c, mask=c_mask)
+
+        if NUM_KSPLIT == 0:
+            tl.store(c_ptrs, c, mask=c_mask)
+        else:
+            tl.atomic_add(c_ptrs, c, mask=c_mask, sem="relaxed")
 
 
 @triton.heuristics(
@@ -513,17 +517,17 @@ def gemm_afp4wfp4(
         config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
         config["NUM_KSPLIT"] = NUM_KSPLIT
 
-        if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
-            y_pp = torch.empty(
-                (config["NUM_KSPLIT"], M, N), dtype=y.dtype, device=y.device
-            )
-        else:
-            y_pp = torch.empty(
-                (config["NUM_KSPLIT"], M, N), dtype=torch.float32, device=y.device
-            )
+        # if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
+        #     y_pp = torch.empty(
+        #         (config["NUM_KSPLIT"], M, N), dtype=y.dtype, device=y.device
+        #     )
+        # else:
+        #     y_pp = torch.empty(
+        #         (config["NUM_KSPLIT"], M, N), dtype=torch.float32, device=y.device
+        #     )
     else:
         config["SPLITK_BLOCK_SIZE"] = 2 * K
-        y_pp = None
+        # y_pp = None
 
     grid = lambda META: (  # noqa: E731
         (
@@ -532,10 +536,11 @@ def gemm_afp4wfp4(
             * triton.cdiv(N, META["BLOCK_SIZE_N"])
         ),
     )
+
     _gemm_afp4_wfp4_kernel[grid](
         x,
         w,
-        y if config["NUM_KSPLIT"] == 1 else y_pp,
+        y,
         x_scales,
         w_scales,
         M,
@@ -545,9 +550,9 @@ def gemm_afp4wfp4(
         x.stride(1),
         w.stride(0),
         w.stride(1),
-        0 if config["NUM_KSPLIT"] == 1 else y_pp.stride(0),
-        y.stride(0) if config["NUM_KSPLIT"] == 1 else y_pp.stride(1),
-        y.stride(1) if config["NUM_KSPLIT"] == 1 else y_pp.stride(2),
+        0,
+        y.stride(0),
+        y.stride(1),
         x_scales.stride(0),
         x_scales.stride(1),
         w_scales.stride(0),
@@ -555,35 +560,35 @@ def gemm_afp4wfp4(
         **config,
     )
 
-    if config["NUM_KSPLIT"] > 1:
-        REDUCE_BLOCK_SIZE_M = 16
-        # TODO: Need to debug - REDUCE_BLOCK_SIZE_N=128 with fp32 partials fails
-        # NOTE: REDUCE_BLOCK_SIZE_N=16 gives best perf with fp32 partials and
-        # REDUCE_BLOCK_SIZE_N=128 gives best perf with bf16 partials
-        REDUCE_BLOCK_SIZE_N = (
-            128 if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1" else 64
-        )
-        ACTUAL_KSPLIT = triton.cdiv(K, (config["SPLITK_BLOCK_SIZE"] // 2))
+    # if config["NUM_KSPLIT"] > 1:
+    #     REDUCE_BLOCK_SIZE_M = 16
+    #     # TODO: Need to debug - REDUCE_BLOCK_SIZE_N=128 with fp32 partials fails
+    #     # NOTE: REDUCE_BLOCK_SIZE_N=16 gives best perf with fp32 partials and
+    #     # REDUCE_BLOCK_SIZE_N=128 gives best perf with bf16 partials
+    #     REDUCE_BLOCK_SIZE_N = (
+    #         128 if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1" else 64
+    #     )
+    #     ACTUAL_KSPLIT = triton.cdiv(K, (config["SPLITK_BLOCK_SIZE"] // 2))
 
-        grid_reduce = (
-            triton.cdiv(M, REDUCE_BLOCK_SIZE_M),
-            triton.cdiv(N, REDUCE_BLOCK_SIZE_N),
-        )
-        _gemm_afp4_wfp4_reduce_kernel[grid_reduce](
-            y_pp,
-            y,
-            M,
-            N,
-            y_pp.stride(0),
-            y_pp.stride(1),
-            y_pp.stride(2),
-            y.stride(0),
-            y.stride(1),
-            REDUCE_BLOCK_SIZE_M,
-            REDUCE_BLOCK_SIZE_N,
-            ACTUAL_KSPLIT,
-            config["NUM_KSPLIT"],
-        )
+    #     grid_reduce = (
+    #         triton.cdiv(M, REDUCE_BLOCK_SIZE_M),
+    #         triton.cdiv(N, REDUCE_BLOCK_SIZE_N),
+    #     )
+    #     _gemm_afp4_wfp4_reduce_kernel[grid_reduce](
+    #         y_pp,
+    #         y,
+    #         M,
+    #         N,
+    #         y_pp.stride(0),
+    #         y_pp.stride(1),
+    #         y_pp.stride(2),
+    #         y.stride(0),
+    #         y.stride(1),
+    #         REDUCE_BLOCK_SIZE_M,
+    #         REDUCE_BLOCK_SIZE_N,
+    #         ACTUAL_KSPLIT,
+    #         config["NUM_KSPLIT"],
+    #     )
 
     return y
 

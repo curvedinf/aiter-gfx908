@@ -1034,13 +1034,22 @@ def _flash_attn_forward(
     # Best config from ROCm/triton/python/perf-kernels/flash_attention.py::attn_fwd autotuning is BLOCK_M: 128, BLOCK_N: 64, waves_per_eu: 2, num_warps: 4, num_ctas: 1, num_stages: 1
     # BLOCK_N=64 spills but has higher performance
     # Tuned for MI300x
+    # config = {
+    #     "BLOCK_M": 128,
+    #     "BLOCK_N": 64,
+    #     "waves_per_eu": 2,
+    #     "num_warps": 4,
+    #     "num_ctas": 1,
+    #     "num_stages": 1,
+    # }
+    # FAv3 config
     config = {
-        "BLOCK_M": 128,
+        "BLOCK_M": 256,
         "BLOCK_N": 64,
         "waves_per_eu": 2,
-        "num_warps": 4,
+        "num_warps": 8,
         "num_ctas": 1,
-        "num_stages": 1,
+        "num_stages": 4,
     }
     # Dropout significantly increases VGPR usage so use small tiles
     if enable_dropout:

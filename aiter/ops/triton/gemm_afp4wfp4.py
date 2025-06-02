@@ -77,8 +77,8 @@ def _gemm_afp4_wfp4_kernel(
     # Map program ids `pid` to the block of C it should compute.
     # This is done in a grouped ordering to promote L2 data reuse.
     pid_unified = tl.program_id(axis=0)
-    pid_k = pid_unified % NUM_KSPLIT
-    pid = pid_unified // NUM_KSPLIT
+    pid_k = pid_unified % GRID_MN
+    pid = pid_unified // GRID_MN
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
@@ -164,7 +164,7 @@ def _gemm_afp4_wfp4_kernel(
         )
         c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
 
-        if NUM_KSPLIT == 0:
+        if NUM_KSPLIT == 1:
             tl.store(c_ptrs, c, mask=c_mask)
         else:
             tl.atomic_add(c_ptrs, c, mask=c_mask, sem="relaxed")
@@ -409,8 +409,6 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
         triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
     )
     while NUM_KSPLIT > 1 and BLOCK_SIZE_K > 16:
-        # print(K, SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT)
-        # print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
 
         if (
             K % (SPLITK_BLOCK_SIZE // 2) == 0
@@ -434,8 +432,6 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
             triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
         )
 
-    # print(K, SPLITK_BLOCK_SIZE // 2, BLOCK_SIZE_K // 2, NUM_KSPLIT)
-    # print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
     return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
 
 
@@ -507,7 +503,6 @@ def gemm_afp4wfp4(
 
     if config is None:
         config = _get_config(M, N, K)
-    # print(f"AFP4WFP4_config={config}")
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
@@ -628,7 +623,6 @@ def gemm_afp4wfp4_preshuffled_scales(
 
     if config is None:
         config = _get_config(M, N, K)
-    # print(f"AFP4WFP4_config={config}")
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]

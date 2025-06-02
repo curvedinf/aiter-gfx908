@@ -77,8 +77,8 @@ def _gemm_afp4_wfp4_kernel(
     # Map program ids `pid` to the block of C it should compute.
     # This is done in a grouped ordering to promote L2 data reuse.
     pid_unified = tl.program_id(axis=0)
-    pid_k = pid_unified % GRID_MN
-    pid = pid_unified // GRID_MN
+    pid_k = pid_unified // GRID_MN
+    pid = pid_unified % GRID_MN
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 

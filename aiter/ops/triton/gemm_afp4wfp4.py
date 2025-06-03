@@ -42,9 +42,9 @@ def _gemm_afp4_wfp4_kernel(
     stride_cm,
     stride_cn,
     stride_asm,
-    stride_ask,
+    stride_ask: tl.constexpr,
     stride_bsn,
-    stride_bsk,
+    stride_bsk: tl.constexpr,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
@@ -193,9 +193,9 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
     stride_cm,
     stride_cn,
     stride_asm,
-    stride_ask,
+    stride_ask: tl.constexpr,
     stride_bsn,
-    stride_bsk,
+    stride_bsk: tl.constexpr,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,

@@ -31,6 +31,7 @@
 #include <vector>
 
 #include <hip/hip_bf16.h>
+using fp8_type = vllm::fp8::fp8_type;
 
 template <typename T, typename F>
 __device__ constexpr T block_reduce(T val, F reduce_f)
@@ -338,14 +339,14 @@ namespace vllm
     }
 
     template <>
-    __device__ hip_fp8 type_convert<hip_fp8, float>(float x)
+    __device__ fp8_type type_convert<fp8_type, float>(float x)
     {
-      hip_fp8 f8{x};
+      fp8_type f8{x};
       return f8;
     }
 
     template <>
-    __device__ float type_convert<float, hip_fp8>(hip_fp8 x)
+    __device__ float type_convert<float, fp8_type>(fp8_type x)
     {
       return float(x);
     }
@@ -1016,15 +1017,15 @@ void reshape_and_cache_with_pertoken_quant(
     dtypeMax = FP8_MAX;
     if (key.dtype() == at::ScalarType::Float)
     {
-      CALL_RESHAPE_AND_CACHE_WITH_PERTOKEN_QUANT(float, hip_fp8, dequant_scale_t);
+      CALL_RESHAPE_AND_CACHE_WITH_PERTOKEN_QUANT(float, fp8_type, dequant_scale_t);
     }
     else if (key.dtype() == at::ScalarType::Half)
     {
-      CALL_RESHAPE_AND_CACHE_WITH_PERTOKEN_QUANT(__half, hip_fp8, dequant_scale_t);
+      CALL_RESHAPE_AND_CACHE_WITH_PERTOKEN_QUANT(__half, fp8_type, dequant_scale_t);
     }
     else if (key.dtype() == at::ScalarType::BFloat16)
     {
-      CALL_RESHAPE_AND_CACHE_WITH_PERTOKEN_QUANT(__hip_bfloat16, hip_fp8, dequant_scale_t);
+      CALL_RESHAPE_AND_CACHE_WITH_PERTOKEN_QUANT(__hip_bfloat16, fp8_type, dequant_scale_t);
     }
     else
     {
@@ -1097,15 +1098,15 @@ void reshape_and_cache_with_block_quant(
     dtypeMax = FP8_MAX;
     if (key.dtype() == at::ScalarType::Float)
     {
-      CALL_RESHAPE_AND_CACHE_WITH_BLOCK_QUANT(float, hip_fp8, dequant_scale_t);
+      CALL_RESHAPE_AND_CACHE_WITH_BLOCK_QUANT(float, fp8_type, dequant_scale_t);
     }
     else if (key.dtype() == at::ScalarType::Half)
     {
-      CALL_RESHAPE_AND_CACHE_WITH_BLOCK_QUANT(__half, hip_fp8, dequant_scale_t);
+      CALL_RESHAPE_AND_CACHE_WITH_BLOCK_QUANT(__half, fp8_type, dequant_scale_t);
     }
     else if (key.dtype() == at::ScalarType::BFloat16)
     {
-      CALL_RESHAPE_AND_CACHE_WITH_BLOCK_QUANT(__hip_bfloat16, hip_fp8, dequant_scale_t);
+      CALL_RESHAPE_AND_CACHE_WITH_BLOCK_QUANT(__hip_bfloat16, fp8_type, dequant_scale_t);
     }
     else
     {

@@ -275,7 +275,7 @@ template <typename scalar_t, typename cache_t,
           vllm::Fp8KVCacheDataType KV_DTYPE, typename OUTT, int BLOCK_SIZE,
           int HEAD_SIZE, int NUM_THREADS, bool ALIBI_ENABLED, int GQA_RATIO>
 __global__
-__launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma16_kernel(
+__launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
     const scalar_t* __restrict__ q,         // [num_seqs, num_heads, head_size]
     const cache_t* __restrict__ k_cache,    // [num_blocks, num_kv_heads, head_size/x, block_size, x]
     const cache_t* __restrict__ v_cache,    // [num_blocks, num_kv_heads, head_size, block_size]

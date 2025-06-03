@@ -4,7 +4,7 @@ import os
 import torch
 import triton
 from op_tests.triton_tests.test_gemm_afp4wfp4 import generate_gemm_afp4wfp4_inputs
-from utils.benchmark_utils import get_model_configs, get_available_models
+from utils.benchmark_utils import get_model_configs, get_available_models, print_vgpr
 import os
 
 TRITON_HIP_PRESHUFFLE_SCALES = (
@@ -90,6 +90,12 @@ def run_benchmark(args):
     @triton.testing.perf_report([benchmark])
     def bench_gemm_afp4wfp4_blockscale(M, N, K, metric, provider):
         c_dtype = torch.bfloat16
+        if args.test:
+            from op_tests.triton_tests.test_gemm_afp4wfp4 import test_gemm_afp4_wfp4
+            test_gemm_afp4_wfp4(M,N,K,c_dtype, None)
+            torch.cuda.synchronize()
+            print("Test passed successfully!")
+            return 0
         x, w, _, _, x_scale, w_scale, _, _ = generate_gemm_afp4wfp4_inputs(
             M, N, K, c_dtype
         )
@@ -104,11 +110,11 @@ def run_benchmark(args):
         mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
         mem = mem_read + mem_write
         out = torch.empty(x.shape[0], w.shape[1], device=x.device, dtype=c_dtype)
-
+        
         ms = triton.testing.do_bench(
             lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
-            warmup=25,
-            rep=100,
+            warmup=1 if args.test else 25,
+            rep=1 if args.test else 100,
         )
 
         # Return exactly one scalar depending on which metric is active
@@ -123,7 +129,7 @@ def run_benchmark(args):
         else:
             raise ValueError("Unknown metric: " + metric)
 
-    bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
+    bench_gemm_afp4wfp4_blockscale.run(save_path=None, print_data=True, show_plots=False)
 
 
 def parse_args():
@@ -165,12 +171,31 @@ def parse_args():
         default="throughput",
         help="metric to plot",
     )
+
+    parser.add_argument(
+        "--print_vgpr",
+        action="store_true",
+        help="Print VGPR usage for Triton kernels",
+    )
+
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Run test with the benchmark shape to ensure correctness",
+    )
+
     args = parser.parse_args()
     return args
 
 
 def main():
     args = parse_args()
+    if args.print_vgpr:
+        print("Retrieving VGPR usage for Triton kernels...")
+        fun = lambda: run_benchmark(args)  # noqa: E731
+        print_vgpr(fun, "GEMM")
+        return 0
+
     run_benchmark(args)
 
 

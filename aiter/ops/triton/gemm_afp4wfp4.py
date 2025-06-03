@@ -14,7 +14,90 @@ import aiter.ops.triton.utils.arch_info as arch_info
 from aiter.ops.triton.utils.core import AITER_TRITON_OPS_PATH, AITER_TRITON_CONFIGS_PATH
 from aiter.ops.triton.utils.tuning_util import aiter_register
 
-
+# @triton.autotune(
+    # configs=[
+        # triton.Config(
+        #     {
+        #         "BLOCK_SIZE_M": 16,
+        #         "BLOCK_SIZE_N": 128,
+        #         "BLOCK_SIZE_K": 256,
+        #         "GROUP_SIZE_M": 1,
+        #         "matrix_instr_nonkdim": 16,
+        #         "cache_modifier": ".cg",
+        #         "NUM_KSPLIT": 4,
+        #         "waves_per_eu": 6,
+        #     },
+        #     num_warps=4, num_stages=2
+        # ),
+        # triton.Config(
+        #     {
+        #         "BLOCK_SIZE_M": 32,
+        #         "BLOCK_SIZE_N": 128,
+        #         "BLOCK_SIZE_K": 256,
+        #         "GROUP_SIZE_M": 1,
+        #         "matrix_instr_nonkdim": 16,
+        #         "cache_modifier": ".cg",
+        #         "NUM_KSPLIT": 4,
+        #         "waves_per_eu": 4,
+        #     },
+        #     num_warps=4, num_stages=2
+        # ),
+        # triton.Config(
+        #     {
+        #         "BLOCK_SIZE_M": 64,
+        #         "BLOCK_SIZE_N": 256,
+        #         "BLOCK_SIZE_K": 256,
+        #         "GROUP_SIZE_M": 1,
+        #         "matrix_instr_nonkdim": 16,
+        #         "cache_modifier": ".cg",
+        #         "NUM_KSPLIT": 1,
+        #         "waves_per_eu": 1,
+        #     },
+        #     num_warps=4, num_stages=3
+        # ),
+        # triton.Config(
+        #     {
+        #         "BLOCK_SIZE_M": 128,
+        #         "BLOCK_SIZE_N": 256,
+        #         "BLOCK_SIZE_K": 256,
+        #         "GROUP_SIZE_M": 1,
+        #         "matrix_instr_nonkdim": 16,
+        #         "cache_modifier": ".cg",
+        #         "NUM_KSPLIT": 1,
+        #         "waves_per_eu": 1,
+        #     },
+        #     num_warps=4, num_stages=3
+        # ),
+        # triton.Config(
+        #     {
+        #         "BLOCK_SIZE_M": 128,
+        #         "BLOCK_SIZE_N": 128,
+        #         "BLOCK_SIZE_K": 256,
+        #         "GROUP_SIZE_M": 2,
+        #         "matrix_instr_nonkdim": 16,
+        #         "cache_modifier": None,
+        #         "NUM_KSPLIT": 1,
+        #         "waves_per_eu": 2,
+        #     },
+        #     num_warps=4, num_stages=2
+        # ),
+        # triton.Config(
+        #     {
+        #         "BLOCK_SIZE_M": 256,
+        #         "BLOCK_SIZE_N": 256,
+        #         "BLOCK_SIZE_K": 256,
+        #         "GROUP_SIZE_M": 4,
+        #         "matrix_instr_nonkdim": 16,
+        #         "cache_modifier": None,
+        #         "NUM_KSPLIT": 1,
+        #         "waves_per_eu": 2,
+        #     },
+        #     num_warps=8, num_stages=2
+        # ),
+#     ],
+#     key=["M", "N", "K"],
+#     use_cuda_graph=True,
+# )
 @triton.heuristics(
     {
         "EVEN_K": lambda args: (args["K"] % (args["BLOCK_SIZE_K"] // 2) == 0)
@@ -83,15 +166,14 @@ def _gemm_afp4_wfp4_kernel(
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
     if NUM_KSPLIT == 1:
-        remap_xcd(pid, GRID_MN)
-
+        pid = remap_xcd(pid, GRID_MN, 8)
         pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
     else:
         pid_m = pid // num_pid_n
         pid_n = pid % num_pid_n
 
-    tl.assume(pid_m > 0)
-    tl.assume(pid_n > 0)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
     # We assume 32 elements along K share the same scale.
     SCALE_GROUP_SIZE: tl.constexpr = 32
 
@@ -435,37 +517,85 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
     return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
 
 
-@functools.lru_cache(maxsize=1024)
+# @functools.lru_cache(maxsize=1024)
+# def _get_config(
+#     M: int,
+#     N: int,
+#     K: int,
+# ):
+#     if not hasattr(_get_config, "_config_dict"):
+#         dev = arch_info.get_device()
+#         fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4-N={N}-K={2*K}.json"
+#         if not os.path.exists(fpath):
+#             fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4.json"
+
+#         with open(fpath, "r") as file:
+#             config = json.load(file)
+#         _get_config._config_dict = config
+
+#     if M < 32:
+#         return _get_config._config_dict["small"]
+#     elif M <= 128:
+#         BLK_M = triton.next_power_of_2(M)
+#         if BLK_M == 32:
+#             return _get_config._config_dict["medium_M32"]
+#         elif BLK_M == 64:
+#             return _get_config._config_dict["medium_M64"]
+#         elif BLK_M == 128:
+#             return _get_config._config_dict["medium_M128"]
+#     elif M <= 256:
+#         return _get_config._config_dict["large"]
+#     else:
+#         return _get_config._config_dict["xlarge"]
+
+
 def _get_config(
     M: int,
     N: int,
     K: int,
 ):
-    if not hasattr(_get_config, "_config_dict"):
-        dev = arch_info.get_device()
-        fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4-N={N}-K={2*K}.json"
-        if not os.path.exists(fpath):
-            fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4.json"
+    # if not hasattr(_get_config, "_config_dict"):
+    #     dev = arch_info.get_device()
+    #     fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4-N={N}-K={2*K}.json"
+    #     if not os.path.exists(fpath):
+    #         fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4.json"
 
-        with open(fpath, "r") as file:
-            config = json.load(file)
-        _get_config._config_dict = config
+    #     with open(fpath, "r") as file:
+    #         config = json.load(file)
+    #     _get_config._config_dict = config
 
-    if M < 32:
-        return _get_config._config_dict["small"]
-    elif M <= 128:
-        BLK_M = triton.next_power_of_2(M)
-        if BLK_M == 32:
-            return _get_config._config_dict["medium_M32"]
-        elif BLK_M == 64:
-            return _get_config._config_dict["medium_M64"]
-        elif BLK_M == 128:
-            return _get_config._config_dict["medium_M128"]
-    elif M <= 256:
-        return _get_config._config_dict["large"]
-    else:
-        return _get_config._config_dict["xlarge"]
+    MIN_TARGET_WGS = 256
 
+    # default config
+    config = {
+        "BLOCK_SIZE_M": 256,
+        "BLOCK_SIZE_N": 256,
+        "BLOCK_SIZE_K": 256,
+        "GROUP_SIZE_M": 32,
+        "num_warps": 8,
+        "num_stages": 2,
+        "waves_per_eu": 2,
+        "matrix_instr_nonkdim": 16,
+        "cache_modifier": None,
+        "NUM_KSPLIT": 1,
+    }
+    num_pid_m = triton.cdiv(M, config["BLOCK_SIZE_M"])
+    num_pid_n = triton.cdiv(N, config["BLOCK_SIZE_N"])
+    if num_pid_m * num_pid_n < MIN_TARGET_WGS:
+        # Try smaller block size for small M and N
+        shape_factor  = M // N
+        config["BLOCK_SIZE_M"] = max(64, triton.next_power_of_2(M // (16 * shape_factor) ))
+        config["BLOCK_SIZE_N"] = max(64, triton.next_power_of_2(N // (16 // shape_factor) ))
+        num_pid_m = triton.cdiv(M, config["BLOCK_SIZE_M"])
+        num_pid_n = triton.cdiv(N, config["BLOCK_SIZE_N"])
+
+    if num_pid_m * num_pid_n < MIN_TARGET_WGS:
+        # If still too low occupancy, turn to split k
+        GRID_MN = num_pid_m * num_pid_n
+        config["NUM_KSPLIT"] = (MIN_TARGET_WGS + GRID_MN - 1) // GRID_MN
+
+    # print(config)
+    return config
 
 # Wrapper for gemm kernel.
 @aiter_register(module=sys.modules[__name__], kernels=["_gemm_afp4_wfp4_kernel"])
@@ -503,6 +633,8 @@ def gemm_afp4wfp4(
 
     if config is None:
         config = _get_config(M, N, K)
+
+
     # print(f"AFP4WFP4_config={config}")
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
@@ -522,7 +654,8 @@ def gemm_afp4wfp4(
                 (config["NUM_KSPLIT"], M, N), dtype=torch.float32, device=y.device
             )
     else:
-        config["SPLITK_BLOCK_SIZE"] = 2 * K
+        SPLITK_BLOCK_SIZE = 2 * K
+        config["SPLITK_BLOCK_SIZE"] = SPLITK_BLOCK_SIZE
         y_pp = None
 
     grid = lambda META: (  # noqa: E731
@@ -552,6 +685,7 @@ def gemm_afp4wfp4(
         x_scales.stride(1),
         w_scales.stride(0),
         w_scales.stride(1),
+        # SPLITK_BLOCK_SIZE = SPLITK_BLOCK_SIZE,
         **config,
     )
 

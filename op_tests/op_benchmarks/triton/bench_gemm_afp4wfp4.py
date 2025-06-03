@@ -34,19 +34,26 @@ def model_benchmark_shapes(args):
 
 def get_x_vals():
     x_vals = [
-        (1, 1280, 8192),
-        (32, 1280, 8192),
-        (64, 1280, 8192),
-        (128, 1280, 8192),
-        (192, 1280, 8192),
-        (256, 1280, 8192),
-        (320, 1280, 8192),
-        (512, 1280, 8192),
-        (1024, 1280, 8192),
-        (2048, 1280, 8192),
-        (4096, 1280, 8192),
-        (8192, 1280, 8192),
-        (16384, 1280, 8192),
+        # (1, 1280, 8192),
+        # (32, 1280, 8192),
+        # (64, 1280, 8192),
+        # (128, 1280, 8192),
+        # (192, 1280, 8192),
+        # (256, 1280, 8192),
+        # (320, 1280, 8192),
+        # (512, 1280, 8192),
+        # (1024, 1280, 8192),
+        # (2048, 1280, 8192),
+        # (4096, 1280, 8192),
+        # (8192, 1280, 8192),
+        # (16384, 1280, 8192),
+        (1, 2048, 2048),
+        (32, 2048, 2048),
+        (64, 2048, 2048),
+        (128, 2048, 2048),
+        (4096, 4096, 4096),
+        (8192, 8192, 8192),
+        (16384, 16384, 16384),
     ]
     return x_vals
 
@@ -111,11 +118,17 @@ def run_benchmark(args):
         mem = mem_read + mem_write
         out = torch.empty(x.shape[0], w.shape[1], device=x.device, dtype=c_dtype)
         
-        ms = triton.testing.do_bench(
-            lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
-            warmup=1 if args.test else 25,
-            rep=1 if args.test else 100,
-        )
+        # Warm up kernel, then capture a CUDA graph.
+        gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out)
+        torch.cuda.synchronize()
+        
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out)
+
+        # Benchmark by replaying the captured CUDA graph.
+        ms = triton.testing.do_bench(lambda: g.replay(), rep=1 if args.test else 100)
+
 
         # Return exactly one scalar depending on which metric is active
         if metric == "time":

@@ -103,6 +103,7 @@ def run_benchmark(args):
         )
         mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
         mem = mem_read + mem_write
+        print("mem=", mem)
         out = torch.empty(x.shape[0], w.shape[1], device=x.device, dtype=c_dtype)
 
         ms = triton.testing.do_bench(

@@ -15,6 +15,37 @@ from aiter.ops.triton.utils.core import AITER_TRITON_OPS_PATH, AITER_TRITON_CONF
 from aiter.ops.triton.utils.tuning_util import aiter_register
 
 
+def get_autotune_configs():
+  configs = []
+  sched_hint = 'none'
+  group_m = 1
+  for block_m in [128]:
+    for block_n in [512]:
+      for block_k in [128]:
+        for wpeu in [1]:
+          for nonk in [16]:
+            for num_warps in [4]:
+              for num_stages in [3]:
+                configs.append(triton.Config({
+                    'BLOCK_SIZE_M': block_m,
+                    'BLOCK_SIZE_N': block_n,
+                    'BLOCK_SIZE_K': block_k,
+                    'GROUP_SIZE_M': group_m,
+                    'waves_per_eu': wpeu,
+                    'matrix_instr_nonkdim': nonk,
+                    'schedule_hint': sched_hint,
+                    'cache_modifier': '.cg',
+                    },
+                    num_stages=num_stages,
+                    num_warps=num_warps))
+  print("num_configs=",len(configs))
+  return configs
+
+@triton.autotune(
+    configs=get_autotune_configs(),
+    key=["M", "N", "K"],
+    use_cuda_graph=True,
+)
 @triton.heuristics(
     {
         "EVEN_K": lambda args: (args["K"] % (args["BLOCK_SIZE_K"] // 2) == 0)
@@ -45,13 +76,13 @@ def _gemm_afp4_wfp4_kernel(
     stride_ask,
     stride_bsn,
     stride_bsk,
+    NUM_KSPLIT: tl.constexpr,
+    SPLITK_BLOCK_SIZE: tl.constexpr,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
-    NUM_KSPLIT: tl.constexpr,
-    SPLITK_BLOCK_SIZE: tl.constexpr,
     EVEN_K: tl.constexpr,
     GRID_MN: tl.constexpr,
     cache_modifier: tl.constexpr,
@@ -166,6 +197,11 @@ def _gemm_afp4_wfp4_kernel(
         tl.store(c_ptrs, c, mask=c_mask)
 
 
+@triton.autotune(
+    configs=get_autotune_configs(),
+    key=["M", "N", "K"],
+    use_cuda_graph=True,
+)
 @triton.heuristics(
     {
         "EVEN_K": lambda args: (args["K"] % (args["BLOCK_SIZE_K"] // 2) == 0)
@@ -196,13 +232,13 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
     stride_ask,
     stride_bsn,
     stride_bsk,
+    NUM_KSPLIT: tl.constexpr,
+    SPLITK_BLOCK_SIZE: tl.constexpr,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
-    NUM_KSPLIT: tl.constexpr,
-    SPLITK_BLOCK_SIZE: tl.constexpr,
     EVEN_K: tl.constexpr,
     GRID_MN: tl.constexpr,
     cache_modifier: tl.constexpr,
@@ -300,7 +336,7 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
 
         for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
             a_scales = tl.load(a_scale_ptrs)
-            b_scales = tl.load(b_scale_ptrs)
+            b_scales = tl.load(b_scale_ptrs, cache_modifier='.cv')
             if BLOCK_SIZE_M >= 32:
                 a_scales = tl.reshape(
                     a_scales, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
@@ -347,7 +383,7 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
             + pid_k * stride_ck
         )
         c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-        tl.store(c_ptrs, c, mask=c_mask)
+        tl.store(c_ptrs, c, mask=c_mask, cache_modifier='.wt')
 
 
 @triton.jit
@@ -398,6 +434,11 @@ def _gemm_afp4_wfp4_reduce_kernel(
 
 
 def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
+    NUM_KSPLIT = 1
+    SPLITK_BLOCK_SIZE = 2*K
+    BLOCK_SIZE_K = -1
+    return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
+
     # heuristics for make "EVEN_K == True" as much as possible
     NUM_KSPLIT_STEP = 2
     BLOCK_SIZE_K_STEP = 2
@@ -430,8 +471,8 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
             triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
         )
 
-    # print(K, SPLITK_BLOCK_SIZE // 2, BLOCK_SIZE_K // 2, NUM_KSPLIT)
-    # print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
+    #print(K, SPLITK_BLOCK_SIZE // 2, BLOCK_SIZE_K // 2, NUM_KSPLIT)
+    #print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
     return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
 
 
@@ -504,13 +545,14 @@ def gemm_afp4wfp4(
     if config is None:
         config = _get_config(M, N, K)
     # print(f"AFP4WFP4_config={config}")
+    config["NUM_KSPLIT"]  = 1
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
         )
 
         config["SPLITK_BLOCK_SIZE"] = SPLITK_BLOCK_SIZE
-        config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
+        #config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
         config["NUM_KSPLIT"] = NUM_KSPLIT
 
         if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
@@ -552,7 +594,9 @@ def gemm_afp4wfp4(
         x_scales.stride(1),
         w_scales.stride(0),
         w_scales.stride(1),
-        **config,
+        config["NUM_KSPLIT"],
+        config["SPLITK_BLOCK_SIZE"],
+        #**config,
     )
 
     if config["NUM_KSPLIT"] > 1:
@@ -614,23 +658,23 @@ def gemm_afp4wfp4_preshuffled_scales(
     Returns:
     - Y: The output matrix with shape (M, N).
     """
-
     M, K = x.shape
     K, N = w.shape
-    
+
     if y is None:
         y = torch.empty((M, N), dtype=dtype, device=x.device)
 
     if config is None:
         config = _get_config(M, N, K)
-    # print(f"AFP4WFP4_config={config}")
+    config["NUM_KSPLIT"]  = 1
+    #print(f"AFP4WFP4_config={config}")
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
         )
 
         config["SPLITK_BLOCK_SIZE"] = SPLITK_BLOCK_SIZE
-        config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
+        #config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
         config["NUM_KSPLIT"] = NUM_KSPLIT
 
         if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
@@ -645,7 +689,7 @@ def gemm_afp4wfp4_preshuffled_scales(
         config["SPLITK_BLOCK_SIZE"] = 2 * K
         y_pp = None
 
-    config["BLOCK_SIZE_N"] = max(config["BLOCK_SIZE_N"], 32)
+    #config["BLOCK_SIZE_N"] = max(config["BLOCK_SIZE_N"], 32)
     grid = lambda META: (  # noqa: E731
         (
             META["NUM_KSPLIT"]
@@ -673,7 +717,9 @@ def gemm_afp4wfp4_preshuffled_scales(
         x_scales.stride(1),
         w_scales.stride(0),
         w_scales.stride(1),
-        **config,
+        config["NUM_KSPLIT"],
+        config["SPLITK_BLOCK_SIZE"],
+        #**config,
     )
 
     if config["NUM_KSPLIT"] > 1:

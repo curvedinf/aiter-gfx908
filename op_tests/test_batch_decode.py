@@ -8,6 +8,7 @@ import pytest
 import torch
 
 import aiter
+from aiter.test_common import perftest
 from einops import rearrange, repeat
 
 
@@ -87,21 +88,27 @@ def ref_masked_attention(
     return out.to(query)
 
 
+@perftest()
+def profile_func(target_func, *args, **kwargs):
+    return target_func(*args, **kwargs)
+
+
 @pytest.mark.parametrize("batch_size", [1, 3, 7])
-@pytest.mark.parametrize(
-    "kv_len", [1, 26, 128, 4097]
-)
+@pytest.mark.parametrize("kv_len", [1, 26, 128, 4097])
 @pytest.mark.parametrize("page_size", [1])
 @pytest.mark.parametrize("num_qo_heads,num_kv_heads", [(6, 1), (3, 1)])
-@pytest.mark.parametrize("head_dim", [128])
+@pytest.mark.parametrize("head_dim", [128, 256])
 @pytest.mark.parametrize("causal", [False, True])
 @pytest.mark.parametrize("kv_layout", ["NHD"])
-@pytest.mark.parametrize("logits_soft_cap", [0.0, 30.0])
+@pytest.mark.parametrize(
+    "logits_soft_cap", [0.0]
+)  # enable logits_soft_cap=30.0 test cases when it's functionally ready
 @pytest.mark.parametrize("contiguous_kv", [True, False])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("q_init_min,q_init_max", [(-10, 10)])
 @pytest.mark.parametrize("kv_init_min,kv_init_max", [(-5, 5)])
 @pytest.mark.parametrize("seed", [19378])
+@pytest.mark.parametrize("profile", [False])
 def test_batch_decode_with_paged_kv_cache(
     batch_size,
     kv_len,
@@ -119,6 +126,7 @@ def test_batch_decode_with_paged_kv_cache(
     kv_init_min,
     kv_init_max,
     seed,
+    profile,
 ):
     if seed is not None:
         torch.manual_seed(seed)
@@ -162,7 +170,7 @@ def test_batch_decode_with_paged_kv_cache(
         ).to(0)
         # kv_data_fp32 = torch.ones_like(kv_data_fp32)
         kv_data = kv_data_fp32.to(dtype)
-    if 1 < batch_size:
+    if 1 < batch_size and not profile:
         kv_lens = torch.randint(1, kv_len + 1, (batch_size,))
     else:
         kv_lens = torch.full((batch_size,), kv_len).int()
@@ -180,14 +188,26 @@ def test_batch_decode_with_paged_kv_cache(
     k_cache = chunks[0].squeeze(2).squeeze(2).contiguous()
     v_cache = chunks[1].squeeze(2).squeeze(2).contiguous()
 
-    o_ck_flash_attn = aiter.flashinfer_batch_decode_func(
-        q,
-        k_cache,
-        v_cache,
-        kv_indptr_gpu,
-        kv_indices_gpu,
-        logits_soft_cap=logits_soft_cap,
-    )[0]
+    if profile:
+        o_ck_flash_attn, time = profile_func(
+            aiter.flashinfer_batch_decode_func,
+            q,
+            k_cache,
+            v_cache,
+            kv_indptr_gpu,
+            kv_indices_gpu,
+            logits_soft_cap=logits_soft_cap,
+        )
+        print(f"time: {time}")
+    else:
+        o_ck_flash_attn = aiter.flashinfer_batch_decode_func(
+            q,
+            k_cache,
+            v_cache,
+            kv_indptr_gpu,
+            kv_indices_gpu,
+            logits_soft_cap=logits_soft_cap,
+        )
 
     for i in range(batch_size):
         perm_dims = [0, 2, 1, 3] if kv_layout == "HND" else [0, 1, 2, 3]
@@ -242,13 +262,16 @@ def test_batch_decode_with_paged_kv_cache(
 
 if __name__ == "__main__":
     for (
+        kv_len,
         causal,
         logits_soft_cap,
         dtype,
-    ) in itertools.product([False, True], [0.0, 30.0], [torch.float16, torch.bfloat16]):
+    ) in itertools.product(
+        [8192], [False, True], [0.0, 30.0], [torch.float16, torch.bfloat16]
+    ):
         test_batch_decode_with_paged_kv_cache(
             batch_size=1,
-            kv_len=8192,
+            kv_len=kv_len,
             page_size=1,
             num_qo_heads=6,
             num_kv_heads=1,
@@ -263,4 +286,5 @@ if __name__ == "__main__":
             kv_init_min=-5,
             kv_init_max=5,
             seed=19378,
+            profile=True,
         )

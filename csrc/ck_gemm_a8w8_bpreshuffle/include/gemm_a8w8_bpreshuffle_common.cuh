@@ -1,6 +1,6 @@
 #pragma once
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #ifdef USE_ROCM
 
@@ -175,18 +175,14 @@ __forceinline__ torch::Tensor gemm_a8w8_bpreshuffle_impl(
     constexpr ck::index_t NumDTensor = DsDataType::Size();
     constexpr auto I0 = ck::Number<0>{};
 
-    EDataType* a_ptr = reinterpret_cast<EDataType*>(XQ.data_ptr());
-    EDataType* b_ptr = reinterpret_cast<EDataType*>(WQ.data_ptr());
-    EDataType* y_ptr = reinterpret_cast<EDataType*>(Y.data_ptr());
-
     // do GEMM
     auto device_gemm = DeviceGemmInstance{};
     auto invoker = device_gemm.MakeInvoker();
     auto argument = device_gemm.MakeArgument(XQ.data_ptr(),
                                              WQ.data_ptr(),
                                              std::array<const void *, NumDTensor>{
-                                                reinterpret_cast<DDataType *>(x_scale.data_ptr()),
-                                                reinterpret_cast<DDataType *>(w_scale.data_ptr())},
+                                                reinterpret_cast<DDataType *>(w_scale.data_ptr()),
+                                                reinterpret_cast<DDataType *>(x_scale.data_ptr())},
                                              reinterpret_cast<EDataType *>(Y.data_ptr()),
                                              M,
                                              N,

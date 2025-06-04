@@ -223,7 +223,7 @@ def per_1x32_f4_quant_hip(x, scale=None, quant_dtype=dtypes.fp4x2):
         scale = (
             torch.empty(
                 (
-                    (m + 31) // 32 * 32,
+                    (m + 255) // 256 * 256,
                     (n // 32 + 7) // 8 * 8,
                 ),
                 dtype=torch.uint8,

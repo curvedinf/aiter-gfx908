@@ -25,6 +25,14 @@ def gemm_a8w8(
     splitK: int = 0,
 ) -> torch.Tensor: ...
 
+@compile_ops("module_gemm_a8w8_bpreshuffle", fc_name="gemm_a8w8_bpreshuffle")
+def gemm_a8w8_bpreshuffle(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    out: Tensor,
+): ...
 
 @compile_ops("module_gemm_a8w8_asm", fc_name="gemm_a8w8_asm")
 def gemm_a8w8_asm(
@@ -61,7 +69,6 @@ def flatmm_a8w8_blockscale_asm(
     w_scale: Tensor,
     out: Tensor,
 ): ...
-
 
 @functools.lru_cache(maxsize=1024)
 def compute_gemm_SplitK(M: int, N: int, K: int, tile_m: int, tile_n: int, tile_k: int):
@@ -177,6 +184,22 @@ def gemm_a8w8_CK(
     Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
     return gemm_a8w8(XQ, WQ, x_scale, w_scale, Y, bias, splitK)
 
+def gemm_a8w8_bpreshuffle_CK(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    dtype=torch.float16
+):
+    assert dtype in [
+        torch.bfloat16,
+        torch.float16,
+    ], f"Output {dtype=} is currently not supported in gemm_a8w8"
+    m = XQ.shape[0]
+    n = WQ.shape[0]
+    k = XQ.shape[-1]
+    Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
+    return gemm_a8w8_bpreshuffle(XQ, WQ, x_scale, w_scale, Y)
 
 def gemm_a8w8_blockscale_CK(
     XQ: Tensor, WQ: Tensor, x_scale: Tensor, w_scale: Tensor, dtype=dtypes.bf16
@@ -223,6 +246,16 @@ def gemm_a8w8_tune(
 
 @compile_ops("module_gemm_a8w8_blockscale_tune", fc_name="gemm_a8w8_blockscale_tune")
 def gemm_a8w8_blockscale_tune(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    out: Tensor,
+    kernelId: int,
+    splitK=0,
+): ...
+@compile_ops("module_gemm_a8w8_bpreshuffle_tune", fc_name="gemm_a8w8_bpreshuffle_tune")
+def gemm_a8w8_bpreshuffle_tune(
     XQ: Tensor,
     WQ: Tensor,
     x_scale: Tensor,

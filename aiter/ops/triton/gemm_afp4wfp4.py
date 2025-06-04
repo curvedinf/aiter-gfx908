@@ -169,7 +169,9 @@ def _gemm_afp4_wfp4_kernel(
     pid = pid_unified % GRID_MN
     # remaps so that concecutive pid's are in the same XCD.
     pid = remap_xcd(pid, GRID_MN, 8)
-    pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
+    pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=4) # GROUP_SIZE_M)
+    # pid_m = pid % num_pid_m
+    # pid_n = pid // num_pid_m
 
     tl.assume(pid_m >= 0)
     tl.assume(pid_n >= 0)
@@ -587,18 +589,27 @@ def _get_config(
     }
     num_pid_m = triton.cdiv(M, config["BLOCK_SIZE_M"])
     num_pid_n = triton.cdiv(N, config["BLOCK_SIZE_N"])
-    if num_pid_m * num_pid_n < MIN_TARGET_WGS:
-        # Try smaller block size for small M and N
-        shape_factor  = triton.next_power_of_2(M // N)
-        config["BLOCK_SIZE_M"] = max(64, triton.next_power_of_2(M // (16 * shape_factor) ))
-        config["BLOCK_SIZE_N"] = max(64, triton.next_power_of_2(N // (16 // shape_factor) ))
-        num_pid_m = triton.cdiv(M, config["BLOCK_SIZE_M"])
-        num_pid_n = triton.cdiv(N, config["BLOCK_SIZE_N"])
 
+    BM = config["BLOCK_SIZE_M"]
+    BN = config["BLOCK_SIZE_N"]
+
+    while (num_pid_m * num_pid_n < MIN_TARGET_WGS) and (BM > 32 or BN > 32):
+        if num_pid_m < num_pid_n:
+            BM = max(BM // 2, 32)
+        else:
+            BN = max(BN // 2, 32)
+        num_pid_m = triton.cdiv(M, BM)
+        num_pid_n = triton.cdiv(N, BN)
+    
+    config["BLOCK_SIZE_M"] = BM
+    config["BLOCK_SIZE_N"] = BN
+    config["num_warps"] = 8 if (BM // 16) * (BN // 16) > 8 else 4
+
+    # If still too low occupancy, turn to split k
     if num_pid_m * num_pid_n < MIN_TARGET_WGS:
-        # If still too low occupancy, turn to split k
         GRID_MN = num_pid_m * num_pid_n
-        config["NUM_KSPLIT"] = max((MIN_TARGET_WGS + GRID_MN - 1) // GRID_MN, triton.cdiv(K, config["BLOCK_SIZE_K"]))
+        config["NUM_KSPLIT"] = (MIN_TARGET_WGS + GRID_MN - 1) // GRID_MN
+        config["BLOCK_SIZE_K"] = max(min(2 * triton.cdiv(K, config["NUM_KSPLIT"]), 256), 32)
 
     return config
 
@@ -638,8 +649,6 @@ def gemm_afp4wfp4(
 
     if config is None:
         config = _get_config(M, N, K)
-
-    # print(f"gemm_afp4wfp4: M={M}, N={N}, K={K}, config={config}")
 
     SPLITK_USE_ATOMICS = False
     if config["NUM_KSPLIT"] > 1:
@@ -683,6 +692,8 @@ def gemm_afp4wfp4(
         y_strides = (0, y_pp.stride(0), y_pp.stride(1))
     else:
         y_strides = (y_pp.stride(0), y_pp.stride(1), y_pp.stride(2))
+
+    print(f"gemm_afp4wfp4: M={M}, N={N}, K={K}, config={config}")
 
     _gemm_afp4_wfp4_kernel[grid](
         x,

@@ -102,6 +102,7 @@ echo "Cleaning up created files and directories..."
 rm -rf rocprof_cache_batch
 if [ -f "$METRICS_FILE" ]; then
     rm "$METRICS_FILE"
+    rm -rf .rocprofv3
     echo "Removed $METRICS_FILE"
 fi
 echo "Cleanup complete."

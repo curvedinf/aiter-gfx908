@@ -94,7 +94,7 @@ __global__ void dynamic_per_group_scaled_quant_kernel(DTYPE_O* __restrict__ out,
     inverted_scale =
         std::is_same_v<DTYPE_O, ck_tile::fp4x2_t> ? inverted_scale : 1.0f / inverted_scale;
 
-    auto* out_ptr  = reinterpret_cast<DTYPE_O*>(out);
+    auto* ptr_o    = reinterpret_cast<DTYPE_O*>(out);
     auto* out_vecs = std::is_same_v<DTYPE_O, ck_tile::fp4x2_t>
                          ? reinterpret_cast<vec_o*>(out + row_offset / 2)
                          : reinterpret_cast<vec_o*>(out + row_offset);
@@ -116,12 +116,11 @@ __device__ float data_to_per_row_scale(const DTYPE_I* __restrict__ input, const 
             : (1. / ck_tile::type_convert<float>(ck_tile::numeric<DTYPE_O>::max()));
 
     const int64_t row_offset        = blockIdx.x * cols;
-    auto const* input_ptr           = reinterpret_cast<DTYPE_I const*>(input + row_offset);
-    auto const* input_vecs          = reinterpret_cast<vec_i const*>(input_ptr);
+    auto const* ptr_i               = reinterpret_cast<DTYPE_I const*>(input + row_offset);
+    auto const* input_vecs          = reinterpret_cast<vec_i const*>(ptr_i);
     static constexpr int32_t ooba_i = 4 / sizeof(DTYPE_I);
     const int32_t oob_i             = (cols + ooba_i - 1) / ooba_i * ooba_i;
-    auto buffer_i =
-        ck_tile::make_buffer_view<ck_tile::address_space_enum::global>(input_ptr, oob_i);
+    auto buffer_i = ck_tile::make_buffer_view<ck_tile::address_space_enum::global>(ptr_i, oob_i);
     buffer_i.init_raw();
 
     // double load core loop start
@@ -218,12 +217,12 @@ __device__ void scaled_quant_impl(DTYPE_O* __restrict__ out,
     using DTYPE_STORE = ck_tile::vector_traits<DTYPE_O>::scalar_type;
 
     const int64_t row_offset        = blockIdx.x * cols;
-    auto const* input_ptr           = reinterpret_cast<DTYPE_I const*>(input + row_offset);
-    auto const* input_vecs          = reinterpret_cast<vec_i const*>(input_ptr);
-    auto* out_ptr                   = std::is_same_v<DTYPE_O, ck_tile::fp4x2_t>
+    auto const* ptr_i               = reinterpret_cast<DTYPE_I const*>(input + row_offset);
+    auto const* input_vecs          = reinterpret_cast<vec_i const*>(ptr_i);
+    auto* ptr_o                     = std::is_same_v<DTYPE_O, ck_tile::fp4x2_t>
                                           ? reinterpret_cast<DTYPE_STORE*>(out + row_offset / 2)
                                           : reinterpret_cast<DTYPE_STORE*>(out + row_offset);
-    auto* out_vecs                  = reinterpret_cast<vec_o*>(out_ptr);
+    auto* out_vecs                  = reinterpret_cast<vec_o*>(ptr_o);
     static constexpr int32_t ooba_i = 4 / sizeof(DTYPE_I);
     static constexpr int32_t ooba_o = 4 / sizeof(DTYPE_O);
     const int32_t oob_i             = (cols + ooba_i - 1) / ooba_i * ooba_i;
@@ -231,11 +230,11 @@ __device__ void scaled_quant_impl(DTYPE_O* __restrict__ out,
 
     auto buffer_i =
         ck_tile::make_buffer_view<ck_tile::address_space_enum::global,
-                                  ck_tile::amd_buffer_coherence_enum::slc>(input_ptr, oob_i);
+                                  ck_tile::amd_buffer_coherence_enum::slc>(ptr_i, oob_i);
     buffer_i.init_raw();
     auto buffer_o =
         ck_tile::make_buffer_view<ck_tile::address_space_enum::global,
-                                  ck_tile::amd_buffer_coherence_enum::glc>(out_ptr, oob_o);
+                                  ck_tile::amd_buffer_coherence_enum::glc>(ptr_o, oob_o);
     buffer_o.init_raw();
 
     // double load core loop start
@@ -286,11 +285,11 @@ __device__ void scaled_quant_impl(DTYPE_O* __restrict__ out,
     // tail elements
     // if (num_elems_tail > 0)
     // {
-    //   auto *out_ptr2 = (out + row_offset);
+    //   auto *ptr_o2 = (out + row_offset);
     //   auto *tmp_i = reinterpret_cast<DTYPE_I const *>(input_vecs + num_vecs);
     //   for (size_t j = threadIdx.x; j < num_elems_tail; j += BlockSize)
     //   {
-    //     out_ptr2[num_vecs * vec_size_i + j] =
+    //     ptr_o2[num_vecs * vec_size_i + j] =
     //         ck_tile::type_convert<DTYPE_O>(ck_tile::type_convert<float>(tmp_i[j]) *
     //         inverted_scale);
     //   }

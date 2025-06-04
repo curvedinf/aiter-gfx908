@@ -1677,36 +1677,38 @@ def _flashinfer_batch_decode(
     return_lse: bool = False,
     zero_tensors: bool = False,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    md_name = 'mha_batch_decode'
-    filter_fwd_splitkv1 = '*'   # get_fwd_splitkv_combine_blobs()
-    filter_fwd_splitkv2 = '*'   # get_fwd_splitkv_blobs()
+    md_name = "mha_batch_decode"
+    filter_fwd_splitkv1 = "*"  # get_fwd_splitkv_combine_blobs()
+    filter_fwd_splitkv2 = "*"  # get_fwd_splitkv_blobs()
     if q.dtype == torch.float16:
-        md_name += '_fp16'
-        filter_fwd_splitkv1+= 'fp16*'
-        filter_fwd_splitkv2+= 'fp16*'
+        md_name += "_fp16"
+        filter_fwd_splitkv1 += "fp16*"
+        filter_fwd_splitkv2 += "fp16*"
     elif q.dtype == torch.bfloat16:
-        md_name += '_bf16'
-        filter_fwd_splitkv1+= 'bf16*'
-        filter_fwd_splitkv2+= 'bf16*'
+        md_name += "_bf16"
+        filter_fwd_splitkv1 += "bf16*"
+        filter_fwd_splitkv2 += "bf16*"
     if 0.0 < logits_soft_cap:
-        md_name += '_logits'
-        filter_fwd_splitkv2 += '_logits*'
+        md_name += "_logits"
+        filter_fwd_splitkv2 += "_logits*"
     else:
-        md_name += '_nlogits'
-        filter_fwd_splitkv2 += '_nlogits*'
+        md_name += "_nlogits"
+        filter_fwd_splitkv2 += "_nlogits*"
     if alibi_slopes is None:
-        md_name += '_nbias'
-        filter_fwd_splitkv2+= '_nbias*'
+        md_name += "_nbias"
+        filter_fwd_splitkv2 += "_nbias*"
     else:
-        md_name += '_alibi'
-        filter_fwd_splitkv2+= '_alibi*'
-    md_name += '_nmask'
-    filter_fwd_splitkv2 += '_nmask*'
-    filter_fwd_splitkv2 += '_pagedkv*'
+        md_name += "_alibi"
+        filter_fwd_splitkv2 += "_alibi*"
+    md_name += "_nmask"
+    filter_fwd_splitkv2 += "_nmask*"
+    filter_fwd_splitkv2 += "_pagedkv*"
 
-    filter_fwd_splitkv = f'{filter_fwd_splitkv1}@{filter_fwd_splitkv2}'
-    blob_gen_cmd = [f'{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_decode ' \
-        '--receipt 200 --filter {} --output_dir {{}}'.format(filter_fwd_splitkv)]
+    filter_fwd_splitkv = f"{filter_fwd_splitkv1}@{filter_fwd_splitkv2}"
+    blob_gen_cmd = [
+        f"{CK_DIR}/example/ck_tile/01_fmha/generate.py -d batch_decode "
+        "--receipt 200 --filter {} --output_dir {{}}".format(filter_fwd_splitkv)
+    ]
 
     q, k, v = [maybe_contiguous(x) for x in (q, k, v)]
     out, softmax_lse = mha_batch_decode(
@@ -1721,7 +1723,7 @@ def _flashinfer_batch_decode(
         return_lse,
         None,
         alibi_slopes,
-        custom_build_args={'md_name': md_name, 'blob_gen_cmd': blob_gen_cmd}
+        custom_build_args={"md_name": md_name, "blob_gen_cmd": blob_gen_cmd},
     )
     return out, softmax_lse
 

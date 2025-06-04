@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import random
 from typing import List, Optional, Tuple, Union
@@ -526,7 +526,7 @@ def test_paged_attention(
                 random_block = (random.randint(0, num_blocks - max_num_blocks_per_seq) //serial_block_num) * serial_block_num
                 block_table = list(
                     range(random_block, random_block + max_num_blocks_per_seq)
-                ) 
+                )
             block_tables_lst.append(block_table)
 
         block_tables = torch.tensor(block_tables_lst, dtype=torch.int)
@@ -652,7 +652,7 @@ def test_paged_attention(
             assert block_shape in [(128, 128), (256, 128)], "KV_8BIT_PER_BLOCK only supports block_shape (128, 128) or (256, 128)"
             assert head_size == block_shape[1], "KV_8BIT_PER_BLOCK only supports head_size == block_shape[1]"
             assert num_blocks % (block_shape[0] // block_size) == 0, "KV_8BIT_PER_BLOCK only supports num_blocks multiple of (block_shape[0] // block_size)"
-            
+
             x = k_cache.shape[-1]
             k_cache_permute = k_cache.view(num_blocks // (block_shape[0] // block_size), (block_shape[0] // block_size), num_kv_heads, head_size//x, block_size, x).permute(0, 2, 1, 3, 4, 5).contiguous()
             k_quant_, k_scale_asm = pertoken_quant(k_cache_permute.view(num_blocks // (block_shape[0] // block_size), num_kv_heads, -1), quant_dtype=torch.float8_e4m3fnuz)
@@ -663,8 +663,8 @@ def test_paged_attention(
             k_quant_ = k_quant_.view(num_blocks // (block_shape[0] // block_size), num_kv_heads, (block_shape[0] // block_size), head_size//x, block_size, x).permute(0, 2, 1, 3, 5, 4).contiguous()
             x = 16 // torch.float8_e4m3fnuz.itemsize
             k_quant_ = k_quant_.view(num_blocks, num_kv_heads, head_size//x, x, block_size).permute(0, 1, 2, 4, 3).contiguous()
-            k_scale_asm = k_scale_asm.view(num_blocks // (block_shape[0] // block_size), num_kv_heads).permute(1, 0).contiguous()
-            
+            k_scale_asm = k_scale_asm.view(num_blocks // (block_shape[0] // block_size), num_kv_heads).contiguous()
+
             v_cache_permute = v_cache.view(num_blocks // (block_shape[0] // block_size), (block_shape[0] // block_size), num_kv_heads, head_size, block_size).permute(0, 2, 1, 3, 4).contiguous()
             v_quant_, v_scale_asm = pertoken_quant(v_cache_permute.view(num_blocks // (block_shape[0] // block_size), num_kv_heads, -1), quant_dtype=torch.float8_e4m3fnuz)
             v_cache_permute = (v_quant_.view(num_blocks // (block_shape[0] // block_size), num_kv_heads, -1).to(torch.float) * v_scale_asm.to(torch.float)).to(v_cache.dtype)
@@ -673,7 +673,7 @@ def test_paged_attention(
             v_cache = v_cache.view(num_blocks, num_kv_heads, head_size, block_size)
             v_quant_ = v_quant_.view(num_blocks // (block_shape[0] // block_size), num_kv_heads, (block_shape[0] // block_size), head_size, block_size).permute(0, 2, 1, 3, 4).contiguous()
             v_quant_ = v_quant_.view(num_blocks, num_kv_heads, head_size, block_size)
-            v_scale_asm = v_scale_asm.view(num_blocks // (block_shape[0] // block_size), num_kv_heads).permute(1, 0).contiguous()
+            v_scale_asm = v_scale_asm.view(num_blocks // (block_shape[0] // block_size), num_kv_heads).contiguous()
 
             out_golden, time_aiter = run_aiter(
                 query,

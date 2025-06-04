@@ -167,19 +167,15 @@ def _gemm_afp4_wfp4_kernel(
     GRID_MNK = GRID_MN * NUM_KSPLIT
     # remaps so that concecutive pid's are in the same XCD.
     pid_unified = remap_xcd(pid_unified, GRID_MNK, 8)
-    if NUM_KSPLIT > 1 and not SPLITK_USE_ATOMICS:
-        # pid k is the fastest changing dimension in order to promote L2 caching for A loads (A: M x K stored in row-major).
-        pid_k = pid_unified % NUM_KSPLIT
-        pid = pid_unified // NUM_KSPLIT
-        pid_m = pid // num_pid_n
-        pid_n = pid % num_pid_n
-    else:
-        # pid k is the slowest changing dimension in order to avoid contention in atomic split k.
-        # non split k case has m row grouping.
+
+    if SPLITK_USE_ATOMICS:
         pid_k = pid_unified // GRID_MN
         pid = pid_unified % GRID_MN
-        pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=4)
-
+    else:
+        pid_k = pid_unified % NUM_KSPLIT
+        pid = pid_unified // NUM_KSPLIT
+    
+    pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=4)
 
     tl.assume(pid_m >= 0)
     tl.assume(pid_n >= 0)
@@ -576,7 +572,7 @@ def _get_config(
     config = {
         "BLOCK_SIZE_M": BLOCK_SIZE_M,
         "BLOCK_SIZE_N": 256,
-        "BLOCK_SIZE_K": 256,
+        "BLOCK_SIZE_K": 128,
         "GROUP_SIZE_M": 4,
         "num_warps": 8,
         "num_stages": 2,

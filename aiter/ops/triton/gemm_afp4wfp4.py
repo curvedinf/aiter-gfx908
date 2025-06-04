@@ -571,8 +571,10 @@ def _get_config(
 ): 
     MIN_TARGET_WGS = 256
     # default config
+    # M is the sequence length in LLMs, which can be small.
+    BLOCK_SIZE_M = min(256, triton.next_power_of_2(M))
     config = {
-        "BLOCK_SIZE_M": 256,
+        "BLOCK_SIZE_M": BLOCK_SIZE_M,
         "BLOCK_SIZE_N": 256,
         "BLOCK_SIZE_K": 256,
         "GROUP_SIZE_M": 4,

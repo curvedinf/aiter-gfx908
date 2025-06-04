@@ -164,14 +164,22 @@ def _gemm_afp4_wfp4_kernel(
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
     pid_unified = tl.program_id(axis=0) # 0,1,2,..., num_pid_m * num_pid_n * split_k - 1
-    # fastest changing dim is num_pid_m, then num_pid_n, then split_k
-    pid_k = pid_unified // GRID_MN
-    pid = pid_unified % GRID_MN
+    GRID_MNK = GRID_MN * NUM_KSPLIT
     # remaps so that concecutive pid's are in the same XCD.
-    pid = remap_xcd(pid, GRID_MN, 8)
-    pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=4) # GROUP_SIZE_M)
-    # pid_m = pid % num_pid_m
-    # pid_n = pid // num_pid_m
+    pid_unified = remap_xcd(pid_unified, GRID_MNK, 8)
+    if NUM_KSPLIT > 1 and not SPLITK_USE_ATOMICS:
+        # pid k is the fastest changing dimension in order to promote L2 caching for A loads (A: M x K stored in row-major).
+        pid_k = pid_unified % NUM_KSPLIT
+        pid = pid_unified // NUM_KSPLIT
+        pid_m = pid // num_pid_n
+        pid_n = pid % num_pid_n
+    else:
+        # pid k is the slowest changing dimension in order to avoid contention in atomic split k.
+        # non split k case has m row grouping.
+        pid_k = pid_unified // GRID_MN
+        pid = pid_unified % GRID_MN
+        pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=4)
+
 
     tl.assume(pid_m >= 0)
     tl.assume(pid_n >= 0)
@@ -525,7 +533,7 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
 
 
 # @functools.lru_cache(maxsize=1024)
-# def _get_config(
+# def _read_config(
 #     M: int,
 #     N: int,
 #     K: int,
@@ -556,24 +564,12 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
 #         return _get_config._config_dict["xlarge"]
 
 
-
 def _get_config(
     M: int,
     N: int,
     K: int,
-):
-    # if not hasattr(_get_config, "_config_dict"):
-    #     dev = arch_info.get_device()
-    #     fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4-N={N}-K={2*K}.json"
-    #     if not os.path.exists(fpath):
-    #         fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4.json"
-
-    #     with open(fpath, "r") as file:
-    #         config = json.load(file)
-    #     _get_config._config_dict = config
-
+): 
     MIN_TARGET_WGS = 256
-
     # default config
     config = {
         "BLOCK_SIZE_M": 256,
@@ -594,10 +590,8 @@ def _get_config(
     BN = config["BLOCK_SIZE_N"]
 
     while (num_pid_m * num_pid_n < MIN_TARGET_WGS) and (BM > 32 or BN > 32):
-        if num_pid_m < num_pid_n:
-            BM = max(BM // 2, 32)
-        else:
-            BN = max(BN // 2, 32)
+        BM = max(BM // 2, 32)
+        BN = max(BN // 2, 32)
         num_pid_m = triton.cdiv(M, BM)
         num_pid_n = triton.cdiv(N, BN)
     
@@ -643,13 +637,12 @@ def gemm_afp4wfp4(
 
     M, K = x.shape
     K, N = w.shape
-
     if y is None:
         y = torch.empty((M, N), dtype=dtype, device=x.device)
 
     if config is None:
         config = _get_config(M, N, K)
-
+    
     SPLITK_USE_ATOMICS = False
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
@@ -693,8 +686,8 @@ def gemm_afp4wfp4(
     else:
         y_strides = (y_pp.stride(0), y_pp.stride(1), y_pp.stride(2))
 
-    print(f"gemm_afp4wfp4: M={M}, N={N}, K={K}, config={config}")
-
+    # print(f"gemm_afp4wfp4: M={M}, N={N}, K={K}, config={config}")
+    # print("USE_ATOMICS:", SPLITK_USE_ATOMICS)
     _gemm_afp4_wfp4_kernel[grid](
         x,
         w,

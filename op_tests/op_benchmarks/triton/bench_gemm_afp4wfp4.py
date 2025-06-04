@@ -47,13 +47,12 @@ def get_x_vals():
         # (4096, 1280, 8192),
         # (8192, 1280, 8192),
         # (16384, 1280, 8192),
-        (1, 2048, 2048),
-        (32, 2048, 2048),
-        (64, 2048, 2048),
-        (128, 2048, 2048),
+        (1, 128, 2048),
+        (128, 128, 2048),
+        (256, 256, 2048),
+        (2048, 2048, 2048),
         (4096, 4096, 4096),
         (8192, 8192, 8192),
-        (16384, 16384, 16384),
     ]
     return x_vals
 
@@ -119,15 +118,16 @@ def run_benchmark(args):
         out = torch.empty(x.shape[0], w.shape[1], device=x.device, dtype=c_dtype)
         
         # Warm up kernel, then capture a CUDA graph.
-        gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out)
-        torch.cuda.synchronize()
+        # gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out)
+        # torch.cuda.synchronize()
         
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
-            gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out)
+        # g = torch.cuda.CUDAGraph()
+        # with torch.cuda.graph(g):
+        #    gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out)
 
+        fun = lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out)  # g.replay() #  
         # Benchmark by replaying the captured CUDA graph.
-        ms = triton.testing.do_bench(lambda: g.replay(), rep=1 if args.test else 100)
+        ms = triton.testing.do_bench(fun, warmup=1 if args.test else 25, rep=1 if args.test else 100)
 
 
         # Return exactly one scalar depending on which metric is active

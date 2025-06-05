@@ -116,8 +116,10 @@ def parse_vgpr_usage(file_path, table_start="result-table-name"):
 
         if re.search(r"\.name:", line):
             vgpr_info.append(line.strip())
-        if re.search(r"\.vgpr_count:", line) or re.search(r"\.vgpr_spill_count:", line):
+        if re.search(r"\.vgpr_count:", line) or re.search(r"\.vgpr_spill_count:", line) or re.search(r"Occupancy:", line):
             vgpr_info.append(line.strip())
+        
+        
         # Detect start of table
         if re.match(rf"^\s*{table_start}", line):
             vgpr_info.append(line.strip())

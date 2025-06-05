@@ -166,7 +166,7 @@ def _gemm_afp4_wfp4_kernel(
     pid_unified = tl.program_id(axis=0) # 0,1,2,..., num_pid_m * num_pid_n * split_k - 1
     GRID_MNK = GRID_MN * NUM_KSPLIT
     # remaps so that concecutive pid's are in the same XCD.
-    pid_unified = remap_xcd(pid_unified, GRID_MNK, 8)
+    # pid_unified = remap_xcd(pid_unified, GRID_MNK, 8)
 
     if SPLITK_USE_ATOMICS:
         pid_k = pid_unified // GRID_MN
@@ -174,6 +174,8 @@ def _gemm_afp4_wfp4_kernel(
     else:
         pid_k = pid_unified % NUM_KSPLIT
         pid = pid_unified // NUM_KSPLIT
+    
+    pid = remap_xcd(pid, GRID_MN)
     
     pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=4)
 
@@ -220,7 +222,7 @@ def _gemm_afp4_wfp4_kernel(
             # Load the next block of A and B, generate a mask by checking the K dimension.
             # If it is out of bounds, set it to 0.
             if EVEN_K:
-                a = tl.load(a_ptrs)
+                a = tl.load(a_ptrs) # , cache_modifier=".cv")
                 b = tl.load(b_ptrs, cache_modifier=cache_modifier)
             else:
                 a = tl.load(
@@ -528,82 +530,82 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
     return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
 
 
-# @functools.lru_cache(maxsize=1024)
-# def _read_config(
-#     M: int,
-#     N: int,
-#     K: int,
-# ):
-#     if not hasattr(_get_config, "_config_dict"):
-#         dev = arch_info.get_device()
-#         fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4-N={N}-K={2*K}.json"
-#         if not os.path.exists(fpath):
-#             fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4.json"
-
-#         with open(fpath, "r") as file:
-#             config = json.load(file)
-#         _get_config._config_dict = config
-
-#     if M < 32:
-#         return _get_config._config_dict["small"]
-#     elif M <= 128:
-#         BLK_M = triton.next_power_of_2(M)
-#         if BLK_M == 32:
-#             return _get_config._config_dict["medium_M32"]
-#         elif BLK_M == 64:
-#             return _get_config._config_dict["medium_M64"]
-#         elif BLK_M == 128:
-#             return _get_config._config_dict["medium_M128"]
-#     elif M <= 256:
-#         return _get_config._config_dict["large"]
-#     else:
-#         return _get_config._config_dict["xlarge"]
-
-
+@functools.lru_cache(maxsize=1024)
 def _get_config(
     M: int,
     N: int,
     K: int,
-): 
-    MIN_TARGET_WGS = 256
-    # default config
-    # M is the sequence length in LLMs, which can be small.
-    BLOCK_SIZE_M = min(256, triton.next_power_of_2(M))
-    config = {
-        "BLOCK_SIZE_M": BLOCK_SIZE_M,
-        "BLOCK_SIZE_N": 256,
-        "BLOCK_SIZE_K": 128,
-        "GROUP_SIZE_M": 4,
-        "num_warps": 8,
-        "num_stages": 2,
-        "waves_per_eu": 2,
-        "matrix_instr_nonkdim": 16,
-        "cache_modifier": None,
-        "NUM_KSPLIT": 1,
-    }
-    num_pid_m = triton.cdiv(M, config["BLOCK_SIZE_M"])
-    num_pid_n = triton.cdiv(N, config["BLOCK_SIZE_N"])
+):
+    if not hasattr(_get_config, "_config_dict"):
+        dev = arch_info.get_device()
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4-N={N}-K={2*K}.json"
+        if not os.path.exists(fpath):
+            fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4.json"
 
-    BM = config["BLOCK_SIZE_M"]
-    BN = config["BLOCK_SIZE_N"]
+        with open(fpath, "r") as file:
+            config = json.load(file)
+        _get_config._config_dict = config
 
-    while (num_pid_m * num_pid_n < MIN_TARGET_WGS) and (BM > 32 or BN > 32):
-        BM = max(BM // 2, 32)
-        BN = max(BN // 2, 32)
-        num_pid_m = triton.cdiv(M, BM)
-        num_pid_n = triton.cdiv(N, BN)
+    if M < 32:
+        return _get_config._config_dict["small"]
+    elif M <= 128:
+        BLK_M = triton.next_power_of_2(M)
+        if BLK_M == 32:
+            return _get_config._config_dict["medium_M32"]
+        elif BLK_M == 64:
+            return _get_config._config_dict["medium_M64"]
+        elif BLK_M == 128:
+            return _get_config._config_dict["medium_M128"]
+    elif M <= 256:
+        return _get_config._config_dict["large"]
+    else:
+        return _get_config._config_dict["xlarge"]
+
+
+# def _get_config(
+#     M: int,
+#     N: int,
+#     K: int,
+# ): 
+#     MIN_TARGET_WGS = 256
+#     # default config
+#     # M is the sequence length in LLMs, which can be small.
+#     BLOCK_SIZE_M = min(256, triton.next_power_of_2(M))
+#     config = {
+#         "BLOCK_SIZE_M": BLOCK_SIZE_M,
+#         "BLOCK_SIZE_N": 256,
+#         "BLOCK_SIZE_K": 128,
+#         "GROUP_SIZE_M": 4,
+#         "num_warps": 8,
+#         "num_stages": 2,
+#         "waves_per_eu": 2,
+#         "matrix_instr_nonkdim": 16,
+#         "cache_modifier": None,
+#         "NUM_KSPLIT": 1,
+#     }
+#     num_pid_m = triton.cdiv(M, config["BLOCK_SIZE_M"])
+#     num_pid_n = triton.cdiv(N, config["BLOCK_SIZE_N"])
+
+#     BM = config["BLOCK_SIZE_M"]
+#     BN = config["BLOCK_SIZE_N"]
+
+#     while (num_pid_m * num_pid_n < MIN_TARGET_WGS) and (BM > 32 or BN > 32):
+#         BM = max(BM // 2, 32)
+#         BN = max(BN // 2, 32)
+#         num_pid_m = triton.cdiv(M, BM)
+#         num_pid_n = triton.cdiv(N, BN)
     
-    config["BLOCK_SIZE_M"] = BM
-    config["BLOCK_SIZE_N"] = BN
-    config["num_warps"] = 8 if (BM // 16) * (BN // 16) > 8 else 4
+#     config["BLOCK_SIZE_M"] = BM
+#     config["BLOCK_SIZE_N"] = BN
+#     config["num_warps"] = 8 if (BM // 16) * (BN // 16) > 8 else 4
 
-    # If still too low occupancy, turn to split k
-    if num_pid_m * num_pid_n < MIN_TARGET_WGS:
-        GRID_MN = num_pid_m * num_pid_n
-        config["NUM_KSPLIT"] = (MIN_TARGET_WGS + GRID_MN - 1) // GRID_MN
-        config["BLOCK_SIZE_K"] = max(min(2 * triton.cdiv(K, config["NUM_KSPLIT"]), 256), 32)
+#     # If still too low occupancy, turn to split k
+#     if num_pid_m * num_pid_n < MIN_TARGET_WGS:
+#         GRID_MN = num_pid_m * num_pid_n
+#         config["NUM_KSPLIT"] = (MIN_TARGET_WGS + GRID_MN - 1) // GRID_MN
+#         config["BLOCK_SIZE_K"] = max(min(2 * triton.cdiv(K, config["NUM_KSPLIT"]), 256), 32)
 
-    return config
+#     return config
 
 # Wrapper for gemm kernel.
 @aiter_register(module=sys.modules[__name__], kernels=["_gemm_afp4_wfp4_kernel"])
@@ -721,22 +723,10 @@ def gemm_afp4wfp4(
         )
         ACTUAL_KSPLIT = triton.cdiv(K, (config["SPLITK_BLOCK_SIZE"] // 2))
 
-        reduce_config = {
-            "BLOCK_SIZE_M": REDUCE_BLOCK_SIZE_M,
-            "BLOCK_SIZE_N": REDUCE_BLOCK_SIZE_N,
-            "ACTUAL_KSPLIT": ACTUAL_KSPLIT,
-            "MAX_KSPLIT": config["NUM_KSPLIT"],
-            "num_warps": 4,
-            "matrix_instr_nonkdim": 16,
-            "num_stages": 1,
-            "waves_per_eu": 2,
-        }
-
         grid_reduce = (
             triton.cdiv(M, REDUCE_BLOCK_SIZE_M),
             triton.cdiv(N, REDUCE_BLOCK_SIZE_N),
         )
-
         _gemm_afp4_wfp4_reduce_kernel[grid_reduce](
             y_pp,
             y,
@@ -747,7 +737,10 @@ def gemm_afp4wfp4(
             y_pp.stride(2),
             y.stride(0),
             y.stride(1),
-            **reduce_config,
+            REDUCE_BLOCK_SIZE_M,
+            REDUCE_BLOCK_SIZE_N,
+            ACTUAL_KSPLIT,
+            config["NUM_KSPLIT"],
         )
 
     return y

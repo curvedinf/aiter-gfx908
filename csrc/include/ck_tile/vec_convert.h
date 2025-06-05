@@ -167,8 +167,7 @@ CK_TILE_HOST_DEVICE constexpr fp4x2_t bf16x2_t_to_fp4x2_t(bf16x2_v x, fp32_t inv
         vec_t<dtype_##_t, vec_size_> out;                                                   \
         using vec_i2 = vec_t<stype_##_t, 2>;                                                \
         using vec_o2 = vec_t<dtype_##_t, 2>;                                                \
-        _Pragma("unroll") \
-        for(size_t i = 0; i < iter_num; i++)                                                \
+        _Pragma("unroll") for(size_t i = 0; i < iter_num; i++)                              \
         {                                                                                   \
             vec_o2 tmp = stype_##x2##_t_to_##dtype_##x2##_t(x.template get_as<vec_i2>()(i), \
                                                             inverted_scale);                \
@@ -208,8 +207,7 @@ CK_TILE_HOST_DEVICE constexpr vec_t<Y, N / 2> vec_convert(vec_t<X, N> x, fp32_t 
         vec_t<dtype_##_t, iter_num> out;                                                        \
         using vec_i2 = vec_t<stype_##_t, 2>;                                                    \
         using vec_o2 = dtype_##_t;                                                              \
-        _Pragma("unroll") \
-        for(size_t i = 0; i < iter_num; i++)                                                    \
+        _Pragma("unroll") for(size_t i = 0; i < iter_num; i++)                                  \
         {                                                                                       \
             vec_o2 tmp =                                                                        \
                 stype_##x2##_t_to_##dtype_##_t(x.template get_as<vec_i2>()(i), inverted_scale); \

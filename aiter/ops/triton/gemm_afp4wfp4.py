@@ -145,6 +145,7 @@ def _gemm_afp4_wfp4_kernel(
     A_scales and B_scales are in e8m0 format.
     A has shape (M, K), B has shape (K, N) and C has shape (M, N)
     """
+    pid_unified = tl.program_id(axis=0) # 0,1,2,..., num_pid_m * num_pid_n * split_k - 1
 
     tl.assume(stride_am > 0)
     tl.assume(stride_ak > 0)
@@ -163,21 +164,20 @@ def _gemm_afp4_wfp4_kernel(
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
-    pid_unified = tl.program_id(axis=0) # 0,1,2,..., num_pid_m * num_pid_n * split_k - 1
-    GRID_MNK = GRID_MN * NUM_KSPLIT
-    # remaps so that concecutive pid's are in the same XCD.
-    # pid_unified = remap_xcd(pid_unified, GRID_MNK, 8)
-
     if SPLITK_USE_ATOMICS:
         pid_k = pid_unified // GRID_MN
         pid = pid_unified % GRID_MN
     else:
         pid_k = pid_unified % NUM_KSPLIT
         pid = pid_unified // NUM_KSPLIT
+
+    if NUM_KSPLIT == 1:
+        if M > 128:
+            pid = remap_xcd(pid, GRID_MN)
     
-    pid = remap_xcd(pid, GRID_MN)
-    
-    pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=4)
+        pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
+    else:
+        pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=1)
 
     tl.assume(pid_m >= 0)
     tl.assume(pid_n >= 0)
@@ -329,7 +329,8 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
     if NUM_KSPLIT == 1:
-        remap_xcd(pid, GRID_MN)
+        if M > 128:
+            pid = remap_xcd(pid, GRID_MN)
 
         pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
     else:

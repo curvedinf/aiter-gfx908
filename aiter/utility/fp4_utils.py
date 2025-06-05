@@ -369,7 +369,7 @@ def dynamic_mxfp4_quant(
     scaleN = triton.cdiv(scaleN_valid, 8) * 8
     blockscale_e8m0 = torch.empty(
         (
-            scaleM * 8,  # pad to 256
+            (scaleM + 255) // 256 * 256,  # pad to 256
             scaleN,
         ),
         dtype=torch.uint8,

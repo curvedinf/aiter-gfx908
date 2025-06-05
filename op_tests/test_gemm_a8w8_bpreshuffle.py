@@ -35,10 +35,6 @@ def test_flatmm_ck(dtype, m, n, k):
     weight_shuffle = shuffle_weight(weight, layout=(16, 16))
 
     out = torch.empty(m, n, dtype=dtypes.fp16, device="cuda")
-
-    flat_weight = weight.view(n // 16, 16, k // 64, 4, 16)
-    flat_weight = flat_weight.permute(0, 2, 3, 1, 4).contiguous()
-    flat_weight = flat_weight.view(n, -1)
     a, avg_a = run_torch(x, weight, x_scale, w_scale, dtype)
     b, avg_b = run_gemm_ck_bpreshuffle(x, weight_shuffle, x_scale, w_scale, dtype)
     tflops = 2 * m *n *k /avg_b /1e6

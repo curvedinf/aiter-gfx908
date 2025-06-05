@@ -74,6 +74,15 @@ def mha_varlen_fwd(
 ) -> list[Tensor]: ...
 
 
+@compile_ops("module_poyenc_mha_v3_fwd", fc_name="poyenc_mha_v3_fwd")
+def poyenc_mha_v3_fwd(
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    softmax_scale: float,
+): ...
+
+
 @compile_ops("module_mha_bwd", fc_name="mha_bwd")
 def mha_bwd(
     dout: Tensor,
@@ -1645,5 +1654,30 @@ def mha_batch_prefill_func(
         result.append(softmax_lse)
     if return_attn_probs:
         result.append(S_dmask)
+
+    return result[0] if len(result) == 1 else tuple(result)
+
+
+def poyenc_mha_v3_fwd_func(
+    q,
+    k,
+    v,
+):
+    head_size_q_og = q.size(3)
+    head_size_v_og = v.size(3)
+    if head_size_q_og % 8 != 0:
+        q = torch.nn.functional.pad(q, [0, 8 - head_size_q_og % 8])
+        k = torch.nn.functional.pad(k, [0, 8 - head_size_q_og % 8])
+    if head_size_v_og % 8 != 0:
+        v = torch.nn.functional.pad(v, [0, 8 - head_size_v_og % 8])
+
+    out_padded = poyenc_mha_v3_fwd(
+        q,
+        k,
+        v,
+    )[0]
+    out = out_padded[..., :head_size_v_og]
+
+    result = [out]
 
     return result[0] if len(result) == 1 else tuple(result)

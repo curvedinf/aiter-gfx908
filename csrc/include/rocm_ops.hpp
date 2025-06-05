@@ -500,6 +500,13 @@
           py::arg("alibi_slopes") = std::nullopt, \
           py::arg("gen")          = std::nullopt);
 
+#define POYENC_MHA_V3_FWD_PYBIND                  \
+    m.def("poyenc_mha_v3_fwd",                    \
+          &aiter::torch_itfs::poyenc_mha_v3_fwd,  \
+          py::arg("q"),                           \
+          py::arg("k"),                           \
+          py::arg("v"));
+
 #define MHA_BATCH_PREFILL_PYBIND                  \
     m.def("mha_batch_prefill",                    \
           &aiter::torch_itfs::mha_batch_prefill,  \

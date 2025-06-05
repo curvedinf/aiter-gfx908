@@ -45,8 +45,12 @@ def generate_gemm_afp4wfp4_inputs(M, N, K, dtype, output=True):
     w = w_low | w_high << 4
     w = w.T
     # Scale of 1.0 in e8m0, bias 127.
+    if M >= 32 and TRITON_HIP_PRESHUFFLE_SCALES:
+        M_pad = (M + 255) // 256 * 256
+    else:
+        M_pad = M
     x_scales = torch.randint(
-        124, 128, (K // SCALE_GROUP_SIZE, M), dtype=torch.uint8, device="cuda"
+        124, 128, (K // SCALE_GROUP_SIZE, M_pad), dtype=torch.uint8, device="cuda"
     )
     w_scales = torch.randint(
         124, 128, (K // SCALE_GROUP_SIZE, N), dtype=torch.uint8, device="cuda"
@@ -70,7 +74,7 @@ def generate_gemm_afp4wfp4_inputs(M, N, K, dtype, output=True):
     else:
         out_dtype = dtype
 
-    return x, w, x_scales, w_scales, x_scales_shuffled, w_scales_shuffled, out_dtype, y
+    return x, w, x_scales[:M], w_scales, x_scales_shuffled, w_scales_shuffled, out_dtype, y
 
 
 def get_x_vals():

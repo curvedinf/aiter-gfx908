@@ -6,7 +6,7 @@ import torch
 import triton
 import triton.language as tl
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
-
+import os
 
 @triton.heuristics(
     {
@@ -126,38 +126,104 @@ def gemm_a16w16(
 
     BLOCK_SIZE_M = 256
     BLOCK_SIZE_N = 256
-    BLOCK_SIZE_K = 64
+    BLOCK_SIZE_K = 32
     GROUP_SIZE_M = 4
     waves_per_eu = 2
     kpack = 1
     matrix_instr_nonkdim = 16
     num_warps = 8
-    num_stages = 2
-    grid = lambda META: (  # noqa: E731
-        triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
-    )
-    _gemm_a16_w16_kernel[grid](
-        x,
-        w,
-        y,
-        M,
-        N,
-        K,
-        x.stride(0),
-        x.stride(1),
-        w.stride(0),
-        w.stride(1),
-        y.stride(0),
-        y.stride(1),
-        BLOCK_SIZE_M,
-        BLOCK_SIZE_N,
-        BLOCK_SIZE_K,
-        GROUP_SIZE_M,
-        waves_per_eu=waves_per_eu,
-        kpack=kpack,
-        matrix_instr_nonkdim=matrix_instr_nonkdim,
-        num_warps=num_warps,
-        num_stages=num_stages,
-    )
+    num_stages = 3
+
+    num_M_slice = 1
+    num_N_slice = 1
+    slice_size_M = M
+    slice_size_N = N
+    shape_db = None
+
+    TRITON_HIP_MNSPLIT = os.environ.get("TRITON_HIP_MNSPLIT", "0")
+    if TRITON_HIP_MNSPLIT == "1":
+        shape_db = {(8192, 10240, 65536):(8192, 10240),
+            (8192, 65536, 10240):(4096, 4096),
+            (10240, 65536, 8192):(10240, 4096),
+            (8192, 65536, 8192):(8192, 8192),
+            (8192, 65536, 28672):(8192, 4096),
+            (128256, 65536, 8192):(42752, 8192),
+            (8192, 65536, 128256):(8192, 4096),
+            (8192, 128256, 65536):(8192, 128256),
+            (28672, 65536, 8192):(4096, 8192),
+            (8192, 57344, 65536):(4096, 4096),
+            (57344, 65536, 8192):(8192, 4096),
+            (28672, 8192, 65536):(4096, 4096),
+            (8192, 65536, 8192):(8192, 8192),
+            (8192, 65536, 57344):(8192, 4096),
+            (8192, 8192, 65536):(4096, 4096),
+        }
+    elif TRITON_HIP_MNSPLIT == "2":
+        shape_db = {(8192, 10240, 65536):(8192, 10240),
+            (8192, 65536, 10240):(4096, 4096),
+            (10240, 65536, 8192):(10240, 4096),
+            (8192, 65536, 8192):(8192, 8192),
+            #(8192, 65536, 28672):(8192, 4096),
+            (128256, 65536, 8192):(42752, 8192),
+            #(8192, 65536, 128256):(8192, 4096),
+            (8192, 128256, 65536):(8192, 128256),
+            (28672, 65536, 8192):(4096, 8192),
+            (8192, 57344, 65536):(4096, 4096),
+            (57344, 65536, 8192):(8192, 4096),
+            (28672, 8192, 65536):(4096, 4096),
+            (8192, 65536, 8192):(8192, 8192),
+            #(8192, 65536, 57344):(8192, 4096),
+            (8192, 8192, 65536):(4096, 4096),
+        }
+    if shape_db is not None :
+        if (M, N, K) in shape_db:
+            (slice_size_M, slice_size_N) = shape_db[(M, N, K)]
+            assert(M % slice_size_M == 0)
+            assert(N % slice_size_N == 0)
+            num_M_slice = int(M / slice_size_M)
+            num_N_slice = int(N / slice_size_N)
+    
+    #print (TRITON_HIP_MNSPLIT, num_M_slice,  num_N_slice,  slice_size_M, slice_size_N)
+
+    x_sub = x.view(num_M_slice, slice_size_M, K) 
+    w_sub = w.view(K, num_N_slice, slice_size_N) 
+    y_sub = y.view(num_M_slice, slice_size_M, num_N_slice, slice_size_N)
+    # Process blocks directly using .view()
+    grid = lambda META: (triton.cdiv(slice_size_M, META['BLOCK_SIZE_M']) * triton.cdiv(slice_size_N, META['BLOCK_SIZE_N']), )
+    for i in range(num_M_slice):
+        for j in range(num_N_slice):
+            # Extract A block using .view() e.g.: (8192, 65536) -> (2, 4096, 65536)[i]
+            x_block = x_sub[i, :, :]  # Shape: (4096, 65536)
+
+            # Extract B block using .view() e.g.: (65536, 28672) -> (65536, 7, 4096)[:, j, :]
+            w_block = w_sub[:, j, :]  # Shape: (65536, 4096)
+            
+            # Create output view directly in final result tensor
+            # Map (i,j) block to correct position e.g.: (8192, 28672) -> (2, 4096, 7, 4096)[i, :, j, :]
+            output_view = y_sub[i, :, j, :]
+            
+            _gemm_a16_w16_kernel[grid](
+                x_block,
+                w_block,
+                output_view,
+                slice_size_M,
+                slice_size_N,
+                K,
+                x_block.stride(0),
+                x_block.stride(1),
+                w_block.stride(0),
+                w_block.stride(1),
+                output_view.stride(0),
+                output_view.stride(1),
+                BLOCK_SIZE_M,
+                BLOCK_SIZE_N,
+                BLOCK_SIZE_K,
+                GROUP_SIZE_M,
+                waves_per_eu=waves_per_eu,
+                kpack=kpack,
+                matrix_instr_nonkdim=matrix_instr_nonkdim,
+                num_warps=num_warps,
+                num_stages=num_stages,
+            )
 
     return y

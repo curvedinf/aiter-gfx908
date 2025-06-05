@@ -17,6 +17,7 @@ void dynamic_per_tensor_quant(torch::Tensor &out,         // [..., d]
 void dynamic_per_token_scaled_quant(
     torch::Tensor &out,         // [..., d]
     torch::Tensor const &input, // [..., d]
-    torch::Tensor &scales, std::optional<at::Tensor> const &scale_ub);
+    torch::Tensor &scales, std::optional<at::Tensor> const &scale_ub,
+    bool shuffle_scale = true);
 
 } // namespace aiter

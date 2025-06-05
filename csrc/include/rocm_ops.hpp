@@ -778,7 +778,8 @@
           py::arg("out"),                                                \
           py::arg("input"),                                              \
           py::arg("scales"),                                             \
-          py::arg("scale_ub") = std::nullopt);
+          py::arg("scale_ub") = std::nullopt,\
+          py::arg("shuffle_scale") = true);
 
 #define RMSNORM_PYBIND                                                                             \
     m.def("rms_norm_cu",                                                                           \

@@ -20,7 +20,9 @@ def run_torch(
     out, _ = attention_ref(
         q,
         k,
-        v
+        v,
+        upcast=upcast,
+        reorder_ops=reorder_ops
     )
 
     return out
@@ -30,11 +32,20 @@ def run_ck(
     k,
     v,
 ):
+    """"""
     out = aiter.flash_attn_func(
         q,
         k,
         v
     )
+    """"""
+    """
+    out = aiter.poyenc_mha_v3_fwd_func(
+        q,
+        k,
+        v
+    )
+    """
 
     return out
 

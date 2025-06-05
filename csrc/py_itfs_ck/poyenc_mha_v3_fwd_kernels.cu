@@ -6,7 +6,7 @@
 namespace aiter {
 namespace torch_itfs {
 
-std::vector<at::Tensor> poyenc_mha_v3_fwd(at::Tensor& q,       // [b, sq, hq, d]
+std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
                                           const at::Tensor& k, // [b, sk, hk, d]
                                           const at::Tensor& v  // [b, sk, hk, d_v]
 )
@@ -55,7 +55,7 @@ std::vector<at::Tensor> poyenc_mha_v3_fwd(at::Tensor& q,       // [b, sq, hq, d]
     at::Tensor out =
         torch::empty({batch_size, seqlen_q, num_heads, head_size_v}, opts.dtype(q_dtype));
 
-    return {out};
+    return {q};
 }
 
 } // namespace torch_itfs

@@ -8,8 +8,8 @@ namespace torch_itfs {
 
 std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
                                           const at::Tensor& k, // [b, sk, hk, d]
-                                          const at::Tensor& v  // [b, sk, hk, d_v]
-)
+                                          const at::Tensor& v, // [b, sk, hk, d_v]
+                                          float softmax_scale)
 {
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == torch::kFloat16 || q_dtype == torch::kBFloat16,

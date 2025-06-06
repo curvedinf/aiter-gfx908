@@ -1662,7 +1662,11 @@ def poyenc_mha_v3_fwd_func(
     q,
     k,
     v,
+    softmax_scale=None,
 ):
+    if softmax_scale is None:
+        softmax_scale = q.shape[-1] ** (-0.5)
+
     head_size_q_og = q.size(3)
     head_size_v_og = v.size(3)
     if head_size_q_og % 8 != 0:
@@ -1675,6 +1679,7 @@ def poyenc_mha_v3_fwd_func(
         q,
         k,
         v,
+        softmax_scale,
     )[0]
     out = out_padded[..., :head_size_v_og]
 

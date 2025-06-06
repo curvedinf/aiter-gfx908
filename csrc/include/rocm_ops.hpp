@@ -505,7 +505,8 @@
           &aiter::torch_itfs::poyenc_mha_v3_fwd,  \
           py::arg("q"),                           \
           py::arg("k"),                           \
-          py::arg("v"));
+          py::arg("v"),                           \
+          py::arg("softmax_scale"));
 
 #define MHA_BATCH_PREFILL_PYBIND                  \
     m.def("mha_batch_prefill",                    \

@@ -489,6 +489,30 @@ namespace vllm
     return static_cast<half>(float(input) * static_cast<float>(scale_functor));
   }
 
+  template <int pack_size>
+  DINLINE array_t<hip_fp8, pack_size> packQuantHalfToFp8(array_t<half, pack_size> inp_pack, half scale_factor)
+  {
+    array_t<hip_fp8, pack_size> ret_pack;
+#pragma unroll
+    for (int i = 0; i < pack_size; ++i)
+    {
+      ret_pack.data[i] = quantHalfToFp8(inp_pack.data[i], scale_factor);
+    }
+    return ret_pack;
+  }
+
+  template <int pack_size>
+  DINLINE array_t<half, pack_size> packDequantFp8ToHalf(array_t<hip_fp8, pack_size> inp_pack, half scale_factor)
+  {
+    array_t<half, pack_size> ret_pack;
+#pragma unroll
+    for (int i = 0; i < pack_size; ++i)
+    {
+      ret_pack.data[i] = dequantFp8ToHalf(inp_pack.data[i], scale_factor);
+    }
+    return ret_pack;
+  }
+
   template <typename input_type, typename output_type, int size>
   DINLINE array_t<output_type, size> packQuant(array_t<input_type, size> inp_pack, input_type scale_functor)
   {}
@@ -521,59 +545,70 @@ namespace vllm
     return tmp;
   }
 
-  /*
-   * quant half to fp8 in allgather
-   * */
-  #define QUANT_SCALE 128
+  template <int quant_scale, int pack_size>
   __global__ __forceinline__ void __launch_bounds__(512, 1) allReduceFp8Naive(RankData* _dp, RankSignals sg, Signal* self_sg, half* __restrict__ result, int rank, int size)
   {
-    int index = blockIdx.x * blockDim.x + threadIdx.x;
-    int part_size = size / 8;
-    using half_vec8 = typename packed_t<half>::P;
-    using fp8_vec8 = array_t<hip_fp8, 8>;
-    const half_vec8* ptrs[8];
-    fp8_vec8* tmps[8];
+    constexpr int ngpus = 8;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = gridDim.x * blockDim.x;
+    using P = typename packed_t<half>::P;
+    using A = typename packed_t<half>::A;
+    using fp8_pack = array_t<hip_fp8, pack_size>;
+    int part = size / ngpus;
+    int start = rank * part;
+    int end = rank == ngpus - 1 ? size : start + part;
+    int largest_part = part + size % ngpus;
+    const P *ptrs[ngpus];
+    fp8_pack *tmps[ngpus];
 #pragma unroll
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < ngpus; i++)
     {
-      ptrs[i] = (const half_vec8*)_dp->ptrs[i];
-      tmps[i] = get_tmp_buf<fp8_vec8>(sg.signals[i]);
+      int target = (rank + i) % ngpus;
+      ptrs[i] = (const P *)_dp->ptrs[target];
+      tmps[i] = get_tmp_buf<fp8_pack>(sg.signals[target]);
     }
-    start_sync<8>(sg, self_sg, rank);
-
-    // read HBM
-    half_vec8 half8_reg = ptrs[rank][rank * part_size / 8 + index];
-#pragma unroll
-    for (int i = 1; i < 8; ++i)
+    auto tmp_out = tmps[0];
+    start_sync<ngpus>(sg, self_sg, rank);
+    // stage 1: reduce scatter
+    for (int idx = start + tid; idx < end; idx += stride)
     {
-      int device_id = (rank + i) % 8;
-      half8_reg = packOp<AddFunctor, half, 8>(half8_reg, ptrs[device_id][rank * part_size / 8 + index]);
+      P half8_reg;
+      half8_reg = packed_reduce<P, ngpus, A>(ptrs, idx);
+      ((P *)result)[idx] = half8_reg;
+      // quant
+      half thread_max = packReduce<AbsMaxFunctor, half, pack_size>(half8_reg);
+      thread_max = warpReduce<MaxFunctor, half, quant_scale / pack_size>(thread_max);
+      half scale_factor = static_cast<half>(static_cast<float>(thread_max) / 240.0f);
+      tmp_out[idx - start] = packQuant<half, hip_fp8, pack_size>(half8_reg, scale_factor);
+      if (threadIdx.x % (quant_scale / pack_size) == 0)
+      {
+        *(reinterpret_cast<half*>(&tmp_out[part]) + (idx - start) / (quant_scale / pack_size)) = scale_factor;
+      }
     }
+    end_sync<ngpus>(sg, self_sg, rank);
 
-    // write HBM
-    *(reinterpret_cast<half_vec8*>(&result[rank * part_size]) + index) = half8_reg;
-
-    // quant
-    half thread_max = packReduce<AbsMaxFunctor, half, 8>(half8_reg);
-    thread_max = warpReduce<MaxFunctor, half, QUANT_SCALE / 8>(thread_max);
-    half scale_factor = static_cast<half>(static_cast<float>(thread_max) / 240.0f);
-
-    // save quant rslt
-    tmps[rank][index] = packQuant<half, hip_fp8, 8>(half8_reg, scale_factor);
-    *(reinterpret_cast<half*>(&tmps[rank][part_size / 8]) + index) = scale_factor;
-    end_sync<8>(sg, self_sg, rank);
-
-#pragma unroll
-    for (int i = 1; i < 8; ++i)
+    // stage 2: all-gather
+    for (int idx = tid; idx < largest_part; idx += stride)
     {
-      int device_id = (rank + i) % 8;
-
-      // load quant rslt
-      scale_factor = *(reinterpret_cast<half*>(&tmps[device_id][part_size / 8]) + index);
-      half8_reg = packDequant<hip_fp8, half, 8>(tmps[device_id][index], scale_factor);
-
-      // write HBM
-      *(reinterpret_cast<half_vec8*>(&result[device_id * part_size]) + index) = half8_reg;
+#pragma unroll
+      for (int i = 1; i < ngpus; i++)
+      {
+        int gather_from_rank = ((rank + i) % ngpus);
+        if (gather_from_rank == ngpus - 1 || idx < part)
+        {
+          // dequant
+          half scale_factor;
+          int factor_stride = quant_scale / pack_size;
+          if (threadIdx.x % factor_stride == 0)
+          {
+            scale_factor = *(reinterpret_cast<half*>(&tmps[i][part]) + idx / factor_stride);
+          }
+          scale_factor = __shfl(scale_factor, (threadIdx.x / factor_stride) * factor_stride);
+          P half8_reg = packDequant<hip_fp8, half, pack_size>(tmps[i][idx], scale_factor);
+          int dst_idx = gather_from_rank * part + idx;
+          ((P *)result)[dst_idx] = half8_reg;
+        }
+      }
     }
   }
 
@@ -783,13 +818,25 @@ namespace vllm
     /*
      * call all reduce fp8 kernel
      * case size in single gpu: (128, 8192)
+     * support 8 gpu only
+     * should make ngpus as template param
+     * should quant scale match hidden_dim when hidden_dim less than 128?
      * */
     void runFp8QuantKernel(cudaStream_t stream, half* input, half* output, int size)
     {
       RankData *ptrs = get_buffer_RD(stream, input);
-      dim3 block(512);
-      dim3 grid(size / (512 * 8 * 8));
-      allReduceFp8Naive<<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size);
+      dim3 block(256);
+      dim3 grid;
+      size /= 8;
+      if (size < 16 * 8192)
+      {
+        grid.x = size / (256 * 8);
+      }
+      else
+      {
+        grid.x = 64;
+      }
+      allReduceFp8Naive<128, 8><<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size);
     }
 
     /**

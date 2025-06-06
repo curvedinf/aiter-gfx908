@@ -93,7 +93,7 @@ void _all_reduce(fptr_t _fa, torch::Tensor &inp, torch::Tensor &out,
   case at::ScalarType::Half:
   {
     // support case: 512 threads per block, half 8 pack, split into 8 pieces
-    if (open_fp8_quant && inp.numel() % (4096 * 8) == 0)
+    if (open_fp8_quant && out.numel() >= 128 * 2048)
     {
       fa->runFp8QuantKernel(stream, reinterpret_cast<half *>(inp.data_ptr()),
                           reinterpret_cast<half *>(out.data_ptr()), out.numel());

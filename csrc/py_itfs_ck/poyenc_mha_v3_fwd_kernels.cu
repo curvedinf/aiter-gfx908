@@ -43,29 +43,6 @@ struct host_args
 };
 
 //////////////////////////////////////////////////////////////////////////////////////
-struct FmhaFwdBf16
-{
-};
-
-template <typename DataType>
-struct FmhaFwdTypeConfig;
-
-template <>
-struct FmhaFwdTypeConfig<FmhaFwdBf16>
-{
-    using QDataType             = ck_tile::bf16_t;
-    using KDataType             = ck_tile::bf16_t;
-    using VDataType             = ck_tile::bf16_t;
-    using BiasDataType          = ck_tile::bf16_t;
-    using RandValOutputDataType = uint8_t;
-    using LSEDataType           = float; // data type for lse(logsumexp L_j = max_j + log(l_j))
-    using SaccDataType          = float; // data type for first gemm accumulation
-    using SMPLComputeDataType   = float; // data type for reduction, softmax
-    using PDataType             = ck_tile::bf16_t; // data type for A matrix of second gemm
-    using OaccDataType          = float;           // data type for second gemm accumulation
-    using ODataType             = ck_tile::bf16_t;
-};
-
 using fmha_dtype_0 = FmhaFwdBf16;
 
 using fmha_block_tile_0 = ck_tile::sequence<128, 128, 32, 128, 32, 128>;
@@ -116,8 +93,8 @@ using fmha_pipeline_problem_0 = ck_tile::BlockFmhaPipelineProblem<
 using fmha_pipeline_0 = ck_tile::BlockFmhaPipelineQRKSVSAsync<fmha_pipeline_problem_0>;
 
 using fmha_epilogue_0 = ck_tile::Default2DEpilogue<
-    ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<FmhaFwdBf16>::OaccDataType,
-                                      typename FmhaFwdTypeConfig<FmhaFwdBf16>::ODataType,
+    ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<fmha_dtype_0>::OaccDataType,
+                                      typename FmhaFwdTypeConfig<fmha_dtype_0>::ODataType,
                                       true,
                                       true>>;
 
@@ -135,8 +112,6 @@ std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
 
     TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
     TORCH_CHECK(v.dtype() == q_dtype, "query and value must have the same dtype");
-
-    std::string q_dtype_str = q_dtype == torch::kFloat16 ? "fp16" : "bf16";
 
     CHECK_DEVICE(q);
     CHECK_DEVICE(k);

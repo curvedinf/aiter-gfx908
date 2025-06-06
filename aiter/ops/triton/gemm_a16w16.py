@@ -141,7 +141,8 @@ def gemm_a16w16(
     shape_db = None
 
     TRITON_HIP_MNSPLIT = os.environ.get("TRITON_HIP_MNSPLIT", "0")
-    if TRITON_HIP_MNSPLIT == "1":
+    #if TRITON_HIP_MNSPLIT == "1":
+    if True:
         shape_db = {(8192, 10240, 65536):(8192, 10240),
             (8192, 65536, 10240):(4096, 4096),
             (10240, 65536, 8192):(10240, 4096),

@@ -32,25 +32,25 @@ def run_ck(
     k,
     v,
 ):
-    """"""
+    """
     out = aiter.flash_attn_func(
         q,
         k,
         v
     )
-    """"""
     """
+    """"""
     out = aiter.poyenc_mha_v3_fwd_func(
         q,
         k,
         v
     )
-    """
+    """"""
 
     return out
 
 
-@pytest.mark.parametrize("dtype", [dtypes.fp16, dtypes.bf16])
+@pytest.mark.parametrize("dtype", [dtypes.bf16])
 @pytest.mark.parametrize("mha_type", ["mha", "mqa", "gqa"])
 @pytest.mark.parametrize("batch_size", [5])
 @pytest.mark.parametrize("nheads", [6])

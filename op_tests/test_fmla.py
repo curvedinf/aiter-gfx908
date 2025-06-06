@@ -204,24 +204,24 @@ if __name__ == "__main__":
     h_kv = 1
     d, dv = 576, 512
 
-    # for (dtype, b, s, h_q, s_q, varlen, causal) in itertools.product(
-    #     (torch.float16, torch.bfloat16),
-    #     (2,4),
-    #     (64, 512, 4096, 8192),
-    #     (16, 64, 128),
-    #     # (1, 2), # s_q for decode
-    #     (64,),  # s_q for prefill
-    #     (False, True),
-    #     (False, True)
-    # ):
-    #     test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen, True, False)
-
-    for (dtype, b, s, h_q, varlen, causal) in itertools.product(
+    for (dtype, b, s, h_q, s_q, varlen, causal) in itertools.product(
         (torch.float16, torch.bfloat16)[1:],
         [1, 3, 5, 16, 32, 64, 128, 256][3:4],
         [21, 64, 256, 512, 1200, 3200, 5200, 8192],
-        (16, 64, 128)[:1],
-        (False, True)[:1],
-        (False, True)[1:]
+        (16, 64, 128)[:],
+        # (1, 2), # s_q for decode
+        (64,),  # s_q for prefill
+        (False, True)[:],
+        (False, True)[:]
     ):
-        test_flash_mla(dtype, b, s, s, h_q, h_kv, d, dv, causal, varlen, False, True)
+        test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen, True, False)
+
+    # for (dtype, b, s, h_q, varlen, causal) in itertools.product(
+    #     (torch.float16, torch.bfloat16)[1:],
+    #     [1, 3, 5, 16, 32, 64, 128, 256][3:4],
+    #     [21, 64, 256, 512, 1200, 3200, 5200, 8192][5:6],
+    #     (16, 64, 128)[:1],
+    #     (False, True)[:1],
+    #     (False, True)[1:]
+    # ):
+    #     test_flash_mla(dtype, b, s, s, h_q, h_kv, d, dv, causal, varlen, False, True)

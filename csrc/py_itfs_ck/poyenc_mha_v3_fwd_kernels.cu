@@ -43,62 +43,130 @@ struct host_args
 };
 
 //////////////////////////////////////////////////////////////////////////////////////
-using fmha_dtype_0 = FmhaFwdBf16;
+template <typename DataType>
+struct get_kernel
+{
+    using fmha_dtype = DataType;
 
-using fmha_block_tile_0 = ck_tile::sequence<128, 128, 32, 128, 32, 128>;
+    using fmha_block_tile = ck_tile::sequence<128, 128, 32, 128, 32, 128>;
 
-using fmha_shape_0 = ck_tile::TileFmhaShape<fmha_block_tile_0,
-                                            ck_tile::sequence<4, 1, 1>,
-                                            ck_tile::sequence<32, 32, 16>,
-                                            ck_tile::sequence<4, 1, 1>,
-                                            ck_tile::sequence<32, 32, 16>,
-                                            true>;
+    using fmha_warp_gemm_shape = ck_tile::sequence<32, 32, 16>;
 
-using fmha_trait_0 = ck_tile::TileFmhaTraits<true,
-                                             true,
-                                             true,
-                                             true,
-                                             false,
-                                             ck_tile::BlockAttentionBiasEnum::NO_BIAS,
-                                             false,
-                                             false,
-                                             false,
-                                             false,
-                                             -1,
-                                             false>;
+    using fmha_shape = ck_tile::TileFmhaShape<fmha_block_tile,
+                                              ck_tile::sequence<4, 1, 1>,
+                                              fmha_warp_gemm_shape,
+                                              ck_tile::sequence<4, 1, 1>,
+                                              fmha_warp_gemm_shape,
+                                              true>;
 
-using fmha_variant_0 =
-    ck_tile::ComposedAttention<false * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
+    using fmha_traits = ck_tile::TileFmhaTraits<true,
+                                                true,
+                                                true,
+                                                true,
+                                                false,
+                                                ck_tile::BlockAttentionBiasEnum::NO_BIAS,
+                                                false,
+                                                false,
+                                                false,
+                                                false,
+                                                -1,
+                                                false>;
 
-using fmha_mask_0 = ck_tile::SimplifiedGenericAttentionMask<false>;
+    using fmha_variant =
+        ck_tile::ComposedAttention<false * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
 
-using fmha_pipeline_problem_0 = ck_tile::BlockFmhaPipelineProblem<
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::QDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::KDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::VDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::SaccDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::SMPLComputeDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::BiasDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::RandValOutputDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::LSEDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::PDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::OaccDataType,
-    typename FmhaFwdTypeConfig<fmha_dtype_0>::ODataType,
-    fmha_shape_0,
-    false,
-    fmha_variant_0,
-    fmha_mask_0,
-    fmha_trait_0>;
+    using fmha_mask = ck_tile::SimplifiedGenericAttentionMask<false>;
 
-using fmha_pipeline_0 = ck_tile::BlockFmhaPipelineQRKSVSAsync<fmha_pipeline_problem_0>;
+    using fmha_problem = ck_tile::BlockFmhaPipelineProblem<
+        typename FmhaFwdTypeConfig<fmha_dtype>::QDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::KDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::VDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::SaccDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::SMPLComputeDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::BiasDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::RandValOutputDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::LSEDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::PDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,
+        fmha_shape,
+        false,
+        fmha_variant,
+        fmha_mask,
+        fmha_traits>;
 
-using fmha_epilogue_0 = ck_tile::Default2DEpilogue<
-    ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<fmha_dtype_0>::OaccDataType,
-                                      typename FmhaFwdTypeConfig<fmha_dtype_0>::ODataType,
-                                      true,
-                                      true>>;
+    using fmha_pipeline = ck_tile::BlockFmhaPipelineQRKSVSAsync<fmha_problem>;
 
-using fmha_kernel_0 = ck_tile::FmhaFwdKernel<fmha_pipeline_0, fmha_epilogue_0>;
+    using fmha_epilogue = ck_tile::Default2DEpilogue<
+        ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
+                                          typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,
+                                          true,
+                                          true>>;
+
+    using type = ck_tile::FmhaFwdKernel<fmha_pipeline, fmha_epilogue>;
+};
+
+template <typename DataType>
+using get_kernel_t = typename get_kernel<DataType>::type;
+
+template <typename Kernel>
+void launch(const host_args& args)
+{
+    auto kargs = Kernel::MakeKargsImpl(args.q_ptr,
+                                       args.k_ptr,
+                                       args.v_ptr,
+                                       nullptr, // bias_ptr
+                                       nullptr, // rand_val_ptr
+                                       nullptr, // lse_ptr
+                                       args.o_ptr,
+                                       args.seqlen_q,
+                                       args.seqlen_k,
+                                       args.hdim_q,
+                                       args.hdim_v,
+                                       args.nhead_q,
+                                       args.nhead_q / args.nhead_k,
+                                       args.scale_s,
+                                       1.0f, // scale_p
+                                       1.0f, // scale_o
+                                       0.0f, // logits_soft_cap
+                                       args.stride_q,
+                                       args.stride_k,
+                                       args.stride_v,
+                                       0, // stride_bias
+                                       0, // stride_randval
+                                       args.stride_o,
+                                       args.nhead_stride_q,
+                                       args.nhead_stride_k,
+                                       args.nhead_stride_v,
+                                       0, // nhead_stride_bias
+                                       0, // nhead_stride_randval
+                                       0, // nhead_stride_lse
+                                       args.nhead_stride_o,
+                                       args.batch_stride_q,
+                                       args.batch_stride_k,
+                                       args.batch_stride_v,
+                                       0, // batch_stride_bias
+                                       0, // batch_stride_randval
+                                       0, // batch_stride_lse
+                                       args.batch_stride_o,
+                                       0,                         // window_size_left
+                                       0,                         // window_size_right
+                                       0,                         // mask_type
+                                       0.0f,                      // p_drop
+                                       false,                     // s_randval
+                                       std::make_pair(0UL, 0UL)); // drop_seed_offset
+
+    dim3 grids = Kernel::GridSize(args.batch, args.nhead_q, args.seqlen_q, args.hdim_v, false);
+    constexpr dim3 blocks                  = Kernel::BlockSize();
+    constexpr ck_tile::index_t kBlockPerCu = Kernel::kBlockPerCu;
+
+    auto stream = at::cuda::getCurrentHIPStream().stream();
+    ck_tile::stream_config stream_config{stream};
+
+    [[maybe_unused]] const float time = ck_tile::launch_kernel(
+        stream_config,
+        ck_tile::make_kernel<blocks.x, kBlockPerCu>(Kernel{}, grids, blocks, 0, kargs));
+}
 //////////////////////////////////////////////////////////////////////////////////////
 
 std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
@@ -107,7 +175,7 @@ std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
                                           float softmax_scale)
 {
     auto q_dtype = q.dtype();
-    TORCH_CHECK(q_dtype == torch::kFloat16 || q_dtype == torch::kBFloat16,
+    TORCH_CHECK(q_dtype == at::ScalarType::Half || q_dtype == at::ScalarType::BFloat16,
                 "FlashAttention only support fp16 and bf16 data type");
 
     TORCH_CHECK(k.dtype() == q_dtype, "query and key must have the same dtype");
@@ -180,61 +248,14 @@ std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
     args.stride_o       = out.stride(1);
     args.nhead_stride_o = out.stride(2);
 
-    auto kargs = fmha_kernel_0::MakeKargsImpl(args.q_ptr,
-                                              args.k_ptr,
-                                              args.v_ptr,
-                                              nullptr, // bias_ptr
-                                              nullptr, // rand_val_ptr
-                                              nullptr, // lse_ptr
-                                              args.o_ptr,
-                                              args.seqlen_q,
-                                              args.seqlen_k,
-                                              args.hdim_q,
-                                              args.hdim_v,
-                                              args.nhead_q,
-                                              args.nhead_q / args.nhead_k,
-                                              args.scale_s,
-                                              1.0f, // scale_p
-                                              1.0f, // scale_o
-                                              0.0f, // logits_soft_cap
-                                              args.stride_q,
-                                              args.stride_k,
-                                              args.stride_v,
-                                              0, // stride_bias
-                                              0, // stride_randval
-                                              args.stride_o,
-                                              args.nhead_stride_q,
-                                              args.nhead_stride_k,
-                                              args.nhead_stride_v,
-                                              0, // nhead_stride_bias
-                                              0, // nhead_stride_randval
-                                              0, // nhead_stride_lse
-                                              args.nhead_stride_o,
-                                              args.batch_stride_q,
-                                              args.batch_stride_k,
-                                              args.batch_stride_v,
-                                              0, // batch_stride_bias
-                                              0, // batch_stride_randval
-                                              0, // batch_stride_lse
-                                              args.batch_stride_o,
-                                              0,                         // window_size_left
-                                              0,                         // window_size_right
-                                              0,                         // mask_type
-                                              0.0f,                      // p_drop
-                                              false,                     // s_randval
-                                              std::make_pair(0UL, 0UL)); // drop_seed_offset
-
-    dim3 grids =
-        fmha_kernel_0::GridSize(args.batch, args.nhead_q, args.seqlen_q, args.hdim_v, false);
-    constexpr dim3 blocks                  = fmha_kernel_0::BlockSize();
-    constexpr ck_tile::index_t kBlockPerCu = fmha_kernel_0::kBlockPerCu;
-
-    auto stream = at::cuda::getCurrentHIPStream().stream();
-    ck_tile::stream_config stream_config{stream};
-
-    [[maybe_unused]] const float time = ck_tile::launch_kernel(
-        stream_config,
-        ck_tile::make_kernel<blocks.x, kBlockPerCu>(fmha_kernel_0{}, grids, blocks, 0, kargs));
+    if(q_dtype == at::ScalarType::Half)
+    {
+        launch<get_kernel_t<FmhaFwdFp16>>(args);
+    }
+    else if(q_dtype == at::ScalarType::BFloat16)
+    {
+        launch<get_kernel_t<FmhaFwdBf16>>(args);
+    }
 
     return {out};
 }

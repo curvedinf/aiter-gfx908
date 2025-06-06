@@ -339,12 +339,21 @@ __device__ void scaled_quant_vgpr_impl(DTYPE_O* __restrict__ out,
 
     if(threadIdx.x < num_vecs)
     {
-        buffer_o.template set(
-            threadIdx.x * vec_size_i,
-            0,
-            true,
-            ck_tile::vec_convert<DTYPE_O, DTYPE_I, vec_size_i>(*input_vecs, inverted_scale)
-                .template get_as<DTYPE_STORE>());
+        auto out = ck_tile::vec_convert<DTYPE_O, DTYPE_I, vec_size_i>(*input_vecs, inverted_scale)
+                       .template get_as<DTYPE_STORE>();
+        if constexpr(vec_size_i <= 16)
+        {
+
+            buffer_o.template set(threadIdx.x * vec_size_o, 0, true, out);
+        }
+        else
+        {
+            using vecT = ck_tile::vec_t<DTYPE_STORE, 16>;
+            auto vec   = out.template get_as<vecT>();
+
+            buffer_o.template set(threadIdx.x * vec_size_o, 0, true, vec[0]);
+            buffer_o.template set(threadIdx.x * vec_size_o, 0, true, vec[1]);
+        }
     }
 }
 
@@ -436,6 +445,10 @@ void static_per_tensor_quant(torch::Tensor& out,         // [..., d]
     else if(cols <= 16 * BlockSize)                                                 \
     {                                                                               \
         DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 16)       \
+    }                                                                               \
+    else if(cols <= 32 * BlockSize)                                                 \
+    {                                                                               \
+        DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_IMPL(quant_kernel, DTYPE_O, 32)       \
     }                                                                               \
     else                                                                            \
     {                                                                               \

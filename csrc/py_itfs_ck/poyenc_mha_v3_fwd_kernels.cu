@@ -2254,10 +2254,12 @@ struct get_kernel
 
     using fmha_warp_gemm_shape = ck_tile::sequence<32, 32, 16>;
 
+    using fmha_block_warps = ck_tile::sequence<4, 1, 1>;
+
     using fmha_shape = ck_tile::TileFmhaShape<fmha_block_tile,
-                                              ck_tile::sequence<4, 1, 1>, // Gemm0BlockWarps
+                                              fmha_block_warps,
                                               fmha_warp_gemm_shape,
-                                              ck_tile::sequence<4, 1, 1>, // Gemm1BlockWarps
+                                              fmha_block_warps,
                                               fmha_warp_gemm_shape,
                                               true // IsVLayoutRowMajor
                                               >;

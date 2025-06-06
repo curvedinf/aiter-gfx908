@@ -78,7 +78,7 @@ using fmha_shape_0 = ck_tile::TileFmhaShape<fmha_block_tile_0,
                                             true>;
 
 using fmha_trait_0 = ck_tile::TileFmhaTraits<true,
-                                             false,
+                                             true,
                                              true,
                                              true,
                                              false,
@@ -182,35 +182,35 @@ std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
     args.scale_s = softmax_scale;
 
     args.q_ptr          = q.data_ptr();
+    args.batch_stride_q = q.stride(0);
     args.stride_q       = q.stride(1);
     args.nhead_stride_q = q.stride(2);
-    args.batch_stride_q = q.stride(0);
 
     args.k_ptr          = k.data_ptr();
+    args.batch_stride_k = k.stride(0);
     args.stride_k       = k.stride(1);
     args.nhead_stride_k = k.stride(2);
-    args.batch_stride_k = k.stride(0);
 
     args.v_ptr          = v.data_ptr();
+    args.batch_stride_v = v.stride(0);
     args.stride_v       = v.stride(1);
     args.nhead_stride_v = v.stride(2);
-    args.batch_stride_v = v.stride(0);
 
     auto opts = q.options();
     at::Tensor out =
         torch::empty({batch_size, seqlen_q, num_heads, head_size_v}, opts.dtype(q_dtype));
 
     args.o_ptr          = out.data_ptr();
+    args.batch_stride_o = out.stride(0);
     args.stride_o       = out.stride(1);
     args.nhead_stride_o = out.stride(2);
-    args.batch_stride_o = out.stride(0);
 
     auto kargs = fmha_kernel_0::MakeKargsImpl(args.q_ptr,
                                               args.k_ptr,
                                               args.v_ptr,
-                                              nullptr,
-                                              nullptr,
-                                              nullptr,
+                                              nullptr, // bias_ptr
+                                              nullptr, // rand_val_ptr
+                                              nullptr, // lse_ptr
                                               args.o_ptr,
                                               args.seqlen_q,
                                               args.seqlen_k,
@@ -219,35 +219,35 @@ std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
                                               args.nhead_q,
                                               args.nhead_q / args.nhead_k,
                                               args.scale_s,
-                                              1.0,
-                                              1.0,
-                                              0.0,
+                                              1.0f, // scale_p
+                                              1.0f, // scale_o
+                                              0.0f, // logits_soft_cap
                                               args.stride_q,
                                               args.stride_k,
                                               args.stride_v,
-                                              0,
-                                              0,
+                                              0, // stride_bias
+                                              0, // stride_randval
                                               args.stride_o,
                                               args.nhead_stride_q,
                                               args.nhead_stride_k,
                                               args.nhead_stride_v,
-                                              0,
-                                              0,
-                                              0,
+                                              0, // nhead_stride_bias
+                                              0, // nhead_stride_randval
+                                              0, // nhead_stride_lse
                                               args.nhead_stride_o,
                                               args.batch_stride_q,
                                               args.batch_stride_k,
                                               args.batch_stride_v,
-                                              0,
-                                              0,
-                                              0,
+                                              0, // batch_stride_bias
+                                              0, // batch_stride_randval
+                                              0, // batch_stride_lse
                                               args.batch_stride_o,
-                                              0,
-                                              0,
-                                              0,
-                                              0,
-                                              false,
-                                              std::make_pair(0, 0));
+                                              0,                         // window_size_left
+                                              0,                         // window_size_right
+                                              0,                         // mask_type
+                                              0.0f,                      // p_drop
+                                              false,                     // s_randval
+                                              std::make_pair(0UL, 0UL)); // drop_seed_offset
 
     dim3 grids =
         fmha_kernel_0::GridSize(args.batch, args.nhead_q, args.seqlen_q, args.hdim_v, false);

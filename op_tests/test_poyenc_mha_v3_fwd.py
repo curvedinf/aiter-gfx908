@@ -17,15 +17,10 @@ def run_torch(
     upcast=True,
     reorder_ops=False,
 ):
-    out, _ = attention_ref(
-        q,
-        k,
-        v,
-        upcast=upcast,
-        reorder_ops=reorder_ops
-    )
+    out, _ = attention_ref(q, k, v, upcast=upcast, reorder_ops=reorder_ops)
 
     return out
+
 
 def run_ck(
     q,
@@ -40,17 +35,13 @@ def run_ck(
     )
     """
     """"""
-    out = aiter.poyenc_mha_v3_fwd_func(
-        q,
-        k,
-        v
-    )
+    out = aiter.poyenc_mha_v3_fwd_func(q, k, v)
     """"""
 
     return out
 
 
-@pytest.mark.parametrize("dtype", [dtypes.bf16])
+@pytest.mark.parametrize("dtype", [dtypes.fp16, dtypes.bf16])
 @pytest.mark.parametrize("mha_type", ["mha", "mqa", "gqa"])
 @pytest.mark.parametrize("batch_size", [5])
 @pytest.mark.parametrize("nheads", [6])
@@ -112,11 +103,7 @@ def test_flash_attn_output(
         requires_grad=True,
     )
 
-    out = run_ck(
-        q,
-        k,
-        v
-    )
+    out = run_ck(q, k, v)
 
     out_ref = run_torch(
         q,

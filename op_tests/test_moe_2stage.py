@@ -325,63 +325,53 @@ def test_fmoe(
     # ######################## stage 2 end ###########
 
     # # ######################## fused 2 stage #########
-    # out2_ck, us = run_perftest(
-    #     ck_moe_2stages,
-    #     input,
-    #     w1_qt_aiter,
-    #     w2_qt_aiter,
-    #     topk_weights,
-    #     topk_ids,
-    #     quant_type=qType,
-    #     fc1_scale=w1_scale,  # [expert(local_expert:EP), inter_dim, 1]
-    #     fc2_scale=w2_scale,  # [expert(local_expert:EP), model_dim, 1]
-    #     block_size=BLOCK_SIZE_M,
-    #     activation=actType,
-    #     doweight_stage1=doweight_stage1,
-    # )
-    # checkAllclose(
-    #     out2_ref,
-    #     out2_ck,
-    #     msg=f"ck_moe_2stages:{us:>8.2f} us, {token*model_dim*inter_dim*3*topk*2/us/1000/1000:>8.2f} tflops......(quant:{AQDType})",
-    # )
-
-    out2_aiter, us_fuse = run_perftest(
-        fused_moe,
+    out2_ck, us_fuse = run_perftest(
+        ck_moe_2stages,
         input,
         w1_qt_aiter,
         w2_qt_aiter,
         topk_weights,
         topk_ids,
-        w1_scale=w1_scale,
-        w2_scale=w2_scale,
         quant_type=qType,
+        fc1_scale=w1_scale,  # [expert(local_expert:EP), inter_dim, 1]
+        fc2_scale=w2_scale,  # [expert(local_expert:EP), model_dim, 1]
+        # block_size=BLOCK_SIZE_M,
         activation=actType,
         doweight_stage1=doweight_stage1,
     )
-
     err = checkAllclose(
         out2_ref,
-        out2_aiter,
-        msg=f"aiter_all_stages:{us_fuse:>8.2f} us......",
+        out2_ck,
+        msg=f"ck_moe_2stages:{us_fuse:>8.2f} us, {token*model_dim*inter_dim*3*topk*2/us_fuse/1000/1000:>8.2f} tflops......(quant:{AQDType})",
     )
+    # out2_aiter, us_fuse = run_perftest(
+    #     fused_moe,
+    #     input,
+    #     w1_qt_aiter,
+    #     w2_qt_aiter,
+    #     topk_weights,
+    #     topk_ids,
+    #     w1_scale=w1_scale,
+    #     w2_scale=w2_scale,
+    #     quant_type=qType,
+    #     activation=actType,
+    #     doweight_stage1=doweight_stage1,
+    #     # block_size_M=32,
+    # )
+
+    # err = checkAllclose(
+    #     out2_ref,
+    #     out2_aiter,
+    #     msg=f"aiter_all_stages:{us_fuse:>8.2f} us......",
+    # )
 
     return {"us": us_fuse, "err": err}
 
 
 list_dtype = [dtypes.bf16, dtypes.fp16][:1]
-list_dim = [(6144, 4096)]
+list_dim = [(6144, 4096), (2304, 1536)]
 list_tokenNum = [
-    1,
-    3,
-    5,
-    16,
-    32,
-    64,
-    128,
-    256,
-    1024,
-    4096,
-    163840,
+    4,8,16,32, 64, 128, 256, 512, 1024, 2048, 3072, 4096, 8192, 16384
 ]
 list_quant = [
     # (aiter.QuantType.No, None, None),  # a16w16
@@ -390,8 +380,8 @@ list_quant = [
     # (aiter.QuantType.per_Token, dtypes.fp8, torch.int4),  # a8w4
     # (aiter.QuantType.per_128x128, dtypes.fp8, dtypes.fp8),  # a8w8 TODO add test
 ]
-list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][:]
-list_doweight_stage1 = [False, True][:]
+list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][:1]
+list_doweight_stage1 = [False, True][:1]
 expert, topk = 8, 2
 
 import pandas as pd

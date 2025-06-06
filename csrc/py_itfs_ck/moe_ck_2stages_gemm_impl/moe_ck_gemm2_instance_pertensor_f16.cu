@@ -19,5 +19,6 @@ CK_MOE_STAGE2_GEMM_DEFINE(128, 128/sizeof(A0DataType), 1, 4, V1, false)
 CK_MOE_STAGE2_GEMM_DEFINE(256, 128/sizeof(A0DataType), 1, 4, V1, false)
 
 
+CK_MOE_STAGE2_GEMM_DEFINE(64, 256/sizeof(A0DataType), 1, 4, V3,false)
 CK_MOE_STAGE2_GEMM_DEFINE(128, 128/sizeof(A0DataType), 1, 4, V3,false)
 CK_MOE_STAGE2_GEMM_DEFINE(256, 128/sizeof(A0DataType), 1, 4, V3,false)

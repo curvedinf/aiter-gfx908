@@ -9,7 +9,7 @@ import os
 from typing import Any, Callable, Dict, Optional, Tuple
 import aiter
 from aiter import logger
-from aiter import pertoken_quant, get_hip_quant, get_torch_quant
+from aiter import pertoken_quant, get_hip_quant, get_triton_quant
 from aiter import ActivationType, QuantType, dtypes
 
 BLOCK_SIZE_M = 32
@@ -427,7 +427,7 @@ def ck_moe_2stages(
     doweight_stage1=False,
 ):
     
-    quant_func = get_hip_quant(quant_type)
+    quant_func = get_triton_quant(quant_type)
     q_dtype_a = w1.dtype if w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
 
     # quant_func = get_torch_quant(quant_type)
@@ -471,7 +471,8 @@ def ck_moe_2stages(
         a1_scale, 
         block_size, 
         sorted_weights if doweight_stage1 else None,
-        act_op
+        act_op,
+        3
     )
 
     if quant_type == QuantType.per_Token:
@@ -492,6 +493,7 @@ def ck_moe_2stages(
         a2_scale, 
         block_size, 
         sorted_weights if not doweight_stage1 else None,
+        3
     )
     return moe_buf
 

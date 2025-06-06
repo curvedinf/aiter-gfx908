@@ -24,7 +24,7 @@
             }                                                                                                               \
             else if (MPerBlock == 64)                                                                                       \
             {                                                                                                               \
-                if (K % (256 / sizeof(A0DataType)) == 0)                                                                    \
+                if (K % (256 / sizeof(A0DataType)) == 0 && PipelineVer == PipelineVersion::v3)                                                                    \
                 {                                                                                                           \
                     ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 64, 256 / sizeof(A0DataType), 1, 4, Nswizzle, true, MulRoutedWeight, 0>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr,  num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);   \
                 }                                                                                                           \
@@ -53,7 +53,7 @@
             }                                                                                                               \
             else if (MPerBlock == 64)                                                                                       \
             {                                                                                                               \
-                if (K % (256 / sizeof(A0DataType)) == 0)                                                                    \
+                if (K % (256 / sizeof(A0DataType)) == 0 && PipelineVer == PipelineVersion::v3)                                                                   \
                 {                                                                                                           \
                     ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 64, 256 / sizeof(A0DataType), 1, 4, Nswizzle, false, MulRoutedWeight, 0>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr,  num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);   \
                 }                                                                                                           \
@@ -85,7 +85,7 @@
             }                                                                                                               \
             else if (MPerBlock == 64)                                                                                       \
             {                                                                                                               \
-                if (K % (256 / sizeof(A0DataType)) == 0)                                                                    \
+                if (K % (256 / sizeof(A0DataType)) == 0 && PipelineVer == PipelineVersion::v3)                                                                  \
                 {                                                                                                           \
                     ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 64, 256 / sizeof(A0DataType), 1, 4, Nswizzle, true, MulRoutedWeight, 1>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr,  num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);   \
                 }                                                                                                           \
@@ -114,7 +114,7 @@
             }                                                                                                               \
             else if (MPerBlock == 64)                                                                                       \
             {                                                                                                               \
-                if (K % (256 / sizeof(A0DataType)) == 0)                                                                    \
+                if (K % (256 / sizeof(A0DataType)) == 0 && PipelineVer == PipelineVersion::v3)                                                                  \
                 {                                                                                                           \
                     ck_moe_stage1_gemm<A0DataType, B0DataType, AccDataType, EDataType, CDEElementOp, PipelineVer, 64, 256 / sizeof(A0DataType), 1, 4, Nswizzle, false, MulRoutedWeight, 1>(at::cuda::getCurrentCUDAStream().stream(), tokens, sorted_size, N, K, topk, hidden_states_ptr, w1_ptr, w2_ptr, sorted_token_ids_ptr, sorted_expert_ids_ptr, sorted_weights_ptr,  num_valid_ids_ptr, out_ptr, w1_scale_ptr, a1_scale_ptr);   \
                 }                                                                                                           \
@@ -206,7 +206,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     // int agvtokens_per_expert = max_num_tokens_padded / E;
     int MPerBlock = block_m.value();
     bool isPerTensorQuant = (!w1_scale.has_value()) || (w1_scale.value().numel() == E);
-    PipelineVersion PipelineVer = (pipe_ver == 1 || MPerBlock < 128) ? PipelineVersion::v1 : PipelineVersion::v3;
+    PipelineVersion PipelineVer = (pipe_ver == 1 || MPerBlock < 64) ? PipelineVersion::v1 : PipelineVersion::v3;
 
     // int M = agvtokens_per_expert < 32 ? 32 : (agvtokens_per_expert < 64 ? 64 : 128);
 
@@ -580,7 +580,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
     // int M = agvtokens_per_expert < 32 ? 32 : (agvtokens_per_expert < 64 ? 64 : 128);
     bool isPerTensorQuant = (!w2_scale.has_value()) || (w2_scale.value().numel() == E);
     bool MulRoutedWeight = sorted_weights.has_value();
-    PipelineVersion PipelineVer = (pipe_ver == 1 || MPerBlock < 128) ? PipelineVersion::v1 : PipelineVersion::v3;
+    PipelineVersion PipelineVer = (pipe_ver == 1 || MPerBlock < 64) ? PipelineVersion::v1 : PipelineVersion::v3;
     
 
     void *inter_states_ptr = inter_states.data_ptr();

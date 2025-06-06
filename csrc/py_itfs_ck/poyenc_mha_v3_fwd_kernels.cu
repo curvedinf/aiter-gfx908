@@ -47,35 +47,40 @@ template <typename DataType>
 struct get_kernel
 {
     using fmha_dtype = DataType;
-
+    //                                        M0   N0   K0  N1   K1
     using fmha_block_tile = ck_tile::sequence<128, 128, 32, 128, 32, 128>;
 
     using fmha_warp_gemm_shape = ck_tile::sequence<32, 32, 16>;
 
     using fmha_shape = ck_tile::TileFmhaShape<fmha_block_tile,
-                                              ck_tile::sequence<4, 1, 1>,
+                                              ck_tile::sequence<4, 1, 1>, // Gemm0BlockWarps
                                               fmha_warp_gemm_shape,
-                                              ck_tile::sequence<4, 1, 1>,
+                                              ck_tile::sequence<4, 1, 1>, // Gemm1BlockWarps
                                               fmha_warp_gemm_shape,
-                                              true>;
+                                              true // IsVLayoutRowMajor
+                                              >;
 
-    using fmha_traits = ck_tile::TileFmhaTraits<true,
-                                                true,
-                                                true,
-                                                true,
-                                                false,
+    using fmha_traits = ck_tile::TileFmhaTraits<true,  // kPadSeqLenQ
+                                                true,  // kPadSeqLenK
+                                                true,  // kPadHeadDimQ
+                                                true,  // kPadHeadDimV
+                                                false, // kHasLogitsSoftCap
                                                 ck_tile::BlockAttentionBiasEnum::NO_BIAS,
-                                                false,
-                                                false,
-                                                false,
-                                                false,
-                                                -1,
-                                                false>;
+                                                false, // kHasBiasGrad
+                                                false, // kStoreLSE
+                                                false, // kHasDropout
+                                                false, // kDoFp8StaticQuant
+                                                -1,    // kBlockPerCu
+                                                false  // kSkipMinSeqlenQ
+                                                >;
 
     using fmha_variant =
-        ck_tile::ComposedAttention<false * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
+        ck_tile::ComposedAttention<false * ck_tile::LOGITS_SOFT_CAP, // VARIANT_CODE
+                                   CK_TILE_FMHA_FWD_FAST_EXP2        // UseExp2
+                                   >;
 
-    using fmha_mask = ck_tile::SimplifiedGenericAttentionMask<false>;
+    using fmha_mask = ck_tile::SimplifiedGenericAttentionMask<false // IsMasking
+                                                              >;
 
     using fmha_problem = ck_tile::BlockFmhaPipelineProblem<
         typename FmhaFwdTypeConfig<fmha_dtype>::QDataType,
@@ -90,7 +95,7 @@ struct get_kernel
         typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
         typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,
         fmha_shape,
-        false,
+        false, // kIsGroupMode
         fmha_variant,
         fmha_mask,
         fmha_traits>;
@@ -100,8 +105,9 @@ struct get_kernel
     using fmha_epilogue = ck_tile::Default2DEpilogue<
         ck_tile::Default2DEpilogueProblem<typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
                                           typename FmhaFwdTypeConfig<fmha_dtype>::ODataType,
-                                          true,
-                                          true>>;
+                                          true, // kPadM
+                                          true  // kPadM
+                                          >>;
 
     using type = ck_tile::FmhaFwdKernel<fmha_pipeline, fmha_epilogue>;
 };

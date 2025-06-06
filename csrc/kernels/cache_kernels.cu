@@ -221,8 +221,8 @@ reshape_and_cache_kernel(const scalar_t* __restrict__ key,   // [num_tokens, num
     const int64_t block_offset = static_cast<int64_t>(slot_idx) % block_size;
 
     const int n                 = num_heads * head_size;
-    const float inverted_kscale = 1 / (*k_scale);
-    const float inverted_vscale = 1 / (*v_scale);
+    const float inverted_kscale = k_scale == nullptr ? 1.0f : 1 / (*k_scale);
+    const float inverted_vscale = v_scale == nullptr ? 1.0f : 1 / (*v_scale);
     for(int i = threadIdx.x; i < n; i += blockDim.x)
     {
         const int64_t src_key_idx   = token_idx * key_stride + i;
@@ -636,7 +636,7 @@ __global__ void reshape_and_cache_with_block_quant_kernel(
         tokens_in_block = slot_mapping[first_token_idx + threadIdx.x] / block_size;
         tokens_in_block = tokens_in_block == block_idx ? 1 : 0;
     }
-    auto sum = [](float a, float b) { return a + b; };
+    auto sum               = [](float a, float b) { return a + b; };
     int numtokens_in_block = block_reduce<int, decltype(sum), wg_size, true>(tokens_in_block, sum);
     // int numtokens_in_block = blockReduce(tokens_in_block, sum);
 
@@ -662,7 +662,6 @@ __global__ void reshape_and_cache_with_block_quant_kernel(
             v_max_val = f_absmax_f32(v_max_val, impl::type_convert<float>(value[src_v_idx]));
         }
     }
-
 
     k_max_val = block_reduce<float, decltype(f_max_f32), wg_size, true>(k_max_val, f_max_f32);
     v_max_val = block_reduce<float, decltype(f_max_f32), wg_size, true>(v_max_val, f_max_f32);

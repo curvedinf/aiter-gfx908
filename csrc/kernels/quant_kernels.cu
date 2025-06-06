@@ -348,11 +348,16 @@ __device__ void scaled_quant_vgpr_impl(DTYPE_O* __restrict__ out,
         }
         else
         {
-            using vecT = ck_tile::vec_t<DTYPE_STORE, 16>;
-            auto vec   = out.template get_as<vecT>();
+            static constexpr int32_t o_step = std::is_same_v<DTYPE_O, ck_tile::fp4x2_t> ? 8 : 16;
+            assert(vec_size_i % 16 == 0);
+            using vecT                        = ck_tile::vec_t<DTYPE_STORE, o_step>;
+            auto vec                          = out.template get_as<vecT>();
+            static constexpr int32_t num_iter = vec_size_i / o_step;
 
-            buffer_o.template set(threadIdx.x * vec_size_o, 0, true, vec[0]);
-            buffer_o.template set(threadIdx.x * vec_size_o, 0, true, vec[1]);
+            for(size_t j = 0; j < num_iter; j++)
+            {
+                buffer_o.template set(threadIdx.x * vec_size_o + j * o_step, 0, true, vec[j]);
+            }
         }
     }
 }

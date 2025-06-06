@@ -193,12 +193,12 @@ template <typename scalar_t,
           bool asmLayout          = false,
           typename slot_mapping_t = int64_t>
 __global__ void
-reshape_and_cache_kernel(const scalar_t* __restrict__ key,                // [num_tokens, num_heads, head_size]
-                         const scalar_t* __restrict__ value,              // [num_tokens, num_heads, head_size]
-                         cache_t* __restrict__ key_cache,                 // [num_blocks, num_heads, head_size/x,
-                                                                          // block_size, x]
-                         cache_t* __restrict__ value_cache,               // [num_blocks, num_heads, head_size,
-                                                                          // block_size]
+reshape_and_cache_kernel(const scalar_t* __restrict__ key,   // [num_tokens, num_heads, head_size]
+                         const scalar_t* __restrict__ value, // [num_tokens, num_heads, head_size]
+                         cache_t* __restrict__ key_cache,    // [num_blocks, num_heads, head_size/x,
+                                                             // block_size, x]
+                         cache_t* __restrict__ value_cache,  // [num_blocks, num_heads, head_size,
+                                                             // block_size]
                          const slot_mapping_t* __restrict__ slot_mapping, // [num_tokens]
                          const int key_stride,
                          const int value_stride,
@@ -408,10 +408,10 @@ template <typename scalar_t,
           bool asmLayout = false,
           int wg_size    = 256>
 __global__ void reshape_and_cache_with_per_token_quant_kernel(
-    const scalar_t* __restrict__ key,               // [num_tokens, num_heads, head_size]
-    const scalar_t* __restrict__ value,             // [num_tokens, num_heads, head_size]
-    cache_t* __restrict__ key_cache,                // [num_blocks, num_heads, head_size/x, block_size, x]
-    cache_t* __restrict__ value_cache,              // [num_blocks, num_heads, head_size, block_size]
+    const scalar_t* __restrict__ key,   // [num_tokens, num_heads, head_size]
+    const scalar_t* __restrict__ value, // [num_tokens, num_heads, head_size]
+    cache_t* __restrict__ key_cache,    // [num_blocks, num_heads, head_size/x, block_size, x]
+    cache_t* __restrict__ value_cache,  // [num_blocks, num_heads, head_size, block_size]
     dequant_scale_t* __restrict__ k_dequant_scales, // [num_heads, max_kv_tokens]
     dequant_scale_t* __restrict__ v_dequant_scales, // [num_heads, max_kv_tokens]
     const int64_t* __restrict__ slot_mapping,       // [num_tokens]
@@ -505,7 +505,7 @@ __global__ void reshape_and_cache_with_per_token_quant_kernel(
     if constexpr(asmLayout)
     {
         // [num_blocks, num_heads, block_size]
-        scale_idx                   = block_size * num_heads * block_idx + block_size * head_idx + block_offset;
+        scale_idx = block_size * num_heads * block_idx + block_size * head_idx + block_offset;
         k_dequant_scales[scale_idx] = k_token_scale;
         v_dequant_scales[scale_idx] = v_token_scale;
     }
@@ -559,10 +559,10 @@ template <typename scalar_t,
           bool asmLayout = false,
           int wg_size    = 256>
 __global__ void reshape_and_cache_with_block_quant_kernel(
-    const scalar_t* __restrict__ key,               // [batch_size, seq_len, num_heads, head_size]
-    const scalar_t* __restrict__ value,             // [batch_size, seq_len, num_heads, head_size]
-    cache_t* __restrict__ key_cache,                // [num_blocks, num_heads, head_size/x, block_size, x]
-    cache_t* __restrict__ value_cache,              // [num_blocks, num_heads, head_size, block_size]
+    const scalar_t* __restrict__ key,   // [batch_size, seq_len, num_heads, head_size]
+    const scalar_t* __restrict__ value, // [batch_size, seq_len, num_heads, head_size]
+    cache_t* __restrict__ key_cache,    // [num_blocks, num_heads, head_size/x, block_size, x]
+    cache_t* __restrict__ value_cache,  // [num_blocks, num_heads, head_size, block_size]
     dequant_scale_t* __restrict__ k_dequant_scales, // [num_heads, num_blocks]
     dequant_scale_t* __restrict__ v_dequant_scales, // [num_heads, num_blocks]
     const int64_t* __restrict__ slot_mapping,       // [num_tokens]
@@ -636,7 +636,9 @@ __global__ void reshape_and_cache_with_block_quant_kernel(
         tokens_in_block = slot_mapping[first_token_idx + threadIdx.x] / block_size;
         tokens_in_block = tokens_in_block == block_idx ? 1 : 0;
     }
-    int numtokens_in_block = block_reduce(tokens_in_block, [](float a, float b) { return a + b; });
+    auto sum = [](float a, float b) { return a + b; };
+    int numtokens_in_block = block_reduce<int, decltype(sum), wg_size, true>(tokens_in_block, sum);
+    // int numtokens_in_block = blockReduce(tokens_in_block, sum);
 
     auto f_absmax_f32 = [](float v_0_, float v_1_) {
         return __builtin_fmaxf(impl::abs(v_0_), impl::abs(v_1_));
@@ -661,8 +663,11 @@ __global__ void reshape_and_cache_with_block_quant_kernel(
         }
     }
 
-    k_max_val = block_reduce(k_max_val, f_max_f32);
-    v_max_val = block_reduce(v_max_val, f_max_f32);
+
+    k_max_val = block_reduce<float, decltype(f_max_f32), wg_size, true>(k_max_val, f_max_f32);
+    v_max_val = block_reduce<float, decltype(f_max_f32), wg_size, true>(v_max_val, f_max_f32);
+    // k_max_val = blockReduce(k_max_val, f_max_f32);
+    // v_max_val = blockReduce(v_max_val, f_max_f32);
 
     float k_block_scale = k_max_val / dtypeMax;
     float v_block_scale = v_max_val / dtypeMax;
@@ -724,14 +729,14 @@ __global__ void reshape_and_cache_with_block_quant_kernel(
                         int head_offset             = (id + threadIdx.x) % head_size;
                         int block_offset_local_divX = block_offset_local / x;
                         int x_idx                   = block_offset_local % x;
-                        cache_idx                   = tgt_value_idx + block_offset_local_divX * head_size * x +
+                        cache_idx = tgt_value_idx + block_offset_local_divX * head_size * x +
                                     head_offset * x + x_idx;
                     }
                     else
                     {
                         int block_offset_local = (id + threadIdx.x) / head_size;
                         int head_offset        = (id + threadIdx.x) % head_size;
-                        cache_idx              = tgt_value_idx + head_offset * block_size + block_offset_local;
+                        cache_idx = tgt_value_idx + head_offset * block_size + block_offset_local;
                     }
                     float tmp              = impl::type_convert<float>(value_cache[cache_idx]);
                     tmp                    = tmp * v_block_scale_global / v_block_scale;

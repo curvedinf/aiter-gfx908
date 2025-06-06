@@ -142,7 +142,7 @@ __device__ std::tuple<float, DTYPE_I*> data_to_per_row_scale(const DTYPE_I* __re
                                                              const int32_t cols)
 {
     static constexpr int32_t vec_size_i =
-        thread_data_size == 0 ? 16 / sizeof(DTYPE_I) : thread_data_size;
+        thread_data_size == 0 ? 16 / sizeof(DTYPE_O) : thread_data_size;
     static constexpr int32_t vec_size_o =
         std::is_same_v<DTYPE_O, ck_tile::fp4x2_t> ? vec_size_i / 2 : vec_size_i;
     using vec_i = ck_tile::vec_t<DTYPE_I, vec_size_i>;
@@ -283,7 +283,7 @@ __device__ void scaled_quant_impl(DTYPE_O* __restrict__ out,
     {
         vec_nxt = buffer_i.template get<vec_i>(vec_idx * vec_size_i, 0, true);
         buffer_o.template set(
-            (vec_idx - vec_stride) * vec_size_i,
+            (vec_idx - vec_stride) * vec_size_o,
             0,
             true,
             ck_tile::vec_convert<DTYPE_O, DTYPE_I, vec_size_i>(vec_cur, inverted_scale)
@@ -294,7 +294,7 @@ __device__ void scaled_quant_impl(DTYPE_O* __restrict__ out,
     if(vec_idx - vec_stride < num_vecs)
     {
         buffer_o.template set(
-            (vec_idx - vec_stride) * vec_size_i,
+            (vec_idx - vec_stride) * vec_size_o,
             0,
             true,
             ck_tile::vec_convert<DTYPE_O, DTYPE_I, vec_size_i>(vec_cur, inverted_scale)

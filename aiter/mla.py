@@ -83,13 +83,26 @@ def _fwd_kernel_stage2_asm(
 
 
 @functools.lru_cache()
-def get_meta_param(num_kv_splits, bs, nhead, max_seqlen_q):
+def get_meta_param(num_kv_splits, bs, total_kv, nhead, max_seqlen_q):
     if num_kv_splits is None:
         cu_num = get_cu_num()
-        num_kv_splits = min(16, max(1, cu_num // bs))
+        kv_seq_len = total_kv / bs
+        over_heads = 84.1
+        tmp = [
+            (
+                bs
+                * i
+                / ((bs * i + cu_num - 1) // cu_num * cu_num)
+                * (kv_seq_len / i)
+                / (kv_seq_len / i + over_heads),
+                i,
+            )
+            for i in range(1, 17)
+        ]
+        tmp = sorted(tmp, key=lambda x: x[0], reverse=True)
+        num_kv_splits = tmp[0][1]
 
     get_mgc = {16: 16, 128: 16}
-
     assert nhead in get_mgc, f"{nhead=} not supported"
     mgc = get_mgc[nhead]
     if max_seqlen_q == 1 and nhead == 16:
@@ -118,8 +131,11 @@ def mla_decode_fwd(
 
     total_s, nhead, v_head_dim = o.shape
     bs = qo_indptr.shape[0] - 1
+    total_kv_len = kv_indices.shape[0]
 
-    num_kv_splits, mgc = get_meta_param(num_kv_splits, bs, nhead, max_seqlen_q)
+    num_kv_splits, mgc = get_meta_param(
+        num_kv_splits, bs, total_kv_len, nhead, max_seqlen_q
+    )
 
     if nhead == 16 and max_seqlen_q == 1:
         # special case for 16 heads and max_seqlen_q == 1

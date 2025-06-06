@@ -332,44 +332,87 @@ def test_mla(
     # aiter implementation
     kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
     out_asm = torch.empty((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
-    (attn_logits, attn_lse), us_asm_decode = run_perftest(
-        aiter.mla.mla_decode_fwd,
-        q,
-        kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
-        out_asm,
-        qo_indptr,
-        kv_indptr,
-        kv_indices,
-        kv_last_page_lens,
-        max_seqlen_qo,
-        sm_scale,
-    )
+    l_num_kv_splits = list(range(1, 17))
+    d_xx = {}
+    d_xx["prefill:ck_192"] = us_aiter
+    d_xx["prefill:asm_576"] = us_asm
 
-    # print(f"{out_ref.view(total_q, -1)=}")
-    # print(f"{out_asm.view(total_q, -1)=}")
-    # checkAllclose(logits_ref, attn_logits,
-    #               msg=f'attn_logits [golden vs aiter_asm]')
-    # checkAllclose(lse_ref, attn_lse,
-    #               msg=f'attn_lse    [golden vs aiter_asm]')
-    flops = mtp * total_kv * nhead * (qk_head_dim + v_head_dim) * 2
-    bytes = (
-        total_kv * nhead_kv * qk_head_dim + total_q * nhead * (qk_head_dim + v_head_dim)
-    ) * (torch.finfo(dtype).bits // 8)
-    err = checkAllclose(
-        out_ref,
-        out_asm,
-        msg=f"mla_decode-absorb    [golden vs aiter_asm]: {us_asm_decode:>8.2f} us......",
-    )
-    return {
-        "prefill:ck_192": us_aiter,
-        "prefill:asm_576": us_asm,
-        "decode:flops": flops,
-        "decode:bytes": bytes,
-        "decode:err": err,
-        "decode:asm_576": us_asm_decode,
-        "decode:TFLOPS": flops / us_asm_decode / 1e6,
-        "decode:TB/s": bytes / us_asm_decode / 1e6,
-    }
+    for num in l_num_kv_splits:
+        (attn_logits, attn_lse), us_asm_decode = run_perftest(
+            aiter.mla.mla_decode_fwd,
+            q,
+            kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
+            out_asm,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            max_seqlen_qo,
+            sm_scale,
+            num_kv_splits=num,
+        )
+
+        # print(f"{out_ref.view(total_q, -1)=}")
+        # print(f"{out_asm.view(total_q, -1)=}")
+        # checkAllclose(logits_ref, attn_logits,
+        #               msg=f'attn_logits [golden vs aiter_asm]')
+        # checkAllclose(lse_ref, attn_lse,
+        #               msg=f'attn_lse    [golden vs aiter_asm]')
+        flops = mtp * total_kv * nhead * (qk_head_dim + v_head_dim) * 2
+        bytes = (
+            total_kv * nhead_kv * qk_head_dim
+            + total_q * nhead * (qk_head_dim + v_head_dim)
+        ) * (torch.finfo(dtype).bits // 8)
+        err = checkAllclose(
+            out_ref,
+            out_asm,
+            msg=f"mla_decode-absorb    [golden vs aiter_asm]: {us_asm_decode:>8.2f} us......",
+        )
+        d_xx[f"decode:flops_{num}"] = flops
+        d_xx[f"decode:bytes_{num}"] = bytes
+        d_xx[f"decode:err_{num}"] = err
+        d_xx[f"decode:asm_576_{num}"] = (us_asm_decode,)
+        d_xx[f"decode:TFLOPS_{num}"] = (flops / us_asm_decode / 1e6,)
+        d_xx[f"decode:TB/s_{num}"] = (bytes / us_asm_decode / 1e6,)
+
+        # auto
+        (attn_logits, attn_lse), us_asm_decode = run_perftest(
+            aiter.mla.mla_decode_fwd,
+            q,
+            kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
+            out_asm,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            max_seqlen_qo,
+            sm_scale,
+            # num_kv_splits=num,
+        )
+
+        # print(f"{out_ref.view(total_q, -1)=}")
+        # print(f"{out_asm.view(total_q, -1)=}")
+        # checkAllclose(logits_ref, attn_logits,
+        #               msg=f'attn_logits [golden vs aiter_asm]')
+        # checkAllclose(lse_ref, attn_lse,
+        #               msg=f'attn_lse    [golden vs aiter_asm]')
+        flops = mtp * total_kv * nhead * (qk_head_dim + v_head_dim) * 2
+        bytes = (
+            total_kv * nhead_kv * qk_head_dim
+            + total_q * nhead * (qk_head_dim + v_head_dim)
+        ) * (torch.finfo(dtype).bits // 8)
+        err = checkAllclose(
+            out_ref,
+            out_asm,
+            msg=f"mla_decode-absorb    [golden vs aiter_asm]: {us_asm_decode:>8.2f} us......",
+        )
+        d_xx[f"decode:flops_auto"] = flops
+        d_xx[f"decode:bytes_auto"] = bytes
+        d_xx[f"decode:err_auto"] = err
+        d_xx[f"decode:asm_576_auto"] = (us_asm_decode,)
+        d_xx[f"decode:TFLOPS_auto"] = (flops / us_asm_decode / 1e6,)
+        d_xx[f"decode:TB/s_auto"] = (bytes / us_asm_decode / 1e6,)
+    return d_xx
 
 
 kv_lora_rank = 512
@@ -381,6 +424,7 @@ list_dtype = [(dtypes.bf16, dtypes.bf16)]
 list_ctx_len = [21, 64, 256, 512, 1200, 3200, 5200, 8192][:]
 list_batch_size = [1, 3, 5, 16, 32, 64, 128, 256][:]
 list_nhead = [(16, 1), (16, 2), (16, 4), (128, 2)][:]
+
 import pandas as pd
 
 for nhead, mtp in list_nhead:
@@ -404,5 +448,5 @@ for nhead, mtp in list_nhead:
         )
         df.append(ret)
     df = pd.DataFrame(df)
-    # df.to_csv(f"mla_nhead{nhead}mtp{mtp}.csv")
+    df.to_csv(f"mla_nhead{nhead}mtp{mtp}.csv")
     aiter.logger.info(f"summary:\n{df}")

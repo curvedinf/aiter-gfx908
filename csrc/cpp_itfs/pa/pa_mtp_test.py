@@ -109,6 +109,7 @@ def ref_masked_attention(
         attn_weights += attn_bias
 
     attn_weights = torch.softmax(attn_weights, dim=-1)
+    print(attn_weights)
     out = torch.einsum("hqk,khd->qhd", attn_weights.float(), value.float())
     return out.to(dtype)
 
@@ -343,7 +344,7 @@ def test_pa_mtp(
     )
     k_cache, v_cache = k_caches[0], v_caches[0]
     # query = torch.ones_like(query)
-    v_cache = torch.ones_like(v_cache)
+    # v_cache = torch.ones_like(v_cache)
     # k_cache = torch.ones_like(k_cache)
     out_ref_noquant = torch_mha_extend(
         query,

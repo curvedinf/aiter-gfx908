@@ -289,8 +289,8 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
     const int q_stride,
     const int kv_block_stride,
     const int kv_head_stride,
-    float* __restrict__ exp_sums,           // [num_seqs, num_heads, max_num_partitions]
-    float* __restrict__ max_logits,         // [num_seqs, num_heads, max_num_partitions]
+    float* __restrict__ exp_sums,           // [num_seqs*mtp, num_heads, max_num_partitions]
+    float* __restrict__ max_logits,         // [num_seqs*mtp, num_heads, max_num_partitions]
     scalar_t* __restrict__ out,             // [num_seqs*mtp, num_heads, max_num_partitions, head_size]
     const float* k_scale, const float* v_scale) {
   // clang-format on
@@ -606,75 +606,80 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   }
 
   // calculate qk_max and exp_sum per warp and write to shared memory
-  float qk_max = -FLT_MAX;
-  float exp_sum = 0.0f;
+  float qk_max[MTP] = {-FLT_MAX};
+  float exp_sum[MTP] = {0.0f};
 
-  for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
-    const int local_token_idx = qkout_token_idx + token_depth * 16;
-    #pragma unroll
-    for(int mtp = 0; mtp < MTP; mtp++) {
+  #pragma unroll
+  for(int mtp = 0; mtp < MTP; mtp++) {
+    for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
+      const int local_token_idx = qkout_token_idx + token_depth * 16;
       for (int i = 0; i < 4; i++) {
         const float tmp = (local_token_idx + i < context_len)
                               ? d_out[mtp][token_depth][i]
                               : -FLT_MAX;
-        qk_max = fmaxf(qk_max, tmp);
+        qk_max[mtp] = fmaxf(qk_max[mtp], tmp);
       }
     }
-  }
 
-  for (int mask = WARP_SIZE / 2; mask >= 16; mask /= 2) {
-    qk_max = fmaxf(qk_max, __shfl_xor(qk_max, mask));
-  }
+    for (int mask = WARP_SIZE / 2; mask >= 16; mask /= 2) {
+      qk_max[mtp] = fmaxf(qk_max[mtp], __shfl_xor(qk_max[mtp], mask));
+    }
 
-  for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
-    const int local_token_idx = qkout_token_idx + token_depth * 16;
-    #pragma unroll
-    for(int mtp = 0; mtp < MTP; mtp++) {
+    for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
+      const int local_token_idx = qkout_token_idx + token_depth * 16;
       for (int i = 0; i < 4; i++) {
         const float tmp = (local_token_idx + i < context_len)
-                              ? __expf(d_out[mtp][token_depth][i] - qk_max)
+                              ? __expf(d_out[mtp][token_depth][i] - qk_max[mtp])
                               : 0.0f;
         d_out[mtp][token_depth][i] = tmp;
-        exp_sum += tmp;
+        exp_sum[mtp] += tmp;
       }
     }
-  }
 
-  for (int mask = WARP_SIZE / 2; mask >= 16; mask /= 2) {
-    exp_sum += __shfl_xor(exp_sum, mask);
+    for (int mask = WARP_SIZE / 2; mask >= 16; mask /= 2) {
+      exp_sum[mtp] += __shfl_xor(exp_sum[mtp], mask);
+    }
   }
-
   __syncthreads();  // sync before writing to shared mem
 
   float* shared_mem = reinterpret_cast<float*>(shared_logits);
   if (laneid < 16) {
-    const int qk_max_offset = warpid * 16 + lane16id;
-    shared_mem[qk_max_offset] = qk_max;
-    const int exp_sum_offset = NWARPS * 16 + qk_max_offset;
-    shared_mem[exp_sum_offset] = exp_sum;
+    #pragma unroll
+    for(int mtp = 0; mtp < MTP; mtp++) {
+      const int qk_max_offset = warpid * 16 * MTP + lane16id * MTP + mtp;
+      shared_mem[qk_max_offset] = qk_max[mtp];
+      const int exp_sum_offset = NWARPS * 16 * MTP + qk_max_offset;
+      shared_mem[exp_sum_offset] = exp_sum[mtp];
+    }
   }
 
   __syncthreads();
 
   // calculate partition qk_max and exp_sum
-  float partition_qk_max = -FLT_MAX;
-  float warp_qk_max_exp[NWARPS];
-  float partition_exp_sum = 0.0f;
+  float inv_sum_scale[MTP] = {0.0f};
+  float partition_qk_max[MTP] = {-FLT_MAX};
+  float partition_exp_sum[MTP] = {0.0f};
 
-  for (int w = 0; w < NWARPS; w++) {
-    warp_qk_max_exp[w] = shared_mem[w * 16 + lane16id];
-    partition_qk_max = fmaxf(partition_qk_max, warp_qk_max_exp[w]);
+  #pragma unroll
+  for(int mtp = 0; mtp < MTP; mtp++) {
+    // float partition_qk_max = -FLT_MAX;
+    float warp_qk_max_exp[NWARPS];
+    // float partition_exp_sum = 0.0f;
+
+    for (int w = 0; w < NWARPS; w++) {
+      warp_qk_max_exp[w] = shared_mem[w * 16 * MTP + lane16id * MTP + mtp];
+      partition_qk_max[mtp] = fmaxf(partition_qk_max[mtp], warp_qk_max_exp[w]);
+    }
+
+    for (int w = 0; w < NWARPS; w++) {
+      warp_qk_max_exp[w] = __expf(warp_qk_max_exp[w] - partition_qk_max[mtp]);
+      partition_exp_sum[mtp] +=
+          shared_mem[NWARPS * 16 * MTP + w * 16 * MTP + lane16id * MTP + mtp] * warp_qk_max_exp[w];
+    }
+
+    inv_sum_scale[mtp] =
+        __fdividef(1.f, partition_exp_sum[mtp] + 1e-6f) * warp_qk_max_exp[warpid];
   }
-
-  for (int w = 0; w < NWARPS; w++) {
-    warp_qk_max_exp[w] = __expf(warp_qk_max_exp[w] - partition_qk_max);
-    partition_exp_sum +=
-        shared_mem[NWARPS * 16 + w * 16 + lane16id] * warp_qk_max_exp[w];
-  }
-
-  const float inv_sum_scale =
-      __fdividef(1.f, partition_exp_sum + 1e-6f) * warp_qk_max_exp[warpid];
-
   __syncthreads();
 
   // disable rtz conversion due to its impact on accuracy.
@@ -684,7 +689,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
     #pragma unroll
     for (int mtp = 0; mtp < MTP; mtp++) {
-      d_out[mtp][token_depth] *= inv_sum_scale;
+      d_out[mtp][token_depth] *= inv_sum_scale[mtp];
       if constexpr (LOGITS_RTZ_CONVERSION) {
         // use rtz conversion for better performance, with negligible impact on
         // accuracy
@@ -694,21 +699,27 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
         shared_logits[mtp][warpid][token_depth][lane16id][rowid] =
             from_floatx4<scalar_t>(d_out[mtp][token_depth]);
       }
+      if(blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && threadIdx.x == 0) {
+        printf("d_out[%d][%d] = %f, %f, %f, %f\n", mtp, token_depth, d_out[mtp][token_depth][0], d_out[mtp][token_depth][1], d_out[mtp][token_depth][2], d_out[mtp][token_depth][3]);
+      }
     }
   }
 
   // write out partition max_logits and exp_sum
   if (threadIdx.x < GQA_RATIO) {
-    const int qhead_idx = lane16id;
-    const int64_t offset = static_cast<int64_t>(seq_idx) *
-                              static_cast<int64_t>(total_num_heads) *
-                              static_cast<int64_t>(max_num_partitions) +
-                          (static_cast<int64_t>(wg_start_head_idx) +
-                            static_cast<int64_t>(qhead_idx)) *
-                              static_cast<int64_t>(max_num_partitions) +
-                          static_cast<int64_t>(partition_idx);
-    max_logits[offset] = partition_qk_max;
-    exp_sums[offset] = partition_exp_sum;
+    #pragma unroll
+    for(int mtp = 0; mtp < MTP; mtp++) {
+      const int qhead_idx = lane16id;
+      const int64_t offset = static_cast<int64_t>(seq_idx * MTP + mtp) *
+                                static_cast<int64_t>(total_num_heads) *
+                                static_cast<int64_t>(max_num_partitions) +
+                            (static_cast<int64_t>(wg_start_head_idx) +
+                              static_cast<int64_t>(qhead_idx)) *
+                                static_cast<int64_t>(max_num_partitions) +
+                            static_cast<int64_t>(partition_idx);
+      max_logits[offset] = partition_qk_max[mtp];
+      exp_sums[offset] = partition_exp_sum[mtp];
+    }
   }
 
   __syncthreads();
@@ -716,14 +727,13 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   constexpr int ELEMS8_ELEMS4_RATIO = 8 / 4;
   constexpr int ELEMS16_ELEMS8_RATIO = 16 / 8;
 
-  _B16x4 outelems[VHELOOP];
+  _B16x4 outelems[MTP][VHELOOP];
   // Softmax V mfma
   // v layout: 16he across lanes x 16 tokens per lane
   #pragma unroll
-  
-  for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
-    floatx4 tmp_out = {0};
-    for (int mtp = 0; mtp < MTP; mtp++) {
+  for (int mtp = 0; mtp < MTP; mtp++) {
+    for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
+      floatx4 tmp_out = {0};
       for (int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++) {
         if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
           for (int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++) {
@@ -805,9 +815,8 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
       if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
         tmp_out *= *v_scale;
       }
-      
+      outelems[mtp][vhe_depth] = from_floatx4<scalar_t>(tmp_out);
     }
-    outelems[vhe_depth] = from_floatx4<scalar_t>(tmp_out);
   }
 
   __syncthreads();
@@ -817,7 +826,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
     // lane16 id head dimension; rowid head element dimension
     #pragma unroll
     for(int mtp = 0; mtp < MTP; mtp++) {
-      shared_logits[mtp][warpid][vhe_depth][lane16id][rowid] = outelems[vhe_depth];
+      shared_logits[mtp][warpid][vhe_depth][lane16id][rowid] = outelems[mtp][vhe_depth];
     }
   }
 
@@ -868,9 +877,9 @@ template <typename scalar_t, typename OUTT, int HEAD_SIZE, int NUM_THREADS,
 __global__
 __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
     OUTT* __restrict__ out,                // [num_seqs*mtp, num_heads, head_size]
-    const float* __restrict__ exp_sums,    // [num_seqs, num_heads,
+    const float* __restrict__ exp_sums,    // [num_seqs*mtp, num_heads,
                                            // max_num_partitions]
-    const float* __restrict__ max_logits,  // [num_seqs, num_heads,
+    const float* __restrict__ max_logits,  // [num_seqs*mtp, num_heads,
                                            // max_num_partitions]
     const scalar_t* __restrict__ tmp_out,  // [num_seqs*mtp, num_heads,
                                            // max_num_partitions, head_size]
@@ -894,79 +903,81 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
   const auto warpid = threadIdx.x / WARP_SIZE;
   [[maybe_unused]] const auto laneid = threadIdx.x % WARP_SIZE;
 
-  __shared__ float shared_global_exp_sum;
-  // max num partitions supported is warp_size * NPAR_LOOPS
-  __shared__ float shared_exp_sums[NPAR_LOOPS * WARP_SIZE];
 
-  if (warpid == 0) {
-    const float* max_logits_ptr = max_logits +
-                                  seq_idx * num_heads * max_num_partitions +
-                                  head_idx * max_num_partitions;
-
-    // valid partition is the last valid partition in case threadid > num
-    // partitions
-    int valid_partition[NPAR_LOOPS];
-    float reg_max_logit[NPAR_LOOPS];
-    const int last_valid_partition = num_partitions - 1;
-
-  #pragma unroll
-    for (int i = 0; i < NPAR_LOOPS; i++) {
-      const auto partition_no = i * WARP_SIZE + threadIdx.x;
-      valid_partition[i] =
-          (partition_no < num_partitions) ? partition_no : last_valid_partition;
-    }
-  #pragma unroll
-    for (int i = 0; i < NPAR_LOOPS; i++) {
-      reg_max_logit[i] = max_logits_ptr[valid_partition[i]];
-    }
-    float max_logit = reg_max_logit[0];
-  #pragma unroll
-    for (int i = 1; i < NPAR_LOOPS; i++) {
-      max_logit = fmaxf(max_logit, reg_max_logit[i]);
-    }
-
-  #pragma unroll
-    for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
-      max_logit = fmaxf(max_logit, __shfl_xor(max_logit, mask));
-    }
-
-    const float* exp_sums_ptr = exp_sums +
-                                seq_idx * num_heads * max_num_partitions +
-                                head_idx * max_num_partitions;
-
-    float rescaled_exp_sum[NPAR_LOOPS];
-  #pragma unroll
-    for (int i = 0; i < NPAR_LOOPS; i++) {
-      rescaled_exp_sum[i] = exp_sums_ptr[valid_partition[i]];
-    }
-  #pragma unroll
-    for (int i = 0; i < NPAR_LOOPS; i++) {
-      const auto partition_no = i * WARP_SIZE + threadIdx.x;
-      rescaled_exp_sum[i] *= (partition_no < num_partitions)
-                                 ? expf(reg_max_logit[i] - max_logit)
-                                 : 0.0f;
-    }
-    float global_exp_sum = rescaled_exp_sum[0];
-  #pragma unroll
-    for (int i = 1; i < NPAR_LOOPS; i++) {
-      global_exp_sum += rescaled_exp_sum[i];
-    }
-  #pragma unroll
-    for (int i = 0; i < NPAR_LOOPS; i++) {
-      const auto partition_no = i * WARP_SIZE + threadIdx.x;
-      shared_exp_sums[partition_no] = rescaled_exp_sum[i];
-    }
-
-  #pragma unroll
-    for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
-      global_exp_sum += __shfl_xor(global_exp_sum, mask);
-    }
-    if (threadIdx.x == 0) {
-      shared_global_exp_sum = global_exp_sum;
-    }
-  }  // warpid == 0
   #pragma unroll
   for (int mtp = 0; mtp < MTP; mtp++) {
+    __shared__ float shared_global_exp_sum;
+    // max num partitions supported is warp_size * NPAR_LOOPS
+    __shared__ float shared_exp_sums[NPAR_LOOPS * WARP_SIZE];
+
+    if (warpid == 0) {
+      const float* max_logits_ptr = max_logits +
+                                    (seq_idx * MTP + mtp) * num_heads * max_num_partitions +
+                                    head_idx * max_num_partitions;
+
+      // valid partition is the last valid partition in case threadid > num
+      // partitions
+      int valid_partition[NPAR_LOOPS];
+      float reg_max_logit[NPAR_LOOPS];
+      const int last_valid_partition = num_partitions - 1;
+
+    #pragma unroll
+      for (int i = 0; i < NPAR_LOOPS; i++) {
+        const auto partition_no = i * WARP_SIZE + threadIdx.x;
+        valid_partition[i] =
+            (partition_no < num_partitions) ? partition_no : last_valid_partition;
+      }
+    #pragma unroll
+      for (int i = 0; i < NPAR_LOOPS; i++) {
+        reg_max_logit[i] = max_logits_ptr[valid_partition[i]];
+      }
+      float max_logit = reg_max_logit[0];
+    #pragma unroll
+      for (int i = 1; i < NPAR_LOOPS; i++) {
+        max_logit = fmaxf(max_logit, reg_max_logit[i]);
+      }
+
+    #pragma unroll
+      for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
+        max_logit = fmaxf(max_logit, __shfl_xor(max_logit, mask));
+      }
+
+      const float* exp_sums_ptr = exp_sums +
+                                  (seq_idx * MTP + mtp) * num_heads * max_num_partitions +
+                                  head_idx * max_num_partitions;
+
+      float rescaled_exp_sum[NPAR_LOOPS];
+    #pragma unroll
+      for (int i = 0; i < NPAR_LOOPS; i++) {
+        rescaled_exp_sum[i] = exp_sums_ptr[valid_partition[i]];
+      }
+    #pragma unroll
+      for (int i = 0; i < NPAR_LOOPS; i++) {
+        const auto partition_no = i * WARP_SIZE + threadIdx.x;
+        rescaled_exp_sum[i] *= (partition_no < num_partitions)
+                                  ? expf(reg_max_logit[i] - max_logit)
+                                  : 0.0f;
+      }
+      float global_exp_sum = rescaled_exp_sum[0];
+    #pragma unroll
+      for (int i = 1; i < NPAR_LOOPS; i++) {
+        global_exp_sum += rescaled_exp_sum[i];
+      }
+    #pragma unroll
+      for (int i = 0; i < NPAR_LOOPS; i++) {
+        const auto partition_no = i * WARP_SIZE + threadIdx.x;
+        shared_exp_sums[partition_no] = rescaled_exp_sum[i];
+      }
+
+    #pragma unroll
+      for (int mask = WARP_SIZE / 2; mask >= 1; mask /= 2) {
+        global_exp_sum += __shfl_xor(global_exp_sum, mask);
+      }
+      if (threadIdx.x == 0) {
+        shared_global_exp_sum = global_exp_sum;
+      }
+    }  // warpid == 0
+
     const scalar_t* tmp_out_ptr =
         tmp_out + (seq_idx * MTP + mtp) * num_heads * max_num_partitions * HEAD_SIZE +
         head_idx * max_num_partitions * HEAD_SIZE + threadIdx.x;

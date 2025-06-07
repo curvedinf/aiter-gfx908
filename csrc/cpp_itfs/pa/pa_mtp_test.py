@@ -109,7 +109,6 @@ def ref_masked_attention(
         attn_weights += attn_bias
 
     attn_weights = torch.softmax(attn_weights, dim=-1)
-    print(attn_weights)
     out = torch.einsum("hqk,khd->qhd", attn_weights.float(), value.float())
     return out.to(dtype)
 

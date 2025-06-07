@@ -699,9 +699,6 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
         shared_logits[mtp][warpid][token_depth][lane16id][rowid] =
             from_floatx4<scalar_t>(d_out[mtp][token_depth]);
       }
-      if(blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && threadIdx.x == 0) {
-        printf("d_out[%d][%d] = %f, %f, %f, %f\n", mtp, token_depth, d_out[mtp][token_depth][0], d_out[mtp][token_depth][1], d_out[mtp][token_depth][2], d_out[mtp][token_depth][3]);
-      }
     }
   }
 

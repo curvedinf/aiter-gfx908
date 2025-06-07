@@ -7,6 +7,7 @@ import aiter
 from aiter.test_common import benchmark
 import random
 from csrc.cpp_itfs.pa.pa import paged_attention_rocm
+import pandas as pd
 
 torch.set_default_device("cuda")
 torch.set_printoptions(sci_mode=False)
@@ -66,7 +67,6 @@ def kv_cache_factory(
 
     torch_dtype = get_kv_cache_torch_dtype(cache_dtype, model_dtype)
 
-    scale = head_size**-0.5
     x = 16 // torch_dtype.itemsize
     k_cache_shape = (num_blocks, num_heads, head_size // x, block_size, x)
     k_caches: List[torch.Tensor] = []
@@ -439,7 +439,7 @@ def test_pa_mtp(
 
 head_dim = 128
 block_size = 16
-import pandas as pd
+
 
 for dtype in [torch.bfloat16]:
     df = []

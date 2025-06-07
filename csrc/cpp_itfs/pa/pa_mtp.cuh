@@ -397,7 +397,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   const int local_qhead_idx = 4 * warpid + rowid;
   const int global_qhead_idx = wg_start_head_idx + local_qhead_idx;
   const int64_t query_start_off = static_cast<int64_t>(
-      query_start_loc_ptr ? query_start_loc_ptr[seq_idx] : seq_idx);
+      query_start_loc_ptr ? query_start_loc_ptr[seq_idx] : seq_idx * MTP);
   
   #pragma unroll
   for(int mtp = 0; mtp < MTP; mtp++) {

@@ -17,7 +17,7 @@ from aiter.test_common import (
     run_perftest,
 )
 
-from aiter.fused_moe_bf16_asm import ck_moe_2stages
+from aiter.fused_moe_bf16_asm import ck_moe_2stages,get_block_size
 from aiter import dtypes
 
 from aiter.ops.triton.quant import dynamic_mxfp4_quant
@@ -577,7 +577,7 @@ def test_fused_moe(
     routed_weight: bool,
     swizzle_mx_scale: bool,
 ):
-    block_size_m = 128
+    block_size_m = 32 #get_block_size(tokens, top_k, E)
     if triton.runtime.driver.active.get_current_target().arch not in ("gfx950"):
         pytest.skip("MXFP4 not supported on this architecture")
     aiter_quant = aiter.get_torch_quant(aiter.QuantType.per_1x32)
@@ -833,5 +833,13 @@ def test_fused_moe(
 
 
 
-test_fused_moe(8192, 6144, 4096, 2, 8, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(4, 7168, 256, 8, 128, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(8, 7168, 256, 8, 128, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(16, 7168, 256, 8, 128, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(32, 7168, 256, 8, 128, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(64, 7168, 256, 8, 128, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(128, 7168, 256, 8, 128, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(256, 7168, 256, 8, 128, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(1024, 7168, 256, 8, 128, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
+test_fused_moe(4096, 7168, 256, 8, 128, "mxfp4_e2m1", "mxfp4_e2m1", False, False)
 # test_fused_moe(512, 2048, 2048, 2, 4, "mxfp4_e2m1", "mxfp4_e2m1", False, False)

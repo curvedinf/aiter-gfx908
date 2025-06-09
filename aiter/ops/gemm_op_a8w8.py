@@ -70,6 +70,17 @@ def flatmm_a8w8_blockscale_asm(
     out: Tensor,
 ): ...
 
+@compile_ops("module_flatmm_ck", fc_name="flatmm_ck")
+def flatmm_ck(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    out: Tensor,
+): ...
+
+
+
 @functools.lru_cache(maxsize=1024)
 def compute_gemm_SplitK(M: int, N: int, K: int, tile_m: int, tile_n: int, tile_k: int):
     cu_num = get_cu_num()
@@ -256,6 +267,33 @@ def gemm_a8w8_blockscale_tune(
 ): ...
 @compile_ops("module_gemm_a8w8_bpreshuffle_tune", fc_name="gemm_a8w8_bpreshuffle_tune")
 def gemm_a8w8_bpreshuffle_tune(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    out: Tensor,
+    kernelId: int,
+    splitK=0,
+): ...
+
+def flatmm_CK(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    dtype=torch.float16,
+):
+    assert dtype in [
+        torch.float16,
+    ], f"Output {dtype=} is currently not supported in gemm_a8w8"
+    m = XQ.shape[0]
+    n = WQ.shape[0]
+    k = XQ.shape[-1]
+    Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
+    return flatmm_ck(XQ, WQ, x_scale, w_scale, Y)
+
+@compile_ops("module_flatmm_ck_tune", fc_name="flatmm_ck_tune")
+def flatmm_ck_tune(
     XQ: Tensor,
     WQ: Tensor,
     x_scale: Tensor,

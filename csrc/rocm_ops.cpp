@@ -12,6 +12,7 @@
 #include "communication_asm.h"
 #include "gemm_a8w8_blockscale.h"
 #include "gemm_a8w8_bpreshuffle.h"
+#include "flatmm_ck.h"
 #include "custom.h"
 #include "moe_op.h"
 #include "moe_sorting.h"

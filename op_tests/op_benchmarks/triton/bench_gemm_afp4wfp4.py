@@ -114,7 +114,7 @@ def run_benchmark(args):
             fn = lambda: gemm_afp4wfp4_splitn(x, w, x_scale, w_scale, c_dtype, out, splitn)
 
         ms = triton.testing.do_bench(
-            fn(),
+            fn,
             warmup=25,
             rep=100,
         )

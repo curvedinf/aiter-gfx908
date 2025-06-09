@@ -551,18 +551,23 @@
             py::arg("out"), py::arg("input"),                                  \
             py::arg("scales"), py::arg("scale_ub") = std::nullopt);
 
-#define RMSNORM_PYBIND                                                                                    \
-      m.def("rms_norm_cu", &rms_norm, "Apply Root Mean Square (RMS) Normalization to the input tensor."); \
-      m.def("fused_add_rms_norm_cu", &fused_add_rms_norm, "In-place fused Add and RMS Normalization");    \
-      m.def("rmsnorm2d_fwd", &rmsnorm2d);                                                                 \
-      m.def("rmsnorm2d_fwd_with_add", &rmsnorm2d_with_add);                                               \
-      m.def("rmsnorm2d_fwd_with_smoothquant", &rmsnorm2d_with_smoothquant);                               \
-      m.def("rmsnorm2d_fwd_with_add_smoothquant", &rmsnorm2d_with_add_smoothquant,                        \
-            py::arg("out"), py::arg("input"), py::arg("residual_in"), py::arg("residual_out"),            \
-            py::arg("xscale"), py::arg("yscale"), py::arg("weight"), py::arg("epsilon"),                  \
-            py::arg("out_before_quant") = std::nullopt);                                                  \
-      m.def("rmsnorm2d_fwd_with_dynamicquant", &rmsnorm2d_with_dynamicquant);                             \
-      m.def("rmsnorm2d_fwd_with_add_dynamicquant", &rmsnorm2d_with_add_dynamicquant);
+#define QUANT_PYBIND                                                     \
+    m.def("static_per_tensor_quant", &aiter::static_per_tensor_quant);   \
+    m.def("dynamic_per_tensor_quant", &aiter::dynamic_per_tensor_quant); \
+    m.def("dynamic_per_token_scaled_quant",                              \
+          &aiter::dynamic_per_token_scaled_quant,                        \
+          py::arg("out"),                                                \
+          py::arg("input"),                                              \
+          py::arg("scales"),                                             \
+          py::arg("scale_ub")      = std::nullopt,                       \
+          py::arg("shuffle_scale") = true);                              \
+    m.def("dynamic_per_group_scaled_quant_fp4",                          \
+          &aiter::dynamic_per_group_scaled_quant_fp4,                    \
+          py::arg("out"),                                                \
+          py::arg("input"),                                              \
+          py::arg("scales"),                                             \
+          py::arg("scale_ub")      = 32,                                 \
+          py::arg("shuffle_scale") = true);
 
 #define ROPE_GENERAL_FWD_PYBIND                                   \
       m.def("rope_fwd_impl", &rope_fwd_impl);                     \

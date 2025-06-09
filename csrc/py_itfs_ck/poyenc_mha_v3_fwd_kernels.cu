@@ -2243,8 +2243,8 @@ template <typename DataType>
 struct get_kernel
 {
     using fmha_dtype = DataType;
-    //                                        M0   N0  K0  N1   K1
-    using fmha_block_tile = ck_tile::sequence<256, 32, 32, 128, 32, 128>;
+    //                                        M0   N0  K0   N1   K1
+    using fmha_block_tile = ck_tile::sequence<256, 32, 128, 128, 32, 128>;
 
     using fmha_warp_gemm_shape = ck_tile::sequence<32, 32, 16>;
 

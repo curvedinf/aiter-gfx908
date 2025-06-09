@@ -2266,8 +2266,8 @@ struct get_kernel
 
     using fmha_traits = ck_tile::TileFmhaTraits<true,  // kPadSeqLenQ
                                                 true,  // kPadSeqLenK
-                                                true,  // kPadHeadDimQ
-                                                true,  // kPadHeadDimV
+                                                false,  // kPadHeadDimQ
+                                                false,  // kPadHeadDimV
                                                 false, // kHasLogitsSoftCap
                                                 ck_tile::BlockAttentionBiasEnum::NO_BIAS,
                                                 false, // kHasBiasGrad

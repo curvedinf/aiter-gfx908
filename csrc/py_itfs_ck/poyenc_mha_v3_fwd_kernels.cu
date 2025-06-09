@@ -20,6 +20,11 @@
 #include "fmha_fwd.hpp"
 #include "mask.hpp"
 
+#define ASM_MARKER(marker)               \
+    __builtin_amdgcn_sched_barrier(0);   \
+    asm volatile("; [POYENC] " #marker); \
+    __builtin_amdgcn_sched_barrier(0);
+
 namespace aiter {
 
 using BlockFmhaPipelineQRKSVSDefaultPolicy =
@@ -303,25 +308,19 @@ struct BlockFmhaPipelineQRKSVS
         constexpr index_t k0_loops = kQKHeaddim / kK0;
         constexpr index_t k1_loops = kN0 / kK1;
 
-        static_assert(2 <= k0_loops);
+        auto k_dram_window =
+            make_tile_window(k_dram_block_window.get_bottom_tensor_view(),
+                             k_dram_block_window.get_window_lengths(),
+                             k_dram_block_window.get_window_origin(),
+                             Policy::template MakeKDramTileDistribution<Problem>());
+        auto k_block_tile = load_tile(k_dram_window); // global read i
+
+        static_assert(1 <= k0_loops);
         static_assert(1 <= k1_loops);
         do
         {
             // STAGE 1, QK gemm
-            auto k_dram_window = make_tile_window(
-                k_dram_block_window.get_bottom_tensor_view(),
-                k_dram_block_window.get_window_lengths(),
-                k_dram_block_window.get_window_origin(),
-                Policy::template MakeKDramTileDistribution<Problem>()); // K DRAM tile window for
-                                                                        // load
-
-            auto k_block_tile = load_tile(k_dram_window);
-            {
-                move_tile_window(k_dram_window, {0, kK0});
-                clear_tile(s_acc); // initialize C
-                store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
-                k_block_tile = load_tile(k_dram_window);
-            }
+            clear_tile(s_acc); // initialize C
 
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
@@ -335,35 +334,20 @@ struct BlockFmhaPipelineQRKSVS
                     0); // prevent from messing up the order of global loads
             }
 
-            if constexpr(k0_loops > 2)
-            {
-                static_for<0, k0_loops - 2, 1>{}([&](auto i_k0) {
-                    block_sync_lds();
-                    gemm_0(s_acc,
-                           get_slice_tile(q_tile,
-                                          sequence<0, i_k0 * kK0>{},
-                                          sequence<kM0, (i_k0 + 1) * kK0>{}),
-                           k_lds_window);
-                    block_sync_lds();
-                    move_tile_window(k_dram_window, {0, kK0});
-
-                    store_tile(
-                        k_lds_window,
-                        tile_elementwise_in(k_element_func, k_block_tile)); // LDS write i + 1
-                    k_block_tile = load_tile(k_dram_window);                // global read i + 2
-                });
-            }
-
-            const auto v_prefetch = load_tile(v_dram_window); // prefetch load v tile
-            {                                                 // tail
+            static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
+                store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
                 block_sync_lds();
+
+                move_tile_window(k_dram_window, {0, kK0});
+                k_block_tile = load_tile(k_dram_window); // global read i + 1
+
                 gemm_0(s_acc,
-                       get_slice_tile(q_tile,
-                                      sequence<0, (k0_loops - 2) * kK0>{},
-                                      sequence<kM0, (k0_loops - 1) * kK0>{}),
+                       get_slice_tile(
+                           q_tile, sequence<0, i_k0 * kK0>{}, sequence<kM0, (i_k0 + 1) * kK0>{}),
                        k_lds_window);
                 block_sync_lds();
-
+            });
+            { // tail
                 store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
                 block_sync_lds();
 
@@ -373,6 +357,7 @@ struct BlockFmhaPipelineQRKSVS
                                       sequence<kM0, k0_loops * kK0>{}),
                        k_lds_window);
             }
+            const auto v_prefetch = load_tile(v_dram_window); // prefetch load v tile
 
             // STAGE 2, scale_s, add bias, mask, softmax
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
@@ -621,6 +606,15 @@ struct BlockFmhaPipelineQRKSVS
             }
             // move K tile windows
             move_tile_window(k_dram_block_window, {kN0, 0});
+            if(i_total_loops < num_total_loop - 1)
+            {
+                k_dram_window =
+                    make_tile_window(k_dram_block_window.get_bottom_tensor_view(),
+                                     k_dram_block_window.get_window_lengths(),
+                                     k_dram_block_window.get_window_origin(),
+                                     Policy::template MakeKDramTileDistribution<Problem>());
+                k_block_tile = load_tile(k_dram_window);
+            }
             // tail
             {
                 block_sync_lds();
@@ -2266,8 +2260,8 @@ struct get_kernel
 
     using fmha_traits = ck_tile::TileFmhaTraits<true,  // kPadSeqLenQ
                                                 true,  // kPadSeqLenK
-                                                false,  // kPadHeadDimQ
-                                                false,  // kPadHeadDimV
+                                                false, // kPadHeadDimQ
+                                                false, // kPadHeadDimV
                                                 false, // kHasLogitsSoftCap
                                                 ck_tile::BlockAttentionBiasEnum::NO_BIAS,
                                                 false, // kHasBiasGrad

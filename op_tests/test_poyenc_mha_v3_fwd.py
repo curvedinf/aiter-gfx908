@@ -66,6 +66,7 @@ def run_ck(
         (2048, 2048),
     ],
 )
+@pytest.mark.parametrize("seed", [None])
 def test_flash_attn_output(
     batch_size,
     nheads,
@@ -75,8 +76,10 @@ def test_flash_attn_output(
     d_v,
     mha_type,
     dtype,
+    seed,
 ):
-    torch.random.manual_seed(0)
+    if seed is not None:
+        torch.random.manual_seed(seed)
     torch.cuda.empty_cache()
     nheads_k = nheads if mha_type == "mha" else (1 if mha_type == "mqa" else 3)
     assert nheads % nheads_k == 0

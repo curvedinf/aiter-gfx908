@@ -220,7 +220,7 @@ def per_token_quant_hip(x, scale=None, quant_dtype=dtypes.i8):
     return y, scale
 
 
-def per_1x32_f4_quant_hip(x, scale=None, quant_dtype=dtypes.fp4x2):
+def per_1x32_f4_quant_hip(x, scale=None, quant_dtype=dtypes.fp4x2, shuffle=True):
     m, n = x.shape
     assert quant_dtype == dtypes.fp4x2
     assert n % 2 == 0
@@ -229,13 +229,13 @@ def per_1x32_f4_quant_hip(x, scale=None, quant_dtype=dtypes.fp4x2):
         scale = (
             torch.empty(
                 (
-                    (m + 31) // 32 * 32,
+                    (m + 255) // 256 * 256,
                     (n // 32 + 7) // 8 * 8,
                 ),
                 dtype=torch.uint8,
                 device=device,
             )
-            .fill_(0x7F)
+            # .fill_(0x7F)
             .view(dtypes.fp8_e8m0)
         )
     else:

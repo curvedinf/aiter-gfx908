@@ -88,7 +88,7 @@ def get_meta_param(num_kv_splits, device, bs, nhead):
         cu_num = get_cu_num()
         num_kv_splits = min(16, max(1, cu_num // bs))
 
-    get_mgc = {16: 64, 128: 16}
+    get_mgc = {16: 64, 32: 32, 64: 16, 128: 16}
     assert nhead in get_mgc, f"{nhead=} not supported"
     mgc = get_mgc[nhead]
     return num_kv_splits, mgc
@@ -118,7 +118,7 @@ def mla_decode_fwd(
 
     num_kv_splits, mgc = get_meta_param(num_kv_splits, device, bs, nhead)
 
-    if nhead == 16:
+    if nhead != 128 or num_kv_splits != 1:
         logits = torch.empty(
             (total_s, num_kv_splits, nhead, v_head_dim),
             dtype=dtypes.fp32,
@@ -127,18 +127,10 @@ def mla_decode_fwd(
         assert (
             max_seqlen_q == 1
         ), f"Assertion: max_seqlen_q should be 1 when n_head=16, but got {max_seqlen_q}"
-    elif nhead == 128:
+    else:
         logits = (
             o.view((total_s, num_kv_splits, nhead, v_head_dim))
-            if num_kv_splits == 1
-            else torch.empty(
-                (total_s, num_kv_splits, nhead, v_head_dim),
-                dtype=dtypes.fp32,
-                device=device,
-            )
         )
-    else:
-        assert False, f"{nhead=} not supported"
 
     attn_lse = torch.empty(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device

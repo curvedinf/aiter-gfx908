@@ -15,6 +15,7 @@ if TRITON_HIP_PRESHUFFLE_SCALES:
     from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4_preshuffled_scales as gemm_afp4wfp4
 else:
     from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4 as gemm_afp4wfp4
+    from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4_splitn
 
 
 def model_benchmark_shapes(args):
@@ -106,11 +107,14 @@ def run_benchmark(args):
         out = torch.empty(x.shape[0], w.shape[1], device=x.device, dtype=c_dtype)
 
         ms = triton.testing.do_bench(
-            lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
+            # lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
+            lambda: gemm_afp4wfp4_splitn(x, w, x_scale, w_scale, c_dtype, out, splitn=2),
             warmup=25,
             rep=100,
         )
 
+        print(f"OPS = {flops * 1e-12} (TFLOPS)")
+        print(f"MEM = {mem * 1e-9} (GB)")
         # Return exactly one scalar depending on which metric is active
         if metric == "time":
             return ms

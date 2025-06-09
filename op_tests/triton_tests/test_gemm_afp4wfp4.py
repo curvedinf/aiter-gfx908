@@ -13,6 +13,7 @@ if TRITON_HIP_PRESHUFFLE_SCALES:
     from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4_preshuffled_scales as gemm_afp4wfp4
 else:
     from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4 as gemm_afp4wfp4
+    from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4_splitn
 
 
 def shuffle_scales(scales: torch.Tensor):
@@ -106,6 +107,7 @@ def get_x_vals():
     x_vals += [(2 ** (v - 1), 4096 * v, 4096 * v) for v in range(1, 6)]
     # x_vals = [(128, 1024, 4096)]
     x_vals += [(16, 16384, 3328 * 2), (128, 16384, 3328 * 2)]
+    x_vals += [(128, 106496, 32768), (128, 16384, 53248)]
     return x_vals
 
 
@@ -160,7 +162,8 @@ def run_torch(x, w, x_scales, w_scales, dtype):
 @pytest.mark.parametrize("M, N, K", get_x_vals())
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("output", [True, False])
-def test_gemm_afp4_wfp4(M: int, N: int, K: int, dtype, output):
+@pytest.mark.parametrize("splitn", [3])
+def test_gemm_afp4_wfp4(M: int, N: int, K: int, dtype, output, splitn: int):
     if triton.runtime.driver.active.get_current_target().arch not in ("gfx950"):
         pytest.skip("MXFP4 not supported on this architecture")
 
@@ -181,8 +184,10 @@ def test_gemm_afp4_wfp4(M: int, N: int, K: int, dtype, output):
     torch_out = run_torch(x, w, x_scales, w_scales, dtype).to(dtype)
 
     if output:
-        triton_out = gemm_afp4wfp4(x, w, x_scales_triton, w_scales_triton, dtype, y)
+        # triton_out = gemm_afp4wfp4(x, w, x_scales_triton, w_scales_triton, dtype, y)
+        triton_out = gemm_afp4wfp4_splitn(x, w, x_scales_triton, w_scales_triton, dtype, y, splitn)
     else:
-        triton_out = gemm_afp4wfp4(x, w, x_scales_triton, w_scales_triton, dtype)
+        # triton_out = gemm_afp4wfp4(x, w, x_scales_triton, w_scales_triton, dtype)
+        triton_out = gemm_afp4wfp4_splitn(x, w, x_scales_triton, w_scales_triton, dtype, y, splitn)
 
     torch.testing.assert_close(torch_out, triton_out)

@@ -7,6 +7,14 @@ from aiter.ops.triton.utils.pid_preprocessing import remap_xcd
 from aiter.ops.triton.mha_onekernel_bwd import _flash_attn_onekernel_backward
 from aiter.ops.triton.mha_fused_bwd import _flash_attn_fused_backward
 
+global _USE_FUSED_BWD_KERNEL
+_USE_FUSED_BWD_KERNEL = False
+
+
+def mha_set_use_fused_bwd_kernel(value: bool):
+    global _USE_FUSED_BWD_KERNEL
+    _USE_FUSED_BWD_KERNEL = value
+
 
 @triton.jit
 def cdiv_fn(x, y):
@@ -2680,8 +2688,6 @@ class FlashAttnFunc(torch.autograd.Function):
         return_lse,
         return_softmax,
         is_grad_enabled,
-        fused_backward,
-        onekernel_backward,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
@@ -2719,8 +2725,6 @@ class FlashAttnFunc(torch.autograd.Function):
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
             ctx.deterministic = deterministic
-            ctx.fused_backward = fused_backward
-            ctx.onekernel_backward = onekernel_backward
 
         out = out_padded[..., :head_size_og]
         result = [out]
@@ -2740,7 +2744,9 @@ class FlashAttnFunc(torch.autograd.Function):
         if head_size_v_og % 8 != 0:
             do_padded = torch.nn.functional.pad(do, [0, 8 - head_size_v_og % 8])
 
-        if ctx.fused_backward:
+        print("Using fused backward kernel:", _USE_FUSED_BWD_KERNEL)
+
+        if _USE_FUSED_BWD_KERNEL:
             _flash_attn_fused_backward(
                 do_padded,
                 q,
@@ -2762,30 +2768,8 @@ class FlashAttnFunc(torch.autograd.Function):
                 philox_seed=ctx.philox_seed,
                 philox_offset=ctx.philox_offset,
             )
-        elif ctx.onekernel_backward:
-            _flash_attn_onekernel_backward(
-                do_padded,
-                q,
-                k,
-                v,
-                out,
-                softmax_lse,
-                dq,
-                dk,
-                dv,
-                ctx.softmax_scale,
-                ctx.alibi_slopes,
-                ctx.causal,
-                None,
-                None,
-                max_seqlen_q=q.shape[1],
-                max_seqlen_k=k.shape[1],
-                dropout_p=ctx.dropout_p,
-                philox_seed=ctx.philox_seed,
-                philox_offset=ctx.philox_offset,
-            )
         else:
-            _flash_attn_backward(
+            _flash_attn_onekernel_backward(
                 do_padded,
                 q,
                 k,
@@ -2844,8 +2828,6 @@ def flash_attn_func(
     deterministic=True,
     return_lse=False,
     return_attn_probs=False,
-    fused_backward=False,
-    onekernel_backward=False,
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in KV with fewer heads
@@ -2908,8 +2890,6 @@ def flash_attn_func(
         return_lse,
         return_attn_probs,
         torch.is_grad_enabled(),
-        fused_backward,
-        onekernel_backward,
     )
 
 
@@ -2929,8 +2909,6 @@ class FlashAttnFP8Func(torch.autograd.Function):
         return_lse,
         return_softmax,
         is_grad_enabled,
-        fused_backward,
-        onekernel_backward,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
@@ -2988,8 +2966,6 @@ class FlashAttnFP8Func(torch.autograd.Function):
             ctx.causal = causal
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
-            ctx.fused_backward = fused_backward
-            ctx.onekernel_backward = onekernel_backward
 
         out = out_padded[..., :head_size_og]
         result = [out]
@@ -3017,7 +2993,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
 
         fp8_dtype = torch.float8_e4m3fnuz
         do_padded_fp8, descale_do = cast_to_fp8(do_padded, fp8_dtype, "bshd")
-        if ctx.fused_backward:
+        if _USE_FUSED_BWD_KERNEL:
             _flash_attn_fused_backward(
                 do_padded_fp8,
                 q_fp8,
@@ -3043,7 +3019,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
                 descale_v=descale_v,
                 descale_do=descale_do,
             )
-        elif ctx.onekernel_bwd:
+        else:
             _flash_attn_onekernel_backward(
                 do_padded_fp8,
                 q_fp8,
@@ -3069,32 +3045,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
                 descale_v=descale_v,
                 descale_do=descale_do,
             )
-        else:
-            _flash_attn_backward(
-                do_padded_fp8,
-                q_fp8,
-                k_fp8,
-                v_fp8,
-                out,
-                softmax_lse,
-                dq,
-                dk,
-                dv,
-                ctx.softmax_scale,
-                ctx.alibi_slopes,
-                ctx.causal,
-                None,
-                None,
-                max_seqlen_q=q_fp8.shape[1],
-                max_seqlen_k=k_fp8.shape[1],
-                dropout_p=ctx.dropout_p,
-                philox_seed=ctx.philox_seed,
-                philox_offset=ctx.philox_offset,
-                descale_q=descale_q,
-                descale_k=descale_k,
-                descale_v=descale_v,
-                descale_do=descale_do,
-            )
+
         # dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
         # dk = dk[..., : k_fp8.shape[-1]]
         # dv = dv[..., : v_fp8.shape[-1]]
@@ -3113,8 +3064,6 @@ def flash_attn_fp8_func(
     deterministic=False,
     return_lse=False,
     return_attn_probs=False,
-    fused_backward=False,
-    onekernel_backward=False,
 ):
     return FlashAttnFP8Func.apply(
         q,
@@ -3129,8 +3078,6 @@ def flash_attn_fp8_func(
         return_lse,
         return_attn_probs,
         torch.is_grad_enabled(),
-        fused_backward,
-        onekernel_backward,
     )
 
 
@@ -3155,8 +3102,6 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         return_softmax,
         block_table,
         is_grad_enabled,
-        fused_backward,
-        onekernel_backward,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
@@ -3198,8 +3143,6 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             ctx.causal = causal
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
-            ctx.fused_backward = fused_backward
-            ctx.onekernel_backward = onekernel_backward
 
         out = out_padded[..., :head_size_og]
 
@@ -3219,7 +3162,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         do_padded = do
         if head_size_og % 8 != 0:
             do_padded = torch.nn.functional.pad(do, [0, 8 - head_size_og % 8])
-        if ctx.fused_backward:
+        if _USE_FUSED_BWD_KERNEL:
             _flash_attn_fused_backward(
                 do_padded,
                 q,
@@ -3241,30 +3184,8 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
                 philox_seed=ctx.philox_seed,
                 philox_offset=ctx.philox_offset,
             )
-        elif ctx.onekernel_backward:
-            _flash_attn_onekernel_backward(
-                do_padded,
-                q,
-                k,
-                v,
-                out,
-                softmax_lse,
-                dq,
-                dk,
-                dv,
-                ctx.softmax_scale,
-                ctx.alibi_slopes,
-                ctx.causal,
-                cu_seqlens_q,
-                cu_seqlens_k,
-                max_seqlen_q=ctx.max_seqlen_q,
-                max_seqlen_k=ctx.max_seqlen_k,
-                dropout_p=ctx.dropout_p,
-                philox_seed=ctx.philox_seed,
-                philox_offset=ctx.philox_offset,
-            )
         else:
-            _flash_attn_backward(
+            _flash_attn_onekernel_backward(
                 do_padded,
                 q,
                 k,
@@ -3306,8 +3227,6 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             None,
             None,
             None,
-            None,
-            None,
         )
 
 
@@ -3328,8 +3247,6 @@ def flash_attn_varlen_func(
     return_lse=False,
     return_attn_probs=False,
     block_table=None,
-    fused_backward=False,
-    onekernel_backward=False,
 ):
     """dropout_p should be set to 0.0 during evaluation
     Supports multi-query and grouped-query attention (MQA/GQA) by passing in K, V with fewer heads
@@ -3403,8 +3320,6 @@ def flash_attn_varlen_func(
         return_attn_probs,
         block_table,
         torch.is_grad_enabled(),
-        fused_backward,
-        onekernel_backward,
     )
 
 
@@ -3429,8 +3344,6 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
         return_softmax,
         block_table,
         is_grad_enabled,
-        fused_backward,
-        onekernel_backward,
     ):
         is_grad = is_grad_enabled and any(x.requires_grad for x in [q, k, v])
         if softmax_scale is None:
@@ -3491,8 +3404,6 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
             ctx.causal = causal
             ctx.window_size = window_size
             ctx.alibi_slopes = alibi_slopes
-            ctx.fused_backward = fused_backward
-            ctx.onekernel_backward = onekernel_backward
 
         out = out_padded[..., :head_size_og]
         result = [out]
@@ -3531,7 +3442,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
         do_padded_fp8, descale_do = cast_varlen_to_fp8(
             do_padded, fp8_dtype, "thd", cu_seqlens_q
         )
-        if ctx.fused_backward:
+        if _USE_FUSED_BWD_KERNEL:
             _flash_attn_fused_backward(
                 do_padded_fp8,
                 q_fp8,
@@ -3557,34 +3468,8 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
                 descale_v=descale_v,
                 descale_do=descale_do,
             )
-        elif ctx.onekernel_backward:
-            _flash_attn_onekernel_backward(
-                do_padded_fp8,
-                q_fp8,
-                k_fp8,
-                v_fp8,
-                out,
-                softmax_lse,
-                dq,
-                dk,
-                dv,
-                ctx.softmax_scale,
-                ctx.alibi_slopes,
-                ctx.causal,
-                cu_seqlens_q,
-                cu_seqlens_k,
-                max_seqlen_q=ctx.max_seqlen_q,
-                max_seqlen_k=ctx.max_seqlen_k,
-                dropout_p=ctx.dropout_p,
-                philox_seed=ctx.philox_seed,
-                philox_offset=ctx.philox_offset,
-                descale_q=descale_q,
-                descale_k=descale_k,
-                descale_v=descale_v,
-                descale_do=descale_do,
-            )
         else:
-            _flash_attn_backward(
+            _flash_attn_onekernel_backward(
                 do_padded_fp8,
                 q_fp8,
                 k_fp8,
@@ -3632,8 +3517,6 @@ def flash_attn_varlen_fp8_func(
     return_lse=False,
     return_attn_probs=False,
     block_table=None,
-    fused_backward=False,
-    onekernel_backward=False,
 ):
     return FlashAttnVarlenFP8Func.apply(
         q,
@@ -3653,6 +3536,4 @@ def flash_attn_varlen_fp8_func(
         return_attn_probs,
         block_table,
         torch.is_grad_enabled(),
-        fused_backward,
-        onekernel_backward,
     )

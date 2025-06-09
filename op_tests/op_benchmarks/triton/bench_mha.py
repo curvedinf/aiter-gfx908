@@ -15,6 +15,7 @@ from aiter.ops.triton.mha import (
     flash_attn_fp8_func,
     flash_attn_varlen_func,
     flash_attn_varlen_fp8_func,
+    mha_set_use_fused_bwd_kernel,
 )
 from aiter.test_mha_common import (
     generate_random_padding_mask,
@@ -158,10 +159,8 @@ def create_benchmark_configs(custom, args):
     if mode == "bwd":
         if args.fused_bwd:
             line_vals = [f"fused-bwd({unit})"]
-        elif args.onekernel_bwd:
-            line_vals = [f"onekernel-bwd({unit})"]
         else:
-            line_vals = [f"fused-bwd({unit})", f"onekernel-bwd({unit})", f"bwd({unit})"]
+            line_vals = [f"fused-bwd({unit})", f"bwd({unit})"]
     else:
         line_vals = [f"fwd({unit})"]
 
@@ -169,9 +168,7 @@ def create_benchmark_configs(custom, args):
         line_vals = [f"Triton({unit})", f"Torch({unit})"]
 
     if args.test_mode:
-        if args.onekernel_bwd:
-            line_vals = [f"onekernel-bwd({unit})"]
-        elif args.fused_bwd:
+        if args.fused_bwd:
             line_vals = [f"fused-bwd({unit})"]
         else:
             line_vals = [f"bwd({unit})"]
@@ -222,12 +219,11 @@ def run_benchmark(custom, args):
         return_attn_probs = False
         varlen = args.layout == "thd"
 
-        fused_backward = "fused-bwd" in provider
-        onekernel_backward = "onekernel-bwd" in provider
+        global _USE_FUSED_BWD
 
-        assert (not fused_backward) or (
-            not onekernel_backward
-        ), "fused_backward and onekernel_backward cannot be used together."
+        fused_backward = "fused-bwd" in provider
+
+        mha_set_use_fused_bwd_kernel(fused_backward)
 
         # Default softmax scale to match standard attention
         if sm_scale is None:
@@ -236,98 +232,72 @@ def run_benchmark(custom, args):
         # Test mode: run tests from op_tests with specified shapes
         if args.test_mode:
             import op_tests.triton_tests.test_mha as test_mha
-            import op_tests.triton_tests.test_mha_fused_bwd as test_fused_bwd
-            import op_tests.triton_tests.test_mha_onekernel_bwd as test_onekernel_bwd
 
             print(
-                f"Testing backward implementation <{provider}> against Torch with shape:"
+                f"Testing kernel implementation <{provider}> against Torch with shape:"
             )
             print(
                 f"BATCH={BATCH}, HQ={HQ}, HK={HK}, N_CTX_Q={N_CTX_Q}, N_CTX_K={N_CTX_K}, D_HEAD={D_HEAD}"
             )
-            if fused_backward:
-                if varlen:
-                    test_fused_bwd.test_mha_fused_backward_varlen(
-                        BATCH,
-                        N_CTX_Q,
-                        N_CTX_K,
-                        HQ,
-                        HK,
-                        D_HEAD,
-                        dropout,
-                        causal,
-                        args.fp8,
-                        dtype,
-                    )
-                else:
-                    test_fused_bwd.test_mha_fused_backward(
-                        BATCH,
-                        N_CTX_Q,
-                        N_CTX_K,
-                        HQ,
-                        HK,
-                        D_HEAD,
-                        dropout,
-                        causal,
-                        args.fp8,
-                        dtype,
-                    )
-            elif onekernel_backward:
-                if varlen:
-                    test_onekernel_bwd.test_mha_fused_backward_varlen(
-                        BATCH,
-                        N_CTX_Q,
-                        N_CTX_K,
-                        HQ,
-                        HK,
-                        D_HEAD,
-                        dropout,
-                        causal,
-                        args.fp8,
-                        dtype,
-                    )
-                else:
-                    test_onekernel_bwd.test_mha_fused_backward(
-                        BATCH,
-                        N_CTX_Q,
-                        N_CTX_K,
-                        HQ,
-                        HK,
-                        D_HEAD,
-                        dropout,
-                        causal,
-                        args.fp8,
-                        dtype,
-                    )
+            if varlen:
+                test_mha.test_mha(
+                    BATCH,
+                    N_CTX_Q,
+                    N_CTX_K,
+                    HQ,
+                    HK,
+                    D_HEAD,
+                    dropout,
+                    True,
+                    True,
+                    causal,
+                    args.fp8,
+                    dtype,
+                )
+                print("Forward test passed!")
+                test_mha.test_mha_backward_varlen(
+                    BATCH,
+                    N_CTX_Q,
+                    N_CTX_K,
+                    HQ,
+                    HK,
+                    D_HEAD,
+                    dropout,
+                    causal,
+                    args.fp8,
+                    dtype,
+                )
+                print("Backward test passed!")
             else:
-                if varlen:
-                    test_mha.test_mha_backward_varlen(
-                        BATCH,
-                        N_CTX_Q,
-                        N_CTX_K,
-                        HQ,
-                        HK,
-                        D_HEAD,
-                        dropout,
-                        causal,
-                        args.fp8,
-                        dtype,
-                    )
-                else:
-                    test_mha.test_mha_backward(
-                        BATCH,
-                        N_CTX_Q,
-                        N_CTX_K,
-                        HQ,
-                        HK,
-                        D_HEAD,
-                        dropout,
-                        causal,
-                        args.fp8,
-                        dtype,
-                    )
+                test_mha.test_mha_varlen(
+                    BATCH,
+                    N_CTX_Q,
+                    N_CTX_K,
+                    HQ,
+                    HK,
+                    D_HEAD,
+                    dropout,
+                    True,
+                    True,
+                    causal,
+                    args.fp8,
+                    dtype,
+                )
+                print("Forward test passed!")
+                test_mha.test_mha_backward(
+                    BATCH,
+                    N_CTX_Q,
+                    N_CTX_K,
+                    HQ,
+                    HK,
+                    D_HEAD,
+                    dropout,
+                    causal,
+                    args.fp8,
+                    dtype,
+                )
+                print("Backward test passed!")
 
-            print("Test passed!")
             return 0
 
         # Generate base inputs
@@ -416,8 +386,6 @@ def run_benchmark(custom, args):
                         causal=causal,
                         return_lse=return_lse,
                         return_attn_probs=return_attn_probs,
-                        fused_backward=fused_backward,
-                        onekernel_backward=onekernel_backward,
                     )
 
             else:
@@ -436,8 +404,6 @@ def run_benchmark(custom, args):
                         causal=causal,
                         return_lse=return_lse,
                         return_attn_probs=return_attn_probs,
-                        fused_backward=fused_backward,
-                        onekernel_backward=onekernel_backward,
                     )
 
         else:
@@ -453,8 +419,6 @@ def run_benchmark(custom, args):
                         causal=causal,
                         return_lse=return_lse,
                         return_attn_probs=return_attn_probs,
-                        fused_backward=fused_backward,
-                        onekernel_backward=onekernel_backward,
                     )
 
             else:
@@ -469,8 +433,6 @@ def run_benchmark(custom, args):
                         causal=causal,
                         return_lse=return_lse,
                         return_attn_probs=return_attn_probs,
-                        fused_backward=fused_backward,
-                        onekernel_backward=onekernel_backward,
                     )
 
         if mode == "bwd":
@@ -577,7 +539,6 @@ def parse_args():
     parser.add_argument("-dtype", default="fp16")
     parser.add_argument("-bench_torch", action="store_true", default=False)
     parser.add_argument("-fused_bwd", action="store_true", default=False)
-    parser.add_argument("-onekernel_bwd", action="store_true", default=False)
     parser.add_argument("-print_vgpr", action="store_true", default=False)
     parser.add_argument(
         "-return_all",

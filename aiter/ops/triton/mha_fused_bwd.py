@@ -768,7 +768,6 @@ def _bwd_kernel_dkdvdq_noncausal(
     offs_n = start_n + tl.arange(0, BLOCK_N)
     mask_kv = offs_n[:, None] < seqlen_k
     PADDED_HEAD: tl.constexpr = BLOCK_D_MODEL != BLOCK_D_MODEL_POW2
-    tl.static_print("PADDED_HEAD: ", PADDED_HEAD)
     if PADDED_HEAD:
         mask_kv &= offs_k < BLOCK_D_MODEL
 
@@ -1075,8 +1074,6 @@ def _flash_attn_fused_backward(
     else:
         # in non causal inner loop over grouped q heads
         grid_dkdvdq = (batch * num_k_heads * num_k_pids,)
-        print("BLOCK_D_MODEL_POW2", BLOCK_D_MODEL_POW2)
-        print("BLOCK_D_MODEL", head_sz)
         _bwd_kernel_dkdvdq_noncausal[grid_dkdvdq](
             q,
             k,

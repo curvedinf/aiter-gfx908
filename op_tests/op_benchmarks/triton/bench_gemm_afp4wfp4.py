@@ -65,6 +65,8 @@ def run_benchmark(args):
     else:
         x_vals_list = get_x_vals()
 
+    splitn = args.splitn
+
     if args.metric == "time":
         ylabel = "Time (ms)"
     elif args.metric == "throughput":
@@ -106,15 +108,17 @@ def run_benchmark(args):
         mem = mem_read + mem_write
         out = torch.empty(x.shape[0], w.shape[1], device=x.device, dtype=c_dtype)
 
+        if splitn == 1:
+            fn = lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out)
+        else:
+            fn = lambda: gemm_afp4wfp4_splitn(x, w, x_scale, w_scale, c_dtype, out, splitn)
+
         ms = triton.testing.do_bench(
-            # lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
-            lambda: gemm_afp4wfp4_splitn(x, w, x_scale, w_scale, c_dtype, out, splitn=2),
+            fn(),
             warmup=25,
             rep=100,
         )
 
-        print(f"OPS = {flops * 1e-12} (TFLOPS)")
-        print(f"MEM = {mem * 1e-9} (GB)")
         # Return exactly one scalar depending on which metric is active
         if metric == "time":
             return ms
@@ -161,6 +165,12 @@ def parse_args():
         nargs=3,
         metavar=("M", "N", "K"),
         help="user-defined shape to benchmark",
+    )
+    parser.add_argument(
+        "--splitn",
+        type=int,
+        default=1,
+        help="splitn",
     )
     parser.add_argument(
         "--metric",

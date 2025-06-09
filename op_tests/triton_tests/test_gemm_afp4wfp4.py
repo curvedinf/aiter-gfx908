@@ -162,7 +162,7 @@ def run_torch(x, w, x_scales, w_scales, dtype):
 @pytest.mark.parametrize("M, N, K", get_x_vals())
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("output", [True, False])
-@pytest.mark.parametrize("splitn", [3])
+@pytest.mark.parametrize("splitn", [1, 2, 3])
 def test_gemm_afp4_wfp4(M: int, N: int, K: int, dtype, output, splitn: int):
     if triton.runtime.driver.active.get_current_target().arch not in ("gfx950"):
         pytest.skip("MXFP4 not supported on this architecture")
@@ -184,10 +184,14 @@ def test_gemm_afp4_wfp4(M: int, N: int, K: int, dtype, output, splitn: int):
     torch_out = run_torch(x, w, x_scales, w_scales, dtype).to(dtype)
 
     if output:
-        # triton_out = gemm_afp4wfp4(x, w, x_scales_triton, w_scales_triton, dtype, y)
-        triton_out = gemm_afp4wfp4_splitn(x, w, x_scales_triton, w_scales_triton, dtype, y, splitn)
+        if splitn == 1:
+            triton_out = gemm_afp4wfp4(x, w, x_scales_triton, w_scales_triton, dtype, y)
+        else:
+            triton_out = gemm_afp4wfp4_splitn(x, w, x_scales_triton, w_scales_triton, dtype, y, splitn)
     else:
-        # triton_out = gemm_afp4wfp4(x, w, x_scales_triton, w_scales_triton, dtype)
-        triton_out = gemm_afp4wfp4_splitn(x, w, x_scales_triton, w_scales_triton, dtype, y, splitn)
+        if splitn == 1:
+            triton_out = gemm_afp4wfp4(x, w, x_scales_triton, w_scales_triton, dtype)
+        else:
+            triton_out = gemm_afp4wfp4_splitn(x, w, x_scales_triton, w_scales_triton, dtype, y, splitn)
 
     torch.testing.assert_close(torch_out, triton_out)

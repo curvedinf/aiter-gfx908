@@ -29,7 +29,11 @@
 #if defined(__HIPCC__) && (defined(__gfx90a__) || defined(__gfx940__) || \
                            defined(__gfx941__) || defined(__gfx942__) || \
                            defined(__gfx950__))
+<<<<<<< HEAD
 #define __HIP__MI300_MI250__
+=======
+  #define __HIP__MI3XX_MI250__
+>>>>>>> origin/main
 #endif
 
 #if defined(NDEBUG)
@@ -45,7 +49,11 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define DIVIDE_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
 
+<<<<<<< HEAD
 #if defined(__HIP__MI300_MI250__) // TODO: Add NAVI support
+=======
+#if defined(__HIP__MI3XX_MI250__)  // TODO: Add NAVI support
+>>>>>>> origin/main
 
 #define GCN_MFMA_INSTR1 __builtin_amdgcn_mfma_f32_16x16x4f32
 #define GCN_MFMA_INSTR __builtin_amdgcn_mfma_f32_4x4x4f16
@@ -118,6 +126,31 @@ __device__ __forceinline__ floatx4 gcn_mfma_instr(const _B16x4 &inpA,
 }
 
 #if defined(__gfx950__)
+<<<<<<< HEAD
+=======
+template <typename T, int absz, int cbid, int blgp>
+__device__ __forceinline__ floatx4 gcn_mfma16x16x32_instr(const _B16x8& inpA,
+                                                          const _B16x8& inpB,
+                                                          const floatx4& inpC)
+{
+    _B16x8_2 tmpA = __builtin_shufflevector(inpA.xy[0], inpA.xy[1], 0, 1, 2, 3, 4, 5, 6, 7);
+    _B16x8_2 tmpB = __builtin_shufflevector(inpB.xy[0], inpB.xy[1], 0, 1, 2, 3, 4, 5, 6, 7);
+
+    if constexpr(std::is_same<T, _Float16>::value)
+    {
+        return __builtin_amdgcn_mfma_f32_16x16x32_f16(tmpA, tmpB, inpC, absz, cbid, blgp);
+    }
+    else if constexpr(std::is_same<T, __hip_bfloat16>::value)
+    {
+        return __builtin_amdgcn_mfma_f32_16x16x32_bf16(tmpA, tmpB, inpC, absz, cbid, blgp);
+    }
+    else
+    {
+        static_assert(false, "unsupported 16b dtype");
+    }
+}
+#else
+>>>>>>> origin/main
 template <typename T, int absz, int cbid, int blgp>
 __device__ __forceinline__ floatx4 gcn_mfma16x16x32_instr(const _B16x8 &inpA,
                                                           const _B16x8 &inpB,
@@ -732,6 +765,7 @@ __global__ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma
     scale2 *= *k_scale;
   }
 
+<<<<<<< HEAD
   floatx4 dout[TLOOP];
 #if 1 // Q stored in registers
   for (int token_depth = 0; token_depth < TLOOP; token_depth++)
@@ -755,6 +789,45 @@ __global__ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma
                                                                           Qlocal[qkhe_depth][qkratio].xy[i], dout[token_depth]);
           }
 #endif
+=======
+    floatx4 dout[TLOOP];
+#if 1 //Q stored in registers
+    for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
+      dout[token_depth] = {0};
+      for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
+        if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
+            for (int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++) {
+#if defined(__gfx950__)
+                dout[token_depth] = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                    Klocal[token_depth][qkhe_depth],
+                    Qlocal[qkhe_depth][qkratio],
+                    dout[token_depth]);
+#else
+              for (int i=0; i<2; i++) {
+                dout[token_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(Klocal[token_depth][qkhe_depth].xy[i],
+                        Qlocal[qkhe_depth][qkratio].xy[i], dout[token_depth]);
+              }
+#endif
+            }
+        } else { //kv cache dtype fp8
+            auto Ktmp = Klocal[token_depth][qkhe_depth];
+            _B8x16 Ktmp8x16 = *reinterpret_cast<_B8x16*>(&Ktmp);
+            for (int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++) {
+                _B8x8 Ktmp8x8 = Ktmp8x16.xy[qkratio];
+                _B16x8 Klocaltmp = convert_b8x8_custom<scalar_t>(Ktmp8x8);
+#if defined(__gfx950__)
+                dout[token_depth] = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                    Klocaltmp,
+                    Qlocal[qkhe_depth][qkratio],
+                    dout[token_depth]);
+#else
+                for (int i=0; i<2; i++) {
+                    dout[token_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(Klocaltmp.xy[i],
+                        Qlocal[qkhe_depth][qkratio].xy[i], dout[token_depth]);
+                }
+#endif
+            }
+>>>>>>> origin/main
         }
       }
       else
@@ -982,6 +1055,7 @@ __global__ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma
     for (int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++)
     {
 
+<<<<<<< HEAD
       if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto)
       {
         for (int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++)
@@ -1011,6 +1085,34 @@ __global__ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma
             const int offset = rowid * VTLANELOOP * 2 + 2 * vfetch_depth + i;
             const int offset1 = offset % 4; // 4 corresponds to ROWS_PER_WARP
             const int offset2 = offset / 4;
+=======
+        if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
+          for (int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++) {
+#if defined(__gfx950__)
+	      _B16x8 tmp_in;
+	      for(int i = 0; i < 2; i++)
+	      {
+	          const int offset = rowid * VTLANELOOP * 2 + 2*vfetch_depth + i;
+                  const int offset1 = offset % 4;
+                  const int offset2 = offset / 4;
+                  tmp_in.xy[i] = shared_logits[vtoken_depth][offset2][lane16id][offset1];
+	      }
+	      tmp_out = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                  Vlocal[vtoken_depth][vhe_depth][vfetch_depth],
+                  tmp_in,
+                  tmp_out);
+#else
+              for (int i=0; i<2; i++) {
+                //TODO generalize this for 8 bit dtypes: each lane needs 2*vfetch_depth + 2 _B16x4 K/token dimension elems; each row is multiplied by a factor of 4
+                //layout: lane in depth dimension | row across ->
+                //0 4 8  12
+                //1 5 9  13
+                //2 6 10 14
+                //3 7 11 15
+                const int offset = rowid * VTLANELOOP * 2 + 2*vfetch_depth + i; 
+                const int offset1 = offset % 4; //4 corresponds to ROWS_PER_WARP
+                const int offset2 = offset / 4;
+>>>>>>> origin/main
 #if 0
                 //if output format is 16 head elems across 16 lanes, 16 qheads spread across 4 rows
                 tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(shared_logits[vtoken_depth][offset2][lane16id][offset1],
@@ -1021,6 +1123,7 @@ __global__ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma
                                                                 shared_logits[vtoken_depth][offset2][lane16id][offset1],
                                                                 tmp_out);
 #endif
+<<<<<<< HEAD
           }
 #endif //__gfx950__
         }
@@ -1058,6 +1161,41 @@ __global__ __launch_bounds__(NUM_THREADS, 5) void paged_attention_ll4mi_QKV_mfma
               // tmp_out);
             }
 #endif //__gfx950__
+=======
+              }
+#endif //__gfx950__
+          }
+        } else {
+          for (int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++) {
+              _B16x8 Vtmp = Vlocal[vtoken_depth][vhe_depth][vfetch_depth];
+              _B8x16 Vtmp8x16 = *reinterpret_cast<_B8x16*>(&Vtmp);
+              for (int j=0; j<2; j++) {
+               _B8x8 Vtmp8x8 = Vtmp8x16.xy[j]; 
+               _B16x8 Vlocaltmp = convert_b8x8_custom<scalar_t>(Vtmp8x8);
+#if defined(__gfx950__)
+                _B16x8 tmp_in;
+                for(int i = 0; i < 2; i++)
+                {
+                    tmp_in.xy[i] = S_local[vtoken_depth][j][i];
+                }
+                tmp_out = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                    Vlocaltmp,
+                    tmp_in,
+                    tmp_out);
+#else
+               for (int i=0; i<2; i++) {
+                const int offset = 4*rowid + 2*j + i; 
+                const int offset1 = offset % 4;
+                const int offset2 = offset / 4;
+                tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(Vlocaltmp.xy[i],
+                          S_local[vtoken_depth][j][i], 
+                        tmp_out);
+                        //shared_logits[vtoken_depth][offset2][lane16id][offset1],
+                        //tmp_out);
+               }
+#endif //__gfx950__
+              }
+>>>>>>> origin/main
           }
         }
       }
@@ -2337,7 +2475,11 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
   }
 }
 
+<<<<<<< HEAD
 #else // !defined(__HIP__MI300_MI250__) TODO: Add NAVI support
+=======
+#else  // !defined(__HIP__MI3XX_MI250__) TODO: Add NAVI support
+>>>>>>> origin/main
 
 template <typename scalar_t, typename cache_t,
           vllm::Fp8KVCacheDataType KV_DTYPE, typename OUTT, int BLOCK_SIZE,
@@ -2411,7 +2553,11 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
     const int max_num_partitions,
     const float *__restrict__ fp8_out_scale_ptr){UNREACHABLE_CODE}
 
+<<<<<<< HEAD
 #endif // defined(__HIP__MI300_MI250__) TODO: Add NAVI support
+=======
+#endif  // defined(__HIP__MI3XX_MI250__) TODO: Add NAVI support
+>>>>>>> origin/main
 
 #define LAUNCH_CUSTOM_ATTENTION_MFMA16(GQA_RATIO)                             \
   paged_attention_ll4mi_QKV_mfma16_kernel<T, KVT, KV_DTYPE, OUTT, BLOCK_SIZE, \

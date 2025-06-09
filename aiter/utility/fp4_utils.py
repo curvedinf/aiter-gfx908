@@ -18,7 +18,11 @@ def f32_to_mxfp4(x):
 
 def mxfp4_to_f32(x):
     # 2 because we pack fp4 in uint8.
+<<<<<<< HEAD
     x = x.repeat_interleave(2, dim=-1)
+=======
+    x = x.repeat_interleave(2, dim=1)
+>>>>>>> origin/main
     x[:, ::2] = x[:, ::2] & 0xF
     x[:, 1::2] = x[:, 1::2] >> 4
     mxfp4_list = [
@@ -364,12 +368,16 @@ def dynamic_mxfp4_quant(
     MXFP4_QUANT_BLOCK_SIZE = 32
 
     x_fp4 = torch.empty((M, N // 2), dtype=torch.uint8, device=x.device)
-    scaleM = (M + 31) // 32 * 32
+    scaleM = triton.cdiv(M, 32) * 32
     scaleN_valid = triton.cdiv(N, MXFP4_QUANT_BLOCK_SIZE)
     scaleN = triton.cdiv(scaleN_valid, 8) * 8
     blockscale_e8m0 = torch.empty(
         (
+<<<<<<< HEAD
             (scaleM + 255) // 256 * 256,  # pad to 256
+=======
+            triton.cdiv(M, 256) * 256,
+>>>>>>> origin/main
             scaleN,
         ),
         dtype=torch.uint8,

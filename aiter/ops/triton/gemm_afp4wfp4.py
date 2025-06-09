@@ -3,7 +3,6 @@
 
 from typing import Optional
 import functools
-import sys
 import json
 import os
 import torch
@@ -11,8 +10,7 @@ import triton
 import triton.language as tl
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 import aiter.ops.triton.utils.arch_info as arch_info
-from aiter.ops.triton.utils.core import AITER_TRITON_OPS_PATH, AITER_TRITON_CONFIGS_PATH
-from aiter.ops.triton.utils.tuning_util import aiter_register
+from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
 
 
 @triton.heuristics(
@@ -270,7 +268,7 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
         offs_ks = (pid_k * (SPLITK_BLOCK_SIZE // SCALE_GROUP_SIZE) * 32) + tl.arange(
             0, BLOCK_SIZE_K // SCALE_GROUP_SIZE * 32
         )
-            # B scales are N x K even though B operand is K x N.
+        # B scales are N x K even though B operand is K x N.
         b_scale_ptrs = (
             b_scales_ptr
             + offs_asn[:, None] * stride_bsn
@@ -278,9 +276,9 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
         )
 
         if BLOCK_SIZE_M < 32:
-            offs_ks_non_shufl = (pid_k * (SPLITK_BLOCK_SIZE // SCALE_GROUP_SIZE)) + tl.arange(
-            0, BLOCK_SIZE_K // SCALE_GROUP_SIZE
-            )
+            offs_ks_non_shufl = (
+                pid_k * (SPLITK_BLOCK_SIZE // SCALE_GROUP_SIZE)
+            ) + tl.arange(0, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
             a_scale_ptrs = (
                 a_scales_ptr
                 + offs_am[:, None] * stride_asm
@@ -430,8 +428,6 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
             triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
         )
 
-    # print(K, SPLITK_BLOCK_SIZE // 2, BLOCK_SIZE_K // 2, NUM_KSPLIT)
-    # print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
     return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
 
 
@@ -467,7 +463,6 @@ def _get_config(
 
 
 # Wrapper for gemm kernel.
-@aiter_register(module=sys.modules[__name__], kernels=["_gemm_afp4_wfp4_kernel"])
 def gemm_afp4wfp4(
     x,
     w,
@@ -586,8 +581,8 @@ def gemm_afp4wfp4(
 
     return y
 
+
 # Wrapper for gemm kernel.
-@aiter_register(module=sys.modules[__name__], kernels=["_gemm_afp4_wfp4_kernel_preshuffled_scales"])
 def gemm_afp4wfp4_preshuffled_scales(
     x,
     w,
@@ -616,7 +611,7 @@ def gemm_afp4wfp4_preshuffled_scales(
 
     M, K = x.shape
     K, N = w.shape
-    
+
     if y is None:
         y = torch.empty((M, N), dtype=dtype, device=x.device)
 

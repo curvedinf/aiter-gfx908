@@ -1,14 +1,19 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+import pytest
+import os
 import torch
 import triton
-import pytest
-from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4, gemm_afp4wfp4_preshuffled_scales
-from aiter.ops.triton.utils.tuning_util import aiter_register_input_generator
+from aiter.ops.triton.gemm_afp4wfp4 import (
+    gemm_afp4wfp4,
+    gemm_afp4wfp4_preshuffled_scales,
+)
 from op_tests.triton_tests.utils.types import str_to_torch_dtype
-import os
 
 TRITON_HIP_PRESHUFFLE_SCALES = (
     os.environ.get("TRITON_HIP_PRESHUFFLE_SCALES", "0") == "1"
 )
+
 
 def shuffle_scales(scales: torch.Tensor):
     scales_shuffled = scales.clone()
@@ -23,16 +28,19 @@ def shuffle_scales(scales: torch.Tensor):
 SCALE_GROUP_SIZE = 32
 
 
-@aiter_register_input_generator("gemm_afp4wfp4")
 def generate_gemm_afp4wfp4_inputs(M, N, K, dtype, output=True):
     torch.manual_seed(5)
     if isinstance(dtype, str):
         dtype = str_to_torch_dtype[dtype]
 
     # 34 is two packed e2m1 values 0010 which is 1.0.
-    x_low = torch.randint(0, 16, (M, K // 2), dtype=torch.uint8, device="cuda")
-    x_high = torch.randint(0, 16, (M, K // 2), dtype=torch.uint8, device="cuda")
-    x = x_low | x_high << 4
+    x_low = torch.randint(0, 16, (M, K // 2), dtype=torch.uint8)
+    x_high = torch.randint(0, 16, (M, K // 2), dtype=torch.uint8)
+    x = (
+        x_high << 4 | x_low
+    )  # Doing this computation on GPU tensors results in NaNs, so move it to GPU afterwards
+    x = x.to(device="cuda")
+
     w_low = torch.randint(0, 16, (N, K // 2), dtype=torch.uint8, device="cuda")
     w_high = torch.randint(0, 16, (N, K // 2), dtype=torch.uint8, device="cuda")
     w = w_low | w_high << 4
@@ -67,7 +75,16 @@ def generate_gemm_afp4wfp4_inputs(M, N, K, dtype, output=True):
     else:
         out_dtype = dtype
 
-    return x, w, x_scales[:M], w_scales, x_scales_shuffled, w_scales_shuffled, out_dtype, y
+    return (
+        x,
+        w,
+        x_scales[:M],
+        w_scales,
+        x_scales_shuffled,
+        w_scales_shuffled,
+        out_dtype,
+        y,
+    )
 
 
 def get_x_vals():
@@ -105,6 +122,7 @@ def get_x_vals():
     x_vals += [(2 ** (v - 1), 4096 * v, 4096 * v) for v in range(1, 6)]
     # x_vals = [(128, 1024, 4096)]
     x_vals += [(16, 16384, 3328 * 2), (128, 16384, 3328 * 2)]
+    x_vals += [(256, 3584, 2112)]
     return x_vals
 
 
@@ -181,9 +199,13 @@ def test_gemm_afp4_wfp4(M: int, N: int, K: int, dtype, output):
 
     if TRITON_HIP_PRESHUFFLE_SCALES:
         if output:
-            triton_out = gemm_afp4wfp4_preshuffled_scales(x, w, x_scales_triton, w_scales_triton, dtype, y)
+            triton_out = gemm_afp4wfp4_preshuffled_scales(
+                x, w, x_scales_triton, w_scales_triton, dtype, y
+            )
         else:
-            triton_out = gemm_afp4wfp4_preshuffled_scales(x, w, x_scales_triton, w_scales_triton, dtype)
+            triton_out = gemm_afp4wfp4_preshuffled_scales(
+                x, w, x_scales_triton, w_scales_triton, dtype
+            )
     else:
         if output:
             triton_out = gemm_afp4wfp4(x, w, x_scales_triton, w_scales_triton, dtype, y)

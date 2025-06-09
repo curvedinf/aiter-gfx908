@@ -1357,7 +1357,7 @@ def is_contiguous(x, name):
         return x.contiguous()
 
 
-def _flash_attn_onekernel_backward(
+def flash_attn_onekernel_backward(
     do: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -1367,6 +1367,7 @@ def _flash_attn_onekernel_backward(
     dq: torch.Tensor,
     dk: torch.Tensor,
     dv: torch.Tensor,
+    dbias: torch.Tensor,
     sm_scale: float,
     alibi_slopes: Optional[torch.Tensor],
     causal: bool,
@@ -1382,6 +1383,8 @@ def _flash_attn_onekernel_backward(
     descale_v: Optional[torch.Tensor] = None,
     descale_do: Optional[torch.Tensor] = None,
 ):
+    if dbias is not None:
+        raise ValueError("Bias is not supported yet in the Triton Backend")
     # IS_VARLEN = True if cu_seqlens_q is not None else False
 
     # IS_FP8 = is_fp8(q)

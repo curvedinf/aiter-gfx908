@@ -881,7 +881,7 @@ def _bwd_kernel_dkdvdq_noncausal(
     tl.store(DK + adj_dkdv, dk, mask=mask_kv)
 
 
-def _flash_attn_fused_backward(
+def flash_attn_fused_backward(
     do: torch.Tensor,
     q: torch.Tensor,
     k: torch.Tensor,
@@ -891,6 +891,7 @@ def _flash_attn_fused_backward(
     dq: torch.Tensor,
     dk: torch.Tensor,
     dv: torch.Tensor,
+    dbias: torch.Tensor,
     sm_scale: float,
     alibi_slopes: Optional[torch.Tensor],
     causal: bool,
@@ -906,6 +907,9 @@ def _flash_attn_fused_backward(
     descale_v: Optional[torch.Tensor] = None,
     descale_do: Optional[torch.Tensor] = None,
 ):
+    if dbias is not None:
+        raise ValueError("Bias is not supported yet in the Triton Backend")
+
     IS_FP8 = is_fp8(q)
     if IS_FP8:
         FP8_MAX = torch.finfo(q.dtype).max

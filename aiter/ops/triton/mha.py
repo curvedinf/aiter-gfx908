@@ -18,6 +18,7 @@ def mha_set_use_fused_bwd_kernel(value: bool):
     global _USE_FUSED_BWD_KERNEL
     _USE_FUSED_BWD_KERNEL = value
 
+
 # global parameters
 _USE_INT64_STRIDES = False
 
@@ -1203,7 +1204,6 @@ class FlashAttnFunc(torch.autograd.Function):
         return dq, dk, dv, None, None, None, None, dbias, None, None, None, None, None
 
 
-
 def flash_attn_func(
     q,
     k,
@@ -1475,6 +1475,7 @@ def flash_attn_fp8_func(
         torch.is_grad_enabled(),
     )
 
+
 def flash_attn_varlen_func(
     q,
     k,
@@ -1659,7 +1660,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
         do_padded = do
         if head_size_og % 8 != 0:
             do_padded = torch.nn.functional.pad(do, [0, 8 - head_size_og % 8])
-        
+
         if _USE_FUSED_BWD_KERNEL:
             flash_attn_fused_backward(
                 do_padded,

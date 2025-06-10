@@ -884,26 +884,26 @@ template<typename Traits,
          typename out_t,
          typename QDramBlockWindow,
          typename KDramBlockWindow,
+         typename VDramBlockWindow,
          typename LseDramBlockWindow,
          typename OutDramBlockWindow,
-         typename VPageBlockNavigator,
          typename Mask>
 CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
-    const QDramBlockWindow&  q_dram_window_,
-    const KDramBlockWindow&  k_dram_window_raw,
-    const VPageBlockNavigator&  v_page_block_navigator,
-    LseDramBlockWindow&         lse_dram_window_,
-    OutDramBlockWindow&         out_dram_window_,
-    const int32_t*              p_block_table,
-    const int32_t               page_block_size,
-    const int32_t               stride_s_k,
-    const int32_t               stride_s_v,
-    int32_t                     seqlen_k,
-    int32_t                     num_splits,
-    int32_t                     split_id,
-    Mask                        mask,
-    float                       scale_s,
-    uint8_t*                    p_smem)
+    const QDramBlockWindow& q_dram_window_,
+    const KDramBlockWindow& k_dram_window_raw,
+    const VDramBlockWindow& v_dram_window_raw,
+    LseDramBlockWindow&     lse_dram_window_,
+    OutDramBlockWindow&     out_dram_window_,
+    const int32_t*          p_block_table,
+    const int32_t           page_block_size,
+    const int32_t           stride_s_k,
+    const int32_t           stride_s_v,
+    int32_t                 seqlen_k,
+    int32_t                 num_splits,
+    int32_t                 split_id,
+    Mask                    mask,
+    float                   scale_s,
+    uint8_t*                p_smem)
 {
     using Policy = FlashMlaPrefillPolicy<Traits, scalar_t, acc_t>;
 
@@ -1010,12 +1010,12 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     constexpr auto kKNumRepeat = Policy::GetNumRepeatOfKDramTileDistribution();
     constexpr auto kKPageIdxDim = ck_tile::number<0>{};
     ck_tile::statically_indexed_array<int32_t, kKNumRepeat> k_offsets;
-    ck_tile::static_for<0, kKNumRepeat, 1>{}([&](auto n0)
+    ck_tile::static_for<0, kKNumRepeat, 1>{}([&](auto rid)
     {
-        const int32_t seqlen_idx = k_coord[kKPageIdxDim] + Traits::kBlockN0 / kKNumRepeat * n0.value;
+        const int32_t seqlen_idx = k_coord[kKPageIdxDim] + Traits::kBlockN0 / kKNumRepeat * rid.value;
         const int32_t page_idx   = seqlen_idx / page_block_size;
         const int32_t seq_idx    = seqlen_idx % page_block_size;
-        k_offsets[n0] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_k;
+        k_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_k;
     });
     auto k_dram_window = ck_tile::make_tile_scatter_gather(
         k_dram_window_origin.get_bottom_tensor_view(),
@@ -1025,25 +1025,41 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
         k_offsets);
     k_dram_window.init_raw();
 
-    auto v_dram_window_lengths =
-        ck_tile::make_tuple(ck_tile::number<Traits::kBlockN1>{}, ck_tile::number<Traits::kBlockK1>{});
-
-    using PageBlockVRet = decltype(v_page_block_navigator.make_tile_window(v_dram_window_lengths,
-                                                                           {0, seqlen_k_start},
-                                                                           Policy::MakeVDramTileDistribution()));
-    using PageBlockVId     = std::tuple_element_t<0, PageBlockVRet>;
-    using PageBlockVWindow = std::tuple_element_t<1, PageBlockVRet>;
-    PageBlockVId page_block_v_ids[n1_loops];
-    PageBlockVWindow v_dram_windows[n1_loops];
+    auto v_dram_window_origin = ck_tile::make_tile_window(
+        v_dram_window_raw.get_bottom_tensor_view(),
+        v_dram_window_raw.get_window_lengths(),
+        {0, seqlen_k_start});
+    auto v_dist = Policy::MakeVDramTileDistribution();
+    auto v_coord = v_dist.calculate_index();
+    constexpr auto kVNumRepeat = Policy::GetNumRepeatOfVDramTileDistribution();
+    constexpr auto kVPageIdxDim = ck_tile::number<1>{};
+    ck_tile::statically_indexed_array<int32_t, kVNumRepeat> v_offsets;
+    ck_tile::static_for<0, kVNumRepeat, 1>{}([&](auto rid)
+    {
+        const int32_t seqlen_idx = v_coord[kVPageIdxDim] + rid.value;
+        const int32_t page_idx   = seqlen_idx / page_block_size;
+        const int32_t seq_idx    = seqlen_idx % page_block_size;
+        v_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_v;
+    });
+    using VDramWindow = decltype(ck_tile::make_tile_scatter_gather(
+        v_dram_window_origin.get_bottom_tensor_view(),
+        v_dram_window_origin.get_window_lengths(),
+        v_dram_window_origin.get_window_origin(),
+        v_dist,
+        v_offsets,
+        kVPageIdxDim));
+    VDramWindow v_dram_windows[n1_loops];
     ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id)
     {
-        auto [page_block_v_id, v_dram_window] =
-            v_page_block_navigator.make_tile_window(
-                v_dram_window_lengths,
-                {n1_id * Traits::kBlockN1, seqlen_k_start},
-                Policy::MakeVDramTileDistribution());
-        page_block_v_ids[n1_id] = page_block_v_id;
-        v_dram_windows[n1_id] = v_dram_window;
+        constexpr ck_tile::array<int32_t, 2> origin_col = {n1_id * Traits::kBlockN1, 0};
+        v_dram_windows[n1_id] = ck_tile::make_tile_scatter_gather(
+            v_dram_window_origin.get_bottom_tensor_view(),
+            v_dram_window_origin.get_window_lengths(),
+            v_dram_window_origin.get_window_origin() + origin_col,
+            v_dist,
+            v_offsets,
+            kVPageIdxDim);
+        v_dram_windows[n1_id].init_raw();
     });
 
 
@@ -1110,6 +1126,13 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
 
         // prefetch load V tile
         auto v_prefetch = ck_tile::load_tile(v_dram_windows[0]);
+        ck_tile::set_tile_if(
+            v_prefetch, ck_tile::numeric<scalar_t>::zero(),
+            [&](auto ids)
+            {
+                const auto col = ids.at(kVPageIdxDim);
+                return (loop_idx * Traits::kBlockN0 + col) >= seqlen_k;
+            });
         
 
         // II. scale_s, mask, softmax
@@ -1208,14 +1231,30 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             auto v_shuffled = ck_tile::make_static_distributed_tensor<scalar_t>(Policy::MakeShuffledVRegBlockDescriptor());
             ck_tile::shuffle_tile(v_shuffled, v_prefetch);
             ck_tile::store_tile(v_lds_window, v_shuffled);
-            page_block_v_ids[n1_id] =
-                v_page_block_navigator.move_tile_window(page_block_v_ids[n1_id], v_dram_windows[n1_id], {0, Traits::kBlockK1});
 
             if constexpr (k1_loops > 1)
             {
                 ck_tile::static_for<0, k1_loops - 1, 1>{}([&](auto k1_id)
                 {
-                    const auto v = ck_tile::load_tile(v_dram_windows[n1_id]); // load next v
+                    // ck_tile:move_tile_window(v_dram_windows[n1_id], {0, Traits::kBlockK1});
+                    ck_tile::static_for<0, kVNumRepeat, 1>{}([&](auto rid)
+                    {
+                        const int32_t seqlen_idx = loop_idx * Traits::kBlockN0 + (k1_id + 1) * Traits::kBlockK1 +
+                            v_coord[kVPageIdxDim] + rid.value;
+                        const int32_t page_idx   = seqlen_idx / page_block_size;
+                        const int32_t seq_idx    = seqlen_idx % page_block_size;
+                        v_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_v;
+                    });
+                    v_dram_windows[n1_id].update_page_idx(v_offsets);
+
+                    auto v = ck_tile::load_tile(v_dram_windows[n1_id]); // load next v
+                    ck_tile::set_tile_if(
+                        v, ck_tile::numeric<scalar_t>::zero(),
+                        [&](auto ids)
+                        {
+                            const auto col = ids.at(kVPageIdxDim);
+                            return (loop_idx * Traits::kBlockN0 + (k1_id + 1) * Traits::kBlockK1 + col) >= seqlen_k;
+                        });
                     ck_tile::block_sync_lds();
                     gemm_1(o_acc[n1_id],
                            ck_tile::get_slice_tile(
@@ -1228,8 +1267,6 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                         Policy::MakeShuffledVRegBlockDescriptor());
                         ck_tile::shuffle_tile(v_shuffled, v);
                         ck_tile::store_tile(v_lds_window, v_shuffled); // store the prefetch
-                    page_block_v_ids[n1_id] = v_page_block_navigator.move_tile_window(
-                        page_block_v_ids[n1_id], v_dram_windows[n1_id], {0, Traits::kBlockK1});
                 });
             }
 
@@ -1239,6 +1276,13 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             if constexpr (n1_id < (n1_loops-1))
             {
                 v_prefetch = ck_tile::load_tile(v_dram_windows[n1_id + 1]);
+                ck_tile::set_tile_if(
+                    v_prefetch, ck_tile::numeric<scalar_t>::zero(),
+                    [&](auto ids)
+                    {
+                        const auto col = ids.at(kVPageIdxDim);
+                        return (loop_idx * Traits::kBlockN0 + col) >= seqlen_k;
+                    });
             }
 
             gemm_1(o_acc[n1_id],
@@ -1250,25 +1294,39 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             ck_tile::block_sync_lds();
         });
 
-        // Move K to next column
         if ((loop_idx + 1) < num_total_loop)
         {
-            // Move to next block of column
+            // Move K to next block of column
             constexpr ck_tile::array<int32_t, 2> next_qk_origin =
                 {0, IsEvenLoop ? Traits::kBlockK0 * (k0_loops - 1) : 0};
             ck_tile::move_tile_window(k_dram_window_origin, {Traits::kBlockN0, 0});
             k_dram_window.set_window_origin(k_dram_window_origin.get_window_origin() + next_qk_origin);
 
             // Recalculate offsets
-            ck_tile::static_for<0, kKNumRepeat, 1>{}([&](auto n0)
+            ck_tile::static_for<0, kKNumRepeat, 1>{}([&](auto rid)
             {
                 const int32_t seqlen_idx = (loop_idx + 1) * Traits::kBlockN0 + k_coord[kKPageIdxDim] +
-                                           Traits::kBlockN0 / kKNumRepeat * n0.value;
+                                           Traits::kBlockN0 / kKNumRepeat * rid.value;
                 const int32_t page_idx   = seqlen_idx / page_block_size;
                 const int32_t seq_idx    = seqlen_idx % page_block_size;
-                k_offsets[n0] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_k;
+                k_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_k;
             });
             k_dram_window.update_page_idx(k_offsets);
+
+            // Move to next V block
+            ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id)
+            {
+                // ck_tile:move_tile_window(v_dram_windows[n1_id], {0, -Traits::kBlockK1 * (k1_loops - 1)});
+                ck_tile::static_for<0, kVNumRepeat, 1>{}([&](auto rid)
+                {
+                    const int32_t seqlen_idx = (loop_idx + 1) * Traits::kBlockN0 +
+                        v_coord[kVPageIdxDim] + rid.value;
+                    const int32_t page_idx   = seqlen_idx / page_block_size;
+                    const int32_t seq_idx    = seqlen_idx % page_block_size;
+                    v_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_v;
+                });
+                v_dram_windows[n1_id].update_page_idx(v_offsets);
+            });
         }
     };
 
@@ -1357,14 +1415,11 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
     const auto hkid = hqid / params.hq_hk_ratio;
     const int32_t mid = __builtin_amdgcn_readfirstlane(tile_m_id * Traits::kBlockM);
 
-    const int32_t seqlen_k        = params.p_seqlens_k[bid];
-    const int32_t num_blocks      = ck_tile::integer_divide_ceil(seqlen_k, params.page_block_size);
-    const int32_t last_block_size = seqlen_k - (num_blocks - 1) * params.page_block_size;
-
     // Define causal mask
     using Mask = std::conditional_t<kIsCausal,
                                     ck_tile::SimplifiedGenericAttentionMask<true>,
                                     ck_tile::SimplifiedGenericAttentionMask<false>>;
+    const int32_t seqlen_k = params.p_seqlens_k[bid];
     Mask mask = kIsCausal ?
                 Mask{params.size_s, seqlen_k - params.size_s + 1, params.size_s, seqlen_k} :
                 Mask{params.size_s, seqlen_k};
@@ -1390,19 +1445,11 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
 
     const auto q_dram = MakeQDram<Policy>(p_query, params.size_s,  params.stride_s_q);
     const auto k_dram = MakeKDram<Policy>(p_key,   kv_cache_width, params.stride_s_k);
-    const auto v_dram = MakeVDram<Policy>(p_value, kv_cache_width, params.stride_s_v);
-
-    const auto v_dram_complete = MakeVDram<Policy, scalar_t>(nullptr, params.page_block_size, params.stride_s_v);
-    const auto v_dram_last     = MakeVDram<Policy, scalar_t>(nullptr, last_block_size,        params.stride_s_v);         
+    const auto v_dram = MakeVDram<Policy>(p_value, kv_cache_width, params.stride_s_v);    
 
     auto q_dram_window = ck_tile::make_tile_window(q_dram, q_dram_window_lengths, {mid, 0});
     auto k_dram_window = ck_tile::make_tile_window(k_dram, k_dram_window_lengths, {0, 0});
     auto v_dram_window = ck_tile::make_tile_window(v_dram, v_dram_window_lengths, {0, 0});
-
-    auto v_page_block_navigator = MakePageBlockNavigator<1, scalar_t>(
-        reinterpret_cast<const scalar_t*>(params.p_value), v_dram_complete, v_dram_last, bid, hkid, seqlen_k,
-        params.stride_b_v, params.stride_h_v,
-        params.p_block_table, params.block_table_batch_stride, params.page_block_size);
 
     if constexpr (kDoSplit)
     {
@@ -1431,7 +1478,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
         kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t>(
             q_dram_window,
             k_dram_window,
-            v_page_block_navigator,
+            v_dram_window,
             lse_acc_dram_window,
             out_acc_dram_window,
             p_block_table,
@@ -1470,7 +1517,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
         kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t>(
             q_dram_window,
             k_dram_window,
-            v_page_block_navigator,
+            v_dram_window,
             lse_dram_window,
             out_dram_window,
             p_block_table,
@@ -1854,6 +1901,11 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
             dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal>(params);
         }();
     );
+    // assert(is_causal == false);
+    // assert(query.scalar_type() == at::ScalarType::BFloat16);
+    // using scalar_t = ck_tile::bf16_t;
+    // using out_t = std::conditional_t<kForceOutAcc, acc_t, scalar_t>;
+    // dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, false>(params);
 
     return {output.to(opts), softmax_lse};
 }

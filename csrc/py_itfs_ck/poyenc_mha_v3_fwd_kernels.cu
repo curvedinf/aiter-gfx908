@@ -400,17 +400,17 @@ struct BlockFmhaPipelineQRKSVS
         static_assert(1 == k1_loops);
         do
         {
-            // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
 
+            // (1) load & store K =============================================
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
+            store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
+            block_sync_lds();
 
+            // (2) mfma + softmax =============================================
             {
-                store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
-                block_sync_lds();
-
                 gemm_0(s_acc,
                        get_slice_tile(q_tile,
                                       sequence<0, (k0_loops - 1) * kK0>{},
@@ -418,7 +418,7 @@ struct BlockFmhaPipelineQRKSVS
                        k_lds_window);
             }
 
-            // STAGE 2, scale_s, mask, softmax
+            // scale_s, mask, softmax
             {
                 s_acc = tile_elementwise_in(s_acc_element_func, s_acc);
 #if !CK_TILE_FMHA_FWD_FAST_EXP2
@@ -488,6 +488,26 @@ struct BlockFmhaPipelineQRKSVS
                 });
             });
 
+            // (3) load & store V =============================================
+            const auto v_prefetch = load_tile(v_dram_window);
+            block_sync_lds();
+            if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+            {
+                auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
+                    Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
+                shuffle_tile(v_shuffle_tmp, v_prefetch);
+                store_tile(
+                    v_lds_window,
+                    tile_elementwise_in(v_element_func, v_shuffle_tmp)); // store the prefetch
+            }
+            else
+            {
+                store_tile(v_lds_window,
+                           tile_elementwise_in(v_element_func, v_prefetch)); // store the prefetch
+            }
+            move_tile_window(v_dram_window, {0, kK1});
+
+            // (4) softmax + mfma =============================================
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                 p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
 
@@ -514,28 +534,9 @@ struct BlockFmhaPipelineQRKSVS
                 });
             });
 
-            const auto v_prefetch = load_tile(v_dram_window);
-            block_sync_lds();
-            if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
-            {
-                auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
-                    Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
-                shuffle_tile(v_shuffle_tmp, v_prefetch);
-                store_tile(
-                    v_lds_window,
-                    tile_elementwise_in(v_element_func, v_shuffle_tmp)); // store the prefetch
-            }
-            else
-            {
-                store_tile(v_lds_window,
-                           tile_elementwise_in(v_element_func, v_prefetch)); // store the prefetch
-            }
-            move_tile_window(v_dram_window, {0, kK1});
-
             const auto p =
                 cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
 
-            // STAGE 3, KV gemm
             {
                 block_sync_lds();
                 gemm_1(o_acc,

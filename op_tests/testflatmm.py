@@ -26,9 +26,9 @@ def run_gemm_ck_bpreshuffle(x, weight, x_scale, w_scale, dtype=torch.float16):
     return aiter.gemm_a8w8_bpreshuffle_CK(x, weight, x_scale, w_scale, dtype)
 
 @perftest(num_iters=5)
-def run_torch(x, weight, x_scale, w_scale,  dtype=torch.float):
-    x = x.to(dtypes.fp32)
-    weight = weight.to(dtypes.fp32)
+def run_torch(x, weight, x_scale, w_scale,  dtype=torch.float16):
+    x = x.to(dtypes.fp32) * x_scale
+    weight = weight.to(dtypes.fp32) * w_scale
     out = F.linear(x, weight)
     return out.to(dtype)
 
@@ -65,8 +65,14 @@ def test_flatmm_ck(dtype, m, n, k):
     weight = (torch.rand((n, k), dtype=torch.float32, device="cuda") / 10).to(
         torch.float8_e4m3fnuz
     )
+    # x = torch.ones_like(x, dtype=dtypes.fp8, device="cuda")
+    # weight = torch.ones_like(weight, dtype=dtypes.fp8, device="cuda")
     x_scale = torch.ones([scale_k, scale_m], dtype=torch.float32, device="cuda")
     w_scale = torch.ones([scale_k, scale_n], dtype=torch.float32, device="cuda")
+
+    # x_scale = torch.ones_like(x_scale, dtype=torch.float32, device="cuda")
+    # w_scale = torch.ones_like(w_scale, dtype=torch.float32, device="cuda")
+
     x_scale_trans = torch.transpose(x_scale, 0, 1)
     w_scale_trans = torch.transpose(w_scale, 0, 1)
 
@@ -74,36 +80,53 @@ def test_flatmm_ck(dtype, m, n, k):
     flat_weight = flat_weight.permute(0, 2, 3, 1, 4).contiguous()
     flat_weight = flat_weight.view(n, -1)
 
+    # x = torch.ones_like(x, dtype=torch.float8_e4m3fnuz, device="cuda")
+    # weight = torch.ones_like(weight, dtype=torch.float8_e4m3fnuz, device="cuda")
+    # x_scale = torch.ones_like(x_scale, dtype=torch.float32, device="cuda")
+    # w_scale = torch.ones_like(w_scale, dtype=torch.float32, device="cuda")
+
     a, avg_a = run_torch2(x, weight, x_scale_trans, w_scale_trans, dtype)
-    # a, avg_a = run_gemm_ck_bpreshuffle(x, flat_weight, x_scale, w_scale, dtype)
     b, avg_b = run_flatmm(x, flat_weight, x_scale, w_scale, dtype)
     tflops = 2 * m *n *k /avg_b /1e6
-    print(a)
-    print(b)
+    # print(a[:,:3])
+    # print(b[:,:3])
     msg = f"[solin  perf] tflops: {tflops} ,dim: {str(dim):<20} dtype: {dtype}, torch avg: {avg_a:<8.2f} us, cktile avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b -1:<5.1%}"
     checkAllclose(a, b, msg="a,b: " + msg, rtol=1e-2, atol=0.01)
 
 @benchmark()
 def test_flatmm(dtype, m, n, k):
     dim = (m, n, k)
-    x = torch.randn((m, k), dtype=dtypes.fp16, device="cuda")
-    weight = torch.randn((n, k), dtype=dtypes.fp16, device="cuda")
-    x, x_scale = aiter.pertoken_quant(x, quant_dtype=dtypes.fp8)
-    weight, w_scale = aiter.pertoken_quant(weight, quant_dtype=dtypes.fp8)
-    weight_shuffle = shuffle_weight(weight, layout=(16, 16))
+    # x = torch.randn((m, k), dtype=dtypes.fp16, device="cuda")
+    # weight = torch.randn((n, k), dtype=dtypes.fp16, device="cuda")
+    # x, x_scale = aiter.pertoken_quant(x, quant_dtype=dtypes.fp8)
+    # weight, w_scale = aiter.pertoken_quant(weight, quant_dtype=dtypes.fp8)
+    # weight_shuffle = shuffle_weight(weight, layout=(16, 16))
+
+    x = (torch.rand((m, k), dtype=torch.float32, device="cuda") / 10).to(
+        torch.float8_e4m3fnuz
+    )
+    weight = (torch.rand((n, k), dtype=torch.float32, device="cuda") / 10).to(
+        torch.float8_e4m3fnuz
+    )
     out = torch.empty(m, n, dtype=dtypes.fp16, device="cuda")
     flat_weight = weight.view(n // 16, 16, k // 64, 4, 16)
     flat_weight = flat_weight.permute(0, 2, 3, 1, 4).contiguous()
     flat_weight = flat_weight.view(n, -1)
     #weight_shuffle = shuffle_weight(weight, layout=(16, 16))
-    x_scale = torch.ones([1, m], dtype=torch.float32, device="cuda")
-    w_scale = torch.ones([1, n], dtype=torch.float32, device="cuda")
+    x_scale = torch.ones([1,m], dtype=torch.float32, device="cuda")
+    w_scale = torch.ones([1,n], dtype=torch.float32, device="cuda")
     x_scale_trans = torch.transpose(x_scale, 0, 1)
     w_scale_trans = torch.transpose(w_scale, 0, 1)
-    out = torch.empty(m, n, dtype=dtypes.fp16, device="cuda")
+    # out = torch.empty(m, n, dtype=dtypes.fp16, device="cuda")
+    x = torch.ones_like(x, dtype=dtypes.fp8, device="cuda")
+    weight = torch.ones_like(weight, dtype=dtypes.fp8, device="cuda")
+    x_scale = torch.ones_like(x_scale, dtype=torch.float32, device="cuda")
+    w_scale = torch.ones_like(w_scale, dtype=torch.float32, device="cuda")
 
     a, avg_a = run_torch(x, weight, x_scale_trans, w_scale_trans, dtype)
     b, avg_b = run_flatmm(x, flat_weight, x_scale, w_scale, dtype)
+    print(a[:,:3])
+    print(b[:,:3])
     # flat_weight = weight.view(n // 16, 16, k // 64, 4, 16)
     # flat_weight = flat_weight.permute(0, 2, 3, 1, 4).contiguous()
     # flat_weight = flat_weight.view(n, -1)
@@ -130,9 +153,9 @@ def test_flatmm(dtype, m, n, k):
 df = []
 for dtype in [torch.float16]:
     for (n, k) in [(4096, 5120),]:
-        for m in [2048]:
-            # ret = test_flatmm_ck(dtype, m, n, k)//can pass
-            ret = test_flatmm(dtype, m, n, k)
+        for m in [128]:
+            ret = test_flatmm_ck(dtype, m, n, k)###can pass
+            # ret = test_flatmm(dtype, m, n, k)
             df.append(ret)
 df = pd.DataFrame(df)
 aiter.logger.info(f"summary:\n{df}")

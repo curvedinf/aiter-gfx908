@@ -143,19 +143,19 @@ template <typename AccDataType, typename EDataType,
         int MWarp, int NWarp , int KWarp,
         int MWTile, int NWTile, int KWTile>
 using CustomConfig = CreateTileConfig<
-          false,//kPadM
-          false,//kPadN
-          false,//kPadK
-          2,   // BlockPerCu
-          128,   // MTile
-          128,   // NTile
-          128,   // KTile
-          1,     // MWarp
-          4,     // NWarp
-          1,     // KWarp
-          16,    // MWTile
-          16,    // NWTile
-          64      // KWTile
+        PadM,//kPadM
+        PadN,//kPadN
+        PadK,//kPadK
+        BlockPerCu,   // BlockPerCu
+        MTile,   // MTile
+        NTile,   // NTile
+        KTile,   // KTile
+        MWarp,     // MWarp
+        NWarp,     // NWarp
+        KWarp,     // KWarp
+        MWTile,    // MWTile
+        NWTile,    // NWTile
+        KWTile      // KWTile
       >;
 
 template <typename DDataType, typename EDataType, typename FlatmmInstance>
@@ -167,7 +167,6 @@ __forceinline__ torch::Tensor flatmm_ck_impl(
         torch::Tensor &out      // Out:[M, N] fp16
         )
      {
-        // printf("solin:-------kernel====.\n");
         TORCH_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
         TORCH_CHECK(x_scale.dtype() == w_scale.dtype(), "Scales should have the same dtype!");
         using ADataType   = typename GemmBasicTypeConfig<ck_tile::fp8_t>::ADataType;

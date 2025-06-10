@@ -10,8 +10,10 @@ from aiter.test_common import perftest
 from aiter.ops.shuffle import shuffle_weight
 from flatmm_ck_common import kernels_list
 import argparse
+from einops import rearrange
+from einops import repeat as eirp
 
-
+block_shape = (128, 128)
 def checkClose(a, b, rtol=1e-3, atol=0.01):
     isClose = torch.isclose(a, b, rtol=rtol, atol=atol)
     mask = ~isClose
@@ -33,6 +35,24 @@ def run_torch(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16):
         out = out.to(bias) + bias
     return out.to(dtype)
 
+@perftest(num_iters=5)
+def run_torch5(x, weight, x_scale, w_scale, dtype=torch.float16):
+    block_shape_n, block_shape_k = block_shape
+    m, k = x.shape
+    n = weight.shape[0]
+
+    x_scale_ = eirp(x_scale, "m k -> m (k repeat)", repeat=block_shape_k)
+    x_scale_ = x_scale_[:m, :k]
+
+    w_scale_ = eirp(w_scale, "n k -> (n repeat) k", repeat=block_shape_n)
+    w_scale_ = eirp(w_scale_, "n k -> n (k repeat)", repeat=block_shape_k)
+    w_scale_ = w_scale_[:n, :k]
+
+    x_ = x.to(x_scale.dtype) * x_scale_
+    weight_ = weight.to(w_scale.dtype) * w_scale_
+
+    out = F.linear(x_.to(torch.float32), weight_.to(torch.float32))
+    return out.to(dtype)
 
 def get_untuned_gemm_list(untuned_gemm_file):
     assert os.path.exists(
@@ -62,13 +82,37 @@ def kernel_instance_test(x, weight, x_scale, w_scale, out, kernel_id, splitK=0):
 
 def tune_gemm(m, n, k, useSplitK=False):
     dim = (m, n, k)
-    x = torch.randn((m, k), dtype=dtypes.fp16, device="cuda")
-    weight = torch.randn((n, k), dtype=dtypes.fp16, device="cuda")
-    x, x_scale = aiter.pertoken_quant(x, quant_dtype=dtypes.fp8)
-    weight, w_scale = aiter.pertoken_quant(weight, quant_dtype=dtypes.fp8)
-    weight_shuffle = shuffle_weight(weight, layout=(16, 16))
+    block_shape_n, block_shape_k = block_shape
+    scale_m = m
+    scale_n = (n + block_shape_n - 1) // block_shape_n
+    scale_k = (k + block_shape_k - 1) // block_shape_k
 
-    ref_out = run_torch(x, weight, x_scale, w_scale, dtype=dtypes.fp16)
+    x = (torch.rand((m, k), dtype=torch.float32, device="cuda") / 10).to(
+        torch.float8_e4m3fnuz
+    )
+    weight = (torch.rand((n, k), dtype=torch.float32, device="cuda") / 10).to(
+        torch.float8_e4m3fnuz
+    )
+    x_scale = torch.ones([scale_k, scale_m], dtype=torch.float32, device="cuda")
+    w_scale = torch.ones([scale_k, scale_n], dtype=torch.float32, device="cuda")
+    x_scale_trans = torch.transpose(x_scale, 0, 1)
+    w_scale_trans = torch.transpose(w_scale, 0, 1)
+
+    flat_weight = weight.view(n // 16, 16, k // 64, 4, 16)
+    flat_weight = flat_weight.permute(0, 2, 3, 1, 4).contiguous()
+    flat_weight = flat_weight.view(n, -1)
+    # dim = (m, n, k)
+    # x = torch.randn((m, k), dtype=dtypes.fp16, device="cuda")
+    # weight = torch.randn((n, k), dtype=dtypes.fp16, device="cuda")
+    # x, x_scale = aiter.pertoken_quant(x, quant_dtype=dtypes.fp8)
+    # weight, w_scale = aiter.pertoken_quant(weight, quant_dtype=dtypes.fp8)
+    # weight_shuffle = shuffle_weight(weight, layout=(16, 16))
+
+    # ref_out = run_torch(x, weight, x_scale, w_scale, dtype=dtypes.fp16)
+    ref_out = run_torch5(x, weight, x_scale_trans, w_scale_trans, torch.float16)
+    if isinstance(ref_out, tuple):
+        print("WARNING: run_torch5 returned tuple. Extracting tensor")
+        ref_out = [item for item in ref_out if isinstance(item, torch.Tensor)][0]
     out = torch.empty(m, n, dtype=dtypes.fp16, device="cuda")
 
     print(f"*******************M:{m} X N:{n} X K:{k}**************************")
@@ -88,7 +132,7 @@ def tune_gemm(m, n, k, useSplitK=False):
         for splitK in range(maxsplitK + 1):
             try:
                 (out), avg_t = kernel_instance_test(
-                    x, weight_shuffle, x_scale, w_scale, out, i, splitK
+                    x, flat_weight, x_scale, w_scale, out, i, splitK
                 )
                 isClosed = checkClose(ref_out, out, rtol=1e-2, atol=0.1)
                 if isClosed:

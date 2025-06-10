@@ -8,7 +8,7 @@ import os
 import torch
 import triton
 import triton.language as tl
-from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
+from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd_chunked
 import aiter.ops.triton.utils.arch_info as arch_info
 from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
 
@@ -82,7 +82,7 @@ def _gemm_afp4_wfp4_kernel(
 
     if NUM_KSPLIT == 1:
         # number of XCDs expected as 8 (MI300 and MI350)
-        pid = remap_xcd(pid, GRID_MN, NUM_XCDS=8, CHUNK_SIZE=GROUP_SIZE_M)
+        pid = remap_xcd_chunked(pid, GRID_MN, NUM_XCDS=8, CHUNK_SIZE=GROUP_SIZE_M)
         pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
     else:
         pid_m = pid // num_pid_n
@@ -232,7 +232,7 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
     if NUM_KSPLIT == 1:
-        remap_xcd(pid, GRID_MN)
+        remap_xcd_chunked(pid, GRID_MN)
 
         pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
     else:

@@ -172,8 +172,7 @@ struct BlockFmhaPipelineQRKSVS
     static constexpr bool kHasDropout       = Problem::kHasDropout;
 
     static_assert(!kHasLogitsSoftCap &&
-                  Problem::BiasEnum == ck_tile::BlockAttentionBiasEnum::NO_BIAS &&
-                  !FmhaMask::IsMasking && !kHasDropout);
+                  Problem::BiasEnum == ck_tile::BlockAttentionBiasEnum::NO_BIAS && !kHasDropout);
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
@@ -397,10 +396,6 @@ struct BlockFmhaPipelineQRKSVS
         constexpr index_t k0_loops = kQKHeaddim / kK0;
         constexpr index_t k1_loops = kN0 / kK1;
 
-        auto k_dram_window = make_tile_window(
-            k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
-        auto k_block_tile = load_tile(k_dram_window); // global read i
-
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);
         do
@@ -408,7 +403,11 @@ struct BlockFmhaPipelineQRKSVS
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
 
-            { // tail
+            auto k_dram_window = make_tile_window(
+                k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
+            auto k_block_tile = load_tile(k_dram_window); // global read i
+
+            {
                 store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
                 block_sync_lds();
 
@@ -418,9 +417,8 @@ struct BlockFmhaPipelineQRKSVS
                                       sequence<kM0, k0_loops * kK0>{}),
                        k_lds_window);
             }
-            const auto v_prefetch = load_tile(v_dram_window); // prefetch load v tile
 
-            // STAGE 2, scale_s, add bias, mask, softmax
+            // STAGE 2, scale_s, mask, softmax
             {
                 s_acc = tile_elementwise_in(s_acc_element_func, s_acc);
 #if !CK_TILE_FMHA_FWD_FAST_EXP2
@@ -516,6 +514,7 @@ struct BlockFmhaPipelineQRKSVS
                 });
             });
 
+            const auto v_prefetch = load_tile(v_dram_window);
             block_sync_lds();
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
             {
@@ -537,15 +536,6 @@ struct BlockFmhaPipelineQRKSVS
                 cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
 
             // STAGE 3, KV gemm
-            // move K tile windows
-            move_tile_window(k_dram_block_window, {kN0, 0});
-            if(i_total_loops < num_total_loop - 1)
-            {
-                k_dram_window = make_tile_window(
-                    k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
-                k_block_tile = load_tile(k_dram_window);
-            }
-            // tail
             {
                 block_sync_lds();
                 gemm_1(o_acc,
@@ -553,6 +543,8 @@ struct BlockFmhaPipelineQRKSVS
                        v_lds_window);
                 block_sync_lds();
             }
+            // move K tile windows
+            move_tile_window(k_dram_block_window, {kN0, 0});
         } while(++i_total_loops < num_total_loop);
 
         // store lse

@@ -26,7 +26,7 @@ def compile(
     return compile_template_op(
         src_template,
         MD_NAME,
-        ["../utils.h", "pa_mtp.cuh", "../../include"],
+        ["../utils.h", "pa.cuh", "../../include"],
         [],
         gqa_ratio=gqa_ratio,
         head_size=head_size,
@@ -62,7 +62,7 @@ def paged_attention_rocm(
     v_scale,
     fp8_out_scale,
     num_threads,
-    mtp,
+    mtp=1,
 ):
     import torch
     from csrc.cpp_itfs.torch_utils import torch_to_c_types

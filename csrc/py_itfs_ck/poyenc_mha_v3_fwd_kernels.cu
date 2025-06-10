@@ -27,11 +27,48 @@
 
 namespace aiter {
 
-using BlockFmhaPipelineQRKSVSDefaultPolicy =
-    ck_tile::BlockFmhaPipelineQXKSVSCustomPolicy</* QLoadOnce = */ true,
-                                                 /* AsyncCopy = */ false,
-                                                 /* NumPrefetchK = */ 1,
-                                                 /* NumPrefetchV = */ 1>;
+struct BlockFmhaPipelineQRKSVSDefaultPolicy
+    : ck_tile::BlockFmhaPipelineQXKSVSCustomPolicy</* QLoadOnce = */ true,
+                                                   /* AsyncCopy = */ false,
+                                                   /* NumPrefetchK = */ 1,
+                                                   /* NumPrefetchV = */ 1>
+
+{
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
+    {
+        using namespace ck_tile;
+
+        using KDataType = remove_cvref_t<typename Problem::KDataType>;
+
+        constexpr index_t kBlockSize = Problem::kBlockSize;
+        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
+
+        constexpr index_t MaxVectorSize = 16 / sizeof(KDataType);
+        constexpr index_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
+
+        constexpr index_t KPerThread      = ck_tile::min(MaxVectorSize, ElemPerThread);
+        constexpr index_t KThreads        = kKPerBlock / KPerThread;
+        constexpr index_t NThreadPerWarp  = get_warp_size() / KThreads;
+        constexpr index_t NumWarps        = kBlockSize / get_warp_size();
+        constexpr index_t NumWarpGroups   = 2;
+        constexpr index_t NumWarpPerGroup = NumWarps / NumWarpGroups;
+        constexpr index_t NPerThread      = kNPerBlock / (NumWarps * NThreadPerWarp);
+
+        static_assert(NumWarps == NumWarpGroups * NumWarpPerGroup);
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<1>,
+                tuple<sequence<NumWarpGroups, NPerThread, NumWarpPerGroup, NThreadPerWarp>,
+                      sequence<KThreads, KPerThread>>,
+                tuple<sequence<1, 1>, sequence<1, 2>>,
+                tuple<sequence<0, 2>, sequence<3, 0>>,
+                sequence<1, 2>,
+                sequence<1, 1>>{});
+    }
+};
 
 // This pipeline is qkv all located in LDS
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSDefaultPolicy>
@@ -308,11 +345,8 @@ struct BlockFmhaPipelineQRKSVS
         constexpr index_t k0_loops = kQKHeaddim / kK0;
         constexpr index_t k1_loops = kN0 / kK1;
 
-        auto k_dram_window =
-            make_tile_window(k_dram_block_window.get_bottom_tensor_view(),
-                             k_dram_block_window.get_window_lengths(),
-                             k_dram_block_window.get_window_origin(),
-                             Policy::template MakeKDramTileDistribution<Problem>());
+        auto k_dram_window = make_tile_window(
+            k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
         auto k_block_tile = load_tile(k_dram_window); // global read i
 
         static_assert(1 <= k0_loops);
@@ -608,11 +642,8 @@ struct BlockFmhaPipelineQRKSVS
             move_tile_window(k_dram_block_window, {kN0, 0});
             if(i_total_loops < num_total_loop - 1)
             {
-                k_dram_window =
-                    make_tile_window(k_dram_block_window.get_bottom_tensor_view(),
-                                     k_dram_block_window.get_window_lengths(),
-                                     k_dram_block_window.get_window_origin(),
-                                     Policy::template MakeKDramTileDistribution<Problem>());
+                k_dram_window = make_tile_window(
+                    k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
                 k_block_tile = load_tile(k_dram_window);
             }
             // tail

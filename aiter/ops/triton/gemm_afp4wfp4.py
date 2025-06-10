@@ -81,8 +81,8 @@ def _gemm_afp4_wfp4_kernel(
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
     if NUM_KSPLIT == 1:
-        remap_xcd(pid, GRID_MN)
-
+        # number of XCDs expected as 8 (MI300 and MI350)
+        pid = remap_xcd(pid, GRID_MN, NUM_XCDS=8, CHUNK_SIZE=GROUP_SIZE_M)
         pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
     else:
         pid_m = pid // num_pid_n
@@ -526,6 +526,7 @@ def gemm_afp4wfp4(
             * triton.cdiv(N, META["BLOCK_SIZE_N"])
         ),
     )
+
     _gemm_afp4_wfp4_kernel[grid](
         x,
         w,

@@ -171,11 +171,9 @@ struct BlockFmhaPipelineQRKSVS
     static constexpr bool kStoreLSE         = Problem::kStoreLSE;
     static constexpr bool kHasDropout       = Problem::kHasDropout;
 
-    static_assert((CK_TILE_FMHA_FWD_FAST_EXP2 &&
-                   (kHasLogitsSoftCap &&
-                        Problem::BiasEnum == ck_tile::BlockAttentionBiasEnum::NO_BIAS ||
-                    !kHasLogitsSoftCap)) ||
-                  (!CK_TILE_FMHA_FWD_FAST_EXP2 && !kHasLogitsSoftCap));
+    static_assert(!kHasLogitsSoftCap &&
+                  Problem::BiasEnum == ck_tile::BlockAttentionBiasEnum::NO_BIAS &&
+                  !FmhaMask::IsMasking && !kHasDropout);
 
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this

@@ -26,7 +26,11 @@ def compile(
     return compile_template_op(
         src_template,
         MD_NAME,
-        ["../utils.h", "pa.cuh", "../../include"],
+        [
+            f"{AITER_CORE_DIR}/csrc/cpp_itfs/utils.h",
+            f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa.cuh",
+            f"{AITER_CORE_DIR}/csrc/include",
+        ],
         [],
         gqa_ratio=gqa_ratio,
         head_size=head_size,

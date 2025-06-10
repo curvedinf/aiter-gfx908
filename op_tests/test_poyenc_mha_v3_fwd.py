@@ -136,14 +136,8 @@ if __name__ == "__main__":
     d_v = 128
     mha_type = "mha"
     dtype = dtypes.bf16
+    seed = None
 
     test_flash_attn_output(
-        batch_size,
-        nheads,
-        seqlen_q,
-        seqlen_k,
-        d,
-        d_v,
-        mha_type,
-        dtype,
+        batch_size, nheads, seqlen_q, seqlen_k, d, d_v, mha_type, dtype, seed
     )

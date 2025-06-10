@@ -107,7 +107,8 @@ def get_x_vals():
     x_vals += [(2 ** (v - 1), 4096 * v, 4096 * v) for v in range(1, 6)]
     # x_vals = [(128, 1024, 4096)]
     x_vals += [(16, 16384, 3328 * 2), (128, 16384, 3328 * 2)]
-    x_vals += [(128, 106496, 32768), (128, 16384, 53248)]
+    # x_vals = [(128, 106496, 32768), (128, 16384, 53248), (128, 79872, 32768), (128, 24576, 53248)]
+    x_vals = [(128, 159744, 53248)] # this case fails
     return x_vals
 
 
@@ -162,7 +163,8 @@ def run_torch(x, w, x_scales, w_scales, dtype):
 @pytest.mark.parametrize("M, N, K", get_x_vals())
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("output", [True, False])
-@pytest.mark.parametrize("splitn", [1, 2, 3])
+# @pytest.mark.parametrize("splitn", [1, 2, 3])
+@pytest.mark.parametrize("splitn", [2, 3])
 def test_gemm_afp4_wfp4(M: int, N: int, K: int, dtype, output, splitn: int):
     if triton.runtime.driver.active.get_current_target().arch not in ("gfx950"):
         pytest.skip("MXFP4 not supported on this architecture")

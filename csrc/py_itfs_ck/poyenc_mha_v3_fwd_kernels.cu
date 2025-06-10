@@ -54,19 +54,19 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
         constexpr index_t NumWarps        = kBlockSize / get_warp_size();
         constexpr index_t NumWarpGroups   = 2;
         constexpr index_t NumWarpPerGroup = NumWarps / NumWarpGroups;
-        constexpr index_t NPerThread      = kNPerBlock / (NumWarps * NThreadPerWarp);
+        constexpr index_t NPerThread      = kNPerBlock / (NumWarpPerGroup * NThreadPerWarp);
 
         static_assert(NumWarps == NumWarpGroups * NumWarpPerGroup);
 
+        // 2 warp-groups share the same data
         return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<1>,
-                tuple<sequence<NumWarpGroups, NPerThread, NumWarpPerGroup, NThreadPerWarp>,
-                      sequence<KThreads, KPerThread>>,
-                tuple<sequence<1, 1>, sequence<1, 2>>,
-                tuple<sequence<0, 2>, sequence<3, 0>>,
-                sequence<1, 2>,
-                sequence<1, 1>>{});
+            tile_distribution_encoding<sequence<NumWarpGroups>,
+                                       tuple<sequence<NPerThread, NumWarpPerGroup, NThreadPerWarp>,
+                                             sequence<KThreads, KPerThread>>,
+                                       tuple<sequence<0, 1>, sequence<1, 2>>,
+                                       tuple<sequence<0, 1>, sequence<2, 0>>,
+                                       sequence<1, 2>,
+                                       sequence<0, 1>>{});
     }
 };
 

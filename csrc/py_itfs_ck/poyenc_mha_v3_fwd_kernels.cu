@@ -82,41 +82,44 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
 
         static_assert(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>);
 
-        constexpr index_t N1 = GetAlignmentV<Problem>();
-        constexpr index_t N0 = kNPerBlock / N1; // P
+        constexpr index_t NPerThread = GetAlignmentV<Problem>();
+        constexpr index_t NThreads   = kNPerBlock / NPerThread; // P
 
         constexpr index_t total_pixels = kNPerBlock * kKPerBlock / kBlockSize;
-        static_assert(total_pixels % N1 == 0); // TODO: this is not always true?
-        constexpr index_t K3     = total_pixels / N1;
-        constexpr index_t kKPack = GetSmemKPackV<Problem>();
-        static_assert(kKPack % K3 == 0);
-        constexpr index_t K2 = kKPack / K3; // TODO: this dimention could be outside single wave
-        if constexpr(get_warp_size() % (K2 * N0) == 0)
+        static_assert(total_pixels % NPerThread == 0); // TODO: this is not always true?
+        constexpr index_t KPerThread = total_pixels / NPerThread;
+        constexpr index_t kKPack     = GetSmemKPackV<Problem>();
+        static_assert(kKPack % KPerThread == 0);
+        constexpr index_t K2 =
+            kKPack / KPerThread; // TODO: this dimention could be outside single wave
+        if constexpr(get_warp_size() % (K2 * NThreads) == 0)
         {
-            constexpr index_t K1 = get_warp_size() / (K2 * N0);
-            constexpr index_t K0 = kBlockSize / get_warp_size();
-            static_assert(kKPerBlock == K0 * K1 * K2 * K3);
+            constexpr index_t K1       = get_warp_size() / (K2 * NThreads);
+            constexpr index_t NumWarps = kBlockSize / get_warp_size();
+            static_assert(kKPerBlock == NumWarps * K1 * K2 * KPerThread);
             return make_static_tile_distribution(
-                tile_distribution_encoding<sequence<1>,
-                                           tuple<sequence<N0, N1>, sequence<K0, K1, K2, K3>>,
-                                           tuple<sequence<2>, sequence<2, 1, 2>>,
-                                           tuple<sequence<0>, sequence<1, 0, 2>>,
-                                           sequence<2, 1>,
-                                           sequence<3, 1>>{});
+                tile_distribution_encoding<
+                    sequence<1>,
+                    tuple<sequence<NThreads, NPerThread>, sequence<NumWarps, K1, K2, KPerThread>>,
+                    tuple<sequence<2>, sequence<2, 1, 2>>,
+                    tuple<sequence<0>, sequence<1, 0, 2>>,
+                    sequence<2, 1>,
+                    sequence<3, 1>>{});
         }
         else
         {
-            constexpr index_t K1   = (K2 * N0) / get_warp_size();
+            constexpr index_t K1   = (K2 * NThreads) / get_warp_size();
             constexpr index_t K2_m = K2 / K1;
             constexpr index_t K0   = kBlockSize / get_warp_size() / K1;
-            static_assert(kKPerBlock == K0 * K1 * K2_m * K3);
+            static_assert(kKPerBlock == K0 * K1 * K2_m * KPerThread);
             return make_static_tile_distribution(
-                tile_distribution_encoding<sequence<1>,
-                                           tuple<sequence<N0, N1>, sequence<K0, K1, K2_m, K3>>,
-                                           tuple<sequence<2, 2>, sequence<1, 2>>,
-                                           tuple<sequence<0, 1>, sequence<0, 2>>,
-                                           sequence<2, 1>,
-                                           sequence<3, 1>>{});
+                tile_distribution_encoding<
+                    sequence<1>,
+                    tuple<sequence<NThreads, NPerThread>, sequence<K0, K1, K2_m, KPerThread>>,
+                    tuple<sequence<2, 2>, sequence<1, 2>>,
+                    tuple<sequence<0, 1>, sequence<0, 2>>,
+                    sequence<2, 1>,
+                    sequence<3, 1>>{});
         }
     }
 };
@@ -443,6 +446,19 @@ struct BlockFmhaPipelineQRKSVS
                        k_lds_window);
             }
             const auto v_prefetch = load_tile(v_dram_window); // prefetch load v tile
+
+#if 0
+            constexpr int target_warp_id = 0;
+            if(get_block_1d_id() == 0 && get_warp_id() == target_warp_id && get_lane_id() == 32)
+            {
+                printf("[POYENC] warp id: %d\n", get_warp_id());
+                for(int idx = 0; idx < v_prefetch.thread_buf_.size(); ++idx)
+                {
+                    printf("%7.3f ", ck_tile::type_convert<float>(v_prefetch.thread_buf_[idx]));
+                }
+                printf("\n");
+            }
+#endif
 
             // STAGE 2, scale_s, add bias, mask, softmax
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)

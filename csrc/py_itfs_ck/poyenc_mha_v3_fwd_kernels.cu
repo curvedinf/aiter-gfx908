@@ -408,18 +408,6 @@ struct BlockFmhaPipelineQRKSVS
             // STAGE 1, QK gemm
             clear_tile(s_acc); // initialize C
 
-            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
-            {
-                __builtin_amdgcn_sched_barrier(
-                    0); // prevent from messing up the order of global loads
-            }
-            const auto bias_tile = load_tile(bias_dram_window); // load bias tile
-            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
-            {
-                __builtin_amdgcn_sched_barrier(
-                    0); // prevent from messing up the order of global loads
-            }
-
             static_for<0, k0_loops - 1, 1>{}([&](auto i_k0) {
                 store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
                 block_sync_lds();
@@ -445,56 +433,7 @@ struct BlockFmhaPipelineQRKSVS
             }
             const auto v_prefetch = load_tile(v_dram_window); // prefetch load v tile
 
-#if 0
-            constexpr int target_warp_id = 0;
-            if(get_block_1d_id() == 0 && get_warp_id() == target_warp_id && get_lane_id() == 32)
-            {
-                printf("[POYENC] warp id: %d\n", get_warp_id());
-                for(int idx = 0; idx < v_prefetch.thread_buf_.size(); ++idx)
-                {
-                    printf("%7.3f ", ck_tile::type_convert<float>(v_prefetch.thread_buf_[idx]));
-                }
-                printf("\n");
-            }
-#endif
-
             // STAGE 2, scale_s, add bias, mask, softmax
-            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
-            {
-                s_acc = tile_elementwise_in(s_acc_element_func, s_acc);
-                tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
-                tile_elementwise_inout(
-                    [&](auto& x, const auto& y) {
-#if !CK_TILE_FMHA_FWD_FAST_EXP2
-                        x += type_convert<SaccDataType>(bias_element_func(y));
-#else
-                        x += log2e_v<SaccDataType> *
-                             type_convert<SaccDataType>(bias_element_func(y));
-#endif
-                    },
-                    s_acc,
-                    bias_tile);
-            }
-            else if constexpr(BiasEnum == BlockAttentionBiasEnum::ALIBI)
-            {
-                const auto k_origin    = k_dram_block_window.get_window_origin();
-                constexpr auto s_spans = decltype(s_acc)::get_distributed_spans();
-                s_acc                  = tile_elementwise_in(s_acc_element_func, s_acc);
-                sweep_tile_span(s_spans[number<0>{}], [&](auto idx0) {
-                    sweep_tile_span(s_spans[number<1>{}], [&](auto idx1) {
-                        const auto tile_idx = get_x_indices_from_distributed_indices(
-                            s_acc.get_tile_distribution(), make_tuple(idx0, idx1));
-
-                        const auto row = q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
-                        const auto col = k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
-                        constexpr auto i_j_idx = make_tuple(idx0, idx1);
-
-                        s_acc(i_j_idx) *= scale_s;
-                        position_encoding.update(s_acc(i_j_idx), row, col);
-                    });
-                });
-            }
-            else
             {
                 s_acc = tile_elementwise_in(s_acc_element_func, s_acc);
                 if constexpr(kHasLogitsSoftCap)
@@ -520,7 +459,7 @@ struct BlockFmhaPipelineQRKSVS
 #endif
                 }
             }
-            move_tile_window(bias_dram_window, {0, kN0});
+
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 const auto k_origin      = k_dram_block_window.get_window_origin();
@@ -562,14 +501,6 @@ struct BlockFmhaPipelineQRKSVS
             static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
                 /// NOTICE: bias might be materialized mask including -inf values, need
                 /// consideration
-                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                             FmhaMask::IsMasking)
-                {
-                    return raw_m == -numeric<SMPLComputeDataType>::infinity()
-                               ? type_convert<SMPLComputeDataType>(0.f)
-                               : raw_m;
-                }
-                else
                 {
                     return raw_m;
                 }
@@ -584,12 +515,6 @@ struct BlockFmhaPipelineQRKSVS
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                 BiasEnum == BlockAttentionBiasEnum::ALIBI)
-                    {
-                        p_compute(i_j_idx) = ck_tile::exp2(s[i_j_idx] - get_validated_m(m[i_idx]));
-                    }
-                    else
                     {
                         if constexpr(kHasLogitsSoftCap)
                         {
@@ -617,12 +542,6 @@ struct BlockFmhaPipelineQRKSVS
                 constexpr auto i_idx = make_tuple(idx0);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 const auto tmp = [&]() {
-                    if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                                 BiasEnum == BlockAttentionBiasEnum::ALIBI)
-                    {
-                        return ck_tile::exp2(m_old[i_idx] - get_validated_m(m[i_idx]));
-                    }
-                    else
                     {
                         if constexpr(kHasLogitsSoftCap)
                         {
@@ -648,12 +567,6 @@ struct BlockFmhaPipelineQRKSVS
                     o_acc(i_j_idx) *= tmp;
                 });
             });
-
-            if constexpr(kHasDropout)
-            {
-                dropout.template Run<decltype(gemm_0), SMPLComputeDataType, RandValOutputDataType>(
-                    smem_ptr, seqlen_k_start + i_total_loops * kN0, p_compute, randval_dram_window);
-            }
 
             block_sync_lds();
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
@@ -730,12 +643,6 @@ struct BlockFmhaPipelineQRKSVS
             sweep_tile_span(lse_spans[number<0>{}], [&, m_ = m, l_ = l](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
-                             BiasEnum == BlockAttentionBiasEnum::ALIBI)
-                {
-                    lse(i_idx) = m_[i_idx] / C_LOG2E + log(l_[i_idx]);
-                }
-                else
                 {
                     if constexpr(kHasLogitsSoftCap)
                     {

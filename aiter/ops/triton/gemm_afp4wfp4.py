@@ -171,7 +171,7 @@ def _gemm_afp4_wfp4_kernel(
         and (args["SPLITK_BLOCK_SIZE"] % args["BLOCK_SIZE_K"] == 0)
         and (args["K"] % (args["SPLITK_BLOCK_SIZE"] // 2) == 0),
         "GRID_MN": lambda args: triton.cdiv(args["M"], args["BLOCK_SIZE_M"])
-        * triton.cdiv(args["N"], args["BLOCK_SIZE_N"]),
+        * triton.cdiv(triton.cdiv(args["N"], args["BLOCK_SIZE_N"]), 2),
     }
 )
 @triton.jit
@@ -277,8 +277,8 @@ def _gemm_afp4_wfp4_kernel_half_WG(
             b_scales_ptr + offs_bn[:, None] * stride_bsn + offs_ks[None, :] * stride_bsk
         )
 
-        offs_to_pid_2 = num_pid_n * BLOCK_SIZE_N * stride_bn
-        offs_scales_to_pid_2 = num_pid_n * BLOCK_SIZE_N * stride_bsn
+        offs_to_pid_n_2 = num_pid_n * BLOCK_SIZE_N * stride_bn
+        offs_scales_to_pid_n_2 = num_pid_n * BLOCK_SIZE_N * stride_bsn
 
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
         accumulator_2 = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
@@ -305,12 +305,12 @@ def _gemm_afp4_wfp4_kernel_half_WG(
             accumulator += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
 
             if pid_n_2 < num_pid_n_2:
-                b_scales = tl.load(b_scale_ptrs + offs_scales_to_pid_2)
+                b_scales = tl.load(b_scale_ptrs + offs_scales_to_pid_n_2)
                 if EVEN_K:
-                    b = tl.load(b_ptrs + offs_to_pid_2, cache_modifier=cache_modifier)
+                    b = tl.load(b_ptrs + offs_to_pid_n_2, cache_modifier=cache_modifier)
                 else:
                     b = tl.load(
-                        b_ptrs + offs_to_pid_2, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
+                        b_ptrs + offs_to_pid_n_2, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
                     )
 
                 accumulator_2 += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
@@ -345,11 +345,11 @@ def _gemm_afp4_wfp4_kernel_half_WG(
         and (args["SPLITK_BLOCK_SIZE"] % args["BLOCK_SIZE_K"] == 0)
         and (args["K"] % (args["SPLITK_BLOCK_SIZE"] // 2) == 0),
         "GRID_MN": lambda args: triton.cdiv(args["M"], args["BLOCK_SIZE_M"])
-        * triton.cdiv(args["N"], args["BLOCK_SIZE_N"]),
+        * triton.cdiv(triton.cdiv(args["N"], args["BLOCK_SIZE_N"]), args["NUM_NSPLIT"]),
     }
 )
 @triton.jit
-def _gemm_afp4_wfp4_kernel_athird_WG(
+def _gemm_afp4_wfp4_kernel_splitn(
     a_ptr,
     b_ptr,
     c_ptr,
@@ -379,6 +379,7 @@ def _gemm_afp4_wfp4_kernel_athird_WG(
     EVEN_K: tl.constexpr,
     GRID_MN: tl.constexpr,
     cache_modifier: tl.constexpr,
+    NUM_NSPLIT: tl.constexpr = 2,
 ):
     """Kernel for computing the matmul C = A x B.
     A and B inputs are in the microscale fp4 (mxfp4) format.
@@ -404,8 +405,8 @@ def _gemm_afp4_wfp4_kernel_athird_WG(
     pid_k = pid_unified % NUM_KSPLIT
     pid = pid_unified // NUM_KSPLIT
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
-    num_pid_n_3 = tl.cdiv(N, BLOCK_SIZE_N)
-    num_pid_n = tl.cdiv(num_pid_n_3, 3)
+    num_pid_n_total = tl.cdiv(N, BLOCK_SIZE_N)
+    num_pid_n = tl.cdiv(num_pid_n_total, NUM_NSPLIT)
 
     if NUM_KSPLIT == 1:
         remap_xcd(pid, GRID_MN)
@@ -416,12 +417,14 @@ def _gemm_afp4_wfp4_kernel_athird_WG(
         pid_n = pid % num_pid_n
     
     pid_n_2 = num_pid_n + pid_n
-    pid_n_3 = 2 * num_pid_n + pid_n
 
     tl.assume(pid_m > 0)
     tl.assume(pid_n > 0)
     tl.assume(pid_n_2 > 0)
-    tl.assume(pid_n_3 > 0)
+
+    if NUM_NSPLIT == 3:
+        pid_n_3 = 2 * num_pid_n + pid_n
+        tl.assume(pid_n_3 > 0)
     # We assume 32 elements along K share the same scale.
     SCALE_GROUP_SIZE: tl.constexpr = 32
 
@@ -434,12 +437,12 @@ def _gemm_afp4_wfp4_kernel_athird_WG(
         offs_k = tl.arange(0, BLOCK_SIZE_K // 2)
         offs_k_split = pid_k * (SPLITK_BLOCK_SIZE // 2) + offs_k
         offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-        offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+        offs_bn = tl.arange(0, BLOCK_SIZE_N)
         a_ptrs = a_ptr + (
             offs_am[:, None] * stride_am + offs_k_split[None, :] * stride_ak
         )
-        b_ptrs = b_ptr + (
-            offs_k_split[:, None] * stride_bk + offs_bn[None, :] * stride_bn
+        b_ptrs_base = b_ptr + (
+            offs_k_split[:, None] * stride_bk
         )
         # Create pointers for the first block of A and B scales
         offs_ks = (pid_k * (SPLITK_BLOCK_SIZE // SCALE_GROUP_SIZE)) + tl.arange(
@@ -449,21 +452,24 @@ def _gemm_afp4_wfp4_kernel_athird_WG(
             a_scales_ptr + offs_am[:, None] * stride_asm + offs_ks[None, :] * stride_ask
         )
         # B scales are N x K even though B operand is K x N.
-        b_scale_ptrs = (
-            b_scales_ptr + offs_bn[:, None] * stride_bsn + offs_ks[None, :] * stride_bsk
+        b_scale_ptrs_base = (
+            b_scales_ptr + offs_ks[None, :] * stride_bsk
         )
-
-        offs_to_pid_2 = num_pid_n * BLOCK_SIZE_N * stride_bn
-        offs_scales_to_pid_2 = num_pid_n * BLOCK_SIZE_N * stride_bsn
-        offs_to_pid_3 = 2 * num_pid_n * BLOCK_SIZE_N * stride_bn
-        offs_scales_to_pid_3 = 2 * num_pid_n * BLOCK_SIZE_N * stride_bsn
 
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
         accumulator_2 = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-        accumulator_3 = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+        
+        offs_bn_tmp = (pid_n * BLOCK_SIZE_N + offs_bn) % N
+        offs_bn_tmp_2 = (pid_n_2 * BLOCK_SIZE_N + offs_bn) % N
+        
+        if NUM_NSPLIT == 3:
+            offs_bn_tmp_3 = (pid_n_3 * BLOCK_SIZE_N + offs_bn) % N
+            accumulator_3 = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
-        # for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
         for k in tl.range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter, num_stages=2):
+            b_scale_ptrs = b_scale_ptrs_base + offs_bn_tmp[:, None] * stride_bsn
+            b_ptrs = b_ptrs_base + offs_bn_tmp[None, :] * stride_bn
+
             a_scales = tl.load(a_scale_ptrs)
             b_scales = tl.load(b_scale_ptrs)
             # a_scales = tl.full((BLOCK_SIZE_M, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)
@@ -483,55 +489,71 @@ def _gemm_afp4_wfp4_kernel_athird_WG(
 
             accumulator += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
 
-            if pid_n_2 < num_pid_n_3:
-                b_scales = tl.load(b_scale_ptrs + offs_scales_to_pid_2)
+            if pid_n_2 < num_pid_n_total:
+                b_scale_ptrs = b_scale_ptrs_base + offs_bn_tmp_2[:, None] * stride_bsn
+                b_ptrs = b_ptrs_base + offs_bn_tmp_2[None, :] * stride_bn
+
+                b_scales = tl.load(b_scale_ptrs)
                 if EVEN_K:
-                    b = tl.load(b_ptrs + offs_to_pid_2, cache_modifier=cache_modifier)
+                    b = tl.load(b_ptrs, cache_modifier=cache_modifier)
                 else:
                     b = tl.load(
-                        b_ptrs + offs_to_pid_2, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
+                        b_ptrs, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
                     )
 
                 accumulator_2 += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
 
-            if pid_n_3 < num_pid_n_3:
-                b_scales = tl.load(b_scale_ptrs + offs_scales_to_pid_3)
-                if EVEN_K:
-                    b = tl.load(b_ptrs + offs_to_pid_3, cache_modifier=cache_modifier)
-                else:
-                    b = tl.load(
-                        b_ptrs + offs_to_pid_3, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
-                    )
+            if NUM_NSPLIT == 3:
+                if pid_n_3 < num_pid_n_total:
+                    b_scale_ptrs = b_scale_ptrs_base + offs_bn_tmp_3[:, None] * stride_bsn
+                    b_ptrs = b_ptrs_base + offs_bn_tmp_3[None, :] * stride_bn
 
-                accumulator_3 += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
+                    b_scales = tl.load(b_scale_ptrs)
+                    if EVEN_K:
+                        b = tl.load(b_ptrs, cache_modifier=cache_modifier)
+                    else:
+                        b = tl.load(
+                            b_ptrs, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
+                        )
+
+                    accumulator_3 += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
 
             # Advance the ptrs to the next K block.
             a_ptrs += (BLOCK_SIZE_K // 2) * stride_ak
-            b_ptrs += (BLOCK_SIZE_K // 2) * stride_bk
+            b_ptrs_base += (BLOCK_SIZE_K // 2) * stride_bk
             a_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_ask
-            b_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_bsk
+            b_scale_ptrs_base += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_bsk
 
         c = accumulator.to(c_ptr.type.element_ty)
 
         # Write back the block of the output matrix C with masks.
         offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
-        offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
-        c_ptrs = (
+        offs_cn = tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
+        c_ptrs_base = (
             c_ptr
             + stride_cm * offs_cm[:, None]
-            + stride_cn * offs_cn[None, :]
             + pid_k * stride_ck
         )
-        c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+        c_mask_m = (offs_cm[:, None] < M)
+        offs_cn_tmp = pid_n * BLOCK_SIZE_N + offs_cn
+        c_ptrs = c_ptrs_base + offs_cn_tmp[None, :] * stride_cn
+        c_mask = c_mask_m & (offs_cn_tmp[None, :] < N)
         tl.store(c_ptrs, c, mask=c_mask)
         
-        if pid_n_2 < num_pid_n_3:
+        if pid_n_2 < num_pid_n_total:
+            offs_cn_tmp = pid_n_2 * BLOCK_SIZE_N + offs_cn
+            c_ptrs = c_ptrs_base + offs_cn_tmp[None, :] * stride_cn
+            c_mask = c_mask_m & (offs_cn_tmp[None, :] < N)
             c_2 = accumulator_2.to(c_ptr.type.element_ty)
-            tl.store(c_ptrs + num_pid_n * BLOCK_SIZE_N * stride_cn, c_2, mask=c_mask)
+            tl.store(c_ptrs, c_2, mask=c_mask)
 
-        if pid_n_3 < num_pid_n_3:
-            c_3 = accumulator_3.to(c_ptr.type.element_ty)
-            tl.store(c_ptrs + 2 * num_pid_n * BLOCK_SIZE_N * stride_cn, c_3, mask=c_mask)
+        if NUM_NSPLIT == 3:
+            if pid_n_3 < num_pid_n_total:
+                offs_cn_tmp = pid_n_3 * BLOCK_SIZE_N + offs_cn
+                c_ptrs = c_ptrs_base + offs_cn_tmp[None, :] * stride_cn
+                c_mask = c_mask_m & (offs_cn_tmp[None, :] < N)
+                c_3 = accumulator_3.to(c_ptr.type.element_ty)
+                tl.store(c_ptrs, c_3, mask=c_mask)
 
 
 @triton.heuristics(
@@ -993,6 +1015,24 @@ def gemm_afp4wfp4_splitn(
     if config is None:
         config = _get_config(M, N, K)
     # print(f"AFP4WFP4_config={config}")
+
+    config["NUM_NSPLIT"] = splitn
+    if splitn == 2:
+        config["BLOCK_SIZE_M"] = 128
+        config["BLOCK_SIZE_N"] = 128
+        config["num_warps"] = 4
+        config["num_stages"] = 2
+        config["matrix_instr_nonkdim"] = 32
+    elif splitn == 3:
+        config["BLOCK_SIZE_M"] = 128
+        config["BLOCK_SIZE_N"] = 128
+        config["num_warps"] = 8
+        config["num_stages"] = 2
+        config["matrix_instr_nonkdim"] = 32
+    else:
+        raise NotImplementedError("NUM_NSPLIT can only be 2 or 3")
+    # print(f"AFP4WFP4_config={config}")
+    
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
@@ -1013,71 +1053,36 @@ def gemm_afp4wfp4_splitn(
     else:
         config["SPLITK_BLOCK_SIZE"] = 2 * K
         y_pp = None
-
-    if splitn == 2:
-        config["BLOCK_SIZE_N"]=128
-        config["num_warps"]=4
-        config["num_stages"]=2
-    elif splitn == 3:
-        config["BLOCK_SIZE_N"]=128
-        config["num_warps"]=8
-        config["num_stages"]=2
-    else:
-        raise NotImplementedError("splitn can only be 2 or 3")
     
     grid = lambda META: (  # noqa: E731
         (
             META["NUM_KSPLIT"]
             * triton.cdiv(M, META["BLOCK_SIZE_M"])
-            * triton.cdiv(triton.cdiv(N, META["BLOCK_SIZE_N"]), splitn)
+            * triton.cdiv(triton.cdiv(N, META["BLOCK_SIZE_N"]), META["NUM_NSPLIT"])
         ),
     )
-    if splitn == 2:
-        _gemm_afp4_wfp4_kernel_half_WG[grid](
-            x,
-            w,
-            y if config["NUM_KSPLIT"] == 1 else y_pp,
-            x_scales,
-            w_scales,
-            M,
-            N,
-            K,
-            x.stride(0),
-            x.stride(1),
-            w.stride(0),
-            w.stride(1),
-            0 if config["NUM_KSPLIT"] == 1 else y_pp.stride(0),
-            y.stride(0) if config["NUM_KSPLIT"] == 1 else y_pp.stride(1),
-            y.stride(1) if config["NUM_KSPLIT"] == 1 else y_pp.stride(2),
-            x_scales.stride(0),
-            x_scales.stride(1),
-            w_scales.stride(0),
-            w_scales.stride(1),
-            **config,
-        )
-    elif splitn == 3:
-        _gemm_afp4_wfp4_kernel_athird_WG[grid](
-            x,
-            w,
-            y if config["NUM_KSPLIT"] == 1 else y_pp,
-            x_scales,
-            w_scales,
-            M,
-            N,
-            K,
-            x.stride(0),
-            x.stride(1),
-            w.stride(0),
-            w.stride(1),
-            0 if config["NUM_KSPLIT"] == 1 else y_pp.stride(0),
-            y.stride(0) if config["NUM_KSPLIT"] == 1 else y_pp.stride(1),
-            y.stride(1) if config["NUM_KSPLIT"] == 1 else y_pp.stride(2),
-            x_scales.stride(0),
-            x_scales.stride(1),
-            w_scales.stride(0),
-            w_scales.stride(1),
-            **config,
-        )
+    _gemm_afp4_wfp4_kernel_splitn[grid](
+        x,
+        w,
+        y if config["NUM_KSPLIT"] == 1 else y_pp,
+        x_scales,
+        w_scales,
+        M,
+        N,
+        K,
+        x.stride(0),
+        x.stride(1),
+        w.stride(0),
+        w.stride(1),
+        0 if config["NUM_KSPLIT"] == 1 else y_pp.stride(0),
+        y.stride(0) if config["NUM_KSPLIT"] == 1 else y_pp.stride(1),
+        y.stride(1) if config["NUM_KSPLIT"] == 1 else y_pp.stride(2),
+        x_scales.stride(0),
+        x_scales.stride(1),
+        w_scales.stride(0),
+        w_scales.stride(1),
+        **config,
+    )
 
     if config["NUM_KSPLIT"] > 1:
         REDUCE_BLOCK_SIZE_M = 16

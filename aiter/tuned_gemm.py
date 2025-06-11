@@ -1,6 +1,6 @@
 """
-* Copyright © Advanced Micro Devices, Inc. All rights reserved.
-* Copyright (c) 2024, The vLLM team.
+* Copyright (C) Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2024-2025, The vLLM team.
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -101,11 +101,25 @@ class TunedGemm:
 
     @functools.lru_cache(maxsize=1024)
     def query_sol(self, m, n, k, bias, dtype, otype, scaleAB=False):
-        if dtype == dtypes.fp16 and k % 8 == 0:
-            if n > 8 and 0 < m <= 4:
-                return 3, 0
-            elif n % 4 == 0 and m == 1 and k <= 8192:
-                return 3, 1
+        # if dtype in [dtypes.fp16, dtypes.bf16] and k % 8 == 0:
+        #     if n > 8 and 0 < m <= 4:
+        #         return 3, 0
+        #     elif n % 4 == 0 and m == 1 and k <= 8192:
+        #         return 3, 1
+
+        if dtype in [dtypes.fp16, dtypes.bf16] and k % 8 == 0:
+            if (
+                (
+                    (m == 1 and n <= 2 * self.cu_count)
+                    or (m > 1 and m <= 4 and n <= self.cu_count)
+                )
+                and k <= 9216
+                or (m > 4 and m <= 8 and n <= self.cu_count)
+                and k <= 5120
+                or (m > 8 and m <= 16 and n <= self.cu_count)
+                and k <= 256
+            ):
+                return 3, 2
         soltype, solidx = self.solids.get(
             (m, n, k, bias, str(dtype), str(otype), scaleAB), (0, 0)
         )
@@ -129,14 +143,21 @@ class TunedGemm:
 
         if solidx == 0:
             out = torch.empty(
-                inp.shape[0], weights.shape[0], dtype=inp.dtype, device="cuda"
+                inp.shape[0], weights.shape[0], dtype=inp.dtype, device=inp.device
             )
             ops.wvSpltK(weights, inp, out, inp.shape[0], self.cu_count)
         elif solidx == 1:
             out = torch.empty(
-                inp.shape[0], weights.shape[0], dtype=inp.dtype, device="cuda"
+                inp.shape[0], weights.shape[0], dtype=inp.dtype, device=inp.device
             )
             ops.LLMM1(weights, inp, out, 4)
+        if solidx == 2:
+            out = torch.empty(
+                inp.shape[0], weights.shape[0], dtype=inp.dtype, device=inp.device
+            )
+            ops.wv_splitk_small_fp16_bf16(
+                weights, inp, out, inp.shape[0], self.cu_count
+            )
         if bias is not None:
             out += bias
         return out
@@ -168,7 +189,7 @@ class TunedGemm:
         scale_c=None,
     ):
         assert (
-            scale_a != None and scale_b != None and scale_c != None
+            scale_a is None and scale_b is None and scale_c is None
         ), "scale_a, scale_b, scale_c must be None for rocblas"
         out = rocb_mm(inp, weights.t(), solidx)
         if bias is not None:

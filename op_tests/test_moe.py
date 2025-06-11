@@ -1,16 +1,10 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
-import torch.nn.functional as F
-import triton.language as tl
-import numpy as np
-import sys
-import os
-from typing import Any, Callable, Dict, Optional, Tuple
 from aiter.test_common import checkAllclose, perftest
 from aiter import dtypes
-from aiter.fused_moe import torch_moe, moe_sorting, fused_topk
+from aiter.fused_moe import torch_moe, fused_topk
 from aiter.fused_moe_bf16_asm import asm_moe
 from aiter.ops.shuffle import shuffle_weight
 from aiter import pertoken_quant, ck_moe

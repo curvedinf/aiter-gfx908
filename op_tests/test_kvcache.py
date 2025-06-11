@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
-import torch.nn.functional as F
 import aiter
 from aiter.test_common import checkAllclose, perftest
 from aiter import dtypes
-from typing import List, Optional, Tuple, Union
+from typing import Tuple
 
 MAX_TOKEN_SUPPORTED = 16384
 
@@ -111,7 +110,7 @@ def run_aiter(
         k_scale = None
         v_scale = None
         aiter.reshape_and_cache(
-            key, value, k_cache, v_cache, slot_mapping, "auto", 1.0, 1.0, asm_layout
+            key, value, k_cache, v_cache, slot_mapping, "auto", asm_layout=asm_layout
         )
     return k_cache, v_cache, k_scale, v_scale
 

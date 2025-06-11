@@ -1,9 +1,13 @@
-import torch
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+
 import pytest
+import torch
 import triton
-import torch.nn.functional as F
-from aiter.ops.triton.rmsnorm import rms_norm
-from aiter.ops.triton.rmsnorm import rmsnorm2d_fwd_with_add
+from aiter.ops.triton.rmsnorm import (
+    rms_norm,
+    rmsnorm2d_fwd_with_add,
+)
 
 
 def generate_rmsnorm_inputs(M, N, dtype):
@@ -11,6 +15,7 @@ def generate_rmsnorm_inputs(M, N, dtype):
     weight = torch.randn(N, dtype=dtype).cuda()
 
     return x, weight
+
 
 def torch_rmsnorm(x, g, out_dtype=torch.float16, epsilon=1e-6):
     M, N = x.shape
@@ -93,7 +98,6 @@ def test_rmsnorm(M, N, in_dtype_str):
     triton.testing.assert_close(y_triton, y_torch, atol=atol, rtol=rtol)
 
 
-# TODO: Re-enable the commented tests once we find why they're causing the AITER CI to fail
 @pytest.mark.parametrize("in_dtype_str", ["fp32", "fp16", "bf16"])
 @pytest.mark.parametrize(
     "M, N",
@@ -103,8 +107,8 @@ def test_rmsnorm(M, N, in_dtype_str):
         (8192, 4096),
         (4096, 8192),
         (8000, 8000),
-        # (1, 31744),
-        # (3, 65536),
+        (1, 31744),
+        (3, 65536),
         (1, 131072),
         (873, 1245),
         (23153, 45),

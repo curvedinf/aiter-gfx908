@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
 import torch.nn.functional as F
@@ -7,7 +7,7 @@ import aiter
 from aiter.test_common import checkAllclose, run_perftest
 from aiter.fused_moe import torch_moe, moe_sorting, fused_topk
 from aiter.ops.shuffle import shuffle_weight
-from aiter import pertoken_quant, ck_moe
+from aiter import pertoken_quant
 from aiter import dtypes
 from einops import rearrange
 

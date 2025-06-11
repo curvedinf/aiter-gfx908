@@ -1,14 +1,11 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
 import torch.nn.functional as F
-import numpy as np
-import sys
-import os
 import aiter
 from aiter import dtypes
-from aiter.test_common import checkAllclose, perftest, tensor_dump
+from aiter.test_common import checkAllclose, perftest
 
 
 @perftest(num_iters=5)

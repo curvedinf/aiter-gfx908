@@ -1,16 +1,11 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor
-from typing import List, Optional
+from typing import Optional
 from ..jit.core import (
     compile_ops,
-    CK_DIR,
-    AITER_CSRC_DIR,
-    AITER_ROOT_DIR,
-    AITER_CORE_DIR,
 )
 from .enum import ActivationType, Enum, QuantType
 

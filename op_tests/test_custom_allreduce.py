@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import os
 
@@ -20,8 +20,6 @@ from aiter.dist.communication_op import tensor_model_parallel_all_reduce
 from aiter.test_common import (
     checkAllclose,
     perftest,
-    tensor_dump,
-    tensor_load,
     benchmark,
 )
 from aiter import dtypes

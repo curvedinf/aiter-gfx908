@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 # user interface
 
@@ -7,10 +7,6 @@ import torch
 from torch import Tensor
 from ..jit.core import (
     compile_ops,
-    CK_DIR,
-    AITER_CSRC_DIR,
-    AITER_ROOT_DIR,
-    AITER_CORE_DIR,
 )
 from ..utility import dtypes
 
@@ -40,6 +36,7 @@ def grouped_topk(
     scale_factor: float = 1.0,
 ): ...
 
+
 @compile_ops("module_moe_asm")
 def moe_fused_gate(
     input: Tensor,
@@ -48,8 +45,9 @@ def moe_fused_gate(
     topk_group: int,
     topk: int,
     n_share_experts_fusion: int,
-    scale_factor: float=1.0,
+    scale_factor: float = 1.0,
 ): ...
+
 
 # this one copied from sglang
 def biased_grouped_topk_torch(

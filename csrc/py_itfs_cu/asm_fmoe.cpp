@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 #include <hip/hip_runtime.h>
 #include <hip/hip_fp16.h>
 #include <torch/all.h>
@@ -278,7 +278,7 @@ void fmoe(torch::Tensor &out,               // [token_cnt, dim]
         impl_ptr = &impl_b16;
     }
     TORCH_CHECK(impl_ptr != nullptr,
-                __func__, ": unsupport current input type");
+                __func__, ": unsupport current input type:", input.scalar_type());
     impl_ptr->launch_kernel<uint16_t, uint16_t>(out,
                                                 input,
                                                 gate,
@@ -696,7 +696,7 @@ void fmoe_g1u1_tkw1(torch::Tensor &out,                            // [token_cnt
     }
     else
     {
-        TORCH_CHECK(false, __func__, " Input only supput Fp8!");
+        TORCH_CHECK(false, __func__, " Unsupported input dtype:", input.dtype());
     }
 
     impl_ptr->launch_kernel<uint8_t, uint16_t>(out,

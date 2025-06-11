@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 import os
-import sys
 import aiter
 import pandas as pd
 import torch
 import torch.nn.functional as F
 from aiter import dtypes
-from aiter.test_common import checkAllclose, perftest
-from gemm_a8w8_blockscale_common import kernelInstance, kernels_list
+from aiter.test_common import perftest
+from gemm_a8w8_blockscale_common import kernels_list
 import argparse
 from einops import rearrange
 
@@ -71,7 +70,7 @@ def get_tuned_gemm_list(tuned_gemm_file):
         tunedf = pd.read_csv(tuned_gemm_file)
     else:
         tunedf = pd.DataFrame(
-            columns=["M", "N", "K", "kernelId", "splitK", "us", "kernelName"]
+            columns=["cu_num", "M", "N", "K", "kernelId", "splitK", "us", "kernelName"]
         )
     return tunedf
 
@@ -148,12 +147,20 @@ def tune_gemm(m, n, k, useSplitK=False):
 
 
 def tune_gemm_list(untunedf, tunedf, issorted=False, useSplitK=False):
+    gpu = torch.cuda.current_device()
+    device_properties = torch.cuda.get_device_properties(gpu)
+    cu_num = device_properties.multi_processor_count
     for i in range(len(untunedf)):
         M = untunedf.loc[i, "M"]
         N = untunedf.loc[i, "N"]
         K = untunedf.loc[i, "K"]
 
-        if tunedf[(tunedf["M"] == M) & (tunedf["N"] == N) & (tunedf["K"] == K)].empty:
+        if tunedf[
+            (tunedf["M"] == M)
+            & (tunedf["N"] == N)
+            & (tunedf["K"] == K)
+            & (tunedf["cu_num"] == cu_num)
+        ].empty:
             kernelId, splitK, time = tune_gemm(M, N, K, useSplitK)
             kernelName = "None" if kernelId == -1 else kernels_list[kernelId].name
             temp = pd.DataFrame(
@@ -161,6 +168,7 @@ def tune_gemm_list(untunedf, tunedf, issorted=False, useSplitK=False):
                     "M": [M],
                     "N": [N],
                     "K": [K],
+                    "cu_num": [cu_num],
                     "kernelId": [kernelId],
                     "splitK": [splitK],
                     "us": [time],
@@ -174,7 +182,7 @@ def tune_gemm_list(untunedf, tunedf, issorted=False, useSplitK=False):
         print()
         print()
     if issorted:
-        tunedf = tunedf.sort_values(by=["M", "N", "K"])
+        tunedf = tunedf.sort_values(by=["cu_num", "M", "N", "K"])
     print("Totall tuning result:")
     print(tunedf)
     return tunedf

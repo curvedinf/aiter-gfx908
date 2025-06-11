@@ -1,5 +1,9 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+
 import triton
 import triton.language as tl
+
 
 @triton.jit
 def remap_xcd(pid, GRID_MN, NUM_XCDS: tl.constexpr = 8):
@@ -22,9 +26,14 @@ def remap_xcd(pid, GRID_MN, NUM_XCDS: tl.constexpr = 8):
     if xcd < tall_xcds:
         pid = xcd * pids_per_xcd + local_pid
     else:
-        pid = tall_xcds * pids_per_xcd + (xcd - tall_xcds) * (pids_per_xcd - 1) + local_pid
+        pid = (
+            tall_xcds * pids_per_xcd
+            + (xcd - tall_xcds) * (pids_per_xcd - 1)
+            + local_pid
+        )
 
     return pid
+
 
 @triton.jit
 def pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M: tl.constexpr = 1):

@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
-import torch.nn.functional as F
 import aiter
 import pandas as pd
 import argparse
 import time
 import os
-from aiter import ActivationType, QuantType
+from aiter import QuantType
 from aiter.jit.core import get_asm_dir
 from aiter.fused_moe import (
     fused_topk,
@@ -19,8 +18,6 @@ from aiter.fused_moe import (
 )
 from aiter.ops.shuffle import shuffle_weight
 from aiter.utility.mp_tuner import mp_tuner
-from aiter.test_common import checkAllclose
-from aiter import QuantType
 from aiter.int4_utils import *
 from aiter import dtypes
 
@@ -93,7 +90,7 @@ def go(
         "q_dtype_w",
         "q_type",
         "use_g1u1",
-        "doweight_stage1"
+        "doweight_stage1",
     ]
     print(untunedf[args])
     prorfiles = []
@@ -111,7 +108,7 @@ def go(
             q_dtype_w,
             q_type,
             use_g1u1,
-            doweight_stage1
+            doweight_stage1,
         ) = line
         dtype = eval(dtype)
         q_dtype_a = eval(q_dtype_a)
@@ -156,13 +153,13 @@ def go(
             dtype=dtype,
             a1_scale=a1_scale,
             w1_scale=w1_scale,
-            doweight=doweight_stage1
+            doweight=doweight_stage1,
         )
         if q_type == QuantType.per_128x128:
             ref, ref_scale = aiter.pertoken_quant(
                 ref.view(ref.shape[0], -1, 128), quant_dtype=q_dtype_a
             )
-            ref = ref.view(ref.shape[0], topk, -1).to(dtypes.fp32)
+            ref = ref.view(ref.shape[0], topk, -1)
             ref_scale = ref_scale.view(token, -1)
 
         tasks = []
@@ -224,7 +221,7 @@ def go(
                                 sorted_ids,
                                 sorted_expert_ids,
                                 num_valid_ids,
-                                out.view(dtypes.bf16),
+                                out,
                                 blockM,
                                 el,
                                 0,
@@ -238,6 +235,8 @@ def go(
                                 w1_scale,
                                 sorted_weights if doweight_stage1 else None,
                             ),
+                            {},
+                            (ref),
                         )
                     )
 
@@ -269,28 +268,19 @@ def go(
                             w1_scale,
                             sorted_weights if doweight_stage1 else None,
                         ),
+                        {},
+                        (ref),
                     )
                 )
         if tasks is None and tasks_ck is None:
-            print(f"no moe solution for ", line)
+            print("no moe solution for ", line)
             continue
         rets = mp_tuner(tasks + tasks_ck)
 
         profileDF = []
-        for (tag, block_m), us, _ in rets:
+        for (tag, block_m), us, err in rets:
             if us == float("inf"):
                 continue
-            if q_type == QuantType.per_128x128:
-                scale = (
-                    _[token:, ...]
-                    .view(-1)[: (token * topk * inter_dim * 4 // 128)]
-                    .view(dtypes.fp32)
-                    .view(token, -1)
-                )
-                _ = _[:token, :, :].to(dtypes.fp32)
-            err = checkAllclose(
-                ref.to("cpu"), _.to(ref.dtype), msg=f"[{tag:<50}]: {us:.2f}us ......      "
-            )
             profileDF.append(
                 [
                     token,
@@ -375,7 +365,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     untunedf = pd.read_csv(args.untune_file)
     untunedf = untunedf.drop_duplicates(keep="last")
-    
+
     if not args.all or args.last:
         if os.path.exists(args.tune_file):
             old_tunedf = pd.read_csv(args.tune_file)
@@ -392,15 +382,30 @@ if __name__ == "__main__":
             old_tunedf[untunedf_cols].apply(tuple, axis=1)
         )
         untunedf = untunedf[~mask]
-    
+
     tunedf = None
     # tunedf = pd.read_csv(args.tune_file)
     profiles, tunedf = go(untunedf, tunedf)
     if old_tunedf is not None and tunedf is not None:
         tunedf = pd.concat([old_tunedf, tunedf], axis=0)
     if tunedf is not None:
-        tunedf = tunedf.astype(str).drop_duplicates(subset=["token","model_dim","inter_dim","expert","topk","act_type","dtype",
-                                                "q_dtype_a","q_dtype_w","q_type","use_g1u1","doweight_stage1"], keep="last")
+        tunedf = tunedf.astype(str).drop_duplicates(
+            subset=[
+                "token",
+                "model_dim",
+                "inter_dim",
+                "expert",
+                "topk",
+                "act_type",
+                "dtype",
+                "q_dtype_a",
+                "q_dtype_w",
+                "q_type",
+                "use_g1u1",
+                "doweight_stage1",
+            ],
+            keep="last",
+        )
         tunedf.to_csv(args.tune_file, index=False)
     if profiles is not None:
         profiles.to_csv(args.profile_file, index=False)

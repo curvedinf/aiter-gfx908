@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import random
 from typing import List, Optional, Tuple, Union
-import itertools
 import torch
 import aiter
 from aiter import dtypes

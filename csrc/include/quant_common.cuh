@@ -1,7 +1,7 @@
 #pragma once
 /*
  * Copyright © Advanced Micro Devices, Inc. All rights reserved.
- * Copyright (c) 2024, The vLLM team.
+ * Copyright (C) 2024-2025, The vLLM team.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -102,9 +102,10 @@ namespace vllm
     }
     // Finally, since cache[0] contains the maximum for this thread block,
     // atomically write the max to the target location
+    float dtypeMax          = ck_tile::type_convert<float>(ck_tile::numeric<scalar_t>::max());
     if (threadIdx.x == 0)
     {
-      atomicMaxFloat(scale, cache[0] / FP8_MAX);
+      atomicMaxFloat(scale, cache[0] / dtypeMax);
     }
   }
 

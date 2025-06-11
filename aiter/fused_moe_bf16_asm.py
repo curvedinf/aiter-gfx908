@@ -1,15 +1,12 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
 import torch.nn.functional as F
-import numpy as np
-import sys
-import os
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Optional
 import aiter
 from aiter import logger
-from aiter import pertoken_quant, get_hip_quant, get_torch_quant
+from aiter import pertoken_quant, get_hip_quant
 from aiter import ActivationType, QuantType, dtypes
 
 BLOCK_SIZE_M = 32
@@ -54,7 +51,8 @@ def moe_sorting_ck(
     return sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf
 
 
-def asm_moe(hidden_states,
+def asm_moe(
+    hidden_states,
     w1,  # [expert(local_expert:EP), inter_dim*2, dim] N,K
     w2,  # [expert(local_expert:EP), dim, inter_dim]
     topk_weight,
@@ -68,8 +66,8 @@ def asm_moe(hidden_states,
     per_tensor_quant_scale=None,
     block_shape=None,
     expert_mask=None,
-    activation=ActivationType.Silu
-    ):
+    activation=ActivationType.Silu,
+):
     E, model_dim, inter_dim = w2.shape
     global_E = E
     if expert_mask is not None:
@@ -132,24 +130,30 @@ def asm_moe(hidden_states,
                 fc2_smooth_scale,
             )
         else:
-            raise ValueError(
-                f"Invalid args: {w1.dtype} {w1.shape=} {w2.shape=}")
+            raise ValueError(f"Invalid args: {w1.dtype} {w1.shape=} {w2.shape=}")
     elif block_shape is not None:
-        assert dtype == torch.bfloat16, "asm_moe for block_scale only support bfloat16 hidden_states"
+        assert (
+            dtype == torch.bfloat16
+        ), "asm_moe for block_scale only support bfloat16 hidden_states"
         assert block_shape == (
-            128, 128), "asm_moe for block_scale only support (128, 128)"
-        assert w1.dtype == torch.float8_e4m3fnuz, "asm_moe for block_scale only support float8_e4m3fnuz weight"
-        assert w2.shape[2] * 2 == w1.shape[1], "aiter moe for block_scale only support g1u1"
+            128,
+            128,
+        ), "asm_moe for block_scale only support (128, 128)"
+        assert (
+            w1.dtype == torch.float8_e4m3fnuz
+        ), "asm_moe for block_scale only support float8_e4m3fnuz weight"
+        assert (
+            w2.shape[2] * 2 == w1.shape[1]
+        ), "aiter moe for block_scale only support g1u1"
         scale_blk_n, scale_blk_k = block_shape
-        hidden_states = hidden_states.view(M *
-                                           model_dim//scale_blk_k, scale_blk_k)
+        hidden_states = hidden_states.view(M * model_dim // scale_blk_k, scale_blk_k)
 
         a1_q, a1_scale = pertoken_quant(
-            hidden_states.view(-1, model_dim // scale_blk_k, scale_blk_k), quant_dtype=torch.float8_e4m3fnuz
+            hidden_states.view(-1, model_dim // scale_blk_k, scale_blk_k),
+            quant_dtype=torch.float8_e4m3fnuz,
         )
         a1_q = a1_q.view(-1, model_dim)
         a1_scale = a1_scale.squeeze(-1).t().contiguous()
-
 
         scale_blk_n, scale_blk_k = block_shape
         aiter.fmoe_fp8_blockscale_g1u1(
@@ -198,11 +202,9 @@ def asm_moe(hidden_states,
                 a8 = torch.empty((M, model_dim), dtype=a8_type, device=device)
                 a8_scale = torch.empty(M, dtype=dtypes.fp32, device=device)
                 if per_tensor_quant_scale is None:
-                    aiter.dynamic_per_token_scaled_fp8_quant(
-                        a8, hidden_states, a8_scale
-                    )
+                    aiter.dynamic_per_token_scaled_quant(a8, hidden_states, a8_scale)
                 else:
-                    aiter.static_scaled_fp8_quant(
+                    aiter.static_per_tensor_quant(
                         a8, hidden_states, per_tensor_quant_scale
                     )
                     a8_scale.fill_(per_tensor_quant_scale)
@@ -214,7 +216,7 @@ def asm_moe(hidden_states,
                 )
                 aiter.smoothquant_fwd(a8, hidden_states, fc1_smooth_scale, a8_scale)
             else:
-                logger.warning(f"FMOE fall into pure torch quant...")
+                logger.warning("FMOE fall into pure torch quant...")
                 a8, a8_scale = aiter.pertoken_quant(hidden_states, quant_dtype=w1.dtype)
         if w2.shape[2] * lastdim_mul == w1.shape[1]:
             fmoe_func = aiter.fmoe_int8_g1u0
@@ -354,11 +356,9 @@ def asm_moe_tkw1(
                 a8 = torch.empty((M, model_dim), dtype=a8_type, device=device)
                 a8_scale = torch.empty(M, dtype=dtypes.fp32, device=device)
                 if per_tensor_quant_scale is None:
-                    aiter.dynamic_per_token_scaled_fp8_quant(
-                        a8, hidden_states, a8_scale
-                    )
+                    aiter.dynamic_per_token_scaled_quant(a8, hidden_states, a8_scale)
                 else:
-                    aiter.static_scaled_fp8_quant(
+                    aiter.static_per_tensor_quant(
                         a8, hidden_states, per_tensor_quant_scale
                     )
                     a8_scale.fill_(per_tensor_quant_scale)
@@ -370,7 +370,7 @@ def asm_moe_tkw1(
                 )
                 aiter.smoothquant_fwd(a8, hidden_states, fc1_smooth_scale, a8_scale)
             else:
-                logger.warning(f"FMOE fall into pure torch quant...")
+                logger.warning("FMOE fall into pure torch quant...")
                 a8, a8_scale = aiter.pertoken_quant(hidden_states, quant_dtype=w1.dtype)
         if w2.shape[2] * 2 * lastdim_mul == w1.shape[1]:
             fmoe_func = aiter.fmoe_g1u1_tkw1
@@ -414,7 +414,8 @@ def ck_moe_2stages(
     a1,
     w1,  # [expert(local_expert:EP), inter_dim(*2), dim] N,K
     w2,  # [expert(local_expert:EP), dim, inter_dim]
-    topk_weight, topk_ids,
+    topk_weight,
+    topk_ids,
     # following for int8 quant
     quant_type=QuantType.No,
     fc1_scale=None,  # [expert(local_expert:EP), inter_dim, 1]
@@ -426,7 +427,7 @@ def ck_moe_2stages(
     activation=ActivationType.Silu,
     doweight_stage1=False,
 ):
-    
+
     quant_func = get_hip_quant(quant_type)
     q_dtype_a = w1.dtype if w1.dtype != torch.uint32 else torch.float8_e4m3fnuz
 
@@ -434,7 +435,7 @@ def ck_moe_2stages(
     E, model_dim, inter_dim = w2.shape
     if w1.dtype is torch.uint32:
         inter_dim = inter_dim * 8
-    
+
     global_E = E
     if expert_mask is not None:
         global_E = expert_mask.numel()
@@ -443,8 +444,11 @@ def ck_moe_2stages(
     device = topk_ids.device
     if block_size is None:
         block_size = get_block_size(M, topk, E)
-    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting_ck(topk_ids, topk_weight, global_E,
-                                                                                           model_dim, dtype, block_size, expert_mask)
+    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = (
+        moe_sorting_ck(
+            topk_ids, topk_weight, global_E, model_dim, dtype, block_size, expert_mask
+        )
+    )
     # print("block_size:", block_size, sorted_expert_ids)
     a1, a1_scale = quant_func(a1, scale=a1_scale, quant_dtype=q_dtype_a)
 
@@ -460,18 +464,19 @@ def ck_moe_2stages(
         act_op = 0  # gelu_and_mul
 
     aiter.ck_moe_stage1(
-        a1, 
-        w1, 
+        a1,
+        w1,
         w2,
-        sorted_ids, 
-        sorted_expert_ids, 
+        sorted_ids,
+        sorted_expert_ids,
         num_valid_ids,
-        a2, topk,
-        fc1_scale, 
-        a1_scale, 
-        block_size, 
+        a2,
+        topk,
+        fc1_scale,
+        a1_scale,
+        block_size,
         sorted_weights if doweight_stage1 else None,
-        act_op
+        act_op,
     )
 
     if quant_type == QuantType.per_Token:
@@ -480,17 +485,17 @@ def ck_moe_2stages(
     a2 = a2.view(M, topk, -1)
 
     aiter.ck_moe_stage2(
-        a2, 
+        a2,
         w1,
-        w2, 
+        w2,
         sorted_ids,
         sorted_expert_ids,
-        num_valid_ids, 
-        moe_buf, 
-        topk, 
-        fc2_scale, 
-        a2_scale, 
-        block_size, 
+        num_valid_ids,
+        moe_buf,
+        topk,
+        fc2_scale,
+        a2_scale,
+        block_size,
         sorted_weights if not doweight_stage1 else None,
     )
     return moe_buf

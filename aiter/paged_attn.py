@@ -289,8 +289,8 @@ class PagedAttention:
                 max_seq_len,
                 alibi_slopes,
                 kv_cache_dtype,
-                torch.tensor(k_scale, device=output.device),
-                torch.tensor(v_scale, device=output.device),
+                torch.tensor(k_scale, device=output.device, dtype=torch.float32),
+                torch.tensor(v_scale, device=output.device, dtype=torch.float32),
                 fp8_out_scale if cpa_fp8_out else None,
                 _PARTITION_SIZE_ROCM,
             )

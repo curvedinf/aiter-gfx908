@@ -55,8 +55,7 @@ FUNCTION_DEFINE
                                             vllm::Fp8KVCacheDataType::kAuto,
                                             {% else %}
                                             vllm::Fp8KVCacheDataType::kFp8E4M3,
-                                            {% endif %}             
-                                            {{out_dtype}},                    
+                                            {% endif %}                              
                                             {{block_size}},              
                                             head_size,               
                                             NTHR,

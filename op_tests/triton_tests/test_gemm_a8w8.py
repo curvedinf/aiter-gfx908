@@ -1,8 +1,11 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+
 import torch
 import triton
 import pytest
-from aiter.ops.triton.gemm_a8w8 import gemm_a8w8
 import torch.nn.functional as F
+from aiter.ops.triton.gemm_a8w8 import gemm_a8w8
 
 
 def run_torch(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16):

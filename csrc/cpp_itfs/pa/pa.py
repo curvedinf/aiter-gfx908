@@ -28,6 +28,7 @@ def compile(
         MD_NAME,
         [
             f"{AITER_CORE_DIR}/csrc/cpp_itfs/utils.h",
+            f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa_quant_utils.cuh",
             f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa.cuh",
             f"{AITER_CORE_DIR}/csrc/include",
         ],

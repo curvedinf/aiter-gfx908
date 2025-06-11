@@ -21,7 +21,7 @@
 #include "float.h"
 #include <algorithm>
 #include "dtype_fp8.cuh"
-#include "quant_utils.cuh"
+#include "pa_quant_utils.cuh"
 #include <limits>
 
 #if defined(__HIPCC__) && \

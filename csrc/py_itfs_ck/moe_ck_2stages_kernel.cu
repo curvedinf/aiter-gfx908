@@ -227,7 +227,6 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
                    std::optional<int> pipe_ver                  = 1)
 {
     const at::cuda::OptionalCUDAGuard device_guard(device_of(out));
-    at::cuda::getCurrentCUDAStream().stream();
     // TORCH_CHECK(hidden_states.dtype() == w1.dtype(),
     //             "Weights and activations should both be same dtype!");
 
@@ -704,6 +703,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
                    std::optional<torch::Tensor> sorted_weights = std::nullopt, // [max_num_tokens_padded])
                    std::optional<int> pipe_ver                 = 1)    
 {
+    const at::cuda::OptionalCUDAGuard device_guard(device_of(out));
     // TORCH_CHECK(inter_states.dtype() == w2.dtype(),
     //             "Weights and activations should both be same dtype!");
     //

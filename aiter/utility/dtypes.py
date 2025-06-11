@@ -16,7 +16,8 @@ def get_dtype_fp8():
 i4x2 = getattr(torch, "int4", torch.uint8)
 fp4x2 = getattr(torch, "float4_e2m1fn_x2", torch.uint8)
 fp8 = get_dtype_fp8()
-fp8_e8m0 = getattr(torch, "float8_e8m0fnu", torch.uint8)
+fp8_e8m0 = torch.uint8
+# fp8_e8m0 = getattr(torch, "float8_e8m0fnu", torch.uint8)
 fp16 = torch.float16
 bf16 = torch.bfloat16
 fp32 = torch.float32

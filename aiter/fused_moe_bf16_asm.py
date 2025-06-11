@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from typing import Optional
 import aiter
 from aiter import logger
-from aiter import pertoken_quant, get_hip_quant, get_triton_quant
+from aiter import pertoken_quant, get_hip_quant, get_triton_quant, per_1x32_f4_quant_hip
 from aiter import ActivationType, QuantType, dtypes
 from aiter.utility.fp4_utils import moe_mxfp4_sort
 
@@ -586,7 +586,8 @@ def ck_moe_2stages(
     # print("block_size:", block_size, sorted_expert_ids)
     # a1, a1_scale = quant_func(a1, scale=a1_scale, shuffle=False)
     # return a1
-    a1, a1_scale = dynamic_mxfp4_quant(a1)
+    # a1, a1_scale = dynamic_mxfp4_quant(a1)
+    a1, a1_scale = per_1x32_f4_quant_hip(a1, shuffle=False)
     a1_scale = moe_mxfp4_sort(a1_scale, sorted_ids=sorted_ids, num_valid_ids=num_valid_ids, token_num=M, block_size=block_size)
     # print(f"{sorted_ids=}, {num_valid_ids=}, {M=}, {block_size=}")
     a2 = torch.empty(
@@ -621,7 +622,8 @@ def ck_moe_2stages(
     elif quant_type == QuantType.per_1x32:
         a2 = a2.view(-1, inter_dim)
     # a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
-    a2, a2_scale = dynamic_mxfp4_quant(a2)
+    # a2, a2_scale = dynamic_mxfp4_quant(a2)
+    a2, a2_scale = per_1x32_f4_quant_hip(a2, shuffle=False)
     a2 = a2.view(M, topk, -1)
     a2_scale = a2_scale.view(M, topk, -1)
 

@@ -65,7 +65,7 @@ def pertoken_quant(
     return y, y_scale
 
 
-def per_1x32_f4_quant(x, scale=None, quant_dtype=dtypes.fp4x2, shuffle=True):
+def per_1x32_f4_quant(x, scale=None, quant_dtype=dtypes.fp4x2, shuffle=False):
     assert quant_dtype == dtypes.fp4x2
     block_size = 32
     F8E8M0_EXP_BIAS = 127
@@ -220,24 +220,38 @@ def per_token_quant_hip(x, scale=None, quant_dtype=dtypes.i8):
     return y, scale
 
 
-def per_1x32_f4_quant_hip(x, scale=None, quant_dtype=dtypes.fp4x2, shuffle=True):
+def per_1x32_f4_quant_hip(x, scale=None, quant_dtype=dtypes.fp4x2, shuffle=False):
     m, n = x.shape
     assert quant_dtype == dtypes.fp4x2
     assert n % 2 == 0
     device = x.device
     if scale is None:
-        scale = (
-            torch.empty(
-                (
-                    (m + 255) // 256 * 256,
-                    (n // 32 + 7) // 8 * 8,
-                ),
-                dtype=torch.uint8,
-                device=device,
+        if shuffle:
+            scale = (
+                torch.empty(
+                    (
+                        (m + 255) // 256 * 256,
+                        (n // 32 + 7) // 8 * 8,
+                    ),
+                    dtype=torch.uint8,
+                    device=device,
+                )
+                # .fill_(0x7F)
+                .view(dtypes.fp8_e8m0)
             )
-            # .fill_(0x7F)
-            .view(dtypes.fp8_e8m0)
-        )
+        else:
+            scale = (
+                torch.empty(
+                    (
+                        m,
+                        n // 32
+                    ),
+                    dtype=torch.uint8,
+                    device=device,
+                )
+                # .fill_(0x7F)
+                .view(dtypes.fp8_e8m0)
+            )
     else:
         raise ValueError("unsupported: static per token quant")
     y = torch.empty(m, n // 2, dtype=quant_dtype, device=device)
@@ -276,8 +290,8 @@ def per_token_quant_triton(x, scale=None, quant_dtype=dtypes.i8):
 
 def per_1x32_f4_quant_triton(x, scale=None, quant_dtype=dtypes.fp4x2, shuffle=False):
     assert quant_dtype == dtypes.fp4x2
-    # y, scale = triton.quant.dynamic_mxfp4_quant(x)
-    y, scale = fp4_utils.dynamic_mxfp4_quant(x, shuffle=shuffle)
+    y, scale = triton.quant.dynamic_mxfp4_quant(x)
+    # y, scale = fp4_utils.dynamic_mxfp4_quant(x, shuffle=shuffle)
     return y, scale
 
 

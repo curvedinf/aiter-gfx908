@@ -9,15 +9,23 @@
     m.def("gelu_and_mul", &aiter::gelu_and_mul, "Activation function used in GELU.");   \
     m.def("gelu_tanh_and_mul", &aiter::gelu_tanh_and_mul, "Activation function used in GELU tanh.");
 
-#define AITER_OPERATOR_PYBIND                                                   \
+#define AITER_ADD_PYBIND							\
     m.def("add", &aiter_add, "apply for add with transpose and broadcast.");    \
-    m.def("mul", &aiter_mul, "apply for mul with transpose and broadcast.");    \
+    m.def("add_", &aiter_add_, "apply for add_ with transpose and broadcast.");
+
+#define AITER_SUB_PYBIND							\
     m.def("sub", &aiter_sub, "apply for sub with transpose and broadcast.");    \
+    m.def("sub_", &aiter_sub_, "apply for sub_ with transpose and broadcast.");
+
+#define AITER_MUL_PYBIND							\
+    m.def("mul", &aiter_mul, "apply for mul with transpose and broadcast.");    \
+    m.def("mul_", &aiter_mul_, "apply for mul_ with transpose and broadcast.");
+
+#define AITER_DIV_PYBIND							\
     m.def("div", &aiter_div, "apply for div with transpose and broadcast.");    \
-    m.def("add_", &aiter_add_, "apply for add_ with transpose and broadcast."); \
-    m.def("mul_", &aiter_mul_, "apply for mul_ with transpose and broadcast."); \
-    m.def("sub_", &aiter_sub_, "apply for sub_ with transpose and broadcast."); \
-    m.def("div_", &aiter_div_, "apply for div_ with transpose and broadcast."); \
+    m.def("div_", &aiter_div_, "apply for div_ with transpose and broadcast.");
+
+#define AITER_OPERATOR_PYBIND                                                   \
     m.def("sigmoid", &aiter_sigmoid, "apply for sigmoid.");                     \
     m.def("tanh", &aiter_tanh, "apply for tanh.");
 

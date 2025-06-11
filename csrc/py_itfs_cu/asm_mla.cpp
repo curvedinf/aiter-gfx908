@@ -116,7 +116,7 @@ void mla_decode_stage1_asm_fwd(
                 "/mla/mla_dec_stage1_bf16_a16w16_subQ128_mqa128.co");
             impl_ptr = &impl_a16w16_bf16_subQ128;
         }
-        else if(gqa_ratio == 16)
+        else //if(gqa_ratio == 16)
         {
             if(max_seqlen_q == 1)
             {

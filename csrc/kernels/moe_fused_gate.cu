@@ -115,8 +115,8 @@ __device__ void moe_fused_gate_impl(
   // Create local arrays for the row chunk and bias chunk and then reinterpret the address of row_chunk as a pointer to
   // AccessType.
 
-  // constexpr uint32_t vec_size = 16 / sizeof(T);
-  using AccessType = ck_tile::vec_t<T, MAX_VPT>;
+  constexpr uint32_t vec_size = 16 / sizeof(T);
+  using AccessType = ck_tile::vec_t<T, vec_size>;
   using VecType = ck_tile::vec_t<float, MAX_VPT>;
 
   T* thread_read_ptr = thread_row_ptr + first_elt_read_by_thread;
@@ -138,24 +138,24 @@ __device__ void moe_fused_gate_impl(
 //     bias_chunk_vec_ptr[ii] = vec_bias_thread_read_ptr[0][ii];
 //   }]
 
-  AccessType row_chunk_vec = *vec_thread_read_ptr;
-  AccessType bias_thread_read_vec = *vec_bias_thread_read_ptr;
-  for (int jj = 0; jj < MAX_VPT; ++jj) {
-    if (jj < params.VPT)
-    {
-      row_chunk[jj] = ck_tile::type_convert<float>(row_chunk_vec(jj));
-      bias_chunk[jj] = ck_tile::type_convert<float>(bias_thread_read_vec(jj));
-    }
-  }
-  // #pragma unroll
-  // for (int ii = 0; ii < params.VPT / vec_size; ++ii) {
-  //   AccessType row_chunk_vec = vec_thread_read_ptr[ii];
-  //   AccessType bias_thread_read_vec = vec_bias_thread_read_ptr[ii];
-  //   for (int jj = 0; jj < vec_size; ++jj) {
-  //     row_chunk[ii * vec_size + jj] = ck_tile::type_convert<float>(row_chunk_vec(jj));
-  //     bias_chunk[ii * vec_size + jj] = ck_tile::type_convert<float>(bias_thread_read_vec(jj));
+  // AccessType row_chunk_vec = *vec_thread_read_ptr;
+  // AccessType bias_thread_read_vec = *vec_bias_thread_read_ptr;
+  // for (int jj = 0; jj < MAX_VPT; ++jj) {
+  //   if (jj < params.VPT)
+  //   {
+  //     row_chunk[jj] = ck_tile::type_convert<float>(row_chunk_vec(jj));
+  //     bias_chunk[jj] = ck_tile::type_convert<float>(bias_thread_read_vec(jj));
   //   }
   // }
+  #pragma unroll
+  for (int ii = 0; ii < params.VPT / vec_size; ++ii) {
+    AccessType row_chunk_vec = vec_thread_read_ptr[ii];
+    AccessType bias_thread_read_vec = vec_bias_thread_read_ptr[ii];
+    for (int jj = 0; jj < vec_size; ++jj) {
+      row_chunk[ii * vec_size + jj] = ck_tile::type_convert<float>(row_chunk_vec(jj));
+      bias_chunk[ii * vec_size + jj] = ck_tile::type_convert<float>(bias_thread_read_vec(jj));
+    }
+  }
   
   // __syncthreads();
 
@@ -265,10 +265,17 @@ __device__ void moe_fused_gate_impl(
       int expert_to_clear_in_thread = expert % params.VPT;
 
       // clear the max value in the thread
-      bias_chunk[expert_to_clear_in_thread] = -FLT_MAX;
-
-      // store output
-      output_ptr[idx] = row_chunk[expert_to_clear_in_thread];
+      #pragma unroll
+      for (int ii = 0; ii < params.VPT; ++ii) {
+        if (ii == expert_to_clear_in_thread) {
+          bias_chunk[ii] = -FLT_MAX;  // clear the max value in the thread
+          output_ptr[idx] = row_chunk[ii];
+        }
+      }
+      //// clear the max value in the thread
+      // bias_chunk[expert_to_clear_in_thread] = -FLT_MAX;
+      //// store output
+      // output_ptr[idx] = row_chunk[expert_to_clear_in_thread];
       indices_ptr[idx] = ck_tile::type_convert<int32_t>(expert);
     }
 

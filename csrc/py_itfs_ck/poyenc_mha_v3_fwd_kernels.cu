@@ -587,12 +587,14 @@ struct BlockFmhaPipelineQRKSVS
                 auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
                     Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
                 shuffle_tile(v_shuffle_tmp, v_prefetch);
+                __builtin_amdgcn_sched_barrier(0);
                 store_tile(
                     v_lds_window,
                     tile_elementwise_in(v_element_func, v_shuffle_tmp)); // store the prefetch
             }
             else
             {
+                __builtin_amdgcn_sched_barrier(0);
                 store_tile(v_lds_window,
                            tile_elementwise_in(v_element_func, v_prefetch)); // store the prefetch
             }
@@ -604,6 +606,10 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (4) softmax + mfma =============================================
+            const auto p =
+                cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
+            __builtin_amdgcn_sched_barrier(0);
+
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                 p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
 
@@ -629,9 +635,6 @@ struct BlockFmhaPipelineQRKSVS
                     o_acc(i_j_idx) *= tmp;
                 });
             });
-
-            const auto p =
-                cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
 
             {
                 gemm_1(o_acc,

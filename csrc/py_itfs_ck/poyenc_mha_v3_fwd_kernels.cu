@@ -361,6 +361,8 @@ struct BlockFmhaPipelineQRKSVS
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                       "wrong!");
 
+        const index_t warp_group_id = get_warp_id() / 4;
+
         // K tile in LDS
         const auto* k_lds_ptr = reinterpret_cast<const KDataType*>(smem_ptr);
         auto k_lds            = make_tensor_view<address_space_enum::lds>(
@@ -469,7 +471,7 @@ struct BlockFmhaPipelineQRKSVS
 #define ENABLE_PINGPONG_SCHED 1
 
 #if ENABLE_PINGPONG_SCHED
-        if(get_warp_id() / 4 == 1)
+        if(warp_group_id == 1)
         {
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_s_barrier();
@@ -651,7 +653,7 @@ struct BlockFmhaPipelineQRKSVS
         } while(++i_total_loops < num_total_loop);
 
 #if ENABLE_PINGPONG_SCHED
-        if(get_warp_id() / 4 == 0)
+        if(warp_group_id == 0)
         {
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_s_barrier();

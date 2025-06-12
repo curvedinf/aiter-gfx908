@@ -160,7 +160,7 @@ def create_benchmark_configs(custom, args):
         if args.fused_bwd:
             line_vals = [f"fused-bwd({unit})"]
         else:
-            line_vals = [f"fused-bwd({unit})", f"bwd({unit})"]
+            line_vals = [f"bwd({unit})"]
     else:
         line_vals = [f"fwd({unit})"]
 

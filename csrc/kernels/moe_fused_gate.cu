@@ -16,10 +16,11 @@
  */
 #include <ATen/cuda/CUDAContext.h>
 #include <cuda_runtime.h>
-#include <ck/ck.hpp>
-#include <ck/utility/data_type.hpp>
-#include <ck/utility/type_convert.hpp>
-#include <ck/utility/array.hpp>
+// #include <ck/ck.hpp>
+// #include <ck/utility/data_type.hpp>
+// #include <ck/utility/type_convert.hpp>
+// #include <ck/utility/array.hpp>
+#include "vec_convert.h"
 #include <stdio.h>
 #include <torch/all.h>
 
@@ -43,8 +44,8 @@ class alignas(Alignment) AlignedArray {
     float data[N];
 };
 
-using bfloat16_t = ck::bhalf_t;
-using float16_t = ck::half_t;
+using bfloat16_t = ck_tile::bfloat16_t;
+using float16_t = ck_tile::half_t;
 using float32_t = float;
 
 // QQ NOTE: to handle the case for at::Half, error: more than one operator ">" matches these operands: built-in operator
@@ -53,7 +54,7 @@ template <typename T>
 __device__ inline bool cmp_gt(const T& a, const T& b) {
   if constexpr (std::is_same<T, float16_t>::value || std::is_same<T, bfloat16_t>::value) {
     // at::Half (or float16_t in our native case) causes ambiguity, so we cast to float.
-    return ck::type_convert<float>(a) > ck::type_convert<float>(b);
+    return ck_tile::type_convert<float>(a) > ck_tile::type_convert<float>(b);
   } else {
     // For types like float, at::BFloat16, or cutlass::half_t / cutlass::bfloat16_t, assume operator> works as expected.
     return a > b;
@@ -63,7 +64,7 @@ __device__ inline bool cmp_gt(const T& a, const T& b) {
 template <typename T>
 __device__ inline bool cmp_eq(const T& a, const T& b) {
   if constexpr (std::is_same<T, float16_t>::value || std::is_same<T, bfloat16_t>::value) {
-    return ck::type_convert<float>(a) == ck::type_convert<float>(b);
+    return ck_tile::type_convert<float>(a) == ck_tile::type_convert<float>(b);
   } else {
     return a == b;
   }
@@ -90,7 +91,7 @@ __device__ void moe_fused_gate_impl(
     int64_t num_rows,
     int64_t topk_group,
     int64_t topk,
-    int64_t n_share_experts_fusion,
+    int64_t num_fused_shared_experts,
     double routed_scaling_factor,
     Params params) {
   int tidx = threadIdx.x;
@@ -101,7 +102,7 @@ __device__ void moe_fused_gate_impl(
   }
 
   // Calculate topk_excluding_share_expert_fusion from topk
-  int64_t topk_excluding_share_expert_fusion = topk - (n_share_experts_fusion > 0 ? 1 : 0);
+  int64_t topk_excluding_share_expert_fusion = topk - num_fused_shared_experts;
 
   // Cast pointers to type T:
   auto* input_ptr = reinterpret_cast<T*>(input);
@@ -114,15 +115,16 @@ __device__ void moe_fused_gate_impl(
   // Create local arrays for the row chunk and bias chunk and then reinterpret the address of row_chunk as a pointer to
   // AccessType.
 
-  constexpr uint32_t vec_size = 32 / sizeof(T);
-  using AccessType = ck::Array<T, vec_size>;
+  // constexpr uint32_t vec_size = 16 / sizeof(T);
+  using AccessType = ck_tile::vec_t<T, MAX_VPT>;
+  using VecType = ck_tile::vec_t<float, MAX_VPT>;
 
   T* thread_read_ptr = thread_row_ptr + first_elt_read_by_thread;
-  float row_chunk[MAX_VPT];
+  VecType row_chunk;
   AccessType const* vec_thread_read_ptr = reinterpret_cast<AccessType const*>(thread_read_ptr);
 
   T* bias_thread_read_ptr = bias_ptr + first_elt_read_by_thread;
-  float bias_chunk[MAX_VPT];
+  VecType bias_chunk;
   AccessType const* vec_bias_thread_read_ptr = reinterpret_cast<AccessType const*>(bias_thread_read_ptr);
 
 // QQ NOTE: doing the follow will be slower than loop assign and more importantly
@@ -136,17 +138,26 @@ __device__ void moe_fused_gate_impl(
 //     bias_chunk_vec_ptr[ii] = vec_bias_thread_read_ptr[0][ii];
 //   }]
 
-  #pragma unroll
-  for (int ii = 0; ii < params.VPT / vec_size; ++ii) {
-    AccessType row_chunk_vec = vec_thread_read_ptr[ii];
-    AccessType bias_thread_read_vec = vec_bias_thread_read_ptr[ii];
-    for (int jj = 0; jj < vec_size; ++jj) {
-      row_chunk[ii * vec_size + jj] = ck::type_convert<float>(row_chunk_vec(jj));
-      bias_chunk[ii * vec_size + jj] = ck::type_convert<float>(bias_thread_read_vec(jj));
+  AccessType row_chunk_vec = *vec_thread_read_ptr;
+  AccessType bias_thread_read_vec = *vec_bias_thread_read_ptr;
+  for (int jj = 0; jj < MAX_VPT; ++jj) {
+    if (jj < params.VPT)
+    {
+      row_chunk[jj] = ck_tile::type_convert<float>(row_chunk_vec(jj));
+      bias_chunk[jj] = ck_tile::type_convert<float>(bias_thread_read_vec(jj));
     }
   }
+  // #pragma unroll
+  // for (int ii = 0; ii < params.VPT / vec_size; ++ii) {
+  //   AccessType row_chunk_vec = vec_thread_read_ptr[ii];
+  //   AccessType bias_thread_read_vec = vec_bias_thread_read_ptr[ii];
+  //   for (int jj = 0; jj < vec_size; ++jj) {
+  //     row_chunk[ii * vec_size + jj] = ck_tile::type_convert<float>(row_chunk_vec(jj));
+  //     bias_chunk[ii * vec_size + jj] = ck_tile::type_convert<float>(bias_thread_read_vec(jj));
+  //   }
+  // }
   
-  __syncthreads();
+  // __syncthreads();
 
 ////////////////////// Sigmoid //////////////////////
 #pragma unroll
@@ -258,7 +269,7 @@ __device__ void moe_fused_gate_impl(
 
       // store output
       output_ptr[idx] = row_chunk[expert_to_clear_in_thread];
-      indices_ptr[idx] = ck::type_convert<int32_t>(expert);
+      indices_ptr[idx] = ck_tile::type_convert<int32_t>(expert);
     }
 
     // accumulate sum for all elements
@@ -269,15 +280,25 @@ __device__ void moe_fused_gate_impl(
     __syncthreads();
   }
 
-  if (thread_group_idx == 0 && n_share_experts_fusion > 0) {
+  if (thread_group_idx == 0 && num_fused_shared_experts > 0) {
     int64_t last_idx = topk * thread_row + topk_excluding_share_expert_fusion;
 
     // Use round-robin to select expert
-    int64_t expert_offset = thread_row % n_share_experts_fusion;
-    indices_ptr[last_idx] = ck::type_convert<int32_t>(params.NUM_EXPERTS + expert_offset);
+    int64_t expert_offset = thread_row % num_fused_shared_experts;
+    indices_ptr[last_idx] = ck_tile::type_convert<int32_t>(params.NUM_EXPERTS + expert_offset);
 
     // Set the weight to the sum of all weights divided by routed_scaling_factor
     output_ptr[last_idx] = output_sum / routed_scaling_factor;
+
+    if (num_fused_shared_experts > 1) {
+      for (int i = 1; i < num_fused_shared_experts; ++i) {
+        ++last_idx;
+        ++expert_offset;
+        indices_ptr[last_idx] = static_cast<int32_t>(params.NUM_EXPERTS + expert_offset);
+        // Set the weight to the sum of all weights divided by routed_scaling_factor
+        output_ptr[last_idx] = output_sum / routed_scaling_factor;
+      }
+    }
   }
   __syncthreads();
 
@@ -320,7 +341,7 @@ __global__ void moe_fused_gate_kernel(
     int64_t num_rows,
     int64_t topk_group,
     int64_t topk,
-    int64_t n_share_experts_fusion,
+    int64_t num_fused_shared_experts,
     double routed_scaling_factor) {
   KernelParams<VPT, NUM_EXPERTS, THREADS_PER_ROW, ROWS_PER_WARP, ROWS_PER_CTA, WARPS_PER_CTA> params;
   moe_fused_gate_impl<T>(
@@ -331,7 +352,7 @@ __global__ void moe_fused_gate_kernel(
       num_rows,
       topk_group,
       topk,
-      n_share_experts_fusion,
+      num_fused_shared_experts,
       routed_scaling_factor,
       params);
 }
@@ -352,7 +373,7 @@ __global__ void moe_fused_gate_kernel(
             num_rows,                                                                                    \
             topk_group,                                                                                  \
             topk,                                                                                        \
-            n_share_experts_fusion,                                                                      \
+            num_fused_shared_experts,                                                                      \
             routed_scaling_factor);                                                                      \
     dispatched = true;                                                                                   \
   } while (0)
@@ -380,7 +401,7 @@ __global__ void moe_fused_gate_kernel_dynamic(
     int64_t num_expert_group,
     int64_t topk_group,
     int64_t topk,
-    int64_t n_share_experts_fusion,
+    int64_t num_fused_shared_experts,
     double routed_scaling_factor) {
   KernelParamsDynamic params;
   params.NUM_EXPERTS = num_experts;             // e.g, for deepseek v3, this is 256
@@ -398,7 +419,7 @@ __global__ void moe_fused_gate_kernel_dynamic(
       num_rows,
       topk_group,
       topk,
-      n_share_experts_fusion,
+      num_fused_shared_experts,
       routed_scaling_factor,
       params);
 }
@@ -412,7 +433,7 @@ std::vector<at::Tensor> moe_fused_gate(
     int64_t num_expert_group,
     int64_t topk_group,
     int64_t topk,
-    int64_t n_share_experts_fusion,
+    int64_t num_fused_shared_experts,
     double routed_scaling_factor) {
   int64_t num_rows = input.size(0);
   int32_t num_experts = input.size(1);
@@ -511,7 +532,7 @@ std::vector<at::Tensor> moe_fused_gate(
           num_expert_group,
           topk_group,
           topk,
-          n_share_experts_fusion,
+          num_fused_shared_experts,
           routed_scaling_factor);
     } else if (input.scalar_type() == at::kHalf) {
       moe_fused_gate_kernel_dynamic<float16_t><<<num_blocks, block_dim, 0, stream>>>(
@@ -524,7 +545,7 @@ std::vector<at::Tensor> moe_fused_gate(
           num_expert_group,
           topk_group,
           topk,
-          n_share_experts_fusion,
+          num_fused_shared_experts,
           routed_scaling_factor);
     } else if (input.scalar_type() == at::kFloat) {
       moe_fused_gate_kernel_dynamic<float32_t><<<num_blocks, block_dim, 0, stream>>>(
@@ -537,7 +558,7 @@ std::vector<at::Tensor> moe_fused_gate(
           num_expert_group,
           topk_group,
           topk,
-          n_share_experts_fusion,
+          num_fused_shared_experts,
           routed_scaling_factor);
     } else {
       TORCH_CHECK(false, "Unsupported data type for moe_fused_gate");

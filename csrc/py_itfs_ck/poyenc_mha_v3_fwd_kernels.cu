@@ -186,6 +186,12 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
                     sequence<1, 3>>{});
         }
     }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
+    {
+        return 2 * GetSmemSizeKV<Problem>();
+    }
 };
 
 // This pipeline is qkv all located in LDS
@@ -356,17 +362,17 @@ struct BlockFmhaPipelineQRKSVS
                       "wrong!");
 
         // K tile in LDS
-        KDataType* k_lds_ptr = static_cast<KDataType*>(static_cast<void*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeQ<Problem>()));
-        auto k_lds           = make_tensor_view<address_space_enum::lds>(
+        const auto* k_lds_ptr = reinterpret_cast<const KDataType*>(smem_ptr);
+        auto k_lds            = make_tensor_view<address_space_enum::lds>(
             k_lds_ptr, Policy::template MakeKLdsBlockDescriptor<Problem>());
-        auto k_lds_window =
-            make_tile_window(k_lds, make_tuple(number<kN0>{}, number<kK0>{}), {0, 0});
+        auto k_lds_window = make_tile_window(
+            k_lds, Policy::template MakeKLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
 
         // V tile in LDS
+        const auto* v_lds_ptr = reinterpret_cast<const VDataType*>(
+            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeKV<Problem>());
         auto v_lds = make_tensor_view<address_space_enum::lds>(
-            reinterpret_cast<VDataType*>(smem_ptr),
-            Policy::template MakeVLdsBlockDescriptor<Problem>());
+            v_lds_ptr, Policy::template MakeVLdsBlockDescriptor<Problem>());
         auto v_lds_window = make_tile_window(
             v_lds, Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
 
@@ -460,6 +466,16 @@ struct BlockFmhaPipelineQRKSVS
         constexpr index_t k0_loops = kQKHeaddim / kK0;
         constexpr index_t k1_loops = kN0 / kK1;
 
+#define ENABLE_PINGPONG_SCHED 1
+
+#if ENABLE_PINGPONG_SCHED
+        if(get_warp_id() / 4 == 1)
+        {
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_s_barrier();
+        }
+#endif
+
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);
         do
@@ -470,9 +486,16 @@ struct BlockFmhaPipelineQRKSVS
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
-            store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
-            block_sync_lds();
+            __builtin_amdgcn_sched_barrier(0);
 
+            store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
+
+            __builtin_amdgcn_s_waitcnt(0xc07f);
+            __builtin_amdgcn_s_barrier();
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
             // (2) mfma + softmax =============================================
             {
                 gemm_0(s_acc,
@@ -551,10 +574,15 @@ struct BlockFmhaPipelineQRKSVS
 #endif
                 });
             });
+            __builtin_amdgcn_s_barrier();
 
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
             // (3) load & store V =============================================
             const auto v_prefetch = load_tile(v_dram_window);
-            block_sync_lds();
+            __builtin_amdgcn_sched_barrier(0);
+
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
             {
                 auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
@@ -571,6 +599,12 @@ struct BlockFmhaPipelineQRKSVS
             }
             move_tile_window(v_dram_window, {0, kK1});
 
+            __builtin_amdgcn_s_waitcnt(0xc07f);
+            __builtin_amdgcn_s_barrier();
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
             // (4) softmax + mfma =============================================
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                 p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
@@ -602,15 +636,27 @@ struct BlockFmhaPipelineQRKSVS
                 cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
 
             {
-                block_sync_lds();
                 gemm_1(o_acc,
                        get_slice_tile(p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
                        v_lds_window);
-                block_sync_lds();
             }
+
             // move K tile windows
             move_tile_window(k_dram_block_window, {kN0, 0});
+            __builtin_amdgcn_s_barrier();
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
         } while(++i_total_loops < num_total_loop);
+
+#if ENABLE_PINGPONG_SCHED
+        if(get_warp_id() / 4 == 0)
+        {
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_s_barrier();
+        }
+#endif
 
         // store lse
         if constexpr(kStoreLSE)

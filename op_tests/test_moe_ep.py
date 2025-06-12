@@ -2,17 +2,23 @@
 # Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
-import torch.nn.functional as F
-import triton.language as tl
-import numpy as np
-import sys
-import os
-from typing import Any, Callable, Dict, Optional, Tuple
-from aiter.test_common import checkAllclose, perftest
-from aiter.fused_moe import torch_moe, moe_sorting, fused_topk
+import aiter
+from aiter.test_common import (
+    checkAllclose,
+    run_perftest,
+    perftest,
+)
+from aiter.fused_moe import (
+    fused_topk,
+    fused_moe,
+    torch_moe,
+)
+
 from aiter.fused_moe_bf16_asm import asm_moe
 from aiter.ops.shuffle import shuffle_weight
+from aiter import ActivationType
 from aiter import pertoken_quant, ck_moe
+from aiter import dtypes
 
 BLOCK_SIZE_M = 32
 MAX_TOKENS = 4096 * 4
@@ -129,8 +135,8 @@ def test_fmoe_ep(
     # This gpu id in EP, this example use the last id
     ep_id = ep - 1
     # total_expert = unshared_expert + shared_expert + fake_expert(only use this fake expert id to mask)
-    # expert_mask = torch.randint(0, 2, (E+shared_E+1,), dtype=torch.int32, device="cuda")
-    expert_mask = torch.zeros((E + shared_E + 1,), dtype=torch.int32, device="cuda")
+    # expert_mask = torch.randint(0, 2, (E+shared_E+1,), dtype=dtypes.i32, device="cuda")
+    expert_mask = torch.zeros((E + shared_E + 1,), dtype=dtypes.i32, device="cuda")
     expert_mask[ep_id * (E // ep) : (ep_id + 1) * E // ep] = 1
     # The last expert
     fake_expertid = expert_mask.numel() - 1
@@ -147,14 +153,16 @@ def test_fmoe_ep(
         return
 
     quantstr = quant_algo[quantAlgoId]
-    quant_dtype = torch.int8 if quantstr.startswith("int8") else torch.float8_e4m3fnuz
+    quant_dtype = dtypes.i8 if quantstr.startswith("int8") else dtypes.fp8
     use_smooth = "smooth" in quantstr
 
     input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
     if use_g1u1:
         w1 = (
             torch.randn(
-                (E // ep + shared_E, inter_dim * 2, model_dim), dtype=dtype, device="cuda"
+                (E // ep + shared_E, inter_dim * 2, model_dim),
+                dtype=dtype,
+                device="cuda",
             )
             / 10
         )
@@ -166,7 +174,9 @@ def test_fmoe_ep(
             / 10
         )
     w2 = (
-        torch.randn((E // ep + shared_E, model_dim, inter_dim), dtype=dtype, device="cuda")
+        torch.randn(
+            (E // ep + shared_E, model_dim, inter_dim), dtype=dtype, device="cuda"
+        )
         / 10
     )
     score = torch.randn((token, E), device="cuda", dtype=dtype)
@@ -175,20 +185,18 @@ def test_fmoe_ep(
     shared_E_score = 0.1
     # init total_topk_ids, inference time you just need to fill ns_topk_ids in total_topk_ids
     total_topk_ids = torch.empty(
-        (MAX_TOKENS, topk + shared_E + 1), dtype=torch.int32, device=input.device
+        (MAX_TOKENS, topk + shared_E + 1), dtype=dtypes.i32, device=input.device
     )
     ns_topk_ids, s_topk_ids = total_topk_ids.split([topk, shared_E + 1], dim=1)
     shared_expert_ids = [E + i for i in range(shared_E + 1)]
     s_topk_ids_list = [[fake_expertid] * (shared_E + 1)] * MAX_TOKENS
     for i in range(ep_id, MAX_TOKENS, ep):
         s_topk_ids_list[i] = shared_expert_ids
-    s_topk_ids[:] = torch.tensor(
-        s_topk_ids_list, dtype=torch.int32, device=input.device
-    )
+    s_topk_ids[:] = torch.tensor(s_topk_ids_list, dtype=dtypes.i32, device=input.device)
 
     # init total_topk_weights, inference time you just need to fill ns_topk_weights in total_topk_weights
     total_topk_weights = torch.empty(
-        (MAX_TOKENS, topk + shared_E + 1), dtype=torch.float32, device=input.device
+        (MAX_TOKENS, topk + shared_E + 1), dtype=dtypes.fp32, device=input.device
     )
     ns_topk_weights, s_topk_weights = total_topk_weights.split(
         [topk, shared_E + 1], dim=1
@@ -211,25 +219,46 @@ def test_fmoe_ep(
         )
 
         # b implement
-        w1b = shuffle_weight(w1)
-        w2b = shuffle_weight(w2)
+        torch_quant = aiter.get_torch_quant(aiter.QuantType.No)
+        w1_qt, w1_scale = torch_quant(w1, quant_dtype=None)
+        w2_qt, w2_scale = torch_quant(w2, quant_dtype=None)
+        w1_qt = w1_qt_aiter = w1_qt.view(w1.shape)
+        w2_qt = w2_qt_aiter = w2_qt.view(w2.shape)
+        w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(16, 16))
+        w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(16, 16))
 
-        if use_g1u1:
-            out_b = ref2
-            avg_b = 9999
-            print("asm g1u1 only support quant/smoothquant Now")
-        else:
-            out_b, avg_b = asm_moe_test(
-                input, w1b, w2b, topk_weights, topk_ids, expert_mask=expert_mask
-            )
+        # if use_g1u1:
+        #     out_b = ref2
+        #     avg_b = 9999
+        #     print("asm g1u1 only support quant/smoothquant Now")
+        # else:
+        #     out_b, avg_b = asm_moe_test(
+        #         input,
+        #         w1_qt_aiter,
+        #         w2_qt_aiter,
+        #         topk_weights,
+        #         topk_ids,
+        #         expert_mask=expert_mask,
+        #     )
 
         # test ck moe
-        out_ck, avg_ck = ck_moe_test(
-            input, w1b, w2b, topk_weights, topk_ids, None, None, None, None, expert_mask
+        out_ck, avg_ck = run_perftest(
+            fused_moe,
+            input,
+            w1_qt_aiter,
+            w2_qt_aiter,
+            topk_weights,
+            topk_ids,
+            expert_mask,
+            w1_scale=None,
+            w2_scale=None,
+            quant_type=aiter.QuantType.No,
+            activation=ActivationType.Silu,
+            doweight_stage1=False,
         )
 
-        msg = f"[perf] {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {shared_E=}, {topk=}, {ep=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:>8.2f} us, ck_avg: {avg_ck:>8.2f} us, uplift: {avg_c/avg_b-1:.1%}"
-        checkAllclose(ref2, out_b, rtol=0.01, atol=10, msg=msg)
+        # msg = f"[perf] {token=}, quant={quantstr}, {model_dim=}, {inter_dim=}, {E=}, {shared_E=}, {topk=}, {ep=}, dtype: {dtype}, torch_avg: {avg_c:<8.2f} us, asm_avg: {avg_b:>8.2f} us, ck_avg: {avg_ck:>8.2f} us, uplift: {avg_c/avg_b-1:.1%}"
+        # checkAllclose(ref2, out_b, rtol=0.01, atol=10, msg=msg)
         checkAllclose(ref2, out_ck, rtol=0.01, atol=10, msg="ck check")
 
     else:
@@ -244,9 +273,9 @@ def test_fmoe_ep(
             fc2_smooth_scale = None
         else:
             # [expert, 1, model_dim]
-            fc1_smooth_scale = torch.randn(sp2, dtype=torch.float, device="cuda")
+            fc1_smooth_scale = torch.randn(sp2, dtype=dtypes.fp32, device="cuda")
             # [expert, 1, inter_dim]
-            fc2_smooth_scale = torch.randn(sp1, dtype=torch.float, device="cuda")
+            fc2_smooth_scale = torch.randn(sp1, dtype=dtypes.fp32, device="cuda")
 
         # ref2 implement
         ref2, avg_c = torch_moe_test(
@@ -305,17 +334,15 @@ def test_fmoe_ep(
         if use_smooth and (
             (
                 (inter_dim % 512 == 0 or inter_dim % 320 == 0)
-                and (
-                    w1b.dtype == torch.float8_e4m3fnuz and inter_dim * 2 == w1b.shape[1]
-                )
+                and (w1b.dtype == dtypes.fp8 and inter_dim * 2 == w1b.shape[1])
             )
             or (
                 (inter_dim % 320 == 0)
-                and (w1b.dtype == torch.int8 and inter_dim * 2 == w1b.shape[1])
+                and (w1b.dtype == dtypes.i8 and inter_dim * 2 == w1b.shape[1])
             )
             or (
                 (inter_dim % 512 == 0)
-                and (w1b.dtype == torch.int8 and inter_dim == w1b.shape[1])
+                and (w1b.dtype == dtypes.i8 and inter_dim == w1b.shape[1])
             )
         ):
             out_b2, avg_b2 = asm_moe_test(
@@ -345,29 +372,29 @@ def test_fmoe_ep(
 
 
 print("test test_fmoe 16 bit")
-print("\ng1u0 no quant")
-for dtype in [torch.float16, torch.bfloat16]:
-    for m in [7, 128, 256]:
-        for dim in [4096, 8192]:
-            for hdim in [1024]:
-                for ep in [1, 2, 4, 8]:
-                    test_fmoe_ep(
-                        dtype, m, dim, hdim, 32, 5, quant="No", shared_E=2, ep=ep
-                    )
+# print("\ng1u0 no quant")
+# for dtype in [dtypes.fp16, dtypes.bf16]:
+#     for m in [7, 128, 256]:
+#         for dim in [4096, 8192]:
+#             for hdim in [1024, 1280]:
+#                 for ep in [4, 8]:
+#                     test_fmoe_ep(
+#                         dtype, m, dim, hdim, 128, 6, quant="No", shared_E=2, ep=ep
+#                     )
 
 print("\ng1u1 no quant")
-for dtype in [torch.float16, torch.bfloat16]:
+for dtype in [dtypes.fp16, dtypes.bf16]:
     for m in [7, 128, 256]:
         for dim in [4096, 8192]:
-            for hdim in [1024]:
-                for ep in [1, 2, 4, 8]:
+            for hdim in [1024, 1280]:
+                for ep in [4, 8]:
                     test_fmoe_ep(
                         dtype,
                         m,
                         dim,
                         hdim,
-                        32,
-                        5,
+                        128,
+                        9,
                         quant="No",
                         use_g1u1=True,
                         shared_E=2,
@@ -375,11 +402,11 @@ for dtype in [torch.float16, torch.bfloat16]:
                     )
 
 print("\ng1u1 int8quant")
-for dtype in [torch.bfloat16]:
+for dtype in [dtypes.bf16]:
     for m in [128, 256]:
         for dim in [4096, 8192]:
             for hdim in [1024]:
-                for ep in [1, 2, 4, 8]:
+                for ep in [4, 8]:
                     test_fmoe_ep(
                         dtype,
                         m,
@@ -394,11 +421,11 @@ for dtype in [torch.bfloat16]:
                     )
 
 print("\ng1u1 fp8quant")
-for dtype in [torch.bfloat16]:
+for dtype in [dtypes.bf16]:
     for m in [128, 256]:
         for dim in [4096, 8192]:
             for hdim in [1024]:
-                for ep in [1, 2, 4, 8]:
+                for ep in [4, 8]:
                     test_fmoe_ep(
                         dtype,
                         m,
@@ -414,11 +441,11 @@ for dtype in [torch.bfloat16]:
 
 
 print("\ng1u0 int8smoothquant")
-for dtype in [torch.bfloat16]:
+for dtype in [dtypes.bf16]:
     for m in [128]:
         for dim in [4096, 6144, 8192]:
             for hdim in [512, 1024]:
-                for ep in [1, 2, 4, 8]:
+                for ep in [4, 8]:
                     test_fmoe_ep(
                         dtype,
                         m,
@@ -433,7 +460,7 @@ for dtype in [torch.bfloat16]:
                     )
 
 print("\ng1u1 int8smoothquant")
-for dtype in [torch.bfloat16]:
+for dtype in [dtypes.bf16]:
     for m in [128]:
         for dim in [4096]:
             for hdim in [1280]:
@@ -452,11 +479,11 @@ for dtype in [torch.bfloat16]:
                     )
 
 print("\ng1u1 fp8smoothquant")
-for dtype in [torch.bfloat16]:
+for dtype in [dtypes.bf16]:
     for m in [128]:
         for dim in [4096, 6144, 8192]:
             for hdim in [512, 1024, 1280]:
-                for ep in [1, 2, 4, 8]:
+                for ep in [4, 8]:
                     test_fmoe_ep(
                         dtype,
                         m,

@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+
 # Copyright (C) 2023-2025 SGLang Team
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -185,7 +188,9 @@ def _fwd_grouped_kernel_stage1_rope(
         # we only apply to the last token in the K_PE
         if LAST_SPLIT:
             # debug assert
-            if (cur_batch == 0 and cur_head == 0) and split_kv_id < NUM_KV_SPLITS - 1:
+            if (
+                cur_batch == 0 and cur_head_id == 0
+            ) and split_kv_id < NUM_KV_SPLITS - 1:
                 tl.device_assert(False, "Only last split should compute k_pe")
 
             kv_loc = tl.load(

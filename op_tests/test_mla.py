@@ -2,14 +2,12 @@
 # Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
-import torch.nn.functional as F
 import aiter
-from op_tests.triton_tests.utils import mla_decode_ref, mla_extend_ref
 from aiter.test_common import checkAllclose, benchmark, run_perftest
-from aiter.test_mha_common import attention_ref
-from einops import rearrange
+from aiter import dtypes
 import random
 import itertools
+import argparse
 
 torch.set_default_device("cuda")
 torch.set_printoptions(sci_mode=False)
@@ -149,8 +147,7 @@ def test_mla(
         k = torch.randn((total_kv, nhead, qk_head_dim), dtype=dtype)
         v = torch.randn((total_kv, nhead, v_head_dim), dtype=dtype)
 
-        out_ref, us_ref = run_perftest(
-            torch_mha_extend,
+        out_ref = torch_mha_extend(
             q,
             k,
             v,
@@ -159,8 +156,6 @@ def test_mla(
             kv_indices,
             sm_scale,
             dtype=dtype,
-            num_iters=2,
-            num_warmup=0,
         )
         out_aiter, us_aiter = run_perftest(
             aiter.flash_attn_varlen_func,
@@ -183,7 +178,7 @@ def test_mla(
         checkAllclose(
             out_ref,
             out_aiter,
-            msg=f"mla_prefill-normal    [torch vs  aiter_ck]:{us_ref:>8.2f} us vs {us_aiter:>8.2f} us...... {flop/us_aiter/1000/1000:>8.2f} TFlops",
+            msg=f"mla_prefill-normal    [torch vs  aiter_ck]: {us_aiter:>8.2f} us...... {flop/us_aiter/1000/1000:>8.2f} TFlops",
         )
         return us_aiter
 
@@ -202,8 +197,7 @@ def test_mla(
     def test_absorb_prefill():
         q = torch.randn((total_qo, nhead, qk_head_dim), dtype=dtype)
 
-        out_ref, us_torch = run_perftest(
-            torch_mla_extend,
+        out_ref = torch_mla_extend(
             q,
             kv_buffer,
             qo_indptr,
@@ -213,8 +207,6 @@ def test_mla(
             kv_lora_rank,
             qk_rope_head_dim,
             dtype=dtype,
-            num_iters=2,
-            num_warmup=0,
         )
 
         # #triton version
@@ -270,7 +262,7 @@ def test_mla(
         checkAllclose(
             out_ref,
             out_asm,
-            msg=f"mla_prefill-absorb    [torch vs aiter_asm]:{us_torch:>8.2f} us vs {us_asm:>8.2f} us......",
+            msg=f"mla_prefill-absorb    [torch vs aiter_asm]: {us_asm:>8.2f} us......",
         )
         return us_asm
 
@@ -281,8 +273,8 @@ def test_mla(
 
     # ############################## absorb: decode
     # seq_lens_qo = torch.randint(1, 5, (batch_size,), dtype=torch.int)
-    if nhead == 16 and mtp != 1:
-        return
+    # if nhead == 16 and mtp != 1:
+    #     return
     seq_lens_qo.fill_(mtp)
 
     max_seqlen_qo = seq_lens_qo.max().item()
@@ -291,8 +283,7 @@ def test_mla(
     q = torch.randn((total_q, nhead, qk_head_dim), dtype=dtype)
 
     # troch implementation
-    out_ref, us_torch_decode = run_perftest(
-        torch_mla_extend,
+    out_ref = torch_mla_extend(
         q,
         kv_buffer,
         qo_indptr,
@@ -301,10 +292,8 @@ def test_mla(
         sm_scale,
         kv_lora_rank,
         qk_rope_head_dim,
-        is_causal=False,
+        is_causal=True,
         dtype=dtype,
-        num_iters=2,
-        num_warmup=0,
     )
 
     # Triton implementation
@@ -317,7 +306,7 @@ def test_mla(
     #     num_kv_splits = 16
     #     attn_logits = torch.empty(
     #         (total_q, nhead, num_kv_splits, v_head_dim + 1),
-    #         dtype=torch.float32,
+    #         dtype=dtypes.fp32,
     #     )
     #     _, us_ref = run_perftest(
     #         mla_decode_ref.decode_attention_fwd,
@@ -363,15 +352,24 @@ def test_mla(
     #               msg=f'attn_logits [golden vs aiter_asm]')
     # checkAllclose(lse_ref, attn_lse,
     #               msg=f'attn_lse    [golden vs aiter_asm]')
-    checkAllclose(
+    flops = mtp * total_kv * nhead * (qk_head_dim + v_head_dim) * 2
+    bytes = (
+        total_kv * nhead_kv * qk_head_dim + total_q * nhead * (qk_head_dim + v_head_dim)
+    ) * (torch.finfo(dtype).bits // 8)
+    err = checkAllclose(
         out_ref,
         out_asm,
-        msg=f"mla_decode-absorb    [golden vs aiter_asm]:{us_torch_decode:>8.2f} us vs {us_asm_decode:>8.2f} us......",
+        msg=f"mla_decode-absorb    [golden vs aiter_asm]: {us_asm_decode:>8.2f} us......",
     )
     return {
         "prefill:ck_192": us_aiter,
         "prefill:asm_576": us_asm,
+        "decode:flops": flops,
+        "decode:bytes": bytes,
+        "decode:err": err,
         "decode:asm_576": us_asm_decode,
+        "decode:TFLOPS": flops / us_asm_decode / 1e6,
+        "decode:TB/s": bytes / us_asm_decode / 1e6,
     }
 
 
@@ -380,11 +378,52 @@ qk_nope_head_dim = 128
 qk_rope_head_dim = 64
 v_head_dim = 128
 block_size = 1
-list_dtype = [(torch.bfloat16, torch.bfloat16)]
-list_ctx_len = [21, 64, 256, 512, 1200, 3200, 5200, 8192][:]
-list_batch_size = [1, 3, 5, 16, 32, 64, 128, 256][:]
-list_nhead = [(16, 1), (128, 2)]
+list_dtype = [(dtypes.bf16, dtypes.bf16)]
+list_ctx_len = [21, 64, 256, 512, 1200, 3200, 5200, 8192]
+list_batch_size = [1, 3, 5, 16, 32, 64, 128, 256]
+list_nhead = [(16, 1), (16, 2), (16, 4), (128, 2)]
+
+parser = argparse.ArgumentParser(description="config input of test")
+parser.add_argument(
+    "-c",
+    "--ctxLen",
+    type=int,
+    choices=list_ctx_len,
+    nargs="?",
+    const=None,
+    default=None,
+    help="context length",
+)
+parser.add_argument(
+    "-b",
+    "--batchSize",
+    type=int,
+    choices=list_batch_size,
+    nargs="?",
+    const=None,
+    default=None,
+    help="batch size",
+)
+parser.add_argument(
+    "-n",
+    "--nhead",
+    type=dtypes.str2tuple,
+    choices=list_nhead,
+    nargs="?",
+    const=None,
+    default=None,
+    help="shape",
+)
+
 import pandas as pd
+
+args = parser.parse_args()
+if args.ctxLen is not None:
+    list_ctx_len = [args.ctxLen]
+if args.batchSize is not None:
+    list_batch_size = [args.batchSize]
+if args.nhead is not None:
+    list_nhead = [args.nhead]
 
 for nhead, mtp in list_nhead:
     df = []
@@ -406,7 +445,6 @@ for nhead, mtp in list_nhead:
             mtp=mtp,
         )
         df.append(ret)
-
     df = pd.DataFrame(df)
-    # df.to_csv("mla_prefill.csv")
+    # df.to_csv(f"mla_nhead{nhead}mtp{mtp}.csv")
     aiter.logger.info(f"summary:\n{df}")

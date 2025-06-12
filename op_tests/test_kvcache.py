@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
-import torch.nn.functional as F
 import aiter
 from aiter.test_common import checkAllclose, perftest
-from typing import List, Optional, Tuple, Union
+from aiter import dtypes
+from typing import Tuple
 
 MAX_TOKEN_SUPPORTED = 16384
 
@@ -110,7 +110,7 @@ def run_aiter(
         k_scale = None
         v_scale = None
         aiter.reshape_and_cache(
-            key, value, k_cache, v_cache, slot_mapping, "auto", 1.0, 1.0, asm_layout
+            key, value, k_cache, v_cache, slot_mapping, "auto", asm_layout=asm_layout
         )
     return k_cache, v_cache, k_scale, v_scale
 
@@ -198,8 +198,8 @@ def test_reshape_and_cache(
         if el is None:
             continue
         checkAllclose(
-            el.to(torch.float32),
-            out_a[i].to(torch.float32),
+            el.to(dtypes.fp32),
+            out_a[i].to(dtypes.fp32),
             msg=f"{names[i]} {el.shape}",
         )
 
@@ -251,8 +251,8 @@ def test_reshape_and_cache(
         if el is None:
             continue
         checkAllclose(
-            el.to(torch.float32),
-            out_a[i].to(torch.float32),
+            el.to(dtypes.fp32),
+            out_a[i].to(dtypes.fp32),
             msg=f"{names[i]} {el.shape}",
         )
     print(
@@ -260,7 +260,7 @@ def test_reshape_and_cache(
     )
 
 
-test_reshape_and_cache(4097, 128, (8, 1), 128, 16, torch.bfloat16, torch.bfloat16)
+test_reshape_and_cache(4097, 128, (8, 1), 128, 16, dtypes.bf16, dtypes.bf16)
 print("\nstart quant fp16->fp8")
 test_reshape_and_cache(
     4097,
@@ -268,9 +268,9 @@ test_reshape_and_cache(
     (8, 1),
     128,
     16,
-    torch.float16,
-    torch.float8_e4m3fnuz,
-    quantCfg={"quant_dtype": torch.float8_e4m3fnuz},
+    dtypes.fp16,
+    dtypes.fp8,
+    quantCfg={"quant_dtype": dtypes.fp8},
 )
 print("\nstart quant fp16->i8")
 test_reshape_and_cache(
@@ -279,9 +279,9 @@ test_reshape_and_cache(
     (8, 1),
     128,
     16,
-    torch.float16,
-    torch.int8,
-    quantCfg={"quant_dtype": torch.int8},
+    dtypes.fp16,
+    dtypes.i8,
+    quantCfg={"quant_dtype": dtypes.i8},
 )
 print("\nstart quant bf16->i8")
 test_reshape_and_cache(
@@ -290,7 +290,7 @@ test_reshape_and_cache(
     (8, 1),
     128,
     16,
-    torch.bfloat16,
-    torch.int8,
-    quantCfg={"quant_dtype": torch.int8},
+    dtypes.bf16,
+    dtypes.i8,
+    quantCfg={"quant_dtype": dtypes.i8},
 )

@@ -181,7 +181,6 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
                    std::optional<int> act_op                    = 0)
 {
     const at::cuda::OptionalCUDAGuard device_guard(device_of(out));
-    at::cuda::getCurrentCUDAStream().stream();
     // TORCH_CHECK(hidden_states.dtype() == w1.dtype(),
     //             "Weights and activations should both be same dtype!");
 
@@ -250,7 +249,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         }
     }
     // FP8 Wint4
-    else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::UInt32)
+    else if (hidden_states.dtype() == torch_fp8 && w1.dtype() == at::ScalarType::UInt32)
     {
         using A0DataType = F8;
         using B0DataType = I4;
@@ -285,7 +284,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         }
     }
     // FP8
-    else if (hidden_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
+    else if (hidden_states.dtype() == torch_fp8)
     {
         using A0DataType = F8;
         using B0DataType = F8;
@@ -457,6 +456,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
                    std::optional<int> block_m = 32,
                    std::optional<torch::Tensor> sorted_weights = std::nullopt)    // [max_num_tokens_padded])
 {
+    const at::cuda::OptionalCUDAGuard device_guard(device_of(out));
     // TORCH_CHECK(inter_states.dtype() == w2.dtype(),
     //             "Weights and activations should both be same dtype!");
     //
@@ -526,7 +526,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         }
     }
     // FP8 wint4
-    else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz && w1.dtype() == at::ScalarType::UInt32)
+    else if (inter_states.dtype() == torch_fp8 && w1.dtype() == at::ScalarType::UInt32)
     {
         using A0DataType = F8;
         using B0DataType = I4;
@@ -547,7 +547,7 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         }
     }
     // FP8
-    else if (inter_states.dtype() == at::ScalarType::Float8_e4m3fnuz)
+    else if (inter_states.dtype() == torch_fp8)
     {
         using A0DataType = F8;
         using B0DataType = F8;

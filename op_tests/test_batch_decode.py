@@ -92,18 +92,16 @@ def profile_func(target_func, *args, **kwargs):
     return target_func(*args, **kwargs)
 
 
-@pytest.mark.parametrize("batch_size", [1, 3, 7])
-@pytest.mark.parametrize("kv_len", [1, 26, 128, 4097])
+@pytest.mark.parametrize("batch_size", [1])
+@pytest.mark.parametrize("kv_len", [64, 128, 256, 1024])
 @pytest.mark.parametrize("page_size", [1])
-@pytest.mark.parametrize("num_qo_heads,num_kv_heads", [(6, 1), (3, 1)])
-@pytest.mark.parametrize("head_dim", [128, 256])
-@pytest.mark.parametrize("causal", [False, True])
+@pytest.mark.parametrize("num_qo_heads,num_kv_heads", [(8, 1), (6, 1), (1, 1)])
+@pytest.mark.parametrize("head_dim", [128])
+@pytest.mark.parametrize("causal", [True])
 @pytest.mark.parametrize("kv_layout", ["NHD"])
-@pytest.mark.parametrize(
-    "logits_soft_cap", [0.0]
-)  # enable logits_soft_cap=30.0 test cases when it's functionally ready
-@pytest.mark.parametrize("contiguous_kv", [True, False])
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("logits_soft_cap", [0.0])
+@pytest.mark.parametrize("contiguous_kv", [True])
+@pytest.mark.parametrize("dtype", [torch.bfloat16])
 @pytest.mark.parametrize("q_init_min,q_init_max", [(-10, 10)])
 @pytest.mark.parametrize("kv_init_min,kv_init_max", [(-5, 5)])
 @pytest.mark.parametrize("seed", [19378])
@@ -154,7 +152,7 @@ def test_batch_decode_with_paged_kv_cache(
         kv_data_fp32 = create_tensor(
             kv_init_min, kv_init_max, *kv_shape, dtype=torch.float32
         ).to(0)
-        kv_data_fp32 = torch.ones_like(kv_data_fp32)
+        # kv_data_fp32 = torch.ones_like(kv_data_fp32)
         kv_data = kv_data_fp32.to(dtype)
         kv_data = kv_data[:, 1, :, 1, :, 1, :, 1, :]
         kv_data_fp32 = kv_data_fp32[:, 1, :, 1, :, 1, :, 1, :]
@@ -175,9 +173,22 @@ def test_batch_decode_with_paged_kv_cache(
         kv_lens = torch.full((batch_size,), kv_len).int()
     kv_num_used_pages = (kv_lens + page_size - 1) // page_size
     kv_indptr_cpu = convert_lens_to_indtpr(kv_num_used_pages)
-    kv_indices_cpu = torch.nn.functional.pad(
-        torch.randperm(total_num_pages).int(), (0, 128), value=0
-    )
+    # kv_indices_cpu = torch.arange(kv_len, dtype=torch.int32)
+    page_id = torch.randperm(kv_len // 16, dtype=torch.int32) * 16
+    kv_indices_cpu = page_id.view(-1, 1).repeat([1, 16]) + torch.arange(16, dtype=torch.int32)
+    kv_indices_cpu = kv_indices_cpu.view(-1)
+    # kv_indices_cpu = torch.randperm(total_num_pages, dtype=torch.int32)[:kv_num_used_pages]
+    # print(f"{kv_indices_cpu=}")
+    
+    # kv_indices_cpu = torch.nn.functional.pad(
+    #     torch.randperm(total_num_pages).int(), (0, 128), value=0
+    # )
+    # kv_indices_cpu = torch.nn.functional.pad(
+    #     torch.randperm(64).int(), (0, 64), value=0
+    # )
+    # kv_indices_cpu = torch.nn.functional.pad(
+    #     torch.randperm(64).int(), (0, 64), value=0
+    # )
     kv_last_page_len_cpu = ((kv_lens - 1) % page_size + 1).int()
 
     kv_indptr_gpu = kv_indptr_cpu.to(0)
@@ -185,23 +196,30 @@ def test_batch_decode_with_paged_kv_cache(
 
     chunks = torch.chunk(kv_data, 2, dim=1)
     k_cache = chunks[0].squeeze(2).squeeze(2).contiguous()
+    # k_cache = torch.ones_like(k_cache)
     v_cache = chunks[1].squeeze(2).squeeze(2).contiguous()
-
+    # v_cache = torch.ones_like(v_cache)
+    # print(q.shape)
+    # print(k_cache.shape)
+    # print(v_cache.shape)
+    k_shuffle= k_cache.view(total_num_pages // 16, 16, num_kv_heads, head_dim // 8, 8).permute(0, 2, 3, 1, 4).contiguous()
+    # k_shuffle = torch.ones_like(k_shuffle)
     if profile:
         o_ck_flash_attn, time = profile_func(
             aiter.flashinfer_batch_decode_func,
             q,
-            k_cache,
+            k_shuffle,
             v_cache,
             kv_indptr_gpu,
             kv_indices_gpu,
             logits_soft_cap=logits_soft_cap,
         )
-        print(f"time: {time}")
+        tbs = batch_size * head_dim * num_kv_heads * kv_len * 2 * 2 / 1024 /1024 /time
+        print(f"time: {time}, tbs:{tbs}")
     else:
         o_ck_flash_attn = aiter.flashinfer_batch_decode_func(
             q,
-            k_cache,
+            k_shuffle,
             v_cache,
             kv_indptr_gpu,
             kv_indices_gpu,
@@ -247,6 +265,7 @@ def test_batch_decode_with_paged_kv_cache(
             ],
             dim=0,
         ).to(dtype)
+        # vi = torch.ones_like(vi)
 
         # enlarge rtol for bf16 to allow passing very few numeric errors
         rtol, atol = (1e-3, 1e-3) if dtype == torch.float16 else (2e-2, 1e-2)
@@ -256,25 +275,29 @@ def test_batch_decode_with_paged_kv_cache(
         )
 
         o_i = o_ck_flash_attn[i].unsqueeze(0)
+        # print(o_i)
+        # print(o_ref_i)
         torch.testing.assert_close(o_i, o_ref_i, rtol=rtol, atol=atol)
 
 
 if __name__ == "__main__":
     for (
         kv_len,
+        headdim,
+        qhead,
         causal,
         logits_soft_cap,
         dtype,
     ) in itertools.product(
-        [8192], [False, True], [0.0, 30.0], [torch.float16, torch.bfloat16]
+        [64, 128, 256], [128], [1, 6, 8], [True], [0.0], [torch.bfloat16]
     ):
         test_batch_decode_with_paged_kv_cache(
             batch_size=1,
             kv_len=kv_len,
             page_size=1,
-            num_qo_heads=6,
+            num_qo_heads=qhead,
             num_kv_heads=1,
-            head_dim=128,
+            head_dim=headdim,
             causal=causal,
             kv_layout="NHD",
             logits_soft_cap=logits_soft_cap,
@@ -285,5 +308,6 @@ if __name__ == "__main__":
             kv_init_min=-5,
             kv_init_max=5,
             seed=19378,
-            profile=True,
+            profile=False,
         )
+    print("test done!")

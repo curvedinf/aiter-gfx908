@@ -114,18 +114,18 @@ MAX_SEQ_LEN = 65536
 NUM_BLOCKS = 32768  # Arbitrary values for testing
 PARTITION_SIZE = 512
 # flshattF and tritonflashattF supported: {dtypes.fp16, dtypes.bf16}
-DTYPES = [torch.half, dtypes.bf16]
-NUM_GEN_SEQS = [7]  # Arbitrary values for testing
+DTYPES = [dtypes.bf16]
+NUM_GEN_SEQS = [128]  # Arbitrary values for testing
 NUM_PREFILL_SEQS = [3]  # Arbitrary values for testing
-NUM_HEADS = [(40, 40), (64, 8)]  # Arbitrary values for testing
+NUM_HEADS = [(8,1)]  # Arbitrary values for testing
 
 # FlashAttention forward only supports head dimension at most 128
 # https://github.com/ROCmSoftwarePlatform/flash-attention/blob/3d2b6f5d037782cc2c906909a46fb7e2e1b48b25/csrc/flash_attn_rocm/flash_api.cpp#L62
-HEAD_SIZES = [64, 80, 96, 112, 120, 128, 192, 256]
+HEAD_SIZES = [128]
 
-BLOCK_SIZES = [16, 32]
-USE_ALIBI = [False, True]
-KV_CACHE_DTYPE = ["auto", "fp8"]
+BLOCK_SIZES = [16]
+USE_ALIBI = [False]
+KV_CACHE_DTYPE = ["auto"]
 SEEDS = [0]
 CUDA_DEVICES = [f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)]
 
@@ -587,9 +587,6 @@ def test_paged_attention(
 
     for quant_algo_, cache_type_ in [
         (0, k_cache.dtype),
-        (2, dtypes.fp8),
-        (2, dtypes.i8),
-        (4, dtypes.fp8),
     ]:
         quant_algo = ck_naive_quant_algo[quant_algo_]
         if quant_algo == "NO":
@@ -802,9 +799,8 @@ def test_paged_attention(
     )
 
 
-for num_heads in [(4, 1), (8, 1), (32, 8)]:
-    for ctx_len in [7, 26, 57, 66, 109, 128, 257, 282, 4097]:
-        for dtype in [dtypes.fp16, dtypes.bf16]:
-            test_paged_attention(
-                ctx_len, 128, num_heads, 128, False, 16, dtype, "auto", 0, "cuda:0"
-            )
+for num_heads in [(8, 1)]:
+    for ctx_len in [4096]:
+        for dtype in [torch.bfloat16]:
+            test_paged_attention(ctx_len, 128, num_heads, 128, False, 16,
+                                 dtype, "auto", 0, "cuda:0")

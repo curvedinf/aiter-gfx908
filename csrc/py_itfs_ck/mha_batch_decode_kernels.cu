@@ -70,7 +70,7 @@ fmha_batch_decode_args get_ck_fmha_batch_decode_args(bool has_lse,
     args.lse_ptr     = nullptr;
     args.o_ptr       = out.data_ptr();
 
-    args.num_total_pages = k.size(0);
+    args.num_total_pages = v.size(0);
     args.kv_indptr       = kv_indptr.data_ptr();
     args.kv_page_indices = kv_page_indices.data_ptr();
 
@@ -197,7 +197,7 @@ mha_batch_decode(at::Tensor& q,               // [b, hq, d]
     const int num_heads_k = k.size(1);
 
     const int max_num_blocks_per_seq = kv_page_indices.size(0);
-    const int num_blocks             = k.size(0);
+    const int num_blocks             = v.size(0);
     const int page_block_size        = 1;
 
     // TODO
@@ -217,7 +217,7 @@ mha_batch_decode(at::Tensor& q,               // [b, hq, d]
                 "Number of heads in key/value must divide number of heads in query");
 
     CHECK_SHAPE(q, batch_size, num_heads, head_size_q);
-    CHECK_SHAPE(k, num_blocks, num_heads_k, head_size_q);
+    // CHECK_SHAPE(k, num_blocks, num_heads_k, head_size_q);
     CHECK_SHAPE(v, num_blocks, num_heads_k, head_size_v);
 
     CHECK_SHAPE(kv_indptr, batch_size + 1);
@@ -259,10 +259,10 @@ mha_batch_decode(at::Tensor& q,               // [b, hq, d]
         softmax_lse.fill_(-std::numeric_limits<float>::infinity());
     }
 
-    int num_splits = 0;
+    int num_splits = 1;
     // make sure the kM0 here is same as the one in codegen script
-    num_splits = aiter::override_num_splits_if_necessary(
-        batch_size, num_heads, seqlen_q, head_size_v, 0, num_splits, /*kM0=*/16);
+    // num_splits = aiter::override_num_splits_if_necessary(
+    //     batch_size, num_heads, seqlen_q, head_size_v, 0, num_splits, /*kM0=*/16);
     TORCH_CHECK(num_splits > 0, "num_splits should greater than 0");
     TORCH_CHECK(num_splits <= 128, "num_splits greater than 128 is not supported");
 

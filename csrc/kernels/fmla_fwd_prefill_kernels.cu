@@ -1010,19 +1010,23 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     constexpr auto kKNumRepeat = Policy::GetNumRepeatOfKDramTileDistribution();
     constexpr auto kKPageIdxDim = ck_tile::number<0>{};
     ck_tile::statically_indexed_array<int32_t, kKNumRepeat> k_offsets;
+    ck_tile::statically_indexed_array<bool, kKNumRepeat> k_valids;
     ck_tile::static_for<0, kKNumRepeat, 1>{}([&](auto rid)
     {
         const int32_t seqlen_idx = k_coord[kKPageIdxDim] + Traits::kBlockN0 / kKNumRepeat * rid.value;
         const int32_t page_idx   = seqlen_idx / page_block_size;
         const int32_t seq_idx    = seqlen_idx % page_block_size;
         k_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_k;
+        k_valids[rid] = (seqlen_idx < seqlen_k);
     });
     auto k_dram_window = ck_tile::make_tile_scatter_gather(
         k_dram_window_origin.get_bottom_tensor_view(),
         k_dram_window_origin.get_window_lengths(),
         k_dram_window_origin.get_window_origin(),
         k_dist,
-        k_offsets);
+        k_offsets,
+        k_valids,
+        kKPageIdxDim);
     k_dram_window.init_raw();
 
     auto v_dram_window_origin = ck_tile::make_tile_window(
@@ -1034,12 +1038,14 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     constexpr auto kVNumRepeat = Policy::GetNumRepeatOfVDramTileDistribution();
     constexpr auto kVPageIdxDim = ck_tile::number<1>{};
     ck_tile::statically_indexed_array<int32_t, kVNumRepeat> v_offsets;
+    ck_tile::statically_indexed_array<bool, kVNumRepeat> v_valids;
     ck_tile::static_for<0, kVNumRepeat, 1>{}([&](auto rid)
     {
         const int32_t seqlen_idx = v_coord[kVPageIdxDim] + rid.value;
         const int32_t page_idx   = seqlen_idx / page_block_size;
         const int32_t seq_idx    = seqlen_idx % page_block_size;
         v_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_v;
+        v_valids[rid] = (seqlen_idx < seqlen_k);
     });
     using VDramWindow = decltype(ck_tile::make_tile_scatter_gather(
         v_dram_window_origin.get_bottom_tensor_view(),
@@ -1047,6 +1053,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
         v_dram_window_origin.get_window_origin(),
         v_dist,
         v_offsets,
+        v_valids,
         kVPageIdxDim));
     VDramWindow v_dram_windows[n1_loops];
     ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id)
@@ -1058,6 +1065,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             v_dram_window_origin.get_window_origin() + origin_col,
             v_dist,
             v_offsets,
+            v_valids,
             kVPageIdxDim);
         v_dram_windows[n1_id].init_raw();
     });
@@ -1126,13 +1134,6 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
 
         // prefetch load V tile
         auto v_prefetch = ck_tile::load_tile(v_dram_windows[0]);
-        ck_tile::set_tile_if(
-            v_prefetch, ck_tile::numeric<scalar_t>::zero(),
-            [&](auto ids)
-            {
-                const auto col = ids.at(kVPageIdxDim);
-                return (loop_idx * Traits::kBlockN0 + col) >= seqlen_k;
-            });
         
 
         // II. scale_s, mask, softmax
@@ -1244,18 +1245,13 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                         const int32_t page_idx   = seqlen_idx / page_block_size;
                         const int32_t seq_idx    = seqlen_idx % page_block_size;
                         v_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_v;
+                        v_valids[rid] = (seqlen_idx < seqlen_k);
                     });
-                    v_dram_windows[n1_id].update_page_idx(v_offsets);
+                    v_dram_windows[n1_id].update_page_idx_and_valids(v_offsets, v_valids);
 
                     auto v = ck_tile::load_tile(v_dram_windows[n1_id]); // load next v
-                    ck_tile::set_tile_if(
-                        v, ck_tile::numeric<scalar_t>::zero(),
-                        [&](auto ids)
-                        {
-                            const auto col = ids.at(kVPageIdxDim);
-                            return (loop_idx * Traits::kBlockN0 + (k1_id + 1) * Traits::kBlockK1 + col) >= seqlen_k;
-                        });
                     ck_tile::block_sync_lds();
+
                     gemm_1(o_acc[n1_id],
                            ck_tile::get_slice_tile(
                                p,
@@ -1263,6 +1259,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                                ck_tile::sequence<Traits::kBlockM, (k1_id + 1) * Traits::kBlockK1>{}),
                            v_lds_window);
                     ck_tile::block_sync_lds();
+
                     auto v_shuffled = ck_tile::make_static_distributed_tensor<scalar_t>(
                         Policy::MakeShuffledVRegBlockDescriptor());
                         ck_tile::shuffle_tile(v_shuffled, v);
@@ -1310,8 +1307,9 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                 const int32_t page_idx   = seqlen_idx / page_block_size;
                 const int32_t seq_idx    = seqlen_idx % page_block_size;
                 k_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_k;
+                k_valids[rid] = (seqlen_idx < seqlen_k);
             });
-            k_dram_window.update_page_idx(k_offsets);
+            k_dram_window.update_page_idx_and_valids(k_offsets, k_valids);
 
             // Move to next V block
             ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id)
@@ -1324,8 +1322,9 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                     const int32_t page_idx   = seqlen_idx / page_block_size;
                     const int32_t seq_idx    = seqlen_idx % page_block_size;
                     v_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_v;
+                    v_valids[rid] = (seqlen_idx < seqlen_k);
                 });
-                v_dram_windows[n1_id].update_page_idx(v_offsets);
+                v_dram_windows[n1_id].update_page_idx_and_valids(v_offsets, v_valids);
             });
         }
     };

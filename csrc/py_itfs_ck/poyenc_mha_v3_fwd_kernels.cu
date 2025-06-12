@@ -474,7 +474,6 @@ struct BlockFmhaPipelineQRKSVS
         if(warp_group_id == 1)
         {
             __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_s_barrier();
         }
 #endif
 
@@ -493,7 +492,6 @@ struct BlockFmhaPipelineQRKSVS
             store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
 
             __builtin_amdgcn_s_waitcnt(0xc07f);
-            __builtin_amdgcn_s_barrier();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -576,7 +574,6 @@ struct BlockFmhaPipelineQRKSVS
 #endif
                 });
             });
-            __builtin_amdgcn_s_barrier();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -602,7 +599,6 @@ struct BlockFmhaPipelineQRKSVS
             move_tile_window(v_dram_window, {0, kK1});
 
             __builtin_amdgcn_s_waitcnt(0xc07f);
-            __builtin_amdgcn_s_barrier();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -645,7 +641,6 @@ struct BlockFmhaPipelineQRKSVS
 
             // move K tile windows
             move_tile_window(k_dram_block_window, {kN0, 0});
-            __builtin_amdgcn_s_barrier();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -655,7 +650,6 @@ struct BlockFmhaPipelineQRKSVS
 #if ENABLE_PINGPONG_SCHED
         if(warp_group_id == 0)
         {
-            __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_s_barrier();
         }
 #endif

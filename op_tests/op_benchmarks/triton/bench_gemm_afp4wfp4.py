@@ -130,7 +130,7 @@ def run_benchmark(args):
         else:
             raise ValueError("Unknown metric: " + metric)
 
-    bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
+    bench_gemm_afp4wfp4_blockscale.run(save_path=None, print_data=True)
 
 
 def parse_args():

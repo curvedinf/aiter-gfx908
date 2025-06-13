@@ -382,7 +382,7 @@ def _persistent_bwd_kernel_dkdvdq_causal(
     IS_VARLEN: tl.constexpr,
     IS_FP8: tl.constexpr,
     FP8_MAX: tl.constexpr,
-    NUM_SMS: tl.constexpr,
+    NUM_WGS: tl.constexpr,
     wid_counter,
 ):
     tl.assume(stride_q_b >= 0)
@@ -418,15 +418,18 @@ def _persistent_bwd_kernel_dkdvdq_causal(
     TOTAL_NUM_WIDS = NUM_Q_HEADS * BATCH * NUM_K_PIDS
 
     GROUP_SIZE = NUM_Q_HEADS // NUM_K_HEADS
-    wid = tl.program_id(0)
+    wid = tl.program_id(0) # 0, 1, ..., NUM_SMS - 1
+
+    # workgroup queue is ordered to have the most locality
+    max_separation = TOTAL_NUM_WIDS // NUM_WGS
+    max_separation = max_separation if TOTAL_NUM_WIDS % max_separation else max_separation - 1
     
     while wid < TOTAL_NUM_WIDS:
-        batch_idx, head_q_idx, seq_k_blk_idx = _wid2pid(
-            wid, BATCH, NUM_Q_HEADS, NUM_K_PIDS, NUM_XCD=8
-        )
-        # batch_idx = wid % BATCH
-        # head_q_idx = (wid // BATCH) % NUM_Q_HEADS
-        # seq_k_blk_idx = (wid // BATCH // NUM_Q_HEADS) % NUM_K_PIDS
+        
+        wid = wid * max_separation % TOTAL_NUM_WIDS
+        seq_k_blk_idx = wid % NUM_K_PIDS
+        head_q_idx = (wid // NUM_K_PIDS) % NUM_Q_HEADS
+        batch_idx = (wid // (NUM_K_PIDS * NUM_Q_HEADS)) % BATCH
 
         # In the backward we dont want concurrent workgroups to handle consecutive heads or blocks, so remap them to be far apart.
         head_q_idx = (head_q_idx * 29) % NUM_Q_HEADS
@@ -808,12 +811,12 @@ def _flash_attn_persistent_backward(
     if "gfx950" in device_properties.gcnArchName: # MI350
         BLOCK_N = 128
         config = {
-            "BLOCK_M": 32,
+            "BLOCK_M": 16,
             "BLOCK_N": BLOCK_N,
-            "waves_per_eu": 2,
-            "num_warps": 8,
+            "waves_per_eu": 1,
+            "num_warps": 4,
             "num_ctas": 1,
-            "matrix_instr_nonkdim": 32,
+            "matrix_instr_nonkdim": 16,
             "num_stages": 1,
             "BLK_SLICE_FACTOR": 1,
         } 
@@ -832,10 +835,10 @@ def _flash_attn_persistent_backward(
 
     # number of persistent workgroups launched
     NUM_WGS = device_properties.multi_processor_count * 1
+    # print("NUM_WGS", NUM_WGS)
     # global counter for next workgroup fetching
     wid_counter = torch.ones((1,), device=q.device, dtype=torch.int32) * NUM_WGS
     num_k_pids = (max_seqlen_k + BLOCK_N - 1) // BLOCK_N
-    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
     assert causal, "Causal attention is required for persistent backward pass"
     grid_dkdvdq = (min(NUM_WGS, batch * num_q_heads * num_k_pids),)
 
@@ -881,7 +884,7 @@ def _flash_attn_persistent_backward(
         IS_VARLEN=IS_VARLEN,
         IS_FP8=IS_FP8,
         FP8_MAX=FP8_MAX,
-        NUM_SMS=NUM_SMS,
+        NUM_WGS=NUM_WGS,
         wid_counter=wid_counter,
         **config,
     )

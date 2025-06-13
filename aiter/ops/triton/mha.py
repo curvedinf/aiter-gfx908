@@ -4,10 +4,11 @@ import triton.language as tl
 
 from typing import Optional, Tuple
 from aiter.ops.triton.utils.pid_preprocessing import _wid2pid, _remap_XCD
-from aiter.ops.triton.mha_bwd_onekernel import _flash_attn_onekernel_backward
-# from aiter.ops.triton.mha_fused_bwd import _flash_attn_fused_backward
+from aiter.ops.triton.mha_bwd_onekernel import _flash_attn_onekernel_backward as _flash_attn_fused_backward
+# from aiter.ops.triton.mha_fused_bwd import _flash_attn_fused_backward as _flash_attn_fused_backward
+# from aiter.ops.triton.mha_persistent_bwd import _flash_attn_persistent_backward as _flash_attn_fused_backward
 from aiter.ops.triton.mha_persistent import _persistent_flash_attn_forward
-from aiter.ops.triton.mha_persistent_bwd import _flash_attn_persistent_backward as _flash_attn_fused_backward
+
 from aiter import dtypes
 from einops import rearrange, repeat
 from typing import Literal, Optional, Union

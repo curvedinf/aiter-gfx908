@@ -2,9 +2,7 @@ import torch.test
 import triton
 import triton.language as tl
 from utils.benchmark_utils import get_model_configs, get_available_models, print_vgpr
-import op_tests.triton_tests.test_mha as test_mha
-import op_tests.triton_tests.test_mha_fused_bwd as test_fused_bwd
-import op_tests.triton_tests.test_mha_onekernel_bwd as test_onekernel_bwd
+
 import torch
 import os
 import sys
@@ -212,6 +210,9 @@ def run_benchmark(custom, args):
 
         # Test mode: run tests from op_tests with specified shapes
         if args.test_mode:
+            import op_tests.triton_tests.test_mha as test_mha
+            import op_tests.triton_tests.test_mha_fused_bwd as test_fused_bwd
+            import op_tests.triton_tests.test_mha_onekernel_bwd as test_onekernel_bwd
             print(
                 f"Testing backward implementation <{provider}> against Torch with shape:"
             )

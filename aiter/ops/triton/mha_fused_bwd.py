@@ -1021,9 +1021,9 @@ def _flash_attn_fused_backward(
     config = {
         "BLOCK_M": 16,
         "BLOCK_N": BLOCK_N,
-        "num_warps": 8,
+        "num_warps": 4,
         "num_stages": 1,
-        "waves_per_eu": 2,
+        "waves_per_eu": 1,
         "BLK_SLICE_FACTOR": 1,
         "matrix_instr_nonkdim": 16,
     }

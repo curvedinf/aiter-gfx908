@@ -505,6 +505,15 @@ struct BlockFmhaPipelineQRKSVS
                        k_lds_window);
             }
 
+            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
+            __builtin_amdgcn_sched_group_barrier(0x008, 2, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
+            __builtin_amdgcn_sched_group_barrier(0x008, 4, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
+            __builtin_amdgcn_sched_group_barrier(0x008, 4, 0); // MFMA
+            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
+            __builtin_amdgcn_sched_group_barrier(0x008, 6, 0); // MFMA
+
             // scale_s, mask, softmax
             {
                 s_acc = tile_elementwise_in(s_acc_element_func, s_acc);

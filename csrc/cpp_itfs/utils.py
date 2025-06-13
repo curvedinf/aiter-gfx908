@@ -15,10 +15,14 @@ GPU_ARCH = subprocess.run(
     "/opt/rocm/bin/offload-arch", shell=True, capture_output=True, text=True
 ).stdout.strip()
 GPU_ARCH = os.environ.get("GPU_ARCHS", GPU_ARCH)
+AITER_REBUILD = int(os.environ.get("AITER_REBUILD", 0))
+
 HOME_PATH = os.environ.get("HOME")
 AITER_MAX_CACHE_SIZE = os.environ.get("AITER_MAX_CACHE_SIZE", None)
 AITER_ROOT_DIR = os.environ.get("AITER_ROOT_DIR", f"{HOME_PATH}/.aiter")
 BUILD_DIR = os.path.abspath(os.path.join(AITER_ROOT_DIR, "build"))
+if AITER_REBUILD >= 1:
+    subprocess.run(f"rm -rf {BUILD_DIR}/*", shell=True)
 os.makedirs(BUILD_DIR, exist_ok=True)
 
 CK_DIR = os.environ.get("CK_DIR", f"{AITER_CORE_DIR}/3rdparty/composable_kernel")
@@ -178,6 +182,7 @@ def compile_template_op(
         func_name = get_default_func_name(md_name, tuple(kwargs.values()))
     if folder is None:
         folder = func_name
+
     if not_built(folder):
         if includes is None:
             includes = []

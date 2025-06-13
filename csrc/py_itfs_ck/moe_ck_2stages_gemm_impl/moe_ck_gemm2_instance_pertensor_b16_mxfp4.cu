@@ -19,15 +19,19 @@ const bool PerTensorQuant = true;
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(32, 128/sizeof(A0DataType), 1, 4, V1,true);
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(64, 128/sizeof(A0DataType), 2, 2,  V1,true);
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(128, 128/sizeof(A0DataType), 2, 2,  V1,true);
+CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(256, 128/sizeof(A0DataType), 2, 2,  V1,true);
 
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(32, 128/sizeof(A0DataType), 1, 4, V1,false);
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(64, 128/sizeof(A0DataType), 2, 2,  V1,false);
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(128, 128/sizeof(A0DataType), 2, 2,  V1,false);
+CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(256, 128/sizeof(A0DataType), 2, 2,  V1,false);
 
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(32, 128/sizeof(A0DataType), 1, 4, V3,true);
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(64, 128/sizeof(A0DataType), 2, 2,  V3,true);
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(128, 128/sizeof(A0DataType), 2, 2,  V3,true);
+CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(256, 128/sizeof(A0DataType), 2, 2,  V3,true);
 
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(32, 128/sizeof(A0DataType), 1, 4, V3,false);
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(64, 128/sizeof(A0DataType), 2, 2,  V3,false);
 CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(128, 128/sizeof(A0DataType), 2, 2,  V3,false);
+CK_MOE_STAGE2_GEMM_MXFP4_DEFINE(256, 128/sizeof(A0DataType), 2, 2,  V3,false);

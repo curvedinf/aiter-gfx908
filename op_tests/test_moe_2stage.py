@@ -2,25 +2,37 @@
 # Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
+import torch.nn.functional as F
+import math
+import sys
+import os
+from typing import Any, Callable, Dict, Optional, Tuple
 import itertools
 import aiter
 from aiter import dtypes
 from aiter.test_common import (
     checkAllclose,
+    perftest,
     benchmark,
+    tensor_dump,
     run_perftest,
 )
 from aiter.int4_utils import *
 
 from aiter.fused_moe import (
     fused_topk,
+    get_inter_dim,
+    torch_moe,
     moe_sorting,
     fused_moe,
+    asm_stage1,
+    ck_stage1,
     torch_moe_stage1,
     torch_moe_stage2,
     get_block_size_M,
 )
 
+from aiter.fused_moe_bf16_asm import ck_moe_2stages
 
 from aiter.ops.shuffle import shuffle_weight
 from aiter import ActivationType
@@ -373,9 +385,9 @@ list_tokenNum = [
 ]
 list_quant = [
     # (aiter.QuantType.No, None, None),  # a16w16
-    (aiter.QuantType.per_Tensor, dtypes.fp8, dtypes.fp8),  # a8w8
-    (aiter.QuantType.per_Token, dtypes.fp8, dtypes.fp8),  # a8w8
-    # (aiter.QuantType.per_Token, dtypes.fp8, torch.int4),  # a8w4
+    # (aiter.QuantType.per_Tensor, dtypes.fp8, dtypes.fp8),  # a8w8
+    # (aiter.QuantType.per_Token, dtypes.fp8, dtypes.fp8),  # a8w8
+    (aiter.QuantType.per_Token, dtypes.fp8, torch.int4),  # a8w4
     # (aiter.QuantType.per_128x128, dtypes.fp8, dtypes.fp8),  # a8w8 TODO add test
 ]
 list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][:]

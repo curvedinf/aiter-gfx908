@@ -27,7 +27,7 @@
     "BLOCK_SIZE_M": 16,
     "BLOCK_SIZE_N": 16,
     "BLOCK_SIZE_K": 512,
-    "GROUP_SIZE_M": 1,
+    "GROUP_SIZE_M": 4,
     "num_warps": 4,
     "num_stages": 3,
     "waves_per_eu": 1,

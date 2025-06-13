@@ -328,7 +328,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
 
   constexpr int MAX_ELEMENTS_PER_QUERY = DIVIDE_ROUND_UP(16, GQA_RATIO);
   constexpr int MTP_PER_THREAD = DIVIDE_ROUND_UP(MTP, MAX_ELEMENTS_PER_QUERY);
-  // constexpr int MTP_PER_THREAD = MTP;
+
   constexpr int MTP_PARALLEL_THREADS = MTP / MTP_PER_THREAD;
   constexpr int GQA_RATIO_MTP_PARALLEL = GQA_RATIO * MTP_PARALLEL_THREADS;
   constexpr int GQA_RATIO4 = DIVIDE_ROUND_UP(GQA_RATIO_MTP_PARALLEL, 4);
@@ -733,7 +733,6 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   // Softmax V mfma
   // v layout: 16he across lanes x 16 tokens per lane
   for (int mtp = 0; mtp < mtp_loop; mtp++) {
-    // for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
     for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
       floatx4 tmp_out = {0};
       for (int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++) {
@@ -826,13 +825,9 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
 
   // store Softmax-V mfma output to shared mem
   for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
-    // const int head_loop = vhe_depth / 2;
-    // const int head_loop_offset = vhe_depth % 2;
     // lane16 id head dimension; rowid head element dimension
     for(int mtp = 0; mtp < mtp_loop; mtp++) {
-      // for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
       shared_logits[0][mtp][warpid][vhe_depth][lane16id][rowid] = outelems[mtp][vhe_depth];
-      // }
     }
   }
 

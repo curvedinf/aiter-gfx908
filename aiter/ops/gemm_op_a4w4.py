@@ -49,4 +49,5 @@ def gemm_a4w4_asm(
     bias: Tensor,  # bias:[1, N] f32
     alpha: Optional[float] = 1.0,
     beta: Optional[float] = 0.0,
+    bpreshuffle: Optional[bool] = True,
 ) -> torch.Tensor: ...

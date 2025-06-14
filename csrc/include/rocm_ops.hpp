@@ -309,7 +309,8 @@
           py::arg("out"),         \
           py::arg("bias"),        \
           py::arg("alpha") = 1.0, \
-          py::arg("beta")  = 0.0);
+          py::arg("beta") = 0.0, \
+          py::arg("bpreshuffle")  = true);
 
 #define GEMM_A8W8_BLOCKSCALE_PYBIND \
     m.def("gemm_a8w8_blockscale",   \

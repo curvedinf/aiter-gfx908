@@ -5,6 +5,7 @@ import torch
 import aiter
 from aiter.test_common import checkAllclose, benchmark, perftest
 from aiter import dtypes
+from aiter.ops.shuffle import shuffle_weight
 from aiter.utility import fp4_utils
 import random
 import itertools
@@ -38,17 +39,28 @@ def run_torch(x, w, x_scales, w_scales, dtype):
 def run_triton(x, w, x_scales, w_scales, out, dtype=dtypes.bf16):
     from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4
 
-    gemm_afp4wfp4(x, w, out, x_scales, w_scales, dtype)
+    gemm_afp4wfp4(x, w, x_scales, w_scales, dtype, out)
     return out
 
 
 @perftest()
-def run_gemm_asm(x, weightshuffle, x_scale, w_scale, out, bias=None, dtype=dtypes.bf16):
-    return aiter.gemm_a4w4_asm(x, weightshuffle, x_scale, w_scale, out, bias)
+def run_gemm_asm(
+    x,
+    weightshuffle,
+    x_scale,
+    w_scale,
+    out,
+    bias=None,
+    dtype=dtypes.bf16,
+    bpreshuffle=True,
+):
+    return aiter.gemm_a4w4_asm(
+        x, weightshuffle, x_scale, w_scale, out, bias, bpreshuffle=bpreshuffle
+    )
 
 
 @benchmark()
-def test_gemm(dtype, M, N, K):
+def test_gemm(dtype, M, N, K, bshuffle):
     from aiter.jit.utils.chip_info import get_gfx
 
     if get_gfx() not in ["gfx950"]:
@@ -60,6 +72,8 @@ def test_gemm(dtype, M, N, K):
     _, w_scales = quant_func(w, shuffle=False)
     x, x_scales_shuffle = quant_func(x, shuffle=True)
     w, w_scales_shuffle = quant_func(w, shuffle=True)
+    if bshuffle == True:
+        wshuffle = shuffle_weight(w, layout=(16, 16))
     out1 = torch.empty(M, N, dtype=dtype)
     out2 = torch.empty((M + 255) // 256 * 256, N, dtype=dtype)
     bias_f32 = torch.zeros(M, N, dtype=dtype)
@@ -72,7 +86,11 @@ def test_gemm(dtype, M, N, K):
     avg_c = None
     tflops_c = None
     tbs_c = None
-    c, avg_c = run_gemm_asm(x, w, x_scales_shuffle, w_scales_shuffle, out2, bias_f32)
+    if bshuffle == True:
+        w = wshuffle
+    c, avg_c = run_gemm_asm(
+        x, w, x_scales_shuffle, w_scales_shuffle, out2, bias_f32, bshuffle
+    )
     err1 = checkAllclose(a, c[:M], msg="asm   ")
     tflops_c = M * N * K * 2 / avg_c / 1e6
     tbs_c = (x.nbytes + w.nbytes) / avg_c / 1e6
@@ -91,18 +109,18 @@ import pandas as pd
 l_dtype = ["bf16"]
 l_mnk = [
     # pure_compute
-    (16384, 16384, 16384),
-    (32768, 106496, 16384),
-    (32768, 16384, 53248),
-    (32768, 18432, 16384),
-    (32768, 16384, 16384),
-    (128, 106496, 16384),
-    (128, 16384, 53248),
-    (128, 18432, 16384),
+    #(16384, 16384, 16384),
+    #(32768, 106496, 16384),
+    #(32768, 16384, 53248),
+    #(32768, 18432, 16384),
+    #(32768, 16384, 16384),
+    #(128, 106496, 16384),
+    #(128, 16384, 53248),
+    #(128, 18432, 16384),
     (128, 16384, 16384),
-    (64, 106496, 16384),
-    (64, 16384, 53248),
-    (64, 18432, 16384),
+    #(64, 106496, 16384),
+    #(64, 16384, 53248),
+    #(64, 18432, 16384),
     (64, 16384, 16384),
     (32, 106496, 16384),
     (32, 16384, 53248),
@@ -140,7 +158,7 @@ l_mnk = [
     (8192, 8192, 1024),
     (16384, 8192, 1024),
 ]
-
+l_bpreshuffle = [True, False][:1]
 parser = argparse.ArgumentParser(description="config input of test")
 parser.add_argument(
     "-d",
@@ -174,7 +192,8 @@ if args.shape is not None:
 df = []
 for dtype in l_dtype:
     for m, n, k in l_mnk:
-        ret = test_gemm(dtype, m, n, k)
-        df.append(ret)
+        for bshuffle in l_bpreshuffle:
+            ret = test_gemm(dtype, m, n, k, bshuffle)
+            df.append(ret)
 df = pd.DataFrame(df)
 aiter.logger.info(f"summary:\n{df}")

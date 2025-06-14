@@ -107,7 +107,6 @@ def ref_masked_attention(
         attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
         attn_bias.to(query.dtype)
         attn_weights += attn_bias
-
     attn_weights = torch.softmax(attn_weights, dim=-1)
     out = torch.einsum("hqk,khd->qhd", attn_weights.float(), value.float())
     return out.to(dtype)
@@ -284,7 +283,7 @@ def test_pa_mtp(
     torch.set_default_device(device)
     num_query_heads, num_kv_heads = num_heads
     assert num_query_heads % num_kv_heads == 0
-    max_seq_len = 16384
+    max_seq_len = ctx_lens
     max_num_blocks_per_seq = (max_seq_len + block_size - 1) // block_size
     num_blocks = max_num_blocks_per_seq * batch_size
     num_blocks_per_seq = (ctx_lens + block_size - 1) // block_size
@@ -359,7 +358,6 @@ def test_pa_mtp(
         dtype=torch.float32,
     )
     max_logits = torch.empty_like(exp_sums)
-
     _, us_aiter_asm = run_aiter(
         out_aiter_noquant,
         exp_sums,

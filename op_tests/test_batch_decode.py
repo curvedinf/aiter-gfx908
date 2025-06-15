@@ -139,6 +139,7 @@ def test_batch_decode_with_paged_kv_cache(
     q = create_tensor(
         q_init_min, q_init_max, batch_size, num_qo_heads, head_dim, dtype=dtype
     ).to(0)
+    # q = torch.arange(batch_size * head_dim, dtype=dtype, device = q.device).view(batch_size, num_qo_heads, head_dim)
     # q = torch.ones_like(q)
     max_num_pages_per_seq = (kv_len + page_size - 1) // page_size
     total_num_pages = max_num_pages_per_seq * batch_size
@@ -165,18 +166,41 @@ def test_batch_decode_with_paged_kv_cache(
         kv_data_fp32 = create_tensor(
             kv_init_min, kv_init_max, *kv_shape, dtype=torch.float32
         ).to(0)
+        vs = [total_num_pages, 1, num_kv_heads, page_size, head_dim]
+        v = create_tensor(
+            kv_init_min, kv_init_max, *vs, dtype=torch.float32
+        ).to(0)
+        ks = [2, 1, num_kv_heads, page_size, head_dim]
+        # k = create_tensor(
+        #     kv_init_min, kv_init_max, *ks, dtype=torch.float32
+        # ).to(0).repeat(total_num_pages//2, 1, 1, 1, 1)
+        # k = torch.randn((1,1, 1, 1, head_dim),  dtype=torch.float32).repeat(total_num_pages, 1, num_kv_heads, page_size, 1).to(0)
+        # k = torch.randn((total_num_pages,1, 1, 1, head_dim//16, 4),  dtype=torch.float32).repeat(1, 1, num_kv_heads, page_size, 1, 4).view(total_num_pages, 1, num_kv_heads, page_size, head_dim).to(0)
+        
+        k = torch.randn(total_num_pages * head_dim, dtype=dtype, device = q.device).view(total_num_pages, 1, num_kv_heads, page_size, head_dim)
+        # k = torch.arange(total_num_pages * head_dim, dtype=dtype, device = q.device).view(total_num_pages, 1, num_kv_heads, page_size, head_dim)
+        kv_data_fp32 = torch.cat([k, v], dim=1).contiguous()
+
+        # for i in range(0, total_num_pages//div):
+        #     kv_data_fp32[i*div:(i+1)*div][0] = torch.ones_like(kv_data_fp32[0:div][0]) * i 
+        # for i in range(0, total_num_pages//div):
+        #     kv_data_fp32[i:(i+1)][0] = torch.ones_like(kv_data_fp32[0:1][0]) * i 
+        #     kv_data_fp32[i:(i+1)][1] = torch.rand_like(kv_data_fp32[0:1][0]) 
         # kv_data_fp32 = torch.ones_like(kv_data_fp32)
+        # print(kv_data_fp32)
+        # kv_data = torch.randn_like(kv_data)
         kv_data = kv_data_fp32.to(dtype)
+        # kv_data = torch.randn_like(kv_data)
     if 1 < batch_size and not profile:
         kv_lens = torch.randint(1, kv_len + 1, (batch_size,))
     else:
         kv_lens = torch.full((batch_size,), kv_len).int()
     kv_num_used_pages = (kv_lens + page_size - 1) // page_size
     kv_indptr_cpu = convert_lens_to_indtpr(kv_num_used_pages)
-    # kv_indices_cpu = torch.arange(kv_len, dtype=torch.int32)
-    page_id = torch.randperm(kv_len // 16, dtype=torch.int32) * 16
-    kv_indices_cpu = page_id.view(-1, 1).repeat([1, 16]) + torch.arange(16, dtype=torch.int32)
-    kv_indices_cpu = kv_indices_cpu.view(-1)
+    kv_indices_cpu = torch.arange(kv_len, dtype=torch.int32)
+    # page_id = torch.randperm(kv_len // 16, dtype=torch.int32) * 16
+    # kv_indices_cpu = page_id.view(-1, 1).repeat([1, 16]) + torch.arange(16, dtype=torch.int32)
+    # kv_indices_cpu = kv_indices_cpu.view(-1)
     # kv_indices_cpu = torch.randperm(total_num_pages, dtype=torch.int32)[:kv_num_used_pages]
     # print(f"{kv_indices_cpu=}")
     
@@ -202,7 +226,10 @@ def test_batch_decode_with_paged_kv_cache(
     # print(q.shape)
     # print(k_cache.shape)
     # print(v_cache.shape)
+    # k_cache = k_cache.view(-1, 2, 8, 4).permute(0, 2, 1, 3).contiguous()
     k_shuffle= k_cache.view(total_num_pages // 16, 16, num_kv_heads, head_dim // 8, 8).permute(0, 2, 3, 1, 4).contiguous()
+    # k_shuffle = k_shuffle[0].view(1, 16, num_kv_heads, head_dim // 8, 8).repeat(total_num_pages // 16).contiguous()
+
     # k_shuffle = torch.ones_like(k_shuffle)
     if profile:
         o_ck_flash_attn, time = profile_func(
@@ -265,7 +292,7 @@ def test_batch_decode_with_paged_kv_cache(
             ],
             dim=0,
         ).to(dtype)
-        # vi = torch.ones_like(vi)
+        # ki = torch.ones_like(ki)
 
         # enlarge rtol for bf16 to allow passing very few numeric errors
         rtol, atol = (1e-3, 1e-3) if dtype == torch.float16 else (2e-2, 1e-2)
@@ -289,8 +316,10 @@ if __name__ == "__main__":
         logits_soft_cap,
         dtype,
     ) in itertools.product(
-        [64, 128, 256], [128], [1, 6, 8], [True], [0.0], [torch.bfloat16]
+        [64, 128, 1024], [128], [1, 8], [True], [0.0], [torch.bfloat16, torch.float16]
     ):
+        print(kv_len, qhead)
+        # try:
         test_batch_decode_with_paged_kv_cache(
             batch_size=1,
             kv_len=kv_len,
@@ -307,7 +336,9 @@ if __name__ == "__main__":
             q_init_max=10,
             kv_init_min=-5,
             kv_init_max=5,
-            seed=19378,
+            seed=None,
             profile=False,
         )
+        # except Exception as e:
+        #     print("error, ", e)
     print("test done!")

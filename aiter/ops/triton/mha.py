@@ -20,12 +20,12 @@ def mha_set_use_fused_bwd_kernel(value: bool):
 
 
 # global parameters
-_USE_INT64_STRIDES = False
+_USE_MHA_INT64_STRIDES = False
 
 
 def mha_set_use_int64_strides(value: bool):
-    global _USE_INT64_STRIDES
-    _USE_INT64_STRIDES = value
+    global _USE_MHA_INT64_STRIDES
+    _USE_MHA_INT64_STRIDES = value
 
 
 @triton.jit
@@ -299,7 +299,7 @@ def _attn_fwd_inner(
         if IS_CAUSAL:
             causal_boundary = start_n + offs_n_causal
             causal_mask = OFFS_M[:, None] >= causal_boundary[None, :]
-            mask = mask and causal_mask
+            mask = mask & causal_mask
 
         qk = tl.where(mask, qk, float("-inf"))
 
@@ -435,7 +435,7 @@ def _attn_fwd(
     VARLEN: tl.constexpr,
     BATCH,
     NUM_XCD: tl.constexpr,
-    USE_INT64_STRIDES: tl.constexpr,
+    USE_MHA_INT64_STRIDES: tl.constexpr,
 ):
     NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
     # calculate offsets
@@ -463,7 +463,7 @@ def _attn_fwd(
     # If we define new strides as stride_x: tl.int64 = stride_x_in, segfault remains
     # The permanent solution is to enable upcasting of tl.constexpr
     # In the meantime, the following workaround provides correctness and does not drop perf
-    if USE_INT64_STRIDES:
+    if USE_MHA_INT64_STRIDES:
         stride_qz = tl.cast(stride_qz_in, tl.int64)
         stride_qh = tl.cast(stride_qh_in, tl.int64)
         stride_qm = tl.cast(stride_qm_in, tl.int64)
@@ -1065,7 +1065,7 @@ def _flash_attn_forward(
         VARLEN=is_varlen,
         BATCH=batch,
         NUM_XCD=8,
-        USE_INT64_STRIDES=_USE_INT64_STRIDES,
+        USE_MHA_INT64_STRIDES=_USE_MHA_INT64_STRIDES,
         **config,
     )
 
@@ -1173,6 +1173,7 @@ class FlashAttnFunc(torch.autograd.Function):
                 dropout_p=ctx.dropout_p,
                 philox_seed=ctx.philox_seed,
                 philox_offset=ctx.philox_offset,
+                USE_INT64_STRIDES=_USE_MHA_INT64_STRIDES,
             )
         else:
             flash_attn_onekernel_backward(
@@ -1196,6 +1197,7 @@ class FlashAttnFunc(torch.autograd.Function):
                 dropout_p=ctx.dropout_p,
                 philox_seed=ctx.philox_seed,
                 philox_offset=ctx.philox_offset,
+                USE_INT64_STRIDES=_USE_MHA_INT64_STRIDES,
             )
 
         dq = dq[..., : q.shape[-1]]  # We could have padded the head dimension
@@ -1412,6 +1414,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
                 descale_k=descale_k,
                 descale_v=descale_v,
                 descale_do=descale_do,
+                USE_INT64_STRIDES=_USE_MHA_INT64_STRIDES,
             )
         else:
             flash_attn_onekernel_backward(
@@ -1439,6 +1442,7 @@ class FlashAttnFP8Func(torch.autograd.Function):
                 descale_k=descale_k,
                 descale_v=descale_v,
                 descale_do=descale_do,
+                USE_INT64_STRIDES=_USE_MHA_INT64_STRIDES,
             )
 
         # dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
@@ -1683,6 +1687,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
                 dropout_p=ctx.dropout_p,
                 philox_seed=ctx.philox_seed,
                 philox_offset=ctx.philox_offset,
+                USE_INT64_STRIDES=_USE_MHA_INT64_STRIDES,
             )
         else:
             flash_attn_onekernel_backward(
@@ -1706,6 +1711,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
                 dropout_p=ctx.dropout_p,
                 philox_seed=ctx.philox_seed,
                 philox_offset=ctx.philox_offset,
+                USE_INT64_STRIDES=_USE_MHA_INT64_STRIDES,
             )
 
         dq = dq[..., : q.shape[-1]]  # We could have padded the head dimension
@@ -1880,6 +1886,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
                 descale_k=descale_k,
                 descale_v=descale_v,
                 descale_do=descale_do,
+                USE_INT64_STRIDES=_USE_MHA_INT64_STRIDES,
             )
         else:
             flash_attn_onekernel_backward(
@@ -1907,6 +1914,7 @@ class FlashAttnVarlenFP8Func(torch.autograd.Function):
                 descale_k=descale_k,
                 descale_v=descale_v,
                 descale_do=descale_do,
+                USE_INT64_STRIDES=_USE_MHA_INT64_STRIDES,
             )
         dq = dq[..., : q_fp8.shape[-1]]  # We could have padded the head dimension
         dk = dk[..., : k_fp8.shape[-1]]

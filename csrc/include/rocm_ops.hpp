@@ -265,19 +265,19 @@
 
 #define CUSTOM_PYBIND                                                                           \
     m.def("wvSpltK",                                                                            \
-          &wvSpltK,                                                                             \
+          &aiter::wvSpltK,                                                                             \
           "wvSpltK(Tensor in_a, Tensor in_b, Tensor! out_c, int N_in,"                          \
           "        int CuCount) -> ()");                                                        \
     m.def("wv_splitk_small_fp16_bf16",                                                          \
-          &wv_splitk_small_fp16_bf16_wrapper,                                                   \
+          &aiter::wv_splitk_small_fp16_bf16_wrapper,                                                   \
           "wv_splitk_small_fp16_bf16(Tensor in_a, Tensor in_b, Tensor! out_c, int N_in,"        \
           "        int CuCount) -> ()");                                                        \
     m.def("LLMM1",                                                                              \
-          &LLMM1,                                                                               \
+          &aiter::LLMM1,                                                                               \
           "LLMM1(Tensor in_a, Tensor in_b, Tensor! out_c, int rows_per_block) -> "              \
           "()");                                                                                \
     m.def("wvSplitKQ",                                                                          \
-          &wvSplitKQ,                                                                           \
+          &aiter::wvSplitKQ,                                                                           \
           "wvSplitKQ(Tensor in_a, Tensor in_b, Tensor! out_c, Tensor scale_a, Tensor scale_b, " \
           "int CuCount) -> ()");
 
@@ -312,6 +312,16 @@
           py::arg("beta") = 0.0, \
           py::arg("bpreshuffle")  = true);
 
+#define GEMM_A4W4_BLOCKSCALE_PYBIND \
+    m.def("gemm_a4w4_blockscale",   \
+          &gemm_a4w4_blockscale,    \
+          "fp4 blockscale gemm",    \
+          py::arg("XQ"),            \
+          py::arg("WQ"),            \
+          py::arg("x_scale"),       \
+          py::arg("w_scale"),       \
+          py::arg("Out"));
+
 #define GEMM_A8W8_BLOCKSCALE_PYBIND \
     m.def("gemm_a8w8_blockscale",   \
           &gemm_a8w8_blockscale,    \
@@ -326,6 +336,18 @@
     m.def("gemm_a8w8_blockscale_tune",   \
           &gemm_a8w8_blockscale_tune,    \
           "gemm_a8w8_blockscale_tune",   \
+          py::arg("XQ"),                 \
+          py::arg("WQ"),                 \
+          py::arg("x_scale"),            \
+          py::arg("w_scale"),            \
+          py::arg("Out"),                \
+          py::arg("kernelId") = 0,       \
+          py::arg("splitK")   = 0);
+
+#define GEMM_A4W4_BLOCKSCALE_TUNE_PYBIND \
+    m.def("gemm_a4w4_blockscale_tune",   \
+          &gemm_a4w4_blockscale_tune,    \
+          "gemm_a4w4_blockscale_tune",   \
           py::arg("XQ"),                 \
           py::arg("WQ"),                 \
           py::arg("x_scale"),            \
@@ -550,7 +572,7 @@
           py::arg("a2_scale")       = std::nullopt,  \
           py::arg("block_m")        = 32,            \
           py::arg("sorted_weights") = std::nullopt); \
-                                                  
+
 #define MHA_VARLEN_FWD_PYBIND                        \
       m.def("mha_varlen_fwd",                        \
           &aiter::torch_itfs::mha_varlen_fwd,        \

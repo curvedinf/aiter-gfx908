@@ -72,8 +72,8 @@ def paged_attention_rocm(
     kv_cache_dtype: str,
     k_scale: float,
     v_scale: float,
-    fp8_out_scale: Optional[torch.Tensor],
-    partition_size: int,
+    fp8_out_scale: Optional[torch.Tensor] = None,
+    partition_size: int = 256,
     mtp: int = 1,
 ) -> torch.Tensor:
     paged_attention_rocm_core(

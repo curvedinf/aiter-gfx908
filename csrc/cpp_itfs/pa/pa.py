@@ -65,8 +65,8 @@ def paged_attention_rocm(
     kv_cache_dtype,
     k_scale,
     v_scale,
-    fp8_out_scale,
-    num_threads,
+    fp8_out_scale=None,
+    num_threads=256,
     mtp=1,
 ):
     import torch
@@ -120,13 +120,13 @@ def paged_attention_rocm(
         kv_cache_dtype,
         out_dtype,
         block_size,
-        "true" if alibi_slopes else "false",
+        "true" if alibi_slopes is not None else "false",
         mtp,
     )
 
     alibi_slopes_ptr = (
         ctypes.cast(alibi_slopes.data_ptr(), ctypes.POINTER(ctypes.c_float))
-        if alibi_slopes
+        if alibi_slopes is not None
         else ctypes.POINTER(ctypes.c_int)()
     )
 

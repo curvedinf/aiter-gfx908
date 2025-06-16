@@ -592,6 +592,7 @@ struct FlashMlaPrefillFwdParams
     int64_t block_table_batch_stride;
     int32_t page_block_size;
     float   scale_softmax;
+    int32_t mask_y_ratio;
 
     // Use int64_t if there is int32 overflow case. For now, just use int32 to save sgpr and prevent using
     // spill table.
@@ -1337,11 +1338,9 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
         params.stride_b_v, params.stride_h_v,
         params.p_block_table, params.block_table_batch_stride, params.page_block_size);
     
-    using Mask = std::conditional_t<kIsCausal,
-                                    ck_tile::SimplifiedGenericAttentionMask<true>,
-                                    ck_tile::SimplifiedGenericAttentionMask<false>>;
+    using Mask = ck_tile::SimplifiedGenericAttentionMask<kIsCausal>;
     Mask mask = kIsCausal ?
-                Mask{params.size_s, seqlen_k - params.size_s + 1, params.size_s, seqlen_k} :
+                Mask{params.size_s, seqlen_k - params.size_s / params.mask_y_ratio + 1, params.size_s, seqlen_k, params.mask_y_ratio} :
                 Mask{params.size_s, seqlen_k};
 
     if constexpr (kDoSplit)
@@ -1695,6 +1694,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const float          softmax_scale,
     const bool           is_causal)
 {
+    bool ENABLE_PACK_QK_RATIO = true;
     //                                        dqk  dv   m0  n0  n1  #warp
     using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4>;
     constexpr bool kForceOutAcc = true;
@@ -1708,7 +1708,9 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
 
     const int32_t batch_size = query.size(0);
     const int32_t seqlen_q_ori = query.size(1);
-    const int32_t num_heads_q = query.size(2);
+    const int32_t num_heads_q_ori = query.size(2);
+    int32_t seqlen_q = seqlen_q_ori;
+    int32_t num_heads_q = num_heads_q_ori;
 
     const int32_t head_size = query.size(3);
     TORCH_CHECK((head_size == 576) && (head_size_v == 512), "Only support QK head dim 576 and V head dim 512!");
@@ -1717,14 +1719,37 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const int32_t page_block_size = key_cache.size(1);
     const int32_t num_heads_k = key_cache.size(2);
 
-    const int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads_q, seqlen_q_ori);
+    TORCH_CHECK(num_heads_q % num_heads_k == 0,
+                "Number of heads in key/value must divide number of heads in query");
+
+    const int32_t hq_hk_ratio = num_heads_q / num_heads_k;
+    int32_t mask_y_ratio      = 1;
+
+    if(ENABLE_PACK_QK_RATIO)
+    {
+        seqlen_q     = seqlen_q_ori * hq_hk_ratio;
+        num_heads_q  = num_heads_k;
+        mask_y_ratio = hq_hk_ratio;
+        if(num_heads_k == 1)
+        {
+            query = query.reshape({batch_size, seqlen_q, num_heads_q, head_size});
+        }
+        else
+        {
+            query = query.view({batch_size, seqlen_q_ori, num_heads_q, hq_hk_ratio, head_size})
+                        .transpose(2, 3)
+                        .reshape({batch_size, seqlen_q, num_heads_q, head_size});
+        }
+    }
+
+    const int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads_q, seqlen_q);
     const bool    do_splits = num_splits > 1;
 
     // Combine shader, which only exists when num_splits > 1, will conduct type convert by default and force.
     // Thus, kForceOutAcc doesn't work in this case.
-    auto output = torch::empty({batch_size, seqlen_q_ori, num_heads_q, head_size_v},
+    auto output = torch::empty({batch_size, seqlen_q, num_heads_q, head_size_v},
                                (kForceOutAcc && !do_splits) ? opts_acc : opts);
-    auto softmax_lse = torch::empty({batch_size, num_heads_q, seqlen_q_ori}, opts_acc);
+    auto softmax_lse = torch::empty({batch_size, num_heads_q, seqlen_q}, opts_acc);
 
     FlashMlaPrefillFwdParams params = {};
 
@@ -1739,12 +1764,14 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.p_softmax_lse      = softmax_lse.data_ptr();
 
     params.size_b                   = batch_size;
-    params.size_s                   = seqlen_q_ori;
+    params.size_s                   = seqlen_q;
     params.size_h                   = num_heads_q;
     params.hq_hk_ratio              = num_heads_q / num_heads_k;
     params.block_table_batch_stride = block_table.stride(0);
     params.page_block_size          = page_block_size;
     params.scale_softmax            = softmax_scale;
+
+    params.mask_y_ratio = mask_y_ratio;
 
     params.stride_b_q = query.stride(0);
     params.stride_s_q = query.stride(1);
@@ -1759,12 +1786,12 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.stride_s_o = output.stride(1);
     params.stride_h_o = output.stride(2);
 
-    if (num_splits > 1)
+    if(num_splits > 1)
     {
         auto output_accum =
-            torch::empty({batch_size, num_splits, seqlen_q_ori, num_heads_q, head_size_v}, opts_acc);
+            torch::empty({batch_size, num_splits, seqlen_q, num_heads_q, head_size_v}, opts_acc);
         auto softmax_lseaccum =
-            torch::empty({batch_size, num_splits, num_heads_q, seqlen_q_ori}, opts_acc);
+            torch::empty({batch_size, num_splits, num_heads_q, seqlen_q}, opts_acc);
 
         params.p_softmax_lseaccum = softmax_lseaccum.data_ptr();
         params.p_output_accum     = output_accum.data_ptr();
@@ -1785,6 +1812,24 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
             dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal>(params);
         }();
     );
+
+    if(ENABLE_PACK_QK_RATIO)
+    {
+        // post process for out and softmax_lse
+        if(num_heads_k == 1)
+        {
+            output = output.reshape({batch_size, seqlen_q_ori, num_heads_q_ori, head_size_v});
+        }
+        else
+        {
+            output = output.view({batch_size, seqlen_q_ori, hq_hk_ratio, num_heads_q, head_size_v})
+                         .transpose(2, 3)
+                         .reshape({batch_size, seqlen_q_ori, num_heads_q_ori, head_size_v});
+        }
+        softmax_lse = softmax_lse.view({batch_size, num_heads_q, seqlen_q_ori, hq_hk_ratio})
+                          .transpose(2, 3)
+                          .reshape({batch_size, num_heads_q_ori, seqlen_q_ori});
+    }
 
     return {output.to(opts), softmax_lse};
 }

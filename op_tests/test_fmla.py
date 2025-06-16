@@ -194,7 +194,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, tes
             torch.finfo(q.dtype).bits // 8
         )
         print(
-            f"{t:.4f} ms, {FLOPS / 10 ** 6 / t:.4f} TFLOPS, {bytes / 10 ** 3 / t:.4f} GB/s"
+            f"{t:.4f} us, {FLOPS / 10 ** 6 / t:.4f} TFLOPS, {bytes / 10 ** 3 / t:.4f} GB/s"
         )
 
     print("====================================")
@@ -216,12 +216,15 @@ if __name__ == "__main__":
     # ):
     #     test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen, True, False)
 
-    for (dtype, b, s, h_q, varlen, causal) in itertools.product(
-        (torch.float16, torch.bfloat16)[1:],
-        [1, 3, 5, 16, 32, 64, 128, 256][3:4],
-        [21, 64, 256, 512, 1200, 3200, 5200, 8192],
-        (16, 64, 128)[:1],
-        (False, True)[:1],
-        (False, True)[1:]
-    ):
-        test_flash_mla(dtype, b, s, s, h_q, h_kv, d, dv, causal, varlen, False, True)
+    # for (dtype, b, s, h_q, varlen, causal) in itertools.product(
+    #     (torch.float16, torch.bfloat16)[1:],
+    #     [1, 3, 5, 16, 32, 64, 128, 256][3:4],
+    #     [21, 64, 256, 512, 1200, 3200, 5200, 8192],
+    #     (16, 64, 128)[:1],
+    #     (False, True)[:1],
+    #     (False, True)[1:]
+    # ):
+    #     test_flash_mla(dtype, b, s, s, h_q, h_kv, d, dv, causal, varlen, True, True)
+    
+    # 873us
+    test_flash_mla(torch.bfloat16, 32, 3, 6001, 16, 1, 576, 512, False, False, True, True)

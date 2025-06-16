@@ -7,7 +7,7 @@
 #include "lru_cache.h"
 #include <memory>
 #include <cstdlib>
-#include <openssl/md5.h>
+#include <openssl/evp.h>
 #include <iomanip>
 #include <fmt/ranges.h>
 #include <fmt/args.h>
@@ -142,17 +142,17 @@ __inline__ void run_lib(std::string func_name, std::string folder, Args... args)
 
 
 __inline__ std::string hash_signature(const std::string& signature) {
-    unsigned char digest[MD5_DIGEST_LENGTH];
-    MD5_CTX context;
+    unsigned char digest[EVP_MAX_MD_SIZE];
+    unsigned int digest_len;
 
-    // Compute the MD5 hash
-    MD5_Init(&context);
-    MD5_Update(&context, signature.data(), signature.size());
-    MD5_Final(digest, &context);
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(ctx, EVP_md5(), NULL);
+    EVP_DigestUpdate(ctx, signature.data(), signature.size());
+    EVP_DigestFinal_ex(ctx, digest, &digest_len);
+    EVP_MD_CTX_free(ctx);
 
-    // Convert binary digest to hex string
     std::stringstream ss;
-    for (int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+    for (unsigned int i = 0; i < digest_len; i++) {
         ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(digest[i]);
     }
     return ss.str();

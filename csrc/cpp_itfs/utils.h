@@ -74,8 +74,6 @@ __inline__ const std::pair<std::string, int> execute_cmd(const std::string& cmd)
 
 
 __inline__ const std::pair<std::string, int> execute_cmd(const std::string& cmd, const std::list<std::string>& args) {
-    // std::cout << args.front() << std::endl;
-    // std::cout << args.back() << std::endl;
     fmt::dynamic_format_arg_store<fmt::format_context> store;
     for (const auto& arg : args) {
         store.push_back(arg);

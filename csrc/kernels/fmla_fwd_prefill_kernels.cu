@@ -1597,11 +1597,21 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
         }
 
         // Get global LSE
-        in_t global_lse = ((sum_lse == 0.f) || (sum_lse != sum_lse)) ?
-            ck_tile::numeric<in_t>::infinity() : (ck_tile::log(sum_lse) + max_lse);
+        const auto [global_lse, output_lse] = [&]() {
+            if ((sum_lse == 0.f) || (sum_lse != sum_lse))
+            {
+                return ck_tile::make_tuple(ck_tile::numeric<in_t>::infinity(), -ck_tile::numeric<in_t>::infinity());
+            }
+            else
+            {
+                const in_t lse = ck_tile::log(sum_lse) + max_lse;
+                return ck_tile::make_tuple(lse, lse);
+            }
+        } ();
+
         if (lane_id == 0)
         {
-            *p_lse = global_lse;
+            *p_lse = output_lse;
         }
 
         // Write LSE to LDS
@@ -1811,7 +1821,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
 {
     //                                        dqk  dv   m0  n0  n1  #warp
     using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4>;
-    constexpr bool kForceOutAcc = true;
+    constexpr bool kForceOutAcc = false;
     using acc_t = float;
 
     torch::Tensor vcache = value_cache.data_ptr() ? value_cache : key_cache;
@@ -1900,11 +1910,11 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
             dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal>(params);
         }();
     );
-    // assert(is_causal == false);
+    // assert(is_causal == true);
     // assert(query.scalar_type() == at::ScalarType::BFloat16);
     // using scalar_t = ck_tile::bf16_t;
     // using out_t = std::conditional_t<kForceOutAcc, acc_t, scalar_t>;
-    // dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, false>(params);
+    // dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, true>(params);
 
     return {output.to(opts), softmax_lse};
 }

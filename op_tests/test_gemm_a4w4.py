@@ -72,7 +72,7 @@ def test_gemm(dtype, M, N, K, bshuffle):
     _, w_scales = quant_func(w, shuffle=False)
     x, x_scales_shuffle = quant_func(x, shuffle=True)
     w, w_scales_shuffle = quant_func(w, shuffle=True)
-    if bshuffle == True:
+    if bshuffle:
         wshuffle = shuffle_weight(w, layout=(16, 16))
     out1 = torch.empty(M, N, dtype=dtype)
     out2 = torch.empty((M + 255) // 256 * 256, N, dtype=dtype)
@@ -86,7 +86,7 @@ def test_gemm(dtype, M, N, K, bshuffle):
     avg_c = None
     tflops_c = None
     tbs_c = None
-    if bshuffle == True:
+    if bshuffle:
         w = wshuffle
     c, avg_c = run_gemm_asm(
         x, w, x_scales_shuffle, w_scales_shuffle, out2, bias_f32, bpreshuffle=bshuffle

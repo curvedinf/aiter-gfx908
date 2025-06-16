@@ -197,10 +197,10 @@ def test_batch_decode_with_paged_kv_cache(
         kv_lens = torch.full((batch_size,), kv_len).int()
     kv_num_used_pages = (kv_lens + page_size - 1) // page_size
     kv_indptr_cpu = convert_lens_to_indtpr(kv_num_used_pages)
-    kv_indices_cpu = torch.arange(kv_len, dtype=torch.int32)
-    # page_id = torch.randperm(kv_len // 16, dtype=torch.int32) * 16
-    # kv_indices_cpu = page_id.view(-1, 1).repeat([1, 16]) + torch.arange(16, dtype=torch.int32)
-    # kv_indices_cpu = kv_indices_cpu.view(-1)
+    # kv_indices_cpu = torch.arange(kv_len, dtype=torch.int32)
+    page_id = torch.randperm(kv_len // 16, dtype=torch.int32) * 16
+    kv_indices_cpu = page_id.view(-1, 1).repeat([1, 16]) + torch.arange(16, dtype=torch.int32)
+    kv_indices_cpu = kv_indices_cpu.view(-1)
     # kv_indices_cpu = torch.randperm(total_num_pages, dtype=torch.int32)[:kv_num_used_pages]
     # print(f"{kv_indices_cpu=}")
     
@@ -316,7 +316,7 @@ if __name__ == "__main__":
         logits_soft_cap,
         dtype,
     ) in itertools.product(
-        [64, 128, 1024], [128], [1, 8], [True], [0.0], [torch.bfloat16, torch.float16]
+        [64, 128, 1024], [128], [1, 6, 8], [True], [0.0], [torch.bfloat16, torch.float16]
     ):
         print(kv_len, qhead)
         # try:

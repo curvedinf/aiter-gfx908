@@ -73,8 +73,7 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
         out.dtype() == torch::ScalarType::BFloat16, __func__, " only support BFloat16 output now!");
     int Mdim = A.size(0);
     int Ndim = B.size(0);
-    int Kdim = A.size(1) * 2; // always fp4_x2
-
+    int Kdim = A.size(1) * 2; // always fp4_x2F
     KernelArgs args;
     size_t arg_size = sizeof(args);
     args.ptr_D      = (void*)out.data_ptr();
@@ -104,23 +103,24 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     int SUBM          = 256;
     int SUBN          = 256;
     int gdx           = (Ndim + SUBN - 1) / SUBN;
-    int gdy           = ((Mdim + SUBM - 1) / SUBM);
+    int gdy           = (Mdim + SUBM - 1) / SUBM;
     int gdz           = 1;
-
-    gdx          = tg_group_size;
-    int num_tg_n = (Ndim + SUBN - 1) / SUBN;
-    gdz          = (num_tg_n + tg_group_size - 1) / tg_group_size;
 
     static AiterAsmKernel noSplitK_impl("_ZN5aiter33f4gemm_bf16_per1x32Fp4_tn_256x256E",
                                         "f4gemm/f4gemm_bf16_per1x32Fp4_tn_256x256.co");
     static AiterAsmKernel noSplitK_bpreshuffle_impl(
         "_ZN5aiter45f4gemm_bf16_per1x32Fp4_tn_bpreshuffle_256x256E",
         "f4gemm/f4gemm_bf16_per1x32Fp4_tn_bpreshuffle_256x256.co");
-    AiterAsmKernel* impl_ptr = &noSplitK_bpreshuffle_impl;
+    AiterAsmKernel* impl_ptr = &noSplitK_impl;
     // if (ks > 0)
     //     impl_ptr = &splitK_impl;
-    if(bpreshuffle == false)
-        impl_ptr = &noSplitK_impl;
+    if(bpreshuffle == true)
+    {
+        gdx          = tg_group_size;
+        int num_tg_n = (Ndim + SUBN - 1) / SUBN;
+        gdz          = (num_tg_n + tg_group_size - 1) / tg_group_size;
+        impl_ptr     = &noSplitK_bpreshuffle_impl;
+    }
 
     impl_ptr->launch_kernel({&args,
                              &arg_size,

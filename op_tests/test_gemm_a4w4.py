@@ -89,7 +89,7 @@ def test_gemm(dtype, M, N, K, bshuffle):
     if bshuffle == True:
         w = wshuffle
     c, avg_c = run_gemm_asm(
-        x, w, x_scales_shuffle, w_scales_shuffle, out2, bias_f32, bshuffle
+        x, w, x_scales_shuffle, w_scales_shuffle, out2, bias_f32, bpreshuffle=bshuffle
     )
     err1 = checkAllclose(a, c[:M], msg="asm   ")
     tflops_c = M * N * K * 2 / avg_c / 1e6
@@ -109,19 +109,20 @@ import pandas as pd
 l_dtype = ["bf16"]
 l_mnk = [
     # pure_compute
-    #(16384, 16384, 16384),
-    #(32768, 106496, 16384),
-    #(32768, 16384, 53248),
-    #(32768, 18432, 16384),
-    #(32768, 16384, 16384),
-    #(128, 106496, 16384),
-    #(128, 16384, 53248),
-    #(128, 18432, 16384),
+    (16384, 16384, 16384),
+    (32768, 106496, 16384),
+    (32768, 16384, 53248),
+    (32768, 18432, 16384),
+    (32768, 16384, 16384),
+    (128, 106496, 16384),
+    (128, 16384, 53248),
+    (128, 18432, 16384),
     (128, 16384, 16384),
-    #(64, 106496, 16384),
-    #(64, 16384, 53248),
-    #(64, 18432, 16384),
+    (64, 106496, 16384),
+    (64, 16384, 53248),
+    (64, 18432, 16384),
     (64, 16384, 16384),
+    (64, 106496, 16384),
     (32, 106496, 16384),
     (32, 16384, 53248),
     (32, 18432, 16384),
@@ -158,7 +159,8 @@ l_mnk = [
     (8192, 8192, 1024),
     (16384, 8192, 1024),
 ]
-l_bpreshuffle = [True, False][:1]
+l_bpreshuffle = [False, True][:]
+
 parser = argparse.ArgumentParser(description="config input of test")
 parser.add_argument(
     "-d",

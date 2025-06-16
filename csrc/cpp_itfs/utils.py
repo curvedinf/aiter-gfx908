@@ -84,7 +84,7 @@ def compile_lib(src_file, folder, includes=None, sources=None, cxxflags=None):
     init_build_dir(sub_build_dir)
     include_dir = f"{sub_build_dir}/include"
     os.makedirs(include_dir, exist_ok=True)
-    for include in includes:
+    for include in includes + [f"{CK_DIR}/include"]:
         if os.path.isdir(include):
             shutil.copytree(include, include_dir, dirs_exist_ok=True)
         else:
@@ -159,7 +159,7 @@ def hash_signature(signature: str):
 
 @lru_cache(maxsize=None)
 def get_default_func_name(md_name, args: tuple):
-    signature = "_".join([str(arg) for arg in args])
+    signature = "_".join([str(arg).lower() for arg in args])
     return f"{md_name}_{hash_signature(signature)}"
 
 

@@ -5,7 +5,7 @@ import math
 
 
 MD_NAME = "pa"
-warpSize = 64
+
 with open(f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa.cpp.jinja", "r") as f:
     src_template = Template(f.read())
 
@@ -72,6 +72,7 @@ def paged_attention_rocm(
     import torch
     from csrc.cpp_itfs.torch_utils import torch_to_c_types
 
+    warpSize = torch.cuda.get_device_properties(out.device).warp_size
     if kv_cache_dtype == "auto":
         if query.dtype == torch.bfloat16:
             dtype = "__hip_bfloat16"

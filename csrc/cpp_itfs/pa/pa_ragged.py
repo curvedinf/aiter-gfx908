@@ -5,7 +5,7 @@ import math
 
 
 MD_NAME = "pa_ragged"
-warpSize = 64
+
 with open(f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa_ragged.cpp.jinja", "r") as f:
     src_template = Template(f.read())
 
@@ -25,7 +25,12 @@ def compile(
     return compile_template_op(
         src_template,
         MD_NAME,
-        ["../utils.h", "pa.cuh", "../../include"],
+        [
+            f"{AITER_CORE_DIR}/csrc/cpp_itfs/utils.h",
+            f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa_ragged.cuh",
+            f"{AITER_CORE_DIR}/csrc/include",
+            f"{AITER_CORE_DIR}/csrc/include/ck_tile/",
+        ],
         [],
         gqa_ratio=gqa_ratio,
         head_size=head_size,
@@ -63,6 +68,7 @@ def paged_attention_ragged(
     import torch
     from csrc.cpp_itfs.torch_utils import torch_to_c_types
 
+    warpSize = torch.cuda.get_device_properties(out.device).warp_size
     if kv_cache_dtype == "auto":
         if query.dtype == torch.bfloat16:
             dtype = "__hip_bfloat16"

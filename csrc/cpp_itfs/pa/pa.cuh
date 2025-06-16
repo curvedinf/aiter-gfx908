@@ -1,3 +1,5 @@
+#pragma once
+
 /*
  * Copyright © Advanced Micro Devices, Inc. All rights reserved.
  * Copyright (C) 2024-2025, The vLLM team.

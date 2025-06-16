@@ -45,7 +45,7 @@ void asm_mla_decode_fwd(std::optional<std::string> folder,
     {
         throw std::invalid_argument("only support max_seqlen_q==1 when gqa_ratio==16");
     }
-    std::vector<std::string> args{std::to_string(gqa_ratio),
+    std::list<std::string> args{std::to_string(gqa_ratio),
                                   std::to_string(page_size),
                                   q_dtype,
                                   kv_dtype,

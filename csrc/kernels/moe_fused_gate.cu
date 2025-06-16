@@ -16,11 +16,7 @@
  */
 #include <ATen/cuda/CUDAContext.h>
 #include <cuda_runtime.h>
-// #include <ck/ck.hpp>
-// #include <ck/utility/data_type.hpp>
-// #include <ck/utility/type_convert.hpp>
-// #include <ck/utility/array.hpp>
-#include "vec_convert.h"
+#include <hipcub/hipcub.hpp>
 #include <stdio.h>
 #include <torch/all.h>
 
@@ -30,6 +26,8 @@
 #include <cub/util_type.cuh>
 #include <cub/cub.cuh>
 #include "hip_compat.h"
+#include "vec_convert.h"
+#include "hip_reduce.h"
 
 
 /// Aligned array type
@@ -100,6 +98,17 @@ __device__ void moe_fused_gate_impl(
   if (thread_row >= num_rows) {
     return;
   }
+  extern __shared__ char shared_mem[];
+  char *ptr = (char *)(((size_t)shared_mem + 255) & ~255);
+
+  // float *scores = reinterpret_cast<float *>(ptr + tidx / params.THREADS_PER_ROW * params.THREADS_PER_ROW * params.VPT * sizeof(float));
+  // ptr += WARP_SIZE * params.VPT * sizeof(float);
+
+  float *scores = reinterpret_cast<float *>(ptr + tidx / params.THREADS_PER_ROW * topk * sizeof(float));
+  ptr += params.ROWS_PER_WARP * topk * sizeof(float);
+
+  int *topk_indices = reinterpret_cast<int *>(ptr + tidx / params.THREADS_PER_ROW * topk * sizeof(int));
+  // ptr += params.ROWS_PER_WARP * topk * sizeof(int);
 
   // Calculate topk_excluding_share_expert_fusion from topk
   int64_t topk_excluding_share_expert_fusion = topk - num_fused_shared_experts;
@@ -115,8 +124,8 @@ __device__ void moe_fused_gate_impl(
   // Create local arrays for the row chunk and bias chunk and then reinterpret the address of row_chunk as a pointer to
   // AccessType.
 
-  constexpr uint32_t vec_size = 16 / sizeof(T);
-  using AccessType = ck_tile::vec_t<T, vec_size>;
+  // constexpr uint32_t vec_size = 16 / sizeof(T);
+  using AccessType = ck_tile::vec_t<T, MAX_VPT>;
   using VecType = ck_tile::vec_t<float, MAX_VPT>;
 
   T* thread_read_ptr = thread_row_ptr + first_elt_read_by_thread;
@@ -138,33 +147,32 @@ __device__ void moe_fused_gate_impl(
 //     bias_chunk_vec_ptr[ii] = vec_bias_thread_read_ptr[0][ii];
 //   }]
 
-  // AccessType row_chunk_vec = *vec_thread_read_ptr;
-  // AccessType bias_thread_read_vec = *vec_bias_thread_read_ptr;
-  // for (int jj = 0; jj < MAX_VPT; ++jj) {
-  //   if (jj < params.VPT)
-  //   {
-  //     row_chunk[jj] = ck_tile::type_convert<float>(row_chunk_vec(jj));
-  //     bias_chunk[jj] = ck_tile::type_convert<float>(bias_thread_read_vec(jj));
+  AccessType row_chunk_vec = *vec_thread_read_ptr;
+  AccessType bias_thread_read_vec = *vec_bias_thread_read_ptr;
+  for (int jj = 0; jj < params.VPT; ++jj) {
+    row_chunk[jj] = ck_tile::type_convert<float>(row_chunk_vec(jj));
+    bias_chunk[jj] = ck_tile::type_convert<float>(bias_thread_read_vec(jj));
+  }
+  // #pragma unroll
+  // for (int ii = 0; ii < params.VPT / vec_size; ++ii) {
+  //   AccessType row_chunk_vec = vec_thread_read_ptr[ii];
+  //   AccessType bias_thread_read_vec = vec_bias_thread_read_ptr[ii];
+  //   for (int jj = 0; jj < vec_size; ++jj) {
+  //     row_chunk[ii * vec_size + jj] = ck_tile::type_convert<float>(row_chunk_vec(jj));
+  //     bias_chunk[ii * vec_size + jj] = ck_tile::type_convert<float>(bias_thread_read_vec(jj));
   //   }
   // }
-  #pragma unroll
-  for (int ii = 0; ii < params.VPT / vec_size; ++ii) {
-    AccessType row_chunk_vec = vec_thread_read_ptr[ii];
-    AccessType bias_thread_read_vec = vec_bias_thread_read_ptr[ii];
-    for (int jj = 0; jj < vec_size; ++jj) {
-      row_chunk[ii * vec_size + jj] = ck_tile::type_convert<float>(row_chunk_vec(jj));
-      bias_chunk[ii * vec_size + jj] = ck_tile::type_convert<float>(bias_thread_read_vec(jj));
-    }
-  }
   
   // __syncthreads();
 
 ////////////////////// Sigmoid //////////////////////
+int scores_offset = tidx % params.THREADS_PER_ROW * params.VPT;
 #pragma unroll
   for (int ii = 0; ii < params.VPT; ++ii) {
     row_chunk[ii] = 1.0f / (1.0f + expf(-row_chunk[ii]));
+    // scores[scores_offset + ii] = row_chunk[ii];
   }
-  __syncthreads();
+  // __syncthreads();
 
 ////////////////////// Add Bias //////////////////////
 #pragma unroll
@@ -197,19 +205,30 @@ __device__ void moe_fused_gate_impl(
     int expert = first_elt_read_by_thread;
     float max_sum = max_val;
     
-// argmin reduce
-#pragma unroll
-    for (int mask = params.THREADS_PER_ROW / 2; mask > 0; mask /= 2) {
-      float other_max_sum =
-          VLLM_SHFL_XOR_SYNC_WIDTH(max_sum, mask, params.THREADS_PER_ROW);
-      int other_expert = VLLM_SHFL_XOR_SYNC_WIDTH(expert, mask, params.THREADS_PER_ROW);
+// // argmin reduce
+// #pragma unroll
+//     for (int mask = params.THREADS_PER_ROW / 2; mask > 0; mask /= 2) {
+//       float other_max_sum =
+//           VLLM_SHFL_XOR_SYNC_WIDTH(max_sum, mask, params.THREADS_PER_ROW);
+//       int other_expert = VLLM_SHFL_XOR_SYNC_WIDTH(expert, mask, params.THREADS_PER_ROW);
 
-      // higher indices win
-      if (cmp_gt(max_sum, other_max_sum) || (cmp_eq(other_max_sum, max_sum) && other_expert > expert)) {
-        max_sum = other_max_sum;
-        expert = other_expert;
-      }
-    }
+//       // higher indices win
+//       if (cmp_gt(max_sum, other_max_sum) || (cmp_eq(other_max_sum, max_sum) && other_expert > expert)) {
+//         max_sum = other_max_sum;
+//         expert = other_expert;
+//       }
+//     }
+
+    using kvp = hipcub::KeyValuePair<int, float>;
+    
+    hipcub::ArgMax arg_max;
+    hipcub::ArgMin arg_min;
+    
+    kvp thread_kvp;
+    thread_kvp.key = expert;
+    thread_kvp.value = max_sum;
+    const kvp result_kvp = multithread_reduce(thread_kvp, arg_min, params.THREADS_PER_ROW);
+    expert = result_kvp.key;
 
     // clear the max value in the thread
     if (k_idx < params.THREADS_PER_ROW - topk_group) {
@@ -222,69 +241,92 @@ __device__ void moe_fused_gate_impl(
     }
   }
 
-  __syncthreads();
+  // __syncthreads();
 
   ////////////////////// Topk //////////////////////
   float output_sum = 0.0f;
+  uint32_t expert_mask = 0xFFFFFFFF;
   for (int k_idx = 0; k_idx < topk_excluding_share_expert_fusion; ++k_idx) {
     // local argmax
     float max_val = bias_chunk[0];
     int expert = first_elt_read_by_thread;
+    // float scale = row_chunk[0];
 
     if (!cmp_eq(max_val, FLT_MAX)) {
 #pragma unroll
       for (int ii = 1; ii < params.VPT; ++ii) {
         float val = bias_chunk[ii];
+        float scale_tmp = row_chunk[ii];
+        // if (((expert_mask >> ii) & 1u) && cmp_gt(val, max_val)) {
         if (cmp_gt(val, max_val)) {
           max_val = val;
           expert = first_elt_read_by_thread + ii;
+          // scale = scale_tmp;
         }
       }
     } else {
       max_val = -FLT_MAX;
     }
+    
+    
+    using kvp = hipcub::KeyValuePair<int, float>;
+    hipcub::ArgMax arg_max;
+    kvp thread_kvp;
+    thread_kvp.key = expert;
+    thread_kvp.value = max_val;
+    const kvp result_kvp = multithread_reduce(thread_kvp, arg_max, params.THREADS_PER_ROW);
+    expert = result_kvp.key;
 
-    // argmax reduce
-#pragma unroll
-    for (int mask = params.THREADS_PER_ROW / 2; mask > 0; mask /= 2) {
-      float other_max =
-          VLLM_SHFL_XOR_SYNC_WIDTH(max_val, mask, params.THREADS_PER_ROW);
-      int other_expert = VLLM_SHFL_XOR_SYNC_WIDTH(expert, mask, params.THREADS_PER_ROW);
+//     // argmax reduce
+// #pragma unroll
+//     for (int mask = params.THREADS_PER_ROW / 2; mask > 0; mask /= 2) {
+//       float other_max =
+//           VLLM_SHFL_XOR_SYNC_WIDTH(max_val, mask, params.THREADS_PER_ROW);
+//       int other_expert = VLLM_SHFL_XOR_SYNC_WIDTH(expert, mask, params.THREADS_PER_ROW);
+//       // float other_scale = VLLM_SHFL_XOR_SYNC_WIDTH(scale, mask, params.THREADS_PER_ROW);
 
-      // lower indices to win
-      if (cmp_gt(other_max, max_val) || (cmp_eq(other_max, max_val) && other_expert < expert)) {
-        max_val = other_max;
-        expert = other_expert;
-      }
-    }
+//       // lower indices to win
+//       if (cmp_gt(other_max, max_val) || (cmp_eq(other_max, max_val) && other_expert < expert)) {
+//         max_val = other_max;
+//         expert = other_expert;
+//         // scale = other_scale;
+//       }
+//     }
 
     int thread_to_clear_in_group = expert / params.VPT;
     int64_t idx = topk * thread_row + k_idx;
 
     if (thread_group_idx == thread_to_clear_in_group) {
       int expert_to_clear_in_thread = expert % params.VPT;
+      // topk_indices[k_idx] = expert;
 
-      // clear the max value in the thread
       #pragma unroll
       for (int ii = 0; ii < params.VPT; ++ii) {
         if (ii == expert_to_clear_in_thread) {
           bias_chunk[ii] = -FLT_MAX;  // clear the max value in the thread
-          output_ptr[idx] = row_chunk[ii];
+          // output_ptr[idx] = row_chunk[ii];
+          scores[k_idx] = row_chunk[ii]; 
         }
       }
+      // output_ptr[idx] = row_chunk[k_idx];
+      // expert_mask &= ~(1u << expert_to_clear_in_thread);
+      // output_ptr[idx] = scale;  // store output
+      
       //// clear the max value in the thread
       // bias_chunk[expert_to_clear_in_thread] = -FLT_MAX;
       //// store output
       // output_ptr[idx] = row_chunk[expert_to_clear_in_thread];
       indices_ptr[idx] = ck_tile::type_convert<int32_t>(expert);
     }
+    __syncthreads();
 
     // accumulate sum for all elements
     if (thread_group_idx == 0) {
-      output_sum += output_ptr[idx];
+      // output_sum += output_ptr[idx];
+      output_sum += scores[k_idx];
     }
 
-    __syncthreads();
+    // __syncthreads();
   }
 
   if (thread_group_idx == 0 && num_fused_shared_experts > 0) {
@@ -314,7 +356,7 @@ __device__ void moe_fused_gate_impl(
 #pragma unroll
     for (int ii = 0; ii < topk; ++ii) {
       int64_t const idx = topk * thread_row + ii;
-      output_ptr[idx] = output_ptr[idx] / output_sum;
+      output_ptr[idx] = scores[ii] / output_sum;
     }
   }
 }
@@ -372,7 +414,7 @@ __global__ void moe_fused_gate_kernel(
     constexpr int ROWS_PER_WARP = ((EXPERT_GROUP) <= WARP_SIZE) ? (WARP_SIZE / (EXPERT_GROUP)) : 1;      \
     constexpr int ROWS_PER_CTA = WARPS_PER_CTA * ROWS_PER_WARP;                                          \
     moe_fused_gate_kernel<T, VPT, (EXPERTS), (EXPERT_GROUP), ROWS_PER_WARP, ROWS_PER_CTA, WARPS_PER_CTA> \
-        <<<num_blocks, block_dim, 0, stream>>>(                                                          \
+        <<<num_blocks, block_dim, shared_mem_size, stream>>>(                                                          \
             input.data_ptr(),                                                                            \
             bias.data_ptr(),                                                                             \
             output.data_ptr<float>(),                                                                    \
@@ -452,6 +494,10 @@ std::vector<at::Tensor> moe_fused_gate(
   int64_t rows_per_warp = std::max<int64_t>(1, WARP_SIZE / num_expert_group);
   int64_t num_warps = (num_rows + rows_per_warp - 1) / rows_per_warp;
   int64_t num_blocks = (num_warps + WARPS_PER_CTA - 1) / WARPS_PER_CTA;
+  int ROWS_PER_WARP = std::max<int64_t>(1, WARP_SIZE / num_expert_group);
+  size_t shared_mem_size = ((topk * sizeof(float) + topk * sizeof(int))
+                             * ROWS_PER_WARP + 255) &
+                             ~255;
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   dim3 block_dim(WARP_SIZE, WARPS_PER_CTA);
 
@@ -529,7 +575,7 @@ std::vector<at::Tensor> moe_fused_gate(
     // Fallback to the dynamic kernel if none of the supported combinations match.
     // currently only support num_experts / num_expert_group <= 32 for dynamic kernels
     if (input.scalar_type() == at::kBFloat16) {
-      moe_fused_gate_kernel_dynamic<bfloat16_t><<<num_blocks, block_dim, 0, stream>>>(
+      moe_fused_gate_kernel_dynamic<bfloat16_t><<<num_blocks, block_dim, shared_mem_size, stream>>>(
           input.data_ptr(),
           bias.data_ptr(),
           output.data_ptr<float>(),
@@ -542,7 +588,7 @@ std::vector<at::Tensor> moe_fused_gate(
           num_fused_shared_experts,
           routed_scaling_factor);
     } else if (input.scalar_type() == at::kHalf) {
-      moe_fused_gate_kernel_dynamic<float16_t><<<num_blocks, block_dim, 0, stream>>>(
+      moe_fused_gate_kernel_dynamic<float16_t><<<num_blocks, block_dim, shared_mem_size, stream>>>(
           input.data_ptr(),
           bias.data_ptr(),
           output.data_ptr<float>(),
@@ -555,7 +601,7 @@ std::vector<at::Tensor> moe_fused_gate(
           num_fused_shared_experts,
           routed_scaling_factor);
     } else if (input.scalar_type() == at::kFloat) {
-      moe_fused_gate_kernel_dynamic<float32_t><<<num_blocks, block_dim, 0, stream>>>(
+      moe_fused_gate_kernel_dynamic<float32_t><<<num_blocks, block_dim, shared_mem_size, stream>>>(
           input.data_ptr(),
           bias.data_ptr(),
           output.data_ptr<float>(),

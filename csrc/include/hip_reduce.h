@@ -106,6 +106,43 @@ __device__ constexpr T wave_reduce(T local, F reduce_op)
     return local;
 }
 
+template <typename T, typename F>
+__device__ constexpr T multithread_reduce(T data, F reduce_op, int thread_num)
+{
+    if(thread_num == 1)
+    {
+        return data;
+    }
+    if(thread_num >= 2)
+    {
+        data = reduce_op(rocprim::detail::warp_move_dpp<T, 0xb1>(data), data);
+    }
+    if(thread_num >= 4)
+    {
+        data = reduce_op(rocprim::detail::warp_move_dpp<T, 0x4e>(data), data);
+    }
+    if(thread_num == 8)
+    {
+        data = reduce_op(rocprim::detail::warp_move_dpp<T, 0x124>(data), data);
+        data = rocprim::detail::warp_move_dpp<T, 0x104, 0xf, 0x5>(data);
+    }
+    else if(thread_num == 16)
+    {
+        data = reduce_op(rocprim::detail::warp_move_dpp<T, 0x124>(data), data);
+        data = reduce_op(rocprim::detail::warp_move_dpp<T, 0x128>(data), data);
+        data = rocprim::warp_shuffle(data, thread_num - 1, thread_num);
+    }
+    else if(thread_num == 32)
+    {
+        data = reduce_op(rocprim::detail::warp_move_dpp<T, 0x124>(data), data);
+        data = reduce_op(rocprim::detail::warp_move_dpp<T, 0x128>(data), data);
+        data = reduce_op(rocprim::detail::warp_move_dpp<T, 0x142>(data), data);
+        data = rocprim::warp_shuffle(data, thread_num - 1, thread_num);
+    }
+
+    return data;
+}
+
 template <typename T, typename F, int BlockSize, bool waveBroadcast = true>
 __device__ constexpr T block_reduce(T local, F reduce_op)
 {

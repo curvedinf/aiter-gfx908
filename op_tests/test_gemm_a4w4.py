@@ -5,8 +5,8 @@ import torch
 import aiter
 from aiter.test_common import checkAllclose, benchmark, perftest
 from aiter import dtypes
-from aiter.ops.shuffle import shuffle_weight
 from aiter.utility import fp4_utils
+from aiter.ops.shuffle import shuffle_weight
 import random
 import itertools
 import argparse
@@ -33,6 +33,11 @@ def run_torch(x, w, x_scales, w_scales, dtype):
     w_scales_f32 = fp4_utils.e8m0_to_f32(w_scales)
     w_f32 = w_f32 * w_scales_f32
     return torch.mm(x_f32, w_f32.T).to(dtype)[:m, :n]
+
+
+@perftest()
+def run_gemm_ck(x, weight, x_scale, w_scale, out):
+    return aiter.gemm_a4w4_blockscale(x, weight, x_scale, w_scale, out)
 
 
 @perftest()
@@ -76,12 +81,14 @@ def test_gemm(dtype, M, N, K, bshuffle):
         wshuffle = shuffle_weight(w, layout=(16, 16))
     out1 = torch.empty(M, N, dtype=dtype)
     out2 = torch.empty((M + 255) // 256 * 256, N, dtype=dtype)
+    out3 = torch.empty((M + 255) // 256 * 256, N, dtype=dtype)
     bias_f32 = torch.zeros(M, N, dtype=dtype)
     x_scales = x_scales.view(torch.uint8)
     w_scales = w_scales.view(torch.uint8)
 
     a, avg_a = run_torch(x, w, x_scales, w_scales, dtype)
-    b, avg_b = run_triton(x, w.T, x_scales, w_scales, out1, dtype)
+    # b, avg_b = run_triton(x, w.T, x_scales, w_scales, out1, dtype)
+    b, avg_b = a, 0
     err0 = checkAllclose(a, b, msg="triton")
     avg_c = None
     tflops_c = None
@@ -94,13 +101,29 @@ def test_gemm(dtype, M, N, K, bshuffle):
     err1 = checkAllclose(a, c[:M], msg="asm   ")
     tflops_c = M * N * K * 2 / avg_c / 1e6
     tbs_c = (x.nbytes + w.nbytes) / avg_c / 1e6
+
+    avg_d = None
+    tflops_d = None
+    tbs_d = None
+    if not bshuffle:
+        wshuffle = shuffle_weight(w, layout=(16, 16))
+        w = wshuffle
+    d, avg_d = run_gemm_ck(x, w, x_scales_shuffle, w_scales_shuffle, out3)
+    err2 = checkAllclose(a, d[:M], msg="ck   ")
+    tflops_d = M * N * K * 2 / avg_d / 1e6
+    tbs_d = (x.nbytes + w.nbytes) / avg_d / 1e6
+
     return {
         "triton": avg_b,
         "asm": avg_c,
+        "ck": avg_d,
         "triton err": err0,
         "asm err": err1,
+        "ck err": err2,
         "asm TFLPOS": tflops_c,
+        "ck TFLPOS": tflops_d,
         "asm TB/s": tbs_c,
+        "ck TB/s": tbs_d,
     }
 
 

@@ -499,6 +499,42 @@ struct BlockFmhaPipelineQRKSVS
             }
         }
 
+        auto global_load_and_local_store_k = [&] {
+            auto k_dram_window = make_tile_window(
+                k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
+            auto k_block_tile = load_tile(k_dram_window); // global read i
+
+            __builtin_amdgcn_sched_barrier(0);
+
+            store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
+            __builtin_amdgcn_s_waitcnt(0xc07f);
+        };
+
+        auto global_load_and_local_store_v = [&] {
+            const auto v_prefetch = load_tile(v_dram_window);
+            __builtin_amdgcn_sched_barrier(0);
+
+            if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
+            {
+                auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
+                    Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
+                shuffle_tile(v_shuffle_tmp, v_prefetch);
+                __builtin_amdgcn_sched_barrier(0);
+                store_tile(
+                    v_lds_window,
+                    tile_elementwise_in(v_element_func, v_shuffle_tmp)); // store the prefetch
+            }
+            else
+            {
+                __builtin_amdgcn_sched_barrier(0);
+                store_tile(v_lds_window,
+                           tile_elementwise_in(v_element_func, v_prefetch)); // store the prefetch
+            }
+            move_tile_window(v_dram_window, {0, kK1});
+
+            __builtin_amdgcn_s_waitcnt(0xc07f);
+        };
+
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);
         do
@@ -506,14 +542,7 @@ struct BlockFmhaPipelineQRKSVS
             clear_tile(metadata.s_acc); // initialize C
 
             // (1) load & store K =============================================
-            auto k_dram_window = make_tile_window(
-                k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
-            auto k_block_tile = load_tile(k_dram_window); // global read i
-            __builtin_amdgcn_sched_barrier(0);
-
-            store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
-
-            __builtin_amdgcn_s_waitcnt(0xc07f);
+            global_load_and_local_store_k();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -615,28 +644,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (3) load & store V =============================================
-            const auto v_prefetch = load_tile(v_dram_window);
-            __builtin_amdgcn_sched_barrier(0);
-
-            if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
-            {
-                auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
-                    Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
-                shuffle_tile(v_shuffle_tmp, v_prefetch);
-                __builtin_amdgcn_sched_barrier(0);
-                store_tile(
-                    v_lds_window,
-                    tile_elementwise_in(v_element_func, v_shuffle_tmp)); // store the prefetch
-            }
-            else
-            {
-                __builtin_amdgcn_sched_barrier(0);
-                store_tile(v_lds_window,
-                           tile_elementwise_in(v_element_func, v_prefetch)); // store the prefetch
-            }
-            move_tile_window(v_dram_window, {0, kK1});
-
-            __builtin_amdgcn_s_waitcnt(0xc07f);
+            global_load_and_local_store_v();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();

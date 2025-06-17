@@ -76,7 +76,7 @@ def _gemm_afp4_wfp4_kernel(
     # This is done in a grouped ordering to promote L2 data reuse.
     pid_unified = tl.program_id(axis=0)
     # remap so that XCDs get continous chunks of pids (of CHUNK_SIZE).
-    pid_unified = remap_xcd_chunked(pid_unified, GRID_MN*NUM_KSPLIT, NUM_XCDS=8, CHUNK_SIZE=min(2, GROUP_SIZE_M))
+    pid_unified = remap_xcd_chunked(pid_unified, GRID_MN*NUM_KSPLIT, NUM_XCDS=8, CHUNK_SIZE=max(2, GROUP_SIZE_M))
     pid_k = pid_unified % NUM_KSPLIT
     pid = pid_unified // NUM_KSPLIT
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)

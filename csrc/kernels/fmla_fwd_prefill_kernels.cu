@@ -963,7 +963,13 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                                 ck_tile::number<Traits::kBlockM>{},
                                 ck_tile::number<Traits::kBlockN0>{});
     auto [seqlen_k_start, seqlen_k_end] =
-        GetSeqlenRange(seqlen_k, Traits::kBlockN0, num_splits, split_id, origin_start, origin_end);
+        GetSeqlenRange(
+            seqlen_k,
+            Traits::kBlockN0,
+            num_splits,
+            split_id,
+            origin_start,
+            ck_tile::min(origin_end, seqlen_k));
 
 
     // 3. Quick exit if no work to do
@@ -1009,15 +1015,16 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     auto k_coord = k_dist.calculate_index();
     constexpr auto kKNumRepeat = Policy::GetNumRepeatOfKDramTileDistribution();
     constexpr auto kKPageIdxDim = ck_tile::number<0>{};
+    const int32_t seqlen_k_base_idx = k_coord[kKPageIdxDim] + seqlen_k_start;
     ck_tile::statically_indexed_array<int32_t, kKNumRepeat> k_offsets;
     ck_tile::statically_indexed_array<bool, kKNumRepeat> k_valids;
     ck_tile::static_for<0, kKNumRepeat, 1>{}([&](auto rid)
     {
-        const int32_t seqlen_idx = k_coord[kKPageIdxDim] + Traits::kBlockN0 / kKNumRepeat * rid.value;
+        const int32_t seqlen_idx = seqlen_k_base_idx + Traits::kBlockN0 / kKNumRepeat * rid.value;
         const int32_t page_idx   = seqlen_idx / page_block_size;
-        const int32_t seq_idx    = seqlen_idx % page_block_size;
-        k_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_k;
-        k_valids[rid] = (seqlen_idx < seqlen_k);
+        const int32_t inside_idx = seqlen_idx % page_block_size;
+        k_offsets[rid] = (p_block_table[page_idx] * page_block_size + inside_idx) * stride_s_k;
+        k_valids[rid] = (seqlen_idx < seqlen_k_end);
     });
     auto k_dram_window = ck_tile::make_tile_scatter_gather(
         k_dram_window_origin.get_bottom_tensor_view(),
@@ -1037,15 +1044,16 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     auto v_coord = v_dist.calculate_index();
     constexpr auto kVNumRepeat = Policy::GetNumRepeatOfVDramTileDistribution();
     constexpr auto kVPageIdxDim = ck_tile::number<1>{};
+    const int32_t seqlen_v_base_idx = v_coord[kVPageIdxDim] + seqlen_k_start;
     ck_tile::statically_indexed_array<int32_t, kVNumRepeat> v_offsets;
     ck_tile::statically_indexed_array<bool, kVNumRepeat> v_valids;
     ck_tile::static_for<0, kVNumRepeat, 1>{}([&](auto rid)
     {
-        const int32_t seqlen_idx = v_coord[kVPageIdxDim] + rid.value;
+        const int32_t seqlen_idx = seqlen_v_base_idx + rid.value;
         const int32_t page_idx   = seqlen_idx / page_block_size;
-        const int32_t seq_idx    = seqlen_idx % page_block_size;
-        v_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_v;
-        v_valids[rid] = (seqlen_idx < seqlen_k);
+        const int32_t inside_idx = seqlen_idx % page_block_size;
+        v_offsets[rid] = (p_block_table[page_idx] * page_block_size + inside_idx) * stride_s_v;
+        v_valids[rid] = (seqlen_idx < seqlen_k_end);
     });
     using VDramWindow = decltype(ck_tile::make_tile_scatter_gather(
         v_dram_window_origin.get_bottom_tensor_view(),
@@ -1237,15 +1245,15 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             {
                 ck_tile::static_for<0, k1_loops - 1, 1>{}([&](auto k1_id)
                 {
-                    // ck_tile:move_tile_window(v_dram_windows[n1_id], {0, Traits::kBlockK1});
+                    // ck_tile::move_tile_window(v_dram_windows[n1_id], {0, Traits::kBlockK1});
                     ck_tile::static_for<0, kVNumRepeat, 1>{}([&](auto rid)
                     {
-                        const int32_t seqlen_idx = loop_idx * Traits::kBlockN0 + (k1_id + 1) * Traits::kBlockK1 +
-                            v_coord[kVPageIdxDim] + rid.value;
+                        const int32_t seqlen_idx = seqlen_v_base_idx + rid.value +
+                            loop_idx * Traits::kBlockN0 + (k1_id + 1) * Traits::kBlockK1;
                         const int32_t page_idx   = seqlen_idx / page_block_size;
-                        const int32_t seq_idx    = seqlen_idx % page_block_size;
-                        v_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_v;
-                        v_valids[rid] = (seqlen_idx < seqlen_k);
+                        const int32_t inside_idx = seqlen_idx % page_block_size;
+                        v_offsets[rid] = (p_block_table[page_idx] * page_block_size + inside_idx) * stride_s_v;
+                        v_valids[rid] = (seqlen_idx < seqlen_k_end);
                     });
                     v_dram_windows[n1_id].update_page_idx_and_valids(v_offsets, v_valids);
 
@@ -1273,6 +1281,8 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             if constexpr (n1_id < (n1_loops-1))
             {
                 v_prefetch = ck_tile::load_tile(v_dram_windows[n1_id + 1]);
+                // TODO: The following code is not necessary but it positively affects performance for unknown reason.
+                // Remove the following code once it no longer affects.
                 ck_tile::set_tile_if(
                     v_prefetch, ck_tile::numeric<scalar_t>::zero(),
                     [&](auto ids)
@@ -1302,27 +1312,26 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             // Recalculate offsets
             ck_tile::static_for<0, kKNumRepeat, 1>{}([&](auto rid)
             {
-                const int32_t seqlen_idx = (loop_idx + 1) * Traits::kBlockN0 + k_coord[kKPageIdxDim] +
+                const int32_t seqlen_idx = seqlen_k_base_idx + (loop_idx + 1) * Traits::kBlockN0 +
                                            Traits::kBlockN0 / kKNumRepeat * rid.value;
                 const int32_t page_idx   = seqlen_idx / page_block_size;
-                const int32_t seq_idx    = seqlen_idx % page_block_size;
-                k_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_k;
-                k_valids[rid] = (seqlen_idx < seqlen_k);
+                const int32_t inside_idx = seqlen_idx % page_block_size;
+                k_offsets[rid] = (p_block_table[page_idx] * page_block_size + inside_idx) * stride_s_k;
+                k_valids[rid] = (seqlen_idx < seqlen_k_end);
             });
             k_dram_window.update_page_idx_and_valids(k_offsets, k_valids);
 
             // Move to next V block
             ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id)
             {
-                // ck_tile:move_tile_window(v_dram_windows[n1_id], {0, -Traits::kBlockK1 * (k1_loops - 1)});
+                // ck_tile::move_tile_window(v_dram_windows[n1_id], {0, -Traits::kBlockK1 * (k1_loops - 1)});
                 ck_tile::static_for<0, kVNumRepeat, 1>{}([&](auto rid)
                 {
-                    const int32_t seqlen_idx = (loop_idx + 1) * Traits::kBlockN0 +
-                        v_coord[kVPageIdxDim] + rid.value;
+                    const int32_t seqlen_idx = seqlen_v_base_idx + rid.value + (loop_idx + 1) * Traits::kBlockN0;
                     const int32_t page_idx   = seqlen_idx / page_block_size;
-                    const int32_t seq_idx    = seqlen_idx % page_block_size;
-                    v_offsets[rid] = (p_block_table[page_idx] * page_block_size + seq_idx) * stride_s_v;
-                    v_valids[rid] = (seqlen_idx < seqlen_k);
+                    const int32_t inside_idx = seqlen_idx % page_block_size;
+                    v_offsets[rid] = (p_block_table[page_idx] * page_block_size + inside_idx) * stride_s_v;
+                    v_valids[rid] = (seqlen_idx < seqlen_k_end);
                 });
                 v_dram_windows[n1_id].update_page_idx_and_valids(v_offsets, v_valids);
             });

@@ -414,31 +414,26 @@ struct BlockFmhaPipelineQRKSVS
                                               q_dram_block_window_tmp.get_window_origin(),
                                               Policy::template MakeQRegTileDistribution<Problem>());
 
-        auto q = load_tile(q_dram_window);
-
-        using SaccBlockTileType = decltype(gemm_0.MakeCBlockTile());
-        auto s_acc              = SaccBlockTileType{};
-
         // reduction function for softmax
         const auto f_max = [](auto e0, auto e1) { return max(e0, e1); };
         const auto f_sum = [](auto e0, auto e1) { return e0 + e1; };
 
-        // infer Sacc, S, P, M, L, Oacc type
-        using SBlockTileType = decltype(cast_tile<SMPLComputeDataType>(s_acc));
+        struct Metadata
+        {
+            decltype(load_tile(q_dram_window)) q;
+            decltype(tile_elementwise_in(q_element_func, q)) q_tile;
+            decltype(gemm_0.MakeCBlockTile()) s_acc;
+            decltype(block_tile_reduce<SMPLComputeDataType>(
+                s_acc, sequence<1>{}, f_max, SMPLComputeDataType{0})) m;
+            decltype(m) l;
+            decltype(gemm_1.MakeCBlockTile()) o_acc;
+        } metadata;
 
-        using MLBlockTileType = decltype(block_tile_reduce<SMPLComputeDataType>(
-            SBlockTileType{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
+        metadata.q = load_tile(q_dram_window);
 
-        using OaccBlockTileType = decltype(gemm_1.MakeCBlockTile());
-
-        // init Oacc, M, L
-        auto o_acc = OaccBlockTileType{};
-        auto m     = MLBlockTileType{};
-        auto l     = MLBlockTileType{};
-
-        clear_tile(o_acc);
-        set_tile(m, -numeric<SMPLComputeDataType>::infinity());
-        clear_tile(l);
+        clear_tile(metadata.o_acc);
+        set_tile(metadata.m, -numeric<SMPLComputeDataType>::infinity());
+        clear_tile(metadata.l);
 
         const auto q_origin = q_dram_window.get_window_origin();
         const auto [seqlen_k_start, seqlen_k_end] =
@@ -453,8 +448,8 @@ struct BlockFmhaPipelineQRKSVS
             {
                 if constexpr(kStoreLSE)
                 {
-                    auto lse =
-                        make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
+                    auto lse = make_static_distributed_tensor<LSEDataType>(
+                        metadata.m.get_tile_distribution());
 
                     set_tile(lse, -numeric<SMPLComputeDataType>::infinity());
 
@@ -463,7 +458,7 @@ struct BlockFmhaPipelineQRKSVS
 
                 // Note: here occ are all cleard, return it
                 // Note: q loaded but no fence, ignore it.
-                return o_acc;
+                return metadata.o_acc;
             }
         }
 
@@ -488,7 +483,7 @@ struct BlockFmhaPipelineQRKSVS
                              {0, seqlen_k_start}, // TODO: hdim split?
                              Policy::template MakeVDramTileDistribution<Problem>());
 
-        auto q_tile = tile_elementwise_in(q_element_func, q);
+        metadata.q_tile = tile_elementwise_in(q_element_func, metadata.q);
 
         // prefetch K tile
         index_t i_total_loops      = 0;
@@ -508,7 +503,7 @@ struct BlockFmhaPipelineQRKSVS
         static_assert(1 == k1_loops);
         do
         {
-            clear_tile(s_acc); // initialize C
+            clear_tile(metadata.s_acc); // initialize C
 
             // (1) load & store K =============================================
             auto k_dram_window = make_tile_window(
@@ -525,8 +520,8 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_sched_barrier(0);
             // (2) mfma + softmax =============================================
             {
-                gemm_0(s_acc,
-                       get_slice_tile(q_tile,
+                gemm_0(metadata.s_acc,
+                       get_slice_tile(metadata.q_tile,
                                       sequence<0, (k0_loops - 1) * kK0>{},
                                       sequence<kM0, k0_loops * kK0>{}),
                        k_lds_window);
@@ -543,9 +538,9 @@ struct BlockFmhaPipelineQRKSVS
 
             // scale_s, mask, softmax
             {
-                s_acc = tile_elementwise_in(s_acc_element_func, s_acc);
+                metadata.s_acc = tile_elementwise_in(s_acc_element_func, metadata.s_acc);
 #if !CK_TILE_FMHA_FWD_FAST_EXP2
-                tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+                tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, metadata.s_acc);
 #endif
             }
 
@@ -558,21 +553,24 @@ struct BlockFmhaPipelineQRKSVS
                                                            number<kN0>{});
                 if(need_perpixel_check)
                 {
-                    set_tile_if(
-                        s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
-                            const auto row = q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
-                            const auto col = k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
-                            return !variant.LogitsMask(variant_params,
-                                                       block_indices.batch_idx,
-                                                       row,
-                                                       col,
-                                                       block_indices.qo_head_idx,
-                                                       block_indices.kv_head_idx);
-                        });
+                    set_tile_if(metadata.s_acc,
+                                -numeric<SMPLComputeDataType>::infinity(),
+                                [&](auto tile_idx) {
+                                    const auto row =
+                                        q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
+                                    const auto col =
+                                        k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
+                                    return !variant.LogitsMask(variant_params,
+                                                               block_indices.batch_idx,
+                                                               row,
+                                                               col,
+                                                               block_indices.qo_head_idx,
+                                                               block_indices.kv_head_idx);
+                                });
                 }
             }
 
-            const auto s = cast_tile<SMPLComputeDataType>(s_acc); // S{j}
+            const auto s = cast_tile<SMPLComputeDataType>(metadata.s_acc); // S{j}
             auto m_local = block_tile_reduce<SMPLComputeDataType>(
                 s,
                 sequence<1>{},
@@ -580,9 +578,11 @@ struct BlockFmhaPipelineQRKSVS
                 -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
             block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
 
-            const auto m_old = m; // m{j-1}
-            tile_elementwise_inout(
-                [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local); // m{j}
+            const auto m_old = metadata.m; // m{j-1}
+            tile_elementwise_inout([](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); },
+                                   metadata.m,
+                                   m_old,
+                                   m_local); // m{j}
 
             auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
                 s.get_tile_distribution()); // Pcompute{j}
@@ -599,14 +599,14 @@ struct BlockFmhaPipelineQRKSVS
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-                auto row_max = scale_s * get_validated_m(m[i_idx]);
+                auto row_max = scale_s * get_validated_m(metadata.m[i_idx]);
 #endif
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                     p_compute(i_j_idx) = ck_tile::exp2(scale_s * s[i_j_idx] - row_max);
 #else
-                    p_compute(i_j_idx) = exp(s[i_j_idx] - get_validated_m(m[i_idx]));
+                    p_compute(i_j_idx) = exp(s[i_j_idx] - get_validated_m(metadata.m[i_idx]));
 #endif
                 });
             });
@@ -651,29 +651,29 @@ struct BlockFmhaPipelineQRKSVS
 
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
             // l{j}, Oacc{j}
-            constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
+            constexpr auto o_spans = decltype(metadata.o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 const auto tmp = [&]() {
-                    auto row_max = scale_s * get_validated_m(m[i_idx]);
+                    auto row_max = scale_s * get_validated_m(metadata.m[i_idx]);
                     return ck_tile::exp2(scale_s * m_old[i_idx] - row_max);
                 }();
 #else
-                const auto tmp       = exp(m_old[i_idx] - get_validated_m(m[i_idx]));
+                const auto tmp       = exp(m_old[i_idx] - get_validated_m(metadata.m[i_idx]));
 #endif
-                l(i_idx) = tmp * l[i_idx] + rowsum_p[i_idx];
+                metadata.l(i_idx) = tmp * metadata.l[i_idx] + rowsum_p[i_idx];
                 sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     // FIXME: this use different equation from FA v2 paper,
                     // but produce correc result.
                     // Is the equation wrong?
-                    o_acc(i_j_idx) *= tmp;
+                    metadata.o_acc(i_j_idx) *= tmp;
                 });
             });
 
             {
-                gemm_1(o_acc,
+                gemm_1(metadata.o_acc,
                        get_slice_tile(p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
                        v_lds_window);
             }
@@ -697,15 +697,16 @@ struct BlockFmhaPipelineQRKSVS
         // store lse
         if constexpr(kStoreLSE)
         {
-            auto lse = make_static_distributed_tensor<LSEDataType>(m.get_tile_distribution());
+            auto lse =
+                make_static_distributed_tensor<LSEDataType>(metadata.m.get_tile_distribution());
 
             constexpr auto lse_spans = decltype(lse)::get_distributed_spans();
-            sweep_tile_span(lse_spans[number<0>{}], [&, m_ = m, l_ = l](auto idx0) {
+            sweep_tile_span(lse_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-                lse(i_idx) = m_[i_idx] * scale_s / C_LOG2E + log(l_[i_idx]);
+                lse(i_idx) = metadata.m[i_idx] * scale_s / C_LOG2E + log(metadata.l[i_idx]);
 #else
-                lse(i_idx) = m_[i_idx] + log(l_[i_idx]);
+                lse(i_idx) = metadata.m[i_idx] + log(metadata.l[i_idx]);
 #endif
             });
 
@@ -713,27 +714,27 @@ struct BlockFmhaPipelineQRKSVS
         }
 
         // finally, O
-        constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
+        constexpr auto o_spans = decltype(metadata.o_acc)::get_distributed_spans();
 
         sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
             constexpr auto i_idx = make_tuple(idx0);
             const auto tmp       = [&]() {
                 if constexpr(FmhaMask::IsMasking)
                 {
-                    return l[i_idx] == 0.f ? 0.f : 1 / l[i_idx];
+                    return metadata.l[i_idx] == 0.f ? 0.f : 1 / metadata.l[i_idx];
                 }
                 else
-                    return 1 / l[i_idx];
+                    return 1 / metadata.l[i_idx];
             }();
             sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                 constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                o_acc(i_j_idx) *= tmp;
+                metadata.o_acc(i_j_idx) *= tmp;
             });
         });
 
-        o_acc = tile_elementwise_in(o_acc_element_func, o_acc);
+        metadata.o_acc = tile_elementwise_in(o_acc_element_func, metadata.o_acc);
 
-        return o_acc;
+        return metadata.o_acc;
     }
 
     template <typename QDramBlockWindowTmp,

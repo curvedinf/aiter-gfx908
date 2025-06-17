@@ -417,7 +417,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
 
     for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
       const int qhead_element = lane16id * CONTIGUOUS_SCALAR_ELEMS_16B + head_loop * HEAD_SIZE_PER_LOOP;
-      if ((local_qhead_idx < GQA_RATIO_MTP_PARALLEL) && (qhead_element < HEAD_SIZE)) {
+      if ((local_mtp_qhead_idx < GQA_RATIO_MTP_PARALLEL) && (qhead_element < HEAD_SIZE)) {
         const scalar_t* q_fetch_ptr = q_ptr + qhead_element;
         const _B16x8* q_fetch_ptr_16B =
             reinterpret_cast<const _B16x8*>(q_fetch_ptr);

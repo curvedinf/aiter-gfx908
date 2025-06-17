@@ -221,6 +221,22 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
     }
 };
 
+template <typename Problem>
+struct InstructionScheduler
+{
+    CK_TILE_DEVICE static constexpr void schedule_gemm0()
+    {
+        __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
+        __builtin_amdgcn_sched_group_barrier(0x008, 2, 0); // MFMA
+        __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
+        __builtin_amdgcn_sched_group_barrier(0x008, 4, 0); // MFMA
+        __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
+        __builtin_amdgcn_sched_group_barrier(0x008, 4, 0); // MFMA
+        __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
+        __builtin_amdgcn_sched_group_barrier(0x008, 6, 0); // MFMA
+    }
+};
+
 // This pipeline is qkv all located in LDS
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSDefaultPolicy>
 struct BlockFmhaPipelineQRKSVS
@@ -553,6 +569,8 @@ struct BlockFmhaPipelineQRKSVS
                    v_lds_window);
         };
 
+        InstructionScheduler<Problem> scheduler;
+
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);
         do
@@ -568,14 +586,7 @@ struct BlockFmhaPipelineQRKSVS
             // (2) mfma + softmax =============================================
             run_gemm0();
 
-            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
-            __builtin_amdgcn_sched_group_barrier(0x008, 2, 0); // MFMA
-            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
-            __builtin_amdgcn_sched_group_barrier(0x008, 4, 0); // MFMA
-            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
-            __builtin_amdgcn_sched_group_barrier(0x008, 4, 0); // MFMA
-            __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
-            __builtin_amdgcn_sched_group_barrier(0x008, 6, 0); // MFMA
+            scheduler.schedule_gemm0();
 
             // scale_s, mask, softmax
             metadata.s_acc = tile_elementwise_in(s_acc_element_func, metadata.s_acc);

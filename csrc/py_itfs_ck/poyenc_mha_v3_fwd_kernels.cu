@@ -271,6 +271,8 @@ struct BlockFmhaPipelineQRKSVS
     static_assert(!kHasLogitsSoftCap &&
                   Problem::BiasEnum == ck_tile::BlockAttentionBiasEnum::NO_BIAS && !kHasDropout);
 
+    static_assert(CK_TILE_FMHA_FWD_FAST_EXP2);
+
     // last dimension vector length used to create tensor view(and decide buffer_load vector length)
     // ... together with tensor distribution. tensor dist should able to overwrite this
     static constexpr ck_tile::index_t kAlignmentQ =
@@ -582,12 +584,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_sched_group_barrier(0x008, 6, 0); // MFMA
 
             // scale_s, mask, softmax
-            {
-                metadata.s_acc = tile_elementwise_in(s_acc_element_func, metadata.s_acc);
-#if !CK_TILE_FMHA_FWD_FAST_EXP2
-                tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, metadata.s_acc);
-#endif
-            }
+            metadata.s_acc = tile_elementwise_in(s_acc_element_func, metadata.s_acc);
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
@@ -640,17 +637,12 @@ struct BlockFmhaPipelineQRKSVS
             constexpr auto p_spans = decltype(metadata.p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-#if CK_TILE_FMHA_FWD_FAST_EXP2
-                auto row_max = scale_s * get_validated_m(metadata.m[i_idx]);
-#endif
+                auto row_max         = scale_s * get_validated_m(metadata.m[i_idx]);
+
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
-#if CK_TILE_FMHA_FWD_FAST_EXP2
                     metadata.p_compute(i_j_idx) =
                         ck_tile::exp2(scale_s * metadata.s[i_j_idx] - row_max);
-#else
-                    metadata.p_compute(i_j_idx) = exp(metadata.s[i_j_idx] - get_validated_m(metadata.m[i_idx]));
-#endif
                 });
             });
 
@@ -679,14 +671,11 @@ struct BlockFmhaPipelineQRKSVS
             constexpr auto o_spans = decltype(metadata.o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-#if CK_TILE_FMHA_FWD_FAST_EXP2
-                const auto tmp = [&]() {
+                const auto tmp       = [&]() {
                     auto row_max = scale_s * get_validated_m(metadata.m[i_idx]);
                     return ck_tile::exp2(scale_s * m_old[i_idx] - row_max);
                 }();
-#else
-                const auto tmp       = exp(m_old[i_idx] - get_validated_m(metadata.m[i_idx]));
-#endif
+
                 metadata.l(i_idx) = tmp * metadata.l[i_idx] + rowsum_p[i_idx];
                 sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
@@ -724,11 +713,7 @@ struct BlockFmhaPipelineQRKSVS
             constexpr auto lse_spans = decltype(lse)::get_distributed_spans();
             sweep_tile_span(lse_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-#if CK_TILE_FMHA_FWD_FAST_EXP2
                 lse(i_idx) = metadata.m[i_idx] * scale_s / C_LOG2E + log(metadata.l[i_idx]);
-#else
-                lse(i_idx) = metadata.m[i_idx] + log(metadata.l[i_idx]);
-#endif
             });
 
             store_tile(lse_dram_window_tmp, tile_elementwise_in(lse_element_func, lse));
@@ -1159,11 +1144,7 @@ struct FmhaFwdKernel
                      hdim_v,
                      num_head_q,
                      nhead_ratio_qk,
-#if CK_TILE_FMHA_FWD_FAST_EXP2
                      static_cast<float>(scale_s * ck_tile::log2e_v<>),
-#else
-                     scale_s,
-#endif
                      stride_q,
                      stride_k,
                      stride_v,
@@ -1479,11 +1460,7 @@ struct FmhaFwdKernel
                      hdim_v,
                      num_head_q,
                      nhead_ratio_qk,
-#if CK_TILE_FMHA_FWD_FAST_EXP2
                      static_cast<float>(scale_s * ck_tile::log2e_v<>),
-#else
-                     scale_s,
-#endif
                      stride_q,
                      stride_k,
                      stride_v,
@@ -2170,9 +2147,7 @@ struct FmhaFwdKernel
                 SaccDataType slope =
                     *(reinterpret_cast<const SaccDataType*>(kargs.alibi_slope_ptr) +
                       i_batch_ * kargs.alibi_slope_stride + i_nhead_);
-#if CK_TILE_FMHA_FWD_FAST_EXP2
                 slope *= ck_tile::log2e_v<>;
-#endif
                 if constexpr(kHasMask)
                 {
                     return make_alibi_from_lr_mask<SaccDataType, true>(slope,

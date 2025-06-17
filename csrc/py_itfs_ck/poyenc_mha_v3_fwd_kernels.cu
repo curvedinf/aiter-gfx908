@@ -439,6 +439,7 @@ struct BlockFmhaPipelineQRKSVS
 
             decltype(block_tile_reduce<SMPLComputeDataType>(
                 s_acc, sequence<1>{}, f_max, SMPLComputeDataType{0})) m;
+            decltype(m) m_local;
             decltype(m) l;
 
             decltype(cast_tile<SMPLComputeDataType>(s_acc)) s;
@@ -569,6 +570,16 @@ struct BlockFmhaPipelineQRKSVS
                    v_lds_window);
         };
 
+        auto run_fmha_alu = [&] {
+            metadata.s       = cast_tile<SMPLComputeDataType>(metadata.s_acc); // S{j}
+            metadata.m_local = block_tile_reduce<SMPLComputeDataType>(
+                metadata.s,
+                sequence<1>{},
+                f_max,
+                -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
+            block_tile_reduce_sync(metadata.m_local, f_max, bool_constant<false>{});
+        };
+
         InstructionScheduler<Problem> scheduler;
 
         static_assert(1 == k0_loops);
@@ -612,19 +623,13 @@ struct BlockFmhaPipelineQRKSVS
                 }
             }
 
-            metadata.s   = cast_tile<SMPLComputeDataType>(metadata.s_acc); // S{j}
-            auto m_local = block_tile_reduce<SMPLComputeDataType>(
-                metadata.s,
-                sequence<1>{},
-                f_max,
-                -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
-            block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
+            run_fmha_alu();
 
             const auto m_old = metadata.m; // m{j-1}
             tile_elementwise_inout([](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); },
                                    metadata.m,
                                    m_old,
-                                   m_local); // m{j}
+                                   metadata.m_local); // m{j}
 
             static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
                 /// NOTICE: bias might be materialized mask including -inf values, need

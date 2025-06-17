@@ -238,7 +238,6 @@ struct BlockFmhaPipelineQRKSVS
     using PDataType             = ck_tile::remove_cvref_t<typename Problem::PDataType>;
     using OaccDataType          = ck_tile::remove_cvref_t<typename Problem::OaccDataType>;
     using ODataType             = ck_tile::remove_cvref_t<typename Problem::ODataType>;
-    using AttentionVariant      = ck_tile::remove_cvref_t<typename Problem::AttentionVariant>;
     using FmhaMask              = ck_tile::remove_cvref_t<typename Problem::FmhaMask>;
 
     using BlockFmhaShape             = ck_tile::remove_cvref_t<typename Problem::BlockFmhaShape>;
@@ -346,9 +345,7 @@ struct BlockFmhaPipelineQRKSVS
               typename SAccElementFunction,
               typename PComputeElementFunction,
               typename OAccElementFunction,
-              typename PositionEncoding,
-              typename AttentionVariantParams,
-              typename BlockIndices>
+              typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto
     operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp, // M0*K0 tile
                const QElementFunction& q_element_func,
@@ -367,9 +364,6 @@ struct BlockFmhaPipelineQRKSVS
                FmhaMask mask,
                PositionEncoding position_encoding,
                float scale_s,
-               const AttentionVariant& variant,
-               const AttentionVariantParams& variant_params,
-               const BlockIndices& block_indices,
                void* smem_ptr,
                DropoutType& dropout) const
     {
@@ -602,12 +596,7 @@ struct BlockFmhaPipelineQRKSVS
                                         q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
                                     const auto col =
                                         k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
-                                    return !variant.LogitsMask(variant_params,
-                                                               block_indices.batch_idx,
-                                                               row,
-                                                               col,
-                                                               block_indices.qo_head_idx,
-                                                               block_indices.kv_head_idx);
+                                    return mask.IsOutOfBound(row, col);
                                 });
                 }
             }
@@ -749,9 +738,7 @@ struct BlockFmhaPipelineQRKSVS
               typename BiasDramBlockWindowTmp,
               typename RandValDramBlockWindowTmp,
               typename LSEDramBlockWindowTmp,
-              typename PositionEncoding,
-              typename AttentionVariantParams,
-              typename BlockIndices>
+              typename PositionEncoding>
     CK_TILE_HOST_DEVICE auto
     operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
                const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
@@ -762,9 +749,6 @@ struct BlockFmhaPipelineQRKSVS
                FmhaMask mask,
                PositionEncoding position_encoding,
                float scale_s,
-               const AttentionVariant& variant,
-               const AttentionVariantParams& variant_params,
-               const BlockIndices& block_indices,
                void* smem_ptr,
                DropoutType& dropout) const
     {
@@ -787,9 +771,6 @@ struct BlockFmhaPipelineQRKSVS
                           mask,
                           position_encoding,
                           scale_s,
-                          variant,
-                          variant_params,
-                          block_indices,
                           smem_ptr,
                           dropout);
     }
@@ -829,8 +810,7 @@ struct FmhaFwdKernel
     static constexpr bool kDoFp8StaticQuant = FmhaPipeline::Problem::kDoFp8StaticQuant;
     static constexpr bool kSkipMinSeqlenQ   = FmhaPipeline::Problem::kSkipMinSeqlenQ;
 
-    using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
-    using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
+    using FmhaMask                 = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
 
     static constexpr bool kUseAsyncCopy = FmhaPipeline::Policy::AsyncCopy;
@@ -2169,21 +2149,6 @@ struct FmhaFwdKernel
             }
         }();
 
-        AttentionVariant variant;
-        const auto variant_params = [&] {
-            if constexpr(kHasLogitsSoftCap)
-            {
-                return ck_tile::LogitsSoftCapParams<FmhaMask, CK_TILE_FMHA_FWD_FAST_EXP2>{
-                    mask, kargs.scale_s, kargs.logits_soft_cap, kargs.logits_soft_cap_rcp};
-            }
-            else
-            {
-                return ck_tile::StandardAttentionParams<FmhaMask>{mask, kargs.scale_s};
-            }
-        }();
-
-        BlockIndices block_indices{i_batch, i_nhead, i_nhead / kargs.nhead_ratio_qk};
-
         auto o_acc_tile = [&]() {
             if constexpr(kDoFp8StaticQuant)
             {
@@ -2205,9 +2170,6 @@ struct FmhaFwdKernel
                     mask,
                     position_encoding,
                     kargs.scale_s,
-                    variant,
-                    variant_params,
-                    block_indices,
                     smem_ptr,
                     dropout);
             }
@@ -2222,9 +2184,6 @@ struct FmhaFwdKernel
                                       mask,
                                       position_encoding,
                                       kargs.scale_s,
-                                      variant,
-                                      variant_params,
-                                      block_indices,
                                       smem_ptr,
                                       dropout);
             }
@@ -2326,7 +2285,7 @@ struct get_kernel
     using fmha_variant =
         ck_tile::ComposedAttention<false * ck_tile::LOGITS_SOFT_CAP, // VARIANT_CODE
                                    CK_TILE_FMHA_FWD_FAST_EXP2        // UseExp2
-                                   >;
+                                   >; // placeholder type, we are not using this
 
     using fmha_mask = ck_tile::SimplifiedGenericAttentionMask<false // IsMasking
                                                               >;

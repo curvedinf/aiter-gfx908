@@ -332,11 +332,13 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   constexpr int MTP_PER_THREAD = DIVIDE_ROUND_UP(MTP, MAX_ELEMENTS_PER_QUERY);
 
   constexpr int MTP_PARALLEL_THREADS = MTP / MTP_PER_THREAD;
-  constexpr int GQA_RATIO_MTP_PARALLEL = GQA_RATIO * MTP_PARALLEL_THREADS;
+  constexpr int GQA_RATIO_LOOP = DIVIDE_ROUND_UP(GQA_RATIO, 16);
+  constexpr int GQA_RATIO_PER_LOOP = GQA_RATIO / GQA_RATIO_LOOP;
+  constexpr int GQA_RATIO_MTP_PARALLEL = GQA_RATIO_PER_LOOP * MTP_PARALLEL_THREADS;
   constexpr int GQA_RATIO4 = DIVIDE_ROUND_UP(GQA_RATIO_MTP_PARALLEL, 4);
 
   // shared_logits is used for multiple purposes
-  __shared__ _B16x4 shared_logits[HEAD_LOOP][MTP_PER_THREAD][NWARPS][4][16][4];
+  __shared__ _B16x4 shared_logits[GQA_RATIO_LOOP][HEAD_LOOP][MTP_PER_THREAD][NWARPS][4][16][4];
 
   // for QK mfma16x16, layout is QHead/Tokenx16 across every 16 lanes, 16 Bytes
   // HeadElements in each lane, 4x16B HeadElements across 4 rows of warp
@@ -354,7 +356,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   constexpr int QKHELOOP = HEAD_SIZE_PER_LOOP / QKHE_PER_FETCH;  // 4xQKHE_16B across
                                                         // warp
 
-  _B16x8 Qlocal[HEAD_LOOP][MTP_PER_THREAD][QKHELOOP]
+  _B16x8 Qlocal[GQA_RATIO_LOOP][HEAD_LOOP][MTP_PER_THREAD][QKHELOOP]
                [QK_SIZE_RATIO];  // note that 16 contiguous elements of Q should
                                  // be fetched per lane for 8 bit cache types :
                                  // QK_SIZE_RATIO changes for this
@@ -371,7 +373,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   // can be interpreted as B8x16 for 8 bit types
   _B16x8 Klocal[HEAD_LOOP][TLOOP][QKHELOOP];
 
-  const auto wg_start_head_idx = blockIdx.z * GQA_RATIO;
+  const auto wg_start_head_idx = blockIdx.z * GQA_RATIO_PER_LOOP;
   const auto wg_start_kv_head_idx = blockIdx.z;
   const auto total_num_heads = gridDim.z * GQA_RATIO;
 
@@ -412,30 +414,32 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   constexpr int mtp_loop = MTP_PER_THREAD;
 
   for(int mtp = 0; mtp < mtp_loop; mtp++) {
-    const scalar_t* q_ptr =
-        q + (query_start_off + mtp * MTP_PARALLEL_THREADS) * q_stride + global_qhead_idx * HEAD_SIZE;
+    for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+      const scalar_t* q_ptr =
+          q + (query_start_off + mtp * MTP_PARALLEL_THREADS) * q_stride + (global_qhead_idx + gqa_ratio_loop * GQA_RATIO_PER_LOOP) * HEAD_SIZE;
+    
+      for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
+        const int qhead_element = lane16id * CONTIGUOUS_SCALAR_ELEMS_16B + head_loop * HEAD_SIZE_PER_LOOP;
+        if ((local_mtp_qhead_idx < GQA_RATIO_MTP_PARALLEL) && (qhead_element < HEAD_SIZE)) {
+          const scalar_t* q_fetch_ptr = q_ptr + qhead_element;
+          const _B16x8* q_fetch_ptr_16B =
+              reinterpret_cast<const _B16x8*>(q_fetch_ptr);
+          _B16x8 tmp = *q_fetch_ptr_16B;
 
-    for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
-      const int qhead_element = lane16id * CONTIGUOUS_SCALAR_ELEMS_16B + head_loop * HEAD_SIZE_PER_LOOP;
-      if ((local_mtp_qhead_idx < GQA_RATIO_MTP_PARALLEL) && (qhead_element < HEAD_SIZE)) {
-        const scalar_t* q_fetch_ptr = q_ptr + qhead_element;
-        const _B16x8* q_fetch_ptr_16B =
-            reinterpret_cast<const _B16x8*>(q_fetch_ptr);
-        _B16x8 tmp = *q_fetch_ptr_16B;
-
-        if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
-          const int offset1 =
-              lane16id /
-              4;  // 16 contiguous chunks of head elems are spread across 4x4lanes
-          shared_logits[head_loop][mtp][offset1][lane4id][local_qhead_idx][0] = tmp.xy[0];
-          shared_logits[head_loop][mtp][offset1][lane4id][local_qhead_idx][1] = tmp.xy[1];
-        } else {
-          for (int i = 0; i < 2; i++) {
-            const int head_elem = lane16id * 2 + i;  // element id in _B16x4 terms
-            const int offset3 = head_elem % 4;
-            const int offset2 = (head_elem / 4) % 4;
-            const int offset1 = head_elem / 4 / 4;
-            shared_logits[head_loop][mtp][offset1][offset2][local_qhead_idx][offset3] = tmp.xy[i];
+          if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
+            const int offset1 =
+                lane16id /
+                4;  // 16 contiguous chunks of head elems are spread across 4x4lanes
+            shared_logits[gqa_ratio_loop][head_loop][mtp][offset1][lane4id][local_qhead_idx][0] = tmp.xy[0];
+            shared_logits[gqa_ratio_loop][head_loop][mtp][offset1][lane4id][local_qhead_idx][1] = tmp.xy[1];
+          } else {
+            for (int i = 0; i < 2; i++) {
+              const int head_elem = lane16id * 2 + i;  // element id in _B16x4 terms
+              const int offset3 = head_elem % 4;
+              const int offset2 = (head_elem / 4) % 4;
+              const int offset1 = head_elem / 4 / 4;
+              shared_logits[gqa_ratio_loop][head_loop][mtp][offset1][offset2][local_qhead_idx][offset3] = tmp.xy[i];
+            }
           }
         }
       }
@@ -446,10 +450,12 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
     for (int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++) {
       for (int i = 0; i < 2; i++) {
         for(int mtp = 0; mtp < mtp_loop; mtp++) {
-          for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
-            Qlocal[head_loop][mtp][qkhe_depth][qkratio].xy[i] =
-                shared_logits[head_loop][mtp][qkhe_depth][rowid][lane16id % GQA_RATIO_MTP_PARALLEL]
+          for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+            for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
+              Qlocal[gqa_ratio_loop][head_loop][mtp][qkhe_depth][qkratio].xy[i] =
+                  shared_logits[gqa_ratio_loop][head_loop][mtp][qkhe_depth][rowid][lane16id % GQA_RATIO_MTP_PARALLEL]
                               [2 * qkratio + i];
+            }
           }
         }
       }
@@ -486,10 +492,12 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
     }
   }
 
-  float alibi_slope;
+  float alibi_slope[GQA_RATIO_LOOP];
   if constexpr (ALIBI_ENABLED) {
-    const int alibi_head_idx = wg_start_head_idx + lane16id;
-    alibi_slope = (lane16id < GQA_RATIO) ? alibi_slopes[alibi_head_idx] : 0.f;
+    for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+      const int alibi_head_idx = wg_start_head_idx + lane16id + gqa_ratio_loop * GQA_RATIO_PER_LOOP;
+      alibi_slope[gqa_ratio_loop] = (lane16id < GQA_RATIO_PER_LOOP) ? alibi_slopes[alibi_head_idx] : 0.f;
+    }
   }
 
   constexpr int VTOKENS_PER_LANE =
@@ -556,51 +564,54 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
     scale2 *= *k_scale;
   }
 
-  floatx4 d_out[MTP_PER_THREAD][TLOOP];
+  floatx4 d_out[GQA_RATIO_LOOP][MTP_PER_THREAD][TLOOP];
   // qk mfma
   for(int mtp = 0; mtp < mtp_loop; mtp++) {
     for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
-      d_out[mtp][token_depth] = {0};
-      for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
-        for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
-          if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
-            for (int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++) {
-              #if defined(__gfx950__)
-              d_out[mtp][token_depth] = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
-                  Klocal[head_loop][token_depth][qkhe_depth],
-                  Qlocal[head_loop][mtp][qkhe_depth][qkratio],
-                  d_out[mtp][token_depth]);
-              #else
-              for (int i = 0; i < 2; i++) {
-                d_out[mtp][token_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
-                    Klocal[head_loop][token_depth][qkhe_depth].xy[i],
-                    Qlocal[head_loop][mtp][qkhe_depth][qkratio].xy[i], d_out[mtp][token_depth]);
+      for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+        d_out[gqa_ratio_loop][mtp][token_depth] = {0};
+        for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
+          for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
+            if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
+              for (int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++) {
+                #if defined(__gfx950__)
+                d_out[gqa_ratio_loop][mtp][token_depth] = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                    Klocal[head_loop][token_depth][qkhe_depth],
+                    Qlocal[gqa_ratio_loop][head_loop][mtp][qkhe_depth][qkratio],
+                    d_out[gqa_ratio_loop][mtp][token_depth]);
+                #else
+                for (int i = 0; i < 2; i++) {
+                  d_out[gqa_ratio_loop][mtp][token_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
+                      Klocal[head_loop][token_depth][qkhe_depth].xy[i],
+                      Qlocal[gqa_ratio_loop][head_loop][mtp][qkhe_depth][qkratio].xy[i],
+                      d_out[gqa_ratio_loop][mtp][token_depth]);
+                }
+                #endif
               }
-              #endif
-            }
-          } else {  // kv cache dtype fp8
-            auto Ktmp = Klocal[head_loop][token_depth][qkhe_depth];
-            _B8x16 Ktmp8x16 = *reinterpret_cast<_B8x16*>(&Ktmp);
-            for (int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++) {
-              _B8x8 Ktmp8x8 = Ktmp8x16.xy[qkratio];
-              _B16x8 Klocaltmp = convert_b8x8_custom<scalar_t>(Ktmp8x8);
-              #if defined(__gfx950__)
-              d_out[mtp][token_depth] = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
-                  Klocaltmp,
-                  Qlocal[head_loop][mtp][qkhe_depth][qkratio],
-                  d_out[mtp][token_depth]);
-              #else
-              for (int i = 0; i < 2; i++) {
-                d_out[mtp][token_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
-                    Klocaltmp.xy[i], Qlocal[head_loop][mtp][qkhe_depth][qkratio].xy[i],
-                    d_out[mtp][token_depth]);
+            } else {  // kv cache dtype fp8
+              auto Ktmp = Klocal[head_loop][token_depth][qkhe_depth];
+              _B8x16 Ktmp8x16 = *reinterpret_cast<_B8x16*>(&Ktmp);
+              for (int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++) {
+                _B8x8 Ktmp8x8 = Ktmp8x16.xy[qkratio];
+                _B16x8 Klocaltmp = convert_b8x8_custom<scalar_t>(Ktmp8x8);
+                #if defined(__gfx950__)
+                d_out[gqa_ratio_loop][mtp][token_depth] = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                    Klocaltmp,
+                    Qlocal[gqa_ratio_loop][head_loop][mtp][qkhe_depth][qkratio],
+                    d_out[gqa_ratio_loop][mtp][token_depth]);
+                #else
+                for (int i = 0; i < 2; i++) {
+                  d_out[gqa_ratio_loop][mtp][token_depth] = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
+                      Klocaltmp.xy[i], Qlocal[gqa_ratio_loop][head_loop][mtp][qkhe_depth][qkratio].xy[i],
+                      d_out[gqa_ratio_loop][mtp][token_depth]);
+                }
+                #endif
               }
-              #endif
             }
           }
         }
-      }
-      d_out[mtp][token_depth] *= scale2;
+        d_out[gqa_ratio_loop][mtp][token_depth] *= scale2;
+      } 
     }
   }
 
@@ -613,82 +624,89 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
       const int local_token_idx = qkout_token_idx + token_depth * 16;
       const int alibi_offset = local_token_idx - context_len + 1;
       for(int mtp = 0; mtp < mtp_loop; mtp++) {
-        for (int i = 0; i < 4; i++) {
-          d_out[mtp][token_depth][i] += alibi_slope * (alibi_offset + i);
+        for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+          for (int i = 0; i < 4; i++) {
+            d_out[gqa_ratio_loop][mtp][token_depth][i] += alibi_slope[gqa_ratio_loop] * (alibi_offset + i);
+          }
         }
       }
     }
   }
 
   // calculate qk_max and exp_sum per warp and write to shared memory
-  float qk_max[MTP_PER_THREAD] = {-FLT_MAX};
-  float exp_sum[MTP_PER_THREAD] = {0.0f};
+  float qk_max[GQA_RATIO_LOOP][MTP_PER_THREAD] = {-FLT_MAX};
+  float exp_sum[GQA_RATIO_LOOP][MTP_PER_THREAD] = {0.0f};
 
   for(int mtp = 0; mtp < mtp_loop; mtp++) {
-    for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
-      const int local_token_idx = qkout_token_idx + token_depth * 16;
-      for (int i = 0; i < 4; i++) {
-        const float tmp = ((local_token_idx + i) < context_len * (warp_mtp_idx + 1))
-                              ? d_out[mtp][token_depth][i]
-                              : -FLT_MAX;
-        qk_max[mtp] = fmaxf(qk_max[mtp], tmp);
+    for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+      for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
+        const int local_token_idx = qkout_token_idx + token_depth * 16;
+        for (int i = 0; i < 4; i++) {
+          const float tmp = ((local_token_idx + i) < context_len * (warp_mtp_idx + 1))
+                                ? d_out[gqa_ratio_loop][mtp][token_depth][i]
+                                : -FLT_MAX;
+          qk_max[gqa_ratio_loop][mtp] = fmaxf(qk_max[gqa_ratio_loop][mtp], tmp);
+        }
       }
-    }
-    
-    for (int mask = WARP_SIZE / 2; mask >= 16; mask /= 2) {
-      qk_max[mtp] = fmaxf(qk_max[mtp], __shfl_xor(qk_max[mtp], mask));
-    }
-
-    for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
-      const int local_token_idx = qkout_token_idx + token_depth * 16;
-      for (int i = 0; i < 4; i++) {
-        const float tmp = (local_token_idx + i < context_len * (warp_mtp_idx + 1))
-                              ? __expf(d_out[mtp][token_depth][i] - qk_max[mtp])
-                              : 0.0f;
-        d_out[mtp][token_depth][i] = tmp;
-        exp_sum[mtp] += tmp;
+      
+      for (int mask = WARP_SIZE / 2; mask >= 16; mask /= 2) {
+        qk_max[gqa_ratio_loop][mtp] = fmaxf(qk_max[gqa_ratio_loop][mtp], __shfl_xor(qk_max[gqa_ratio_loop][mtp], mask));
       }
-    }
 
-    for (int mask = WARP_SIZE / 2; mask >= 16; mask /= 2) {
-      exp_sum[mtp] += __shfl_xor(exp_sum[mtp], mask);
-    }
-    
+      for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
+        const int local_token_idx = qkout_token_idx + token_depth * 16;
+        for (int i = 0; i < 4; i++) {
+          const float tmp = ((local_token_idx + i) < context_len * (warp_mtp_idx + 1))
+                                ? __expf(d_out[gqa_ratio_loop][mtp][token_depth][i] - qk_max[gqa_ratio_loop][mtp])
+                                : 0.0f;
+          d_out[gqa_ratio_loop][mtp][token_depth][i] = tmp;
+          exp_sum[gqa_ratio_loop][mtp] += tmp;
+        }
+      }
+
+      for (int mask = WARP_SIZE / 2; mask >= 16; mask /= 2) {
+        exp_sum[gqa_ratio_loop][mtp] += __shfl_xor(exp_sum[gqa_ratio_loop][mtp], mask);
+      }
+    }   
   }
   __syncthreads();  // sync before writing to shared mem
 
   float* shared_mem = reinterpret_cast<float*>(shared_logits);
   if (laneid < 16) {
     for(int mtp = 0; mtp < mtp_loop; mtp++) {
-      const int qk_max_offset = warpid * 16 * MTP_PER_THREAD + lane16id * MTP_PER_THREAD + mtp;
-      shared_mem[qk_max_offset] = qk_max[mtp];
-      const int exp_sum_offset = NWARPS * 16 * MTP_PER_THREAD + qk_max_offset;
-      shared_mem[exp_sum_offset] = exp_sum[mtp];
+      for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {  
+        const int qk_max_offset = warpid * 16 * GQA_RATIO_LOOP * MTP_PER_THREAD + (lane16id + gqa_ratio_loop * GQA_RATIO_PER_LOOP) * MTP_PER_THREAD + mtp;
+        shared_mem[qk_max_offset] = qk_max[gqa_ratio_loop][mtp];
+        const int exp_sum_offset = NWARPS * 16 * GQA_RATIO_LOOP * MTP_PER_THREAD + qk_max_offset;
+        shared_mem[exp_sum_offset] = exp_sum[gqa_ratio_loop][mtp];
+      }
     }
   }
 
   __syncthreads();
 
   // calculate partition qk_max and exp_sum
-  float inv_sum_scale[MTP_PER_THREAD] = {0.0f};
-  float partition_qk_max[MTP_PER_THREAD] = {-FLT_MAX};
-  float partition_exp_sum[MTP_PER_THREAD] = {0.0f};
+  float inv_sum_scale[GQA_RATIO_LOOP][MTP_PER_THREAD] = {0.0f};
+  float partition_qk_max[GQA_RATIO_LOOP][MTP_PER_THREAD] = {-FLT_MAX};
+  float partition_exp_sum[GQA_RATIO_LOOP][MTP_PER_THREAD] = {0.0f};
 
   for(int mtp = 0; mtp < mtp_loop; mtp++) {
-    float warp_qk_max_exp[NWARPS];
-    for (int w = 0; w < NWARPS; w++) {
-      warp_qk_max_exp[w] = shared_mem[w * 16 * MTP_PER_THREAD + lane16id * MTP_PER_THREAD + mtp];
-      partition_qk_max[mtp] = fmaxf(partition_qk_max[mtp], warp_qk_max_exp[w]);
-    }
+    for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+      float warp_qk_max_exp[NWARPS];
+      for (int w = 0; w < NWARPS; w++) {
+        warp_qk_max_exp[w] = shared_mem[w * 16 * GQA_RATIO_LOOP * MTP_PER_THREAD + (lane16id + gqa_ratio_loop * GQA_RATIO_PER_LOOP) * MTP_PER_THREAD + mtp];
+        partition_qk_max[gqa_ratio_loop][mtp] = fmaxf(partition_qk_max[gqa_ratio_loop][mtp], warp_qk_max_exp[w]);
+      }
 
-    for (int w = 0; w < NWARPS; w++) {
-      warp_qk_max_exp[w] = __expf(warp_qk_max_exp[w] - partition_qk_max[mtp]);
-      partition_exp_sum[mtp] +=
-          shared_mem[NWARPS * 16 * MTP_PER_THREAD +  w * 16 * MTP_PER_THREAD + lane16id * MTP_PER_THREAD + mtp] * warp_qk_max_exp[w];
+      for (int w = 0; w < NWARPS; w++) {
+        warp_qk_max_exp[w] = __expf(warp_qk_max_exp[w] - partition_qk_max[gqa_ratio_loop][mtp]);
+        partition_exp_sum[gqa_ratio_loop][mtp] +=
+            shared_mem[NWARPS * 16 * GQA_RATIO_LOOP * MTP_PER_THREAD +  w * 16 * GQA_RATIO_LOOP * MTP_PER_THREAD + (lane16id + gqa_ratio_loop * GQA_RATIO_PER_LOOP) * MTP_PER_THREAD + mtp] * warp_qk_max_exp[w];
+      }
+      
+      inv_sum_scale[gqa_ratio_loop][mtp] =
+            __fdividef(1.f, partition_exp_sum[gqa_ratio_loop][mtp] + 1e-6f) * warp_qk_max_exp[warpid];
     }
-    
-    inv_sum_scale[mtp] =
-          __fdividef(1.f, partition_exp_sum[mtp] + 1e-6f) * warp_qk_max_exp[warpid];
   }
   __syncthreads();
   // disable rtz conversion due to its impact on accuracy.
@@ -697,15 +715,17 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   // write logits to shared mem
   for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
     for (int mtp = 0; mtp < mtp_loop; mtp++) {
-      d_out[mtp][token_depth] *= inv_sum_scale[mtp];
-      if constexpr (LOGITS_RTZ_CONVERSION) {
-        // use rtz conversion for better performance, with negligible impact on
-        // accuracy
-        shared_logits[0][mtp][warpid][token_depth][lane16id][rowid] =
-            from_floatx4_rtz<scalar_t>(d_out[mtp][token_depth]);
-      } else {
-        shared_logits[0][mtp][warpid][token_depth][lane16id][rowid] =
-            from_floatx4<scalar_t>(d_out[mtp][token_depth]);
+      for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+        d_out[gqa_ratio_loop][mtp][token_depth] *= inv_sum_scale[gqa_ratio_loop][mtp];
+        if constexpr (LOGITS_RTZ_CONVERSION) {
+          // use rtz conversion for better performance, with negligible impact on
+          // accuracy
+          shared_logits[gqa_ratio_loop][0][mtp][warpid][token_depth][lane16id][rowid] =
+              from_floatx4_rtz<scalar_t>(d_out[gqa_ratio_loop][mtp][token_depth]);
+        } else {
+          shared_logits[gqa_ratio_loop][0][mtp][warpid][token_depth][lane16id][rowid] =
+              from_floatx4<scalar_t>(d_out[gqa_ratio_loop][mtp][token_depth]);
+        }
       }
     }
   }
@@ -713,16 +733,18 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   // write out partition max_logits and exp_sum
   if (threadIdx.x < GQA_RATIO_MTP_PARALLEL) {
     for(int mtp = 0; mtp < mtp_loop; mtp++) {
-      const int qhead_idx = lane16id;
-      const int64_t offset = static_cast<int64_t>(query_start_off + mtp * MTP_PARALLEL_THREADS) *
-                                static_cast<int64_t>(total_num_heads) *
-                                static_cast<int64_t>(max_num_partitions) +
-                            (static_cast<int64_t>(wg_start_head_idx) +
-                              static_cast<int64_t>(qhead_idx)) *
-                                static_cast<int64_t>(max_num_partitions) +
-                            static_cast<int64_t>(partition_idx);
-      max_logits[offset] = partition_qk_max[mtp];
-      exp_sums[offset] = partition_exp_sum[mtp];
+      for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+        const int qhead_idx = lane16id + gqa_ratio_loop * GQA_RATIO_PER_LOOP;
+        const int64_t offset = static_cast<int64_t>(query_start_off + mtp * MTP_PARALLEL_THREADS) *
+                                  static_cast<int64_t>(total_num_heads) *
+                                  static_cast<int64_t>(max_num_partitions) +
+                              (static_cast<int64_t>(wg_start_head_idx) +
+                                static_cast<int64_t>(qhead_idx)) *
+                                  static_cast<int64_t>(max_num_partitions) +
+                              static_cast<int64_t>(partition_idx);
+        max_logits[offset] = partition_qk_max[gqa_ratio_loop][mtp];
+        exp_sums[offset] = partition_exp_sum[gqa_ratio_loop][mtp];
+      }
     }
   }
 
@@ -731,95 +753,97 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   constexpr int ELEMS8_ELEMS4_RATIO = 8 / 4;
   constexpr int ELEMS16_ELEMS8_RATIO = 16 / 8;
 
-  _B16x4 outelems[MTP_PER_THREAD][VHELOOP];
+  _B16x4 outelems[GQA_RATIO_LOOP][MTP_PER_THREAD][VHELOOP];
   // Softmax V mfma
   // v layout: 16he across lanes x 16 tokens per lane
   for (int mtp = 0; mtp < mtp_loop; mtp++) {
-    for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
-      floatx4 tmp_out = {0};
-      for (int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++) {
-        if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
-          for (int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++) {
-            #if defined(__gfx950__)
-            _B16x8 tmp_in;
-            for(int i = 0; i < ELEMS8_ELEMS4_RATIO; i++)
-            {
-              const int offset = rowid * VTLANELOOP * ELEMS8_ELEMS4_RATIO +
-                                vfetch_depth * ELEMS8_ELEMS4_RATIO + i;
-              const int offset1 = offset % ROWS_PER_WARP;
-              const int offset2 = offset / ROWS_PER_WARP;
-                      tmp_in.xy[i] = shared_logits[0][mtp][vtoken_depth][offset2][lane16id][offset1];
-            }
-            tmp_out = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
-                      Vlocal[vtoken_depth][vhe_depth][vfetch_depth],
-                      tmp_in,
-                      tmp_out);
-            #else          
-            for (int i = 0; i < ELEMS8_ELEMS4_RATIO; i++) {
-              const int offset = rowid * VTLANELOOP * ELEMS8_ELEMS4_RATIO +
-                                vfetch_depth * ELEMS8_ELEMS4_RATIO + i;
-              const int offset1 = offset % ROWS_PER_WARP;
-              const int offset2 = offset / ROWS_PER_WARP;
-              // output format is 16 qheads across 16 lanes, 16 head elems spread
-              // across 4 rows
-              tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
-                  Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i],
-                  shared_logits[0][mtp][vtoken_depth][offset2][lane16id][offset1],
-                  tmp_out);
-            }
-            #endif
-          }
-          // KV cache fp8
-        } else {
-          for (int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++) {
-            _B16x8 Vtmp = Vlocal[vtoken_depth][vhe_depth][vfetch_depth];
-            // reinterpret V format as 16 elements of 8bits
-            _B8x16 Vtmp8x16 = *reinterpret_cast<_B8x16*>(&Vtmp); 
-            for (int j = 0; j < ELEMS16_ELEMS8_RATIO; j++) {
-              _B8x8 Vtmp8x8 = Vtmp8x16.xy[j];
-              _B16x8 Vlocaltmp = convert_b8x8_custom<scalar_t>(Vtmp8x8);
-
+    for (int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+      for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
+        floatx4 tmp_out = {0};
+        for (int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++) {
+          if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
+            for (int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++) {
               #if defined(__gfx950__)
               _B16x8 tmp_in;
               for(int i = 0; i < ELEMS8_ELEMS4_RATIO; i++)
               {
-                const int offset =
-                    rowid * ELEMS16_ELEMS8_RATIO * ELEMS8_ELEMS4_RATIO +
-                    j * ELEMS8_ELEMS4_RATIO + i;
+                const int offset = rowid * VTLANELOOP * ELEMS8_ELEMS4_RATIO +
+                                  vfetch_depth * ELEMS8_ELEMS4_RATIO + i;
                 const int offset1 = offset % ROWS_PER_WARP;
                 const int offset2 = offset / ROWS_PER_WARP;
-                tmp_in.xy[i] = shared_logits[0][mtp][vtoken_depth][offset2][lane16id][offset1];
+                        tmp_in.xy[i] = shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1];
               }
               tmp_out = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
-                  Vlocaltmp,
-                  tmp_in,
-                  tmp_out);
-              #else
+                        Vlocal[vtoken_depth][vhe_depth][vfetch_depth],
+                        tmp_in,
+                        tmp_out);
+              #else          
               for (int i = 0; i < ELEMS8_ELEMS4_RATIO; i++) {
-                const int offset =
-                    rowid * ELEMS16_ELEMS8_RATIO * ELEMS8_ELEMS4_RATIO +
-                    j * ELEMS8_ELEMS4_RATIO + i;
+                const int offset = rowid * VTLANELOOP * ELEMS8_ELEMS4_RATIO +
+                                  vfetch_depth * ELEMS8_ELEMS4_RATIO + i;
                 const int offset1 = offset % ROWS_PER_WARP;
                 const int offset2 = offset / ROWS_PER_WARP;
-                // output format is 16 qheads across 16 lanes, 16 head elems
-                // spread across 4 rows
+                // output format is 16 qheads across 16 lanes, 16 head elems spread
+                // across 4 rows
                 tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
-                    Vlocaltmp.xy[i],
-                    shared_logits[0][mtp][vtoken_depth][offset2][lane16id][offset1],
+                    Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i],
+                    shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1],
                     tmp_out);
               }
               #endif
             }
+            // KV cache fp8
+          } else {
+            for (int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++) {
+              _B16x8 Vtmp = Vlocal[vtoken_depth][vhe_depth][vfetch_depth];
+              // reinterpret V format as 16 elements of 8bits
+              _B8x16 Vtmp8x16 = *reinterpret_cast<_B8x16*>(&Vtmp); 
+              for (int j = 0; j < ELEMS16_ELEMS8_RATIO; j++) {
+                _B8x8 Vtmp8x8 = Vtmp8x16.xy[j];
+                _B16x8 Vlocaltmp = convert_b8x8_custom<scalar_t>(Vtmp8x8);
+
+                #if defined(__gfx950__)
+                _B16x8 tmp_in;
+                for(int i = 0; i < ELEMS8_ELEMS4_RATIO; i++)
+                {
+                  const int offset =
+                      rowid * ELEMS16_ELEMS8_RATIO * ELEMS8_ELEMS4_RATIO +
+                      j * ELEMS8_ELEMS4_RATIO + i;
+                  const int offset1 = offset % ROWS_PER_WARP;
+                  const int offset2 = offset / ROWS_PER_WARP;
+                  tmp_in.xy[i] = shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1];
+                }
+                tmp_out = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
+                    Vlocaltmp,
+                    tmp_in,
+                    tmp_out);
+                #else
+                for (int i = 0; i < ELEMS8_ELEMS4_RATIO; i++) {
+                  const int offset =
+                      rowid * ELEMS16_ELEMS8_RATIO * ELEMS8_ELEMS4_RATIO +
+                      j * ELEMS8_ELEMS4_RATIO + i;
+                  const int offset1 = offset % ROWS_PER_WARP;
+                  const int offset2 = offset / ROWS_PER_WARP;
+                  // output format is 16 qheads across 16 lanes, 16 head elems
+                  // spread across 4 rows
+                  tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
+                      Vlocaltmp.xy[i],
+                      shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1],
+                      tmp_out);
+                }
+                #endif
+              }
+            }
           }
+
         }
+        if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
+          tmp_out *= *v_scale;
+        }  
 
+        // apply post Softmax V mfma v_scale
+        outelems[gqa_ratio_loop][mtp][vhe_depth] = from_floatx4<scalar_t>(tmp_out);
       }
-      if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
-        tmp_out *= *v_scale;
-      }  
-
-      // apply post Softmax V mfma v_scale
-      outelems[mtp][vhe_depth] = from_floatx4<scalar_t>(tmp_out);
     }
   }
 
@@ -829,7 +853,9 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   for (int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
     // lane16 id head dimension; rowid head element dimension
     for(int mtp = 0; mtp < mtp_loop; mtp++) {
-      shared_logits[0][mtp][warpid][vhe_depth][lane16id][rowid] = outelems[mtp][vhe_depth];
+      for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+        shared_logits[gqa_ratio_loop][0][mtp][warpid][vhe_depth][lane16id][rowid] = outelems[gqa_ratio_loop][mtp][vhe_depth];
+      }
     }
   }
 
@@ -838,36 +864,38 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   // write to tmp_out with coalesced writes after reading from shared mem
   if (warpid == 0) {
     for (int mtp = 0; mtp < mtp_loop; mtp++) {
-      for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
-        _B16x8 vout[GQA_RATIO4];
-        // each lane writes out 16Bytes of tmp_out along head elem dimension
-        const int head_elem_idx = lane16id * 8 + head_loop * HEAD_SIZE_PER_LOOP;
-        if (head_elem_idx < HEAD_SIZE) {
-          for (int h = 0; h < GQA_RATIO4; h++) {
-            const int local_head_idx = 4 * h + rowid;
-            const int offset1 = (head_elem_idx / 16) % 4;
-            const int offset2 = head_elem_idx / 16 / NWARPS;
-            const int offset3 = (head_elem_idx / 4) % 4;
-            for (int i = 0; i < 2; i++) {
-              vout[h].xy[i] =
-                  shared_logits[0][mtp][offset1][offset2][local_head_idx][offset3 + i];
+      for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+        for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
+          _B16x8 vout[GQA_RATIO4];
+          // each lane writes out 16Bytes of tmp_out along head elem dimension
+          const int head_elem_idx = lane16id * 8 + head_loop * HEAD_SIZE_PER_LOOP;
+          if (head_elem_idx < HEAD_SIZE) {
+            for (int h = 0; h < GQA_RATIO4; h++) {
+              const int local_head_idx = 4 * h + rowid;
+              const int offset1 = (head_elem_idx / 16) % 4;
+              const int offset2 = head_elem_idx / 16 / NWARPS;
+              const int offset3 = (head_elem_idx / 4) % 4;
+              for (int i = 0; i < 2; i++) {
+                vout[h].xy[i] =
+                    shared_logits[gqa_ratio_loop][0][mtp][offset1][offset2][local_head_idx][offset3 + i];
+              }
             }
-          }
 
-          const int64_t hsz_maxp_mult =
-              static_cast<int64_t>(HEAD_SIZE * max_num_partitions);
-          
-          scalar_t* out_ptr = out + (query_start_off + mtp * MTP_PARALLEL_THREADS) * total_num_heads * hsz_maxp_mult +
-                              partition_idx * HEAD_SIZE;
-          for (int h = 0; h < GQA_RATIO4; h++) {
-            const int local_head_idx = 4 * h + rowid;
-            if (local_head_idx < GQA_RATIO_MTP_PARALLEL) {
-              const int64_t out_head_idx =
-                  static_cast<int64_t>(wg_start_head_idx + local_head_idx);
-              scalar_t* out_ptr2 = out_ptr + out_head_idx * hsz_maxp_mult;
-              scalar_t* out_ptr3 = out_ptr2 + head_elem_idx;
-              _B16x8* out_ptr_B16x8 = reinterpret_cast<_B16x8*>(out_ptr3);
-              *out_ptr_B16x8 = vout[h];
+            const int64_t hsz_maxp_mult =
+                static_cast<int64_t>(HEAD_SIZE * max_num_partitions);
+            
+            scalar_t* out_ptr = out + (query_start_off + mtp * MTP_PARALLEL_THREADS) * total_num_heads * hsz_maxp_mult +
+                                partition_idx * HEAD_SIZE;
+            for (int h = 0; h < GQA_RATIO4; h++) {
+              const int local_head_idx = 4 * h + rowid;
+              if (local_head_idx < GQA_RATIO_MTP_PARALLEL) {
+                const int64_t out_head_idx =
+                    static_cast<int64_t>(wg_start_head_idx + local_head_idx + gqa_ratio_loop * GQA_RATIO_PER_LOOP);
+                scalar_t* out_ptr2 = out_ptr + out_head_idx * hsz_maxp_mult;
+                scalar_t* out_ptr3 = out_ptr2 + head_elem_idx;
+                _B16x8* out_ptr_B16x8 = reinterpret_cast<_B16x8*>(out_ptr3);
+                *out_ptr_B16x8 = vout[h];
+              }
             }
           }
         }

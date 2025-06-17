@@ -34,39 +34,54 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
                                                    /* NumPrefetchV = */ 1>
 
 {
+    using BasePolicy = ck_tile::BlockFmhaPipelineQXKSVSCustomPolicy</* QLoadOnce = */ true,
+                                                                    /* AsyncCopy = */ false,
+                                                                    /* NumPrefetchK = */ 1,
+                                                                    /* NumPrefetchV = */ 1>;
+
+    static constexpr ck_tile::index_t NumWarpPerGroup = 4;
+    static constexpr ck_tile::index_t NumThreadPerWarpGroup =
+        NumWarpPerGroup * ck_tile::get_warp_size();
+
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
     {
         using namespace ck_tile;
 
-        using KDataType = remove_cvref_t<typename Problem::KDataType>;
+        constexpr index_t NumWarpGroups = Problem::kBlockSize / NumThreadPerWarpGroup;
+        if constexpr(NumWarpGroups == 1)
+        {
+            return BasePolicy::template MakeKDramTileDistribution<Problem>();
+        }
+        else if constexpr(NumWarpGroups == 2)
+        {
+            using KDataType = remove_cvref_t<typename Problem::KDataType>;
 
-        constexpr index_t NumWarpGroups = 2;
+            // make distribution for a single warp-group and duplicate content in all groups
+            constexpr index_t kBlockSize = Problem::kBlockSize / NumWarpGroups;
+            constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
+            constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
 
-        // make distribution for a single warp-group and duplicate content in all groups
-        constexpr index_t kBlockSize = Problem::kBlockSize / NumWarpGroups;
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
+            constexpr index_t MaxVectorSize = 16 / sizeof(KDataType);
+            constexpr index_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
 
-        constexpr index_t MaxVectorSize = 16 / sizeof(KDataType);
-        constexpr index_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
+            constexpr index_t KPerThread     = ck_tile::min(MaxVectorSize, ElemPerThread);
+            constexpr index_t KThreads       = kKPerBlock / KPerThread;
+            constexpr index_t NThreadPerWarp = get_warp_size() / KThreads;
+            constexpr index_t NumWarps       = kBlockSize / get_warp_size();
 
-        constexpr index_t KPerThread     = ck_tile::min(MaxVectorSize, ElemPerThread);
-        constexpr index_t KThreads       = kKPerBlock / KPerThread;
-        constexpr index_t NThreadPerWarp = get_warp_size() / KThreads;
-        constexpr index_t NumWarps       = kBlockSize / get_warp_size();
+            constexpr index_t NPerThread = kNPerBlock / (NumWarps * NThreadPerWarp);
 
-        constexpr index_t NPerThread = kNPerBlock / (NumWarps * NThreadPerWarp);
-
-        // 2 warp-groups share the same data
-        return make_static_tile_distribution(
-            tile_distribution_encoding<sequence<NumWarpGroups>,
-                                       tuple<sequence<NPerThread, NumWarps, NThreadPerWarp>,
-                                             sequence<KThreads, KPerThread>>,
-                                       tuple<sequence<0, 1>, sequence<1, 2>>,
-                                       tuple<sequence<0, 1>, sequence<2, 0>>,
-                                       sequence<1, 2>,
-                                       sequence<0, 1>>{});
+            // 2 warp-groups share the same data
+            return make_static_tile_distribution(
+                tile_distribution_encoding<sequence<NumWarpGroups>,
+                                           tuple<sequence<NPerThread, NumWarps, NThreadPerWarp>,
+                                                 sequence<KThreads, KPerThread>>,
+                                           tuple<sequence<0, 1>, sequence<1, 2>>,
+                                           tuple<sequence<0, 1>, sequence<2, 0>>,
+                                           sequence<1, 2>,
+                                           sequence<0, 1>>{});
+        }
     }
 
     template <typename Problem>
@@ -74,57 +89,63 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
     {
         using namespace ck_tile;
 
-        using VLayout = remove_cvref_t<typename Problem::BlockFmhaShape::VLayout>;
-
-        constexpr index_t NumWarpGroups = 2;
-
-        // make distribution for a single warp-group and duplicate content in all groups
-        constexpr index_t kBlockSize = Problem::kBlockSize / NumWarpGroups;
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
-
-        static_assert(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>);
-
-        constexpr index_t NPerThread = GetAlignmentV<Problem>();
-        constexpr index_t NThreads   = kNPerBlock / NPerThread; // P
-
-        constexpr index_t total_pixels = kNPerBlock * kKPerBlock / kBlockSize;
-        static_assert(total_pixels % NPerThread == 0); // TODO: this is not always true?
-        constexpr index_t KPerThread = total_pixels / NPerThread;
-        constexpr index_t kKPack     = GetSmemKPackV<Problem>();
-        static_assert(kKPack % KPerThread == 0);
-        constexpr index_t K2 =
-            kKPack / KPerThread; // TODO: this dimention could be outside single wave
-        if constexpr(get_warp_size() % (K2 * NThreads) == 0)
+        constexpr index_t NumWarpGroups = Problem::kBlockSize / NumThreadPerWarpGroup;
+        if constexpr(NumWarpGroups == 1)
         {
-            constexpr index_t K1       = get_warp_size() / (K2 * NThreads);
-            constexpr index_t NumWarps = kBlockSize / get_warp_size();
-            static_assert(kKPerBlock == NumWarps * K1 * K2 * KPerThread);
-            // 2 warp-groups share the same data
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<NumWarpGroups>,
-                    tuple<sequence<NThreads, NPerThread>, sequence<NumWarps, K1, K2, KPerThread>>,
-                    tuple<sequence<0, 2>, sequence<2, 1, 2>>,
-                    tuple<sequence<0, 0>, sequence<1, 0, 2>>,
-                    sequence<2, 1>,
-                    sequence<3, 1>>{});
+            return BasePolicy::template MakeVDramTileDistribution<Problem>();
         }
-        else
+        else if constexpr(NumWarpGroups == 2)
         {
-            constexpr index_t K1   = (K2 * NThreads) / get_warp_size();
-            constexpr index_t K2_m = K2 / K1;
-            constexpr index_t K0   = kBlockSize / get_warp_size() / K1;
-            static_assert(kKPerBlock == K0 * K1 * K2_m * KPerThread);
-            // 2 warp-groups share the same data
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<NumWarpGroups>,
-                    tuple<sequence<NThreads, NPerThread>, sequence<K0, K1, K2_m, KPerThread>>,
-                    tuple<sequence<0, 2, 2>, sequence<1, 2>>,
-                    tuple<sequence<0, 0, 1>, sequence<0, 2>>,
-                    sequence<2, 1>,
-                    sequence<3, 1>>{});
+            using VLayout = remove_cvref_t<typename Problem::BlockFmhaShape::VLayout>;
+
+            // make distribution for a single warp-group and duplicate content in all groups
+            constexpr index_t kBlockSize = Problem::kBlockSize / NumWarpGroups;
+            constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
+            constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
+
+            static_assert(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>);
+
+            constexpr index_t NPerThread = GetAlignmentV<Problem>();
+            constexpr index_t NThreads   = kNPerBlock / NPerThread; // P
+
+            constexpr index_t total_pixels = kNPerBlock * kKPerBlock / kBlockSize;
+            static_assert(total_pixels % NPerThread == 0); // TODO: this is not always true?
+            constexpr index_t KPerThread = total_pixels / NPerThread;
+            constexpr index_t kKPack     = GetSmemKPackV<Problem>();
+            static_assert(kKPack % KPerThread == 0);
+            constexpr index_t K2 =
+                kKPack / KPerThread; // TODO: this dimention could be outside single wave
+            if constexpr(get_warp_size() % (K2 * NThreads) == 0)
+            {
+                constexpr index_t K1       = get_warp_size() / (K2 * NThreads);
+                constexpr index_t NumWarps = kBlockSize / get_warp_size();
+                static_assert(kKPerBlock == NumWarps * K1 * K2 * KPerThread);
+                // 2 warp-groups share the same data
+                return make_static_tile_distribution(
+                    tile_distribution_encoding<sequence<NumWarpGroups>,
+                                               tuple<sequence<NThreads, NPerThread>,
+                                                     sequence<NumWarps, K1, K2, KPerThread>>,
+                                               tuple<sequence<0, 2>, sequence<2, 1, 2>>,
+                                               tuple<sequence<0, 0>, sequence<1, 0, 2>>,
+                                               sequence<2, 1>,
+                                               sequence<3, 1>>{});
+            }
+            else
+            {
+                constexpr index_t K1   = (K2 * NThreads) / get_warp_size();
+                constexpr index_t K2_m = K2 / K1;
+                constexpr index_t K0   = kBlockSize / get_warp_size() / K1;
+                static_assert(kKPerBlock == K0 * K1 * K2_m * KPerThread);
+                // 2 warp-groups share the same data
+                return make_static_tile_distribution(
+                    tile_distribution_encoding<
+                        sequence<NumWarpGroups>,
+                        tuple<sequence<NThreads, NPerThread>, sequence<K0, K1, K2_m, KPerThread>>,
+                        tuple<sequence<0, 2, 2>, sequence<1, 2>>,
+                        tuple<sequence<0, 0, 1>, sequence<0, 2>>,
+                        sequence<2, 1>,
+                        sequence<3, 1>>{});
+            }
         }
     }
 
@@ -134,56 +155,62 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
     {
         using namespace ck_tile;
 
-        // This descriptor only used when V layout is seqlen * hdim
-        using VLayout = remove_cvref_t<typename Problem::BlockFmhaShape::VLayout>;
-        static_assert(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>);
-
-        constexpr index_t NumWarpGroups = 2;
-
-        // make distribution for a single warp-group and duplicate content in all groups
-        constexpr index_t kBlockSize = Problem::kBlockSize / 2;
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
-
-        constexpr index_t NPerThread = GetAlignmentV<Problem>();
-        constexpr index_t NThreads   = kNPerBlock / NPerThread;
-
-        constexpr index_t total_pixels = kNPerBlock * kKPerBlock / kBlockSize;
-        static_assert(total_pixels % NPerThread == 0); // TODO: this is not always true?
-        constexpr index_t KPerThread = total_pixels / NPerThread;
-        constexpr index_t kKPack     = GetSmemKPackV<Problem>();
-        static_assert(kKPack % KPerThread == 0);
-        constexpr index_t K2 =
-            kKPack / KPerThread; // TODO: this dimention could be outside single wave
-        if constexpr(get_warp_size() % (K2 * NThreads) == 0)
+        constexpr index_t NumWarpGroups = Problem::kBlockSize / NumThreadPerWarpGroup;
+        if constexpr(NumWarpGroups == 1)
         {
-            constexpr index_t K1       = get_warp_size() / (K2 * NThreads);
-            constexpr index_t NumWarps = kBlockSize / get_warp_size();
-            // 2 warp-groups share the same data
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<NumWarpGroups>,
-                    tuple<sequence<NThreads, NPerThread>, sequence<NumWarps, K1, K2, KPerThread>>,
-                    tuple<sequence<0, 2>, sequence<2, 1, 2>>,
-                    tuple<sequence<0, 0>, sequence<1, 0, 2>>,
-                    sequence<1, 2>,
-                    sequence<1, 3>>{});
+            return BasePolicy::template MakeShuffledVRegBlockDescriptor<Problem>();
         }
-        else
+        else if constexpr(NumWarpGroups == 2)
         {
-            constexpr index_t K1   = (K2 * NThreads) / get_warp_size();
-            constexpr index_t K2_m = K2 / K1;
-            constexpr index_t K0   = kBlockSize / get_warp_size() / K1;
-            static_assert(kKPerBlock == K0 * K1 * K2_m * KPerThread);
-            // 2 warp-groups share the same data
-            return make_static_tile_distribution(
-                tile_distribution_encoding<
-                    sequence<NumWarpGroups>,
-                    tuple<sequence<NThreads, NPerThread>, sequence<K0, K1, K2_m, KPerThread>>,
-                    tuple<sequence<0, 2, 2>, sequence<1, 2>>,
-                    tuple<sequence<0, 0, 1>, sequence<0, 2>>,
-                    sequence<1, 2>,
-                    sequence<1, 3>>{});
+            // This descriptor only used when V layout is seqlen * hdim
+            using VLayout = remove_cvref_t<typename Problem::BlockFmhaShape::VLayout>;
+            static_assert(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>);
+
+            // make distribution for a single warp-group and duplicate content in all groups
+            constexpr index_t kBlockSize = Problem::kBlockSize / 2;
+            constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
+            constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
+
+            constexpr index_t NPerThread = GetAlignmentV<Problem>();
+            constexpr index_t NThreads   = kNPerBlock / NPerThread;
+
+            constexpr index_t total_pixels = kNPerBlock * kKPerBlock / kBlockSize;
+            static_assert(total_pixels % NPerThread == 0); // TODO: this is not always true?
+            constexpr index_t KPerThread = total_pixels / NPerThread;
+            constexpr index_t kKPack     = GetSmemKPackV<Problem>();
+            static_assert(kKPack % KPerThread == 0);
+            constexpr index_t K2 =
+                kKPack / KPerThread; // TODO: this dimention could be outside single wave
+            if constexpr(get_warp_size() % (K2 * NThreads) == 0)
+            {
+                constexpr index_t K1       = get_warp_size() / (K2 * NThreads);
+                constexpr index_t NumWarps = kBlockSize / get_warp_size();
+                // 2 warp-groups share the same data
+                return make_static_tile_distribution(
+                    tile_distribution_encoding<sequence<NumWarpGroups>,
+                                               tuple<sequence<NThreads, NPerThread>,
+                                                     sequence<NumWarps, K1, K2, KPerThread>>,
+                                               tuple<sequence<0, 2>, sequence<2, 1, 2>>,
+                                               tuple<sequence<0, 0>, sequence<1, 0, 2>>,
+                                               sequence<1, 2>,
+                                               sequence<1, 3>>{});
+            }
+            else
+            {
+                constexpr index_t K1   = (K2 * NThreads) / get_warp_size();
+                constexpr index_t K2_m = K2 / K1;
+                constexpr index_t K0   = kBlockSize / get_warp_size() / K1;
+                static_assert(kKPerBlock == K0 * K1 * K2_m * KPerThread);
+                // 2 warp-groups share the same data
+                return make_static_tile_distribution(
+                    tile_distribution_encoding<
+                        sequence<NumWarpGroups>,
+                        tuple<sequence<NThreads, NPerThread>, sequence<K0, K1, K2_m, KPerThread>>,
+                        tuple<sequence<0, 2, 2>, sequence<1, 2>>,
+                        tuple<sequence<0, 0, 1>, sequence<0, 2>>,
+                        sequence<1, 2>,
+                        sequence<1, 3>>{});
+            }
         }
     }
 
@@ -468,14 +495,14 @@ struct BlockFmhaPipelineQRKSVS
         constexpr index_t k0_loops = kQKHeaddim / kK0;
         constexpr index_t k1_loops = kN0 / kK1;
 
-#define ENABLE_PINGPONG_SCHED 1
-
-#if ENABLE_PINGPONG_SCHED
-        if(warp_group_id == 1)
+        constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
+        if constexpr(NumWarpGroups == 2)
         {
-            __builtin_amdgcn_s_barrier();
+            if(warp_group_id == 1)
+            {
+                __builtin_amdgcn_s_barrier();
+            }
         }
-#endif
 
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);
@@ -659,12 +686,13 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_sched_barrier(0);
         } while(++i_total_loops < num_total_loop);
 
-#if ENABLE_PINGPONG_SCHED
-        if(warp_group_id == 0)
+        if constexpr(NumWarpGroups == 2)
         {
-            __builtin_amdgcn_s_barrier();
+            if(warp_group_id == 0)
+            {
+                __builtin_amdgcn_s_barrier();
+            }
         }
-#endif
 
         // store lse
         if constexpr(kStoreLSE)

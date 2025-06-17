@@ -4,6 +4,9 @@
 import torch
 import aiter
 from aiter import dtypes
+from aiter.test_common import (
+    perftest,
+)
 from aiter.test_mha_common import (
     attention_ref,
 )
@@ -22,23 +25,9 @@ def run_torch(
     return out
 
 
-def run_ck(
-    q,
-    k,
-    v,
-):
-    """
-    out = aiter.flash_attn_func(
-        q,
-        k,
-        v
-    )
-    """
-    """"""
-    out = aiter.poyenc_mha_v3_fwd_func(q, k, v)
-    """"""
-
-    return out
+@perftest()
+def profile_func(target_func, *args, **kwargs):
+    return target_func(*args, **kwargs)
 
 
 @pytest.mark.parametrize("dtype", [dtypes.fp16, dtypes.bf16])
@@ -77,6 +66,7 @@ def test_flash_attn_output(
     mha_type,
     dtype,
     seed,
+    profile=False,
 ):
     if seed is not None:
         torch.random.manual_seed(seed)
@@ -106,7 +96,12 @@ def test_flash_attn_output(
         requires_grad=True,
     )
 
-    out = run_ck(q, k, v)
+    attention = aiter.poyenc_mha_v3_fwd_func
+    if profile:
+        out, time = profile_func(attention, q, k, v)
+        print(f"time: {time}")
+    else:
+        out = attention(q, k, v)
 
     out_ref = run_torch(
         q,
@@ -122,8 +117,9 @@ def test_flash_attn_output(
         reorder_ops=True,
     )
 
-    print(f"Output max diff: {(out - out_ref).abs().max().item()}")
-    print(f"Output Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
+    if not profile:
+        print(f"Output max diff: {(out - out_ref).abs().max().item()}")
+        print(f"Output Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
     out_tol = max(2 * (out_pt - out_ref).abs().max().item(), 0.01)
     assert (out - out_ref).abs().max().item() <= out_tol
 

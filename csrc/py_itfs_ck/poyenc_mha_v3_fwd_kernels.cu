@@ -423,10 +423,17 @@ struct BlockFmhaPipelineQRKSVS
             decltype(load_tile(q_dram_window)) q;
             decltype(tile_elementwise_in(q_element_func, q)) q_tile;
             decltype(gemm_0.MakeCBlockTile()) s_acc;
+            decltype(gemm_1.MakeCBlockTile()) o_acc;
+
             decltype(block_tile_reduce<SMPLComputeDataType>(
                 s_acc, sequence<1>{}, f_max, SMPLComputeDataType{0})) m;
             decltype(m) l;
-            decltype(gemm_1.MakeCBlockTile()) o_acc;
+
+            decltype(cast_tile<SMPLComputeDataType>(s_acc)) s;
+            decltype(make_static_distributed_tensor<SMPLComputeDataType>(
+                s.get_tile_distribution())) p_compute;
+            decltype(cast_tile<PDataType>(
+                tile_elementwise_in(p_compute_element_func, p_compute))) p;
         } metadata;
 
         metadata.q = load_tile(q_dram_window);
@@ -535,6 +542,21 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
+        auto run_gemm0 = [&] {
+            gemm_0(metadata.s_acc,
+                   get_slice_tile(metadata.q_tile,
+                                  sequence<0, (k0_loops - 1) * kK0>{},
+                                  sequence<kM0, k0_loops * kK0>{}),
+                   k_lds_window);
+        };
+
+        auto run_gemm1 = [&] {
+            gemm_1(metadata.o_acc,
+                   get_slice_tile(
+                       metadata.p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
+                   v_lds_window);
+        };
+
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);
         do
@@ -548,13 +570,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (2) mfma + softmax =============================================
-            {
-                gemm_0(metadata.s_acc,
-                       get_slice_tile(metadata.q_tile,
-                                      sequence<0, (k0_loops - 1) * kK0>{},
-                                      sequence<kM0, k0_loops * kK0>{}),
-                       k_lds_window);
-            }
+            run_gemm0();
 
             __builtin_amdgcn_sched_group_barrier(0x100, 2, 0); // DS read
             __builtin_amdgcn_sched_group_barrier(0x008, 2, 0); // MFMA
@@ -599,9 +615,9 @@ struct BlockFmhaPipelineQRKSVS
                 }
             }
 
-            const auto s = cast_tile<SMPLComputeDataType>(metadata.s_acc); // S{j}
+            metadata.s   = cast_tile<SMPLComputeDataType>(metadata.s_acc); // S{j}
             auto m_local = block_tile_reduce<SMPLComputeDataType>(
-                s,
+                metadata.s,
                 sequence<1>{},
                 f_max,
                 -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
@@ -613,9 +629,6 @@ struct BlockFmhaPipelineQRKSVS
                                    m_old,
                                    m_local); // m{j}
 
-            auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
-                s.get_tile_distribution()); // Pcompute{j}
-
             static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
                 /// NOTICE: bias might be materialized mask including -inf values, need
                 /// consideration
@@ -624,7 +637,7 @@ struct BlockFmhaPipelineQRKSVS
                 }
             };
 
-            constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
+            constexpr auto p_spans = decltype(metadata.p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
@@ -633,9 +646,10 @@ struct BlockFmhaPipelineQRKSVS
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-                    p_compute(i_j_idx) = ck_tile::exp2(scale_s * s[i_j_idx] - row_max);
+                    metadata.p_compute(i_j_idx) =
+                        ck_tile::exp2(scale_s * metadata.s[i_j_idx] - row_max);
 #else
-                    p_compute(i_j_idx) = exp(s[i_j_idx] - get_validated_m(metadata.m[i_idx]));
+                    metadata.p_compute(i_j_idx) = exp(metadata.s[i_j_idx] - get_validated_m(metadata.m[i_idx]));
 #endif
                 });
             });
@@ -650,12 +664,15 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (4) softmax + mfma =============================================
-            const auto p =
-                cast_tile<PDataType>(tile_elementwise_in(p_compute_element_func, p_compute));
+            metadata.p = cast_tile<PDataType>(
+                tile_elementwise_in(p_compute_element_func, metadata.p_compute));
             __builtin_amdgcn_sched_barrier(0);
 
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
-                p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0}); // rowsum(Pcompute{j})
+                metadata.p_compute,
+                sequence<1>{},
+                f_sum,
+                SMPLComputeDataType{0}); // rowsum(Pcompute{j})
 
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
             // l{j}, Oacc{j}
@@ -680,11 +697,7 @@ struct BlockFmhaPipelineQRKSVS
                 });
             });
 
-            {
-                gemm_1(metadata.o_acc,
-                       get_slice_tile(p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
-                       v_lds_window);
-            }
+            run_gemm1();
 
             // move K tile windows
             move_tile_window(k_dram_block_window, {kN0, 0});

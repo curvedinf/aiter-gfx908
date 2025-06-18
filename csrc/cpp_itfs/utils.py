@@ -56,6 +56,7 @@ def get_hip_version():
 
 def validate_and_update_archs():
     archs = GPU_ARCH.split(";")
+    archs = [arch.strip() for arch in archs]
     # List of allowed architectures
     allowed_archs = ["native", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx1100"]
 

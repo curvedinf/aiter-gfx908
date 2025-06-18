@@ -10,10 +10,12 @@ from aiter.ops.shuffle import shuffle_weight
 import random
 import itertools
 import argparse
+import pandas as pd
 
 torch.set_default_device("cuda")
 torch.set_printoptions(sci_mode=False)
 SCALE_GROUP_SIZE = 32
+pd.set_option("display.max_columns", 200)
 
 
 @perftest(num_iters=5)
@@ -65,7 +67,7 @@ def run_gemm_asm(
 
 
 @benchmark()
-def test_gemm(dtype, M, N, K, bshuffle):
+def test_gemm(dtype, M, N, K):
     from aiter.jit.utils.chip_info import get_gfx
 
     if get_gfx() not in ["gfx950"]:
@@ -77,8 +79,7 @@ def test_gemm(dtype, M, N, K, bshuffle):
     _, w_scales = quant_func(w, shuffle=False)
     x, x_scales_shuffle = quant_func(x, shuffle=True)
     w, w_scales_shuffle = quant_func(w, shuffle=True)
-    if bshuffle:
-        wshuffle = shuffle_weight(w, layout=(16, 16))
+    wshuffle = shuffle_weight(w, layout=(16, 16))
     out1 = torch.empty(M, N, dtype=dtype)
     out2 = torch.empty((M + 255) // 256 * 256, N, dtype=dtype)
     out3 = torch.empty((M + 255) // 256 * 256, N, dtype=dtype)
@@ -88,46 +89,59 @@ def test_gemm(dtype, M, N, K, bshuffle):
 
     a, avg_a = run_torch(x, w, x_scales, w_scales, dtype)
     b, avg_b = run_triton(x, w.T, x_scales, w_scales, out1, dtype)
-    # b, avg_b = a, 0
-    err0 = checkAllclose(a, b, msg="triton")
+
+    err0 = checkAllclose(a, b, msg="triton        ")
     avg_c = None
     tflops_c = None
     tbs_c = None
-    if bshuffle:
-        w = wshuffle
     c, avg_c = run_gemm_asm(
-        x, w, x_scales_shuffle, w_scales_shuffle, out2, bias_f32, bpreshuffle=bshuffle
+        x,
+        wshuffle,
+        x_scales_shuffle,
+        w_scales_shuffle,
+        out2,
+        bias_f32,
+        bpreshuffle=True,
     )
-    err1 = checkAllclose(a, c[:M], msg="asm   ")
+    err1 = checkAllclose(a, c[:M], msg="asm_bshuffle  ")
     tflops_c = M * N * K * 2 / avg_c / 1e6
     tbs_c = (x.nbytes + w.nbytes) / avg_c / 1e6
+
+    avg_c2 = None
+    tflops_c2 = None
+    tbs_c2 = None
+    c2, avg_c2 = run_gemm_asm(
+        x, w, x_scales_shuffle, w_scales_shuffle, out2, bias_f32, bpreshuffle=False
+    )
+    err1_ = checkAllclose(a, c2[:M], msg="asm_NObshuffle ")
+    tflops_c2 = M * N * K * 2 / avg_c2 / 1e6
+    tbs_c2 = (x.nbytes + w.nbytes) / avg_c2 / 1e6
 
     avg_d = None
     tflops_d = None
     tbs_d = None
-    if not bshuffle:
-        wshuffle = shuffle_weight(w, layout=(16, 16))
-        w = wshuffle
-    d, avg_d = run_gemm_ck(x, w, x_scales_shuffle, w_scales_shuffle, out3)
-    err2 = checkAllclose(a, d[:M], msg="ck   ")
+    d, avg_d = run_gemm_ck(x, wshuffle, x_scales_shuffle, w_scales_shuffle, out3)
+    err2 = checkAllclose(a, d[:M], msg="ck            ")
     tflops_d = M * N * K * 2 / avg_d / 1e6
     tbs_d = (x.nbytes + w.nbytes) / avg_d / 1e6
 
     return {
         "triton": avg_b,
-        "asm": avg_c,
+        "asm bpreshuffle": avg_c,
+        "asm no bpreshuffle": avg_c2,
         "ck": avg_d,
         "triton err": err0,
-        "asm err": err1,
+        "asm bpreshuffle err": err1,
+        "asm no bpreshuffle err": err1_,
         "ck err": err2,
-        "asm TFLPOS": tflops_c,
+        "asm bpreshuffle TFLPOS": tflops_c,
+        "asm no bpreshuffle TFLPOS": tflops_c2,
         "ck TFLPOS": tflops_d,
-        "asm TB/s": tbs_c,
+        "asm bpreshuffle TB/s": tbs_c,
+        "asm no bpreshuffle TB/s": tbs_c2,
         "ck TB/s": tbs_d,
     }
 
-
-import pandas as pd
 
 l_dtype = ["bf16"]
 l_mnk = [
@@ -181,8 +195,12 @@ l_mnk = [
     (4096, 8192, 1024),
     (8192, 8192, 1024),
     (16384, 8192, 1024),
+    # for asm
+    (16384, 16384, 16384),
+    (32768, 32768, 32768),
+    (51200, 18432, 16384),
+    (51200, 16384, 16384),
 ]
-l_bpreshuffle = [False, True][:]
 
 parser = argparse.ArgumentParser(description="config input of test")
 parser.add_argument(
@@ -217,8 +235,7 @@ if args.shape is not None:
 df = []
 for dtype in l_dtype:
     for m, n, k in l_mnk:
-        for bshuffle in l_bpreshuffle:
-            ret = test_gemm(dtype, m, n, k, bshuffle)
-            df.append(ret)
+        ret = test_gemm(dtype, m, n, k)
+        df.append(ret)
 df = pd.DataFrame(df)
 aiter.logger.info(f"summary:\n{df}")

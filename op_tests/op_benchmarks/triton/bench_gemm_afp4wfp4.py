@@ -10,6 +10,9 @@ from aiter.ops.triton.gemm_afp4wfp4 import (
 from op_tests.triton_tests.test_gemm_afp4wfp4 import generate_gemm_afp4wfp4_inputs
 from utils.benchmark_utils import get_model_configs, get_available_models, print_vgpr
 
+import json
+import functools
+
 TRITON_HIP_PRESHUFFLE_SCALES = (
     os.environ.get("TRITON_HIP_PRESHUFFLE_SCALES", "0") == "1"
 )
@@ -48,6 +51,31 @@ def get_x_vals():
     ]
     return x_vals
 
+@functools.lru_cache(maxsize=1024)
+def _get_config(
+    fpath: str,
+    M: int,
+):
+    with open(fpath, "r") as file:
+        config = json.load(file)
+    _get_config._config_dict = config
+
+    if M < 32:
+        return _get_config._config_dict["small"]
+    elif M <= 128:
+        BLK_M = triton.next_power_of_2(M)
+        if BLK_M == 32:
+            return _get_config._config_dict["medium_M32"]
+        elif BLK_M == 64:
+            return _get_config._config_dict["medium_M64"]
+        elif BLK_M == 128:
+            return _get_config._config_dict["medium_M128"]
+    elif M <= 256:
+        return _get_config._config_dict["large"]
+    else:
+        return _get_config._config_dict["xlarge"]
+
+
 
 def run_benchmark(args):
     assert not (args.shape and args.model) or not (
@@ -85,8 +113,15 @@ def run_benchmark(args):
         args={"metric": args.metric},
     )
 
+    
+    
+
     @triton.testing.perf_report([benchmark])
     def bench_gemm_afp4wfp4_blockscale(M, N, K, metric, provider):
+        config=None
+        if args.config_file:
+            config = _get_config(args.config_file, M)
+        
         c_dtype = torch.bfloat16
         x, w, _, _, x_scale, w_scale, _, _ = generate_gemm_afp4wfp4_inputs(
             M, N, K, c_dtype
@@ -106,14 +141,14 @@ def run_benchmark(args):
         if TRITON_HIP_PRESHUFFLE_SCALES:
             ms = triton.testing.do_bench(
                 lambda: gemm_afp4wfp4_preshuffled_scales(
-                    x, w, x_scale, w_scale, c_dtype, out
+                    x, w, x_scale, w_scale, c_dtype, out, config=config
                 ),
                 warmup=25,
                 rep=100,
             )
         else:
             ms = triton.testing.do_bench(
-                lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
+                lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out, config=config),
                 warmup=25,
                 rep=100,
             )
@@ -178,6 +213,14 @@ def parse_args():
         action="store_true",
         help="Print VGPR usage for Triton kernels.",
     )
+
+    parser.add_argument(
+        "--config_file",
+        type=str,
+        default=None,
+        help="config json file determining block_sizes.",
+    )
+
 
     args = parser.parse_args()
     return args

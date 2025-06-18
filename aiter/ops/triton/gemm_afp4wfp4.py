@@ -8,7 +8,7 @@ import os
 import torch
 import triton
 import triton.language as tl
-from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd_chunked
+from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd_chunked, remap_xcd
 import aiter.ops.triton.utils.arch_info as arch_info
 from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
 
@@ -493,6 +493,7 @@ def gemm_afp4wfp4(
 
     if y is None:
         y = torch.empty((M, N), dtype=dtype, device=x.device)
+
 
     if config is None:
         config = _get_config(M, N, K)

@@ -532,8 +532,7 @@
           py::arg("w1_scale")       = std::nullopt,  \
           py::arg("a1_scale")       = std::nullopt,  \
           py::arg("block_m")        = 32,            \
-          py::arg("sorted_weights") = std::nullopt,  \
-          py::arg("pipe_ver") = 1);                  \
+          py::arg("sorted_weights") = std::nullopt); \
                                                      \
     m.def("ck_moe_stage2",                           \
           &ck_moe_stage2,                            \
@@ -549,8 +548,7 @@
           py::arg("w2_scale")       = std::nullopt,  \
           py::arg("a2_scale")       = std::nullopt,  \
           py::arg("block_m")        = 32,            \
-          py::arg("sorted_weights") = std::nullopt,  \
-          py::arg("pipe_ver") = 1);                  \
+          py::arg("sorted_weights") = std::nullopt); \
                                                   
 #define MHA_VARLEN_FWD_PYBIND                        \
       m.def("mha_varlen_fwd",                        \

@@ -87,8 +87,8 @@ def test_gemm(dtype, M, N, K, bshuffle):
     w_scales = w_scales.view(torch.uint8)
 
     a, avg_a = run_torch(x, w, x_scales, w_scales, dtype)
-    # b, avg_b = run_triton(x, w.T, x_scales, w_scales, out1, dtype)
-    b, avg_b = a, 0
+    b, avg_b = run_triton(x, w.T, x_scales, w_scales, out1, dtype)
+    # b, avg_b = a, 0
     err0 = checkAllclose(a, b, msg="triton")
     avg_c = None
     tflops_c = None

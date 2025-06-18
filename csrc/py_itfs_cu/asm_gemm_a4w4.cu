@@ -111,15 +111,12 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     static AiterAsmKernel noSplitK_bpreshuffle_impl(
         "_ZN5aiter45f4gemm_bf16_per1x32Fp4_tn_bpreshuffle_256x256E",
         "f4gemm/f4gemm_bf16_per1x32Fp4_tn_bpreshuffle_256x256.co");
-    AiterAsmKernel* impl_ptr = &noSplitK_impl;
+    AiterAsmKernel* impl_ptr = &noSplitK_bpreshuffle_impl;
     // if (ks > 0)
     //     impl_ptr = &splitK_impl;
-    if(bpreshuffle == true)
+    if(bpreshuffle == false)
     {
-        gdx          = tg_group_size;
-        int num_tg_n = (Ndim + SUBN - 1) / SUBN;
-        gdz          = (num_tg_n + tg_group_size - 1) / tg_group_size;
-        impl_ptr     = &noSplitK_bpreshuffle_impl;
+        impl_ptr = &noSplitK_impl;
     }
 
     impl_ptr->launch_kernel({&args,

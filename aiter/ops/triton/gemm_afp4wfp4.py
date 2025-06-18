@@ -504,6 +504,13 @@ def gemm_afp4wfp4(
     if config is None:
         config = _get_config(M, N, K)
     # print(f"AFP4WFP4_config={config}")
+    config["BLOCK_SIZE_M"] = 16
+    config["BLOCK_SIZE_N"] = 128
+    config["BLOCK_SIZE_K"] = 512
+    config["GROUP_SIZE_M"] = 1
+    config["num_warps"] = 2
+    config["num_stages"] = 4
+    config["NUM_KSPLIT"] = 1
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
@@ -624,6 +631,16 @@ def gemm_afp4wfp4_preshuffled_scales(
     if config is None:
         config = _get_config(M, N, K)
     # print(f"AFP4WFP4_config={config}")
+    config["BLOCK_SIZE_M"] = 128
+    config["BLOCK_SIZE_N"] = 512
+    config["BLOCK_SIZE_K"] = 256
+    config["GROUP_SIZE_M"] = 1
+    config["num_warps"] = 4
+    config["num_stages"] = 2
+    config["waves_per_eu"] = 1
+    #config["NUM_KSPLIT"] = 1
+    #config["SPLITK_BLOCK_SIZE"] = 4096
+
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]

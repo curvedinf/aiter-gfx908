@@ -403,16 +403,16 @@ struct BlockFmhaPipelineQRKSVS
         const index_t warp_group_id = get_warp_id() / 4;
 
         // K tile in LDS
-        const auto* k_lds_ptr = reinterpret_cast<const KDataType*>(smem_ptr);
-        auto k_lds            = make_tensor_view<address_space_enum::lds>(
+        auto* k_lds_ptr = reinterpret_cast<KDataType*>(static_cast<char*>(smem_ptr) + 0);
+        auto k_lds      = make_tensor_view<address_space_enum::lds>(
             k_lds_ptr, Policy::template MakeKLdsBlockDescriptor<Problem>());
         auto k_lds_window = make_tile_window(
             k_lds, Policy::template MakeKLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
 
         // V tile in LDS
-        const auto* v_lds_ptr = reinterpret_cast<const VDataType*>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeKV<Problem>());
-        auto v_lds = make_tensor_view<address_space_enum::lds>(
+        auto* v_lds_ptr = reinterpret_cast<VDataType*>(static_cast<char*>(smem_ptr) +
+                                                       Policy::template GetSmemSizeKV<Problem>());
+        auto v_lds      = make_tensor_view<address_space_enum::lds>(
             v_lds_ptr, Policy::template MakeVLdsBlockDescriptor<Problem>());
         auto v_lds_window = make_tile_window(
             v_lds, Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
@@ -421,9 +421,7 @@ struct BlockFmhaPipelineQRKSVS
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetKVBlockGemm<Problem>();
 
-        auto q_dram_window = make_tile_window(q_dram_block_window_tmp.get_bottom_tensor_view(),
-                                              q_dram_block_window_tmp.get_window_lengths(),
-                                              q_dram_block_window_tmp.get_window_origin(),
+        auto q_dram_window = make_tile_window(q_dram_block_window_tmp,
                                               Policy::template MakeQRegTileDistribution<Problem>());
 
         // reduction function for softmax
@@ -432,8 +430,8 @@ struct BlockFmhaPipelineQRKSVS
 
         struct Metadata
         {
-            decltype(load_tile(q_dram_window)) q;
-            decltype(tile_elementwise_in(q_element_func, q)) q_tile;
+            decltype(make_static_distributed_tensor<QDataType>(
+                Policy::template MakeQRegTileDistribution<Problem>())) q_tile;
             decltype(gemm_0.MakeCBlockTile()) s_acc;
             decltype(gemm_1.MakeCBlockTile()) o_acc;
 
@@ -448,8 +446,6 @@ struct BlockFmhaPipelineQRKSVS
             decltype(cast_tile<PDataType>(
                 tile_elementwise_in(p_compute_element_func, p_compute))) p;
         } metadata;
-
-        metadata.q = load_tile(q_dram_window);
 
         clear_tile(metadata.o_acc);
         set_tile(metadata.m, -numeric<SMPLComputeDataType>::infinity());
@@ -503,21 +499,20 @@ struct BlockFmhaPipelineQRKSVS
                              {0, seqlen_k_start}, // TODO: hdim split?
                              Policy::template MakeVDramTileDistribution<Problem>());
 
-        metadata.q_tile = tile_elementwise_in(q_element_func, metadata.q);
-
         // prefetch K tile
         index_t i_total_loops      = 0;
         constexpr index_t k0_loops = kQKHeaddim / kK0;
         constexpr index_t k1_loops = kN0 / kK1;
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
-        if constexpr(NumWarpGroups == 2)
-        {
-            if(warp_group_id == 1)
-            {
-                __builtin_amdgcn_s_barrier();
-            }
-        }
+
+        auto global_load_q = [&] {
+            /// TODO: use shared memory to speed-up reading
+            auto origin_q      = load_tile(q_dram_window);
+            auto transformed_q = tile_elementwise_in(q_element_func, origin_q);
+
+            metadata.q_tile = transformed_q;
+        };
 
         auto global_load_and_local_store_k = [&] {
             auto k_dram_window = make_tile_window(
@@ -581,6 +576,16 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         InstructionScheduler<Problem> scheduler;
+
+        global_load_q();
+
+        if constexpr(NumWarpGroups == 2)
+        {
+            if(warp_group_id == 1)
+            {
+                __builtin_amdgcn_s_barrier();
+            }
+        }
 
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);

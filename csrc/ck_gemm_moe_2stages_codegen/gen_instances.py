@@ -55,7 +55,7 @@ MoeKernel moe_stage1_heuristic_dispatch(int block_m)
     }}
     else if (block_m == 128)
     {{
-        return ck_moe_stage1_gemm<{A0DataType}, {B0DataType}, {AccDataType}, {EDataType}, {CDEElementOp}, V1, 256, 128, 64, 128/sizeof({A0DataType}), 2, 2, {Nswizzle}, {PerTensorQuant}, {MulRoutedWeight}, {ActOP}>;
+        return ck_moe_stage1_gemm<{A0DataType}, {B0DataType}, {AccDataType}, {EDataType}, {CDEElementOp}, V1, 256, 128, 64, 128/sizeof({A0DataType}), 1, 4, {Nswizzle}, {PerTensorQuant}, {MulRoutedWeight}, {ActOP}>;
     }}
     else
     {{
@@ -157,7 +157,7 @@ MoeKernel moe_stage2_heuristic_dispatch(int block_m)
     }}
     else if (block_m == 128)
     {{
-        return ck_moe_stage2_gemm<{A0DataType}, {B0DataType}, {AccDataType}, {EDataType}, {CDEElementOp}, V1, 256, 128, 128, 128/sizeof({A0DataType}), 2, 2, {Nswizzle}, {PerTensorQuant}, {MulRoutedWeight}, {ActOP}>;
+        return ck_moe_stage2_gemm<{A0DataType}, {B0DataType}, {AccDataType}, {EDataType}, {CDEElementOp}, V1, 256, 128, 128, 128/sizeof({A0DataType}), 1, 4, {Nswizzle}, {PerTensorQuant}, {MulRoutedWeight}, {ActOP}>;
     }}
     else
     {{
@@ -311,7 +311,6 @@ class ck_moe_2stage_gemm_codegen:
                 )
                 if os.path.exists(f_instance):
                     os.remove(f_instance)
-                print(f"{self.a_dtype=}")
                 if "per_128x128" in self.quant_type:
                     quanttype = "_blockscale"
                 elif "FP4" in self.a_dtype:

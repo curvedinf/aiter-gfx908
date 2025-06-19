@@ -447,6 +447,13 @@ struct BlockFmhaPipelineQRKSVS
                 tile_elementwise_in(p_compute_element_func, p_compute))) p;
         } metadata;
 
+        {
+            auto origin_q      = load_tile(q_dram_window);
+            auto transformed_q = tile_elementwise_in(q_element_func, origin_q);
+
+            metadata.q_tile = transformed_q;
+        }
+
         clear_tile(metadata.o_acc);
         set_tile(metadata.m, -numeric<SMPLComputeDataType>::infinity());
         clear_tile(metadata.l);
@@ -506,15 +513,7 @@ struct BlockFmhaPipelineQRKSVS
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
-        auto global_load_q = [&] {
-            /// TODO: use shared memory to speed-up reading
-            auto origin_q      = load_tile(q_dram_window);
-            auto transformed_q = tile_elementwise_in(q_element_func, origin_q);
-
-            metadata.q_tile = transformed_q;
-        };
-
-        auto global_load_and_local_store_k = [&] {
+        auto mem_load_k = [&] {
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
@@ -525,7 +524,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
-        auto global_load_and_local_store_v = [&] {
+        auto mem_load_v = [&] {
             const auto v_prefetch = load_tile(v_dram_window);
             __builtin_amdgcn_sched_barrier(0);
 
@@ -577,8 +576,6 @@ struct BlockFmhaPipelineQRKSVS
 
         InstructionScheduler<Problem> scheduler;
 
-        global_load_q();
-
         if constexpr(NumWarpGroups == 2)
         {
             if(warp_group_id == 1)
@@ -594,7 +591,7 @@ struct BlockFmhaPipelineQRKSVS
             clear_tile(metadata.s_acc); // initialize C
 
             // (1) load & store K =============================================
-            global_load_and_local_store_k();
+            mem_load_k();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -660,7 +657,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (3) load & store V =============================================
-            global_load_and_local_store_v();
+            mem_load_v();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();

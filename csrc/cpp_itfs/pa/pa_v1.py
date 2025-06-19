@@ -2,7 +2,6 @@ from jinja2 import Template
 from csrc.cpp_itfs.utils import compile_template_op, AITER_CORE_DIR
 import ctypes
 import math
-from typing import Optional
 
 MD_NAME = "pa_v1"
 
@@ -53,23 +52,23 @@ def compile(
 
 
 def paged_attention_v1(
-    out: "torch.Tensor",
-    workspace_buffer: "torch.Tensor",
-    query: "torch.Tensor",
-    key_cache: "torch.Tensor",
-    value_cache: "torch.Tensor",
+    out,
+    workspace_buffer,
+    query,
+    key_cache,
+    value_cache,
     scale: float,
-    block_tables: "torch.Tensor",
-    cu_query_lens: Optional["torch.Tensor"],
-    context_lens: "torch.Tensor",
+    block_tables,
+    cu_query_lens,
+    context_lens,
     max_context_len: int,
-    alibi_slopes: Optional["torch.Tensor"],
+    alibi_slopes,
     kv_cache_dtype: str,
     kv_cache_layout: str,
     logits_soft_cap: float,
-    k_scale: "torch.Tensor",
-    v_scale: "torch.Tensor",
-    fp8_out_scale: Optional["torch.Tensor"] = None,
+    k_scale,
+    v_scale,
+    fp8_out_scale=None,
     partition_size: int = 256,
     mtp: int = 1,
 ):

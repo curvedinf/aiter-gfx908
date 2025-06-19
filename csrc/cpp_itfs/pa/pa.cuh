@@ -23,8 +23,9 @@
 #include "float.h"
 #include <algorithm>
 #include "dtype_fp8.cuh"
-#include "pa_quant_utils.cuh"
+#include "quant_utils.cuh"
 #include <limits>
+
 
 #if defined(__HIPCC__) && \
     (defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__))
@@ -46,10 +47,6 @@
 
 #if defined(__HIP__GFX9__)
 
-  #define GCN_MFMA_INSTR1 __builtin_amdgcn_mfma_f32_16x16x4f32
-  #define GCN_MFMA_INSTR __builtin_amdgcn_mfma_f32_4x4x4f16
-
-
 using floatx4 = __attribute__((__vector_size__(4 * sizeof(float)))) float;
 using float16x4 =
     __attribute__((__vector_size__(4 * sizeof(_Float16)))) _Float16;
@@ -61,7 +58,6 @@ typedef struct _Half8 {
   _Half4 xy[2];
 } _Half8;
 
-using bit16_t = uint16_t;
 using bit16x4 = __attribute__((__vector_size__(4 * sizeof(uint16_t)))) uint16_t;
 typedef bit16x4 _B16x4;
 typedef struct _B16x8 {
@@ -76,6 +72,23 @@ typedef struct _B8x16 {
   _B8x8 xy[2];
 } _B8x16;
 
+////// Non temporal loads ///////
+template <typename T>
+__device__ __forceinline__ T loadnt(T* addr)
+{
+    return __builtin_nontemporal_load(addr);
+}
+
+__device__ __forceinline__ _B16x8 load_ntmprl_16Byte(const _B16x8* addr)
+{
+    auto addr_alias = reinterpret_cast<const float*>(addr);
+    auto dat0       = loadnt(addr_alias);
+    auto dat1       = loadnt(addr_alias + 1);
+    auto dat2       = loadnt(addr_alias + 2);
+    auto dat3       = loadnt(addr_alias + 3);
+    auto res        = make_float4(dat0, dat1, dat2, dat3);
+    return *reinterpret_cast<_B16x8*>(&res);
+}
 
 #if defined(__gfx950__)
 template <typename T, int absz, int cbid, int blgp>
@@ -140,11 +153,6 @@ __device__ __forceinline__ T from_float(const float& inp) {
 
 template <typename T>
 __device__ __forceinline__ _B16x4 from_floatx4(const floatx4& inp) {
-  [[maybe_unused]] union tmpcvt {
-    uint16_t u;
-    _Float16 f;
-    __hip_bfloat16 b;
-  } t16;
   _B16x4 ret;
   if constexpr (std::is_same<T, _Float16>::value) {
     union h2cvt {
@@ -173,11 +181,6 @@ __device__ __forceinline__ _B16x4 from_floatx4(const floatx4& inp) {
 template <typename T>
 __device__ __forceinline__ _B16x4 addx4(const _B16x4& inp1,
                                         const _B16x4& inp2) {
-  [[maybe_unused]] union tmpcvt {
-    uint16_t u;
-    _Float16 f;
-    __hip_bfloat16 b;
-  } t1, t2, res;
   _B16x4 ret;
   if constexpr (std::is_same<T, _Float16>::value) {
     union h2cvt {
@@ -1110,9 +1113,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
     OUTT* out_ptr = out + (query_start_off + mtp) * num_heads * HEAD_SIZE +
                     static_cast<int64_t>(head_idx) * HEAD_SIZE;
     if constexpr (std::is_same<OUTT, bit8_t>::value) {
-      out_ptr[threadIdx.x] =
-          __hip_cvt_float_to_fp8(acc, vllm::fp8::fp8_type::__default_saturation,
-                                vllm::fp8::fp8_type::__default_interpret);
+      out_ptr[threadIdx.x] = hip_fp8(acc).data;
     } else {
       out_ptr[threadIdx.x] = from_float<scalar_t>(acc);
     }

@@ -28,9 +28,9 @@ def compile(
         MD_NAME,
         [
             f"{AITER_CORE_DIR}/csrc/cpp_itfs/utils.h",
-            f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa_quant_utils.cuh",
             f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa.cuh",
             f"{AITER_CORE_DIR}/csrc/include",
+            f"{AITER_CORE_DIR}/csrc/include/ck_tile",
         ],
         [],
         gqa_ratio=gqa_ratio,
@@ -206,6 +206,7 @@ def paged_attention_rocm(
         fp8_out_scale_ptr,
         stream,
     )
+    return out
 
 
 if __name__ == "__main__":

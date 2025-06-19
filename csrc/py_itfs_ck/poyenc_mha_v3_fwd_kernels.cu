@@ -215,6 +215,70 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
     }
 
     template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKRegTileDistribution()
+    {
+        using namespace ck_tile;
+
+        using BlockGemm = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
+
+        return BlockGemm::MakeBBlockTileDistribution();
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetQKBlockGemm()
+    {
+        using namespace ck_tile;
+
+        using GemmProblem =
+            BlockGemmProblem<typename Problem::QDataType,
+                             typename Problem::KDataType,
+                             typename Problem::SaccDataType,
+                             Problem::kNumGemm0Warps * get_warp_size(),
+                             TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
+                                                    Problem::BlockFmhaShape::kN0,
+                                                    Problem::BlockFmhaShape::kK0>,
+                                           typename Problem::BlockFmhaShape::Gemm0BlockWarps,
+                                           typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
+
+        constexpr auto warp_gemm = []() {
+            constexpr index_t WarpGemmM = Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{});
+            static_assert(WarpGemmM == 4 || WarpGemmM == 16 || WarpGemmM == 32);
+
+            if constexpr(std::is_same_v<typename Problem::QDataType, half_t> &&
+                         std::is_same_v<typename Problem::KDataType, half_t> &&
+                         std::is_same_v<typename Problem::SaccDataType, float>)
+            {
+                if constexpr(WarpGemmM == 32)
+                    return WarpGemmMfmaF16F16F32M32N32K16SwizzleBTransposedCDistribution{};
+                else if constexpr(WarpGemmM == 16)
+                    return WarpGemmMfmaF16F16F32M16N16K16TransposedCDistribution{};
+                else // WarpGemmM == 4
+                    return WarpGemmMfmaF16F16F32M4N64K16{};
+            }
+            else if constexpr(std::is_same_v<typename Problem::QDataType, bf16_t> &&
+                              std::is_same_v<typename Problem::KDataType, bf16_t> &&
+                              std::is_same_v<typename Problem::SaccDataType, float>)
+            {
+                if constexpr(WarpGemmM == 32)
+                    return WarpGemmMfmaBf16Bf16F32M32N32K16SwizzleBTransposedCDistribution{};
+                else if constexpr(WarpGemmM == 16)
+                    return WarpGemmMfmaBf16Bf16F32M16N16K16TransposedCDistribution{};
+                else // WarpGemmM == 4
+                    return WarpGemmMfmaBf16Bf16F32M4N64K16{};
+            }
+        }();
+
+        using BlockGemmPolicy =
+            BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::QDataType,
+                                                typename Problem::KDataType,
+                                                typename Problem::SaccDataType,
+                                                typename Problem::BlockFmhaShape::Gemm0BlockWarps,
+                                                decltype(warp_gemm)>;
+
+        return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy>{};
+    }
+
+    template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         return 2 * GetSmemSizeKV<Problem>();
@@ -550,11 +614,17 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto run_gemm0 = [&] {
+            auto k_lds_window_for_load = make_tile_window(
+                k_lds_window, Policy::template MakeKRegTileDistribution<Problem>());
+
+            auto k_tile = load_tile(k_lds_window_for_load);
             gemm_0(metadata.s_acc,
                    get_slice_tile(metadata.q_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
                                   sequence<kM0, k0_loops * kK0>{}),
-                   k_lds_window);
+                   get_slice_tile(k_tile,
+                                  sequence<0, (k0_loops - 1) * kK0>{},
+                                  sequence<kN0, k0_loops * kK0>{}));
         };
 
         auto run_gemm1 = [&] {

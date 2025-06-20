@@ -12,6 +12,9 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qx_ks_vs_custom_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
+#include "block_gemm_areg_bsmem_creg_v2.hpp"
+#include "block_gemm_areg_bsmem_creg_v2_custom_policy.hpp"
+
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -276,6 +279,57 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
                                                 decltype(warp_gemm)>;
 
         return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy>{};
+    }
+
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto GetKVBlockGemm()
+    {
+        using namespace ck_tile;
+
+        using GemmProblem =
+            BlockGemmProblem<typename Problem::PDataType,
+                             typename Problem::VDataType,
+                             typename Problem::OaccDataType,
+                             Problem::kNumGemm1Warps * get_warp_size(),
+                             TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
+                                                    Problem::BlockFmhaShape::kN1,
+                                                    Problem::BlockFmhaShape::kK1>,
+                                           typename Problem::BlockFmhaShape::Gemm1BlockWarps,
+                                           typename Problem::BlockFmhaShape::Gemm1WarpTile>>;
+
+        auto warp_gemm = [&]() {
+            if constexpr(std::is_same_v<typename Problem::KDataType, fp8_t> &&
+                         std::is_same_v<typename Problem::VDataType, fp8_t> &&
+                         std::is_same_v<typename Problem::OaccDataType, float>)
+            {
+                return WarpGemmMfmaFp8Fp8F32M32N32K16SwizzleBTransposedCDistribution<>{};
+                // return
+                // WarpGemmImpl<WarpGemmAtrributeMfmaTransposedCDistribution_SwizzleB<
+                //         WarpGemmAttributeMfmaImpl_f32_32x32x16_f8_base<typename
+                //         Problem::PDataType, typename Problem::VDataType>>>{};
+            }
+            else
+            {
+                return WarpGemmMfmaDispatcher<
+                    typename Problem::PDataType,
+                    typename Problem::VDataType,
+                    typename Problem::OaccDataType,
+                    Problem::BlockFmhaShape::Gemm1WarpTile::at(number<0>{}),
+                    Problem::BlockFmhaShape::Gemm1WarpTile::at(number<1>{}),
+                    Problem::BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
+                    true>{};
+            }
+        }();
+
+        using WarpGemm = remove_cvref_t<decltype(warp_gemm)>;
+
+        using BlockGemmPolicy = aiter::BlockGemmARegBSmemCRegV2CustomPolicy<
+            typename Problem::PDataType,
+            typename Problem::VDataType,
+            typename Problem::OaccDataType,
+            typename Problem::BlockFmhaShape::Gemm1BlockWarps,
+            WarpGemm>;
+        return aiter::BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
     }
 
     template <typename Problem>

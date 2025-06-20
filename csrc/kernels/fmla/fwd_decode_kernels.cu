@@ -2116,7 +2116,7 @@ void dispatch_fmla_fwd_splictkv(
                         toString((TYPE)), ".");         \
     }
 
-std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
+std::vector<torch::Tensor> flash_mla_fwd_decode_with_kvcache_impl(
     torch::Tensor& query,
     const torch::Tensor& key_cache,
     const torch::Tensor& value_cache,

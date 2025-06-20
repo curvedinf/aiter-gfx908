@@ -296,16 +296,22 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
 
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
+        rep_m: tl.constexpr = BLOCK_SIZE_M // 32
+        rep_n: tl.constexpr = BLOCK_SIZE_N // 32
+        rep_k: tl.constexpr = BLOCK_SIZE_K // SCALE_GROUP_SIZE // 8
+
         for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
             a_scales = tl.load(a_scale_ptrs)
             b_scales = tl.load(b_scale_ptrs, cache_modifier=cache_modifier)
             if BLOCK_SIZE_M >= 32:
-                a_scales = tl.reshape(
-                    a_scales, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
-                )
-            b_scales = tl.reshape(
-                b_scales, (BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
-            )
+                #a_scales = tl.reshape(
+                #    a_scales, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+                #)
+                a_scales = a_scales.reshape(rep_m, rep_k, 4, 16, 2, 2, 1).trans(0,1,5,3,4,2,6).reshape(BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+            #b_scales = tl.reshape(
+            #    b_scales, (BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+            #)
+            b_scales = b_scales.reshape(rep_n, rep_k, 4, 16, 2, 2, 1).trans(0,1,5,3,4,2,6).reshape(BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
 
             # a_scales = tl.full((BLOCK_SIZE_M, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)
             # b_scales = tl.full((BLOCK_SIZE_N, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)

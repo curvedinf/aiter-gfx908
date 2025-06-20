@@ -516,7 +516,61 @@ __inline__ __device__ void _paged_attention_kernel(
     constexpr int ELEMS8_ELEMS4_RATIO  = 8 / 4;
     constexpr int ELEMS16_ELEMS8_RATIO = 16 / 8;
 
+    for (int mtp = 0; mtp < mtp_loop; mtp++) {
+        for(int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
+
+            for(int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++)
+            {
+                // 1. store data into LDS
+                for(int vblock_depth = 0; vblock_depth < VBLOCKS_PER_LANE; vblock_depth++)
+                {
+                    const int vlds_col_idx = laneid % n_thread_per_block;
+                    const int vlocal_token_idx =
+                        vblock_depth * k_thread_per_block + threadIdx.x / n_thread_per_block;
+                    *reinterpret_cast<_B16x8*>(vlds_ptr +
+                                            (/*row=*/vlocal_token_idx * n_thread_per_block +
+                                                /*col=*/vlds_col_idx) *
+                                                16) = Vlocal[vtoken_depth][vhe_depth][vblock_depth];
+                }
+                __syncthreads();
+
+                // 2. load data from LDS (transposed), then do multification
+                if constexpr(KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto)
+                {
+                    for(int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++)
+                    {
+                        {
+                            const int vlocal_head_elem = warpid * 16 + lane16id;
+
+                            const int vlds_col_idx  = vlocal_head_elem / CONTIGUOUS_KV_ELEMS_16B_LOAD;
+                            const int vlds_elem_idx = vlocal_head_elem % CONTIGUOUS_KV_ELEMS_16B_LOAD;
+
+                            const int vlocal_token_idx =
+                                rowid * VTOKENS_PER_LANE + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
+
+                            // read data points individually and save them into array
+                            cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
+                            for(int d2 = 0; d2 < CONTIGUOUS_KV_ELEMS_16B_LOAD; ++d2)
+                            {
+                                const cache_t* fetched_elems = reinterpret_cast<const cache_t*>(
+                                    vlds_ptr + (/*row=*/(vlocal_token_idx + d2) * n_thread_per_block +
+                                                /*col=*/vlds_col_idx) *
+                                                16);
+
+                                elems[d2] = fetched_elems[vlds_elem_idx];
+                            }
+
+                            // copy all the read data points together
+                            Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *reinterpret_cast<const _B16x8*>(elems);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     _B16x4 outelems[GQA_RATIO_LOOP][MTP_PER_THREAD][VHELOOP];
+
     // Softmax V mfma
     // v layout: 16he across lanes x 16 tokens per lane
     for (int mtp = 0; mtp < mtp_loop; mtp++) {
@@ -526,49 +580,10 @@ __inline__ __device__ void _paged_attention_kernel(
 
                 for(int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++)
                 {
-                    // 1. store data into LDS
-                    for(int vblock_depth = 0; vblock_depth < VBLOCKS_PER_LANE; vblock_depth++)
-                    {
-                        const int vlds_col_idx = laneid % n_thread_per_block;
-                        const int vlocal_token_idx =
-                            vblock_depth * k_thread_per_block + threadIdx.x / n_thread_per_block;
-                        *reinterpret_cast<_B16x8*>(vlds_ptr +
-                                                (/*row=*/vlocal_token_idx * n_thread_per_block +
-                                                    /*col=*/vlds_col_idx) *
-                                                    16) = Vlocal[vtoken_depth][vhe_depth][vblock_depth];
-                    }
-                    __syncthreads();
-
-                    // 2. load data from LDS (transposed), then do multification
                     if constexpr(KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto)
                     {
                         for(int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++)
                         {
-                            _B16x8 tmp = {0};
-                            {
-                                const int vlocal_head_elem = warpid * 16 + lane16id;
-
-                                const int vlds_col_idx  = vlocal_head_elem / CONTIGUOUS_KV_ELEMS_16B_LOAD;
-                                const int vlds_elem_idx = vlocal_head_elem % CONTIGUOUS_KV_ELEMS_16B_LOAD;
-
-                                const int vlocal_token_idx =
-                                    rowid * VTOKENS_PER_LANE + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
-
-                                // read data points individually and save them into array
-                                cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
-                                for(int d2 = 0; d2 < CONTIGUOUS_KV_ELEMS_16B_LOAD; ++d2)
-                                {
-                                    const cache_t* fetched_elems = reinterpret_cast<const cache_t*>(
-                                        vlds_ptr + (/*row=*/(vlocal_token_idx + d2) * n_thread_per_block +
-                                                    /*col=*/vlds_col_idx) *
-                                                    16);
-
-                                    elems[d2] = fetched_elems[vlds_elem_idx];
-                                }
-
-                                // copy all the read data points together
-                                tmp = *reinterpret_cast<const _B16x8*>(elems);
-                            }
                             #if defined(__gfx950__)
                             _B16x8 tmp_in;
                             for(int i = 0; i < ELEMS8_ELEMS4_RATIO; i++)
@@ -580,7 +595,7 @@ __inline__ __device__ void _paged_attention_kernel(
                                         tmp_in.xy[i] = shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1];
                             }
                             tmp_out = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
-                                        tmp,
+                                        Vlocal[vtoken_depth][vhe_depth][vfetch_depth],
                                         tmp_in,
                                         tmp_out);
                             #else          
@@ -592,7 +607,7 @@ __inline__ __device__ void _paged_attention_kernel(
                                 // output format is 16 qheads across 16 lanes, 16 head elems spread
                                 // across 4 rows
                                 tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
-                                    tmp.xy[i],
+                                    Vlocal[vtoken_depth][vhe_depth][vfetch_depth].xy[i],
                                     shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1],
                                     tmp_out);
                             }
@@ -652,7 +667,6 @@ __inline__ __device__ void _paged_attention_kernel(
                 {
                     tmp_out *= *v_scale_ptr;
                 }
-                // apply post Softmax V mfma v_scale
                 outelems[gqa_ratio_loop][mtp][vhe_depth] = from_floatx4<scalar_t>(tmp_out);
             }
         }

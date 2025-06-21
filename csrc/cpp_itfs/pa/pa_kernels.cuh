@@ -160,11 +160,11 @@ __inline__ __device__ void _paged_attention_kernel(
                         shared_logits[gqa_ratio_loop][head_loop][mtp][offset1][lane4id][local_qhead_idx][1] = tmp.xy[1];
                     } else {
                         for (int i = 0; i < 2; i++) {
-                        const int head_elem = lane16id * 2 + i;  // element id in _B16x4 terms
-                        const int offset3 = head_elem % 4;
-                        const int offset2 = (head_elem / 4) % 4;
-                        const int offset1 = head_elem / 4 / 4;
-                        shared_logits[gqa_ratio_loop][head_loop][mtp][offset1][offset2][local_qhead_idx][offset3] = tmp.xy[i];
+                            const int head_elem = lane16id * 2 + i;  // element id in _B16x4 terms
+                            const int offset3 = head_elem % 4;
+                            const int offset2 = (head_elem / 4) % 4;
+                            const int offset1 = head_elem / 4 / 4;
+                            shared_logits[gqa_ratio_loop][head_loop][mtp][offset1][offset2][local_qhead_idx][offset3] = tmp.xy[i];
                         }
                     }
                 }
@@ -535,35 +535,29 @@ __inline__ __device__ void _paged_attention_kernel(
                 __syncthreads();
 
                 // 2. load data from LDS (transposed), then do multification
-                if constexpr(KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto)
-                {
-                    for(int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++)
+                for(int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++){
+                    const int vlocal_head_elem = warpid * 16 + lane16id;
+
+                    const int vlds_col_idx  = vlocal_head_elem / CONTIGUOUS_KV_ELEMS_16B_LOAD;
+                    const int vlds_elem_idx = vlocal_head_elem % CONTIGUOUS_KV_ELEMS_16B_LOAD;
+
+                    const int vlocal_token_idx =
+                        rowid * VTOKENS_PER_LANE + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
+
+                    // read data points individually and save them into array
+                    cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
+                    for(int d2 = 0; d2 < CONTIGUOUS_KV_ELEMS_16B_LOAD; ++d2)
                     {
-                        {
-                            const int vlocal_head_elem = warpid * 16 + lane16id;
+                        const cache_t* fetched_elems = reinterpret_cast<const cache_t*>(
+                            vlds_ptr + (/*row=*/(vlocal_token_idx + d2) * n_thread_per_block +
+                                        /*col=*/vlds_col_idx) *
+                                        16);
 
-                            const int vlds_col_idx  = vlocal_head_elem / CONTIGUOUS_KV_ELEMS_16B_LOAD;
-                            const int vlds_elem_idx = vlocal_head_elem % CONTIGUOUS_KV_ELEMS_16B_LOAD;
-
-                            const int vlocal_token_idx =
-                                rowid * VTOKENS_PER_LANE + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
-
-                            // read data points individually and save them into array
-                            cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
-                            for(int d2 = 0; d2 < CONTIGUOUS_KV_ELEMS_16B_LOAD; ++d2)
-                            {
-                                const cache_t* fetched_elems = reinterpret_cast<const cache_t*>(
-                                    vlds_ptr + (/*row=*/(vlocal_token_idx + d2) * n_thread_per_block +
-                                                /*col=*/vlds_col_idx) *
-                                                16);
-
-                                elems[d2] = fetched_elems[vlds_elem_idx];
-                            }
-
-                            // copy all the read data points together
-                            Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *reinterpret_cast<const _B16x8*>(elems);
-                        }
+                        elems[d2] = fetched_elems[vlds_elem_idx];
                     }
+
+                    // copy all the read data points together
+                    Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *reinterpret_cast<const _B16x8*>(elems);
                 }
             }
         }
@@ -613,7 +607,6 @@ __inline__ __device__ void _paged_attention_kernel(
                             }
                             #endif
                         }
-                        // KV cache fp8
                     }
                     else
                     {
@@ -631,12 +624,12 @@ __inline__ __device__ void _paged_attention_kernel(
                                 _B16x8 tmp_in;
                                 for(int i = 0; i < ELEMS8_ELEMS4_RATIO; i++)
                                 {
-                                const int offset =
-                                    rowid * ELEMS16_ELEMS8_RATIO * ELEMS8_ELEMS4_RATIO +
-                                    j * ELEMS8_ELEMS4_RATIO + i;
-                                const int offset1 = offset % ROWS_PER_WARP;
-                                const int offset2 = offset / ROWS_PER_WARP;
-                                tmp_in.xy[i] = shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1];
+                                    const int offset =
+                                        rowid * ELEMS16_ELEMS8_RATIO * ELEMS8_ELEMS4_RATIO +
+                                        j * ELEMS8_ELEMS4_RATIO + i;
+                                    const int offset1 = offset % ROWS_PER_WARP;
+                                    const int offset2 = offset / ROWS_PER_WARP;
+                                    tmp_in.xy[i] = shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1];
                                 }
                                 tmp_out = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
                                     Vlocaltmp,
@@ -644,17 +637,17 @@ __inline__ __device__ void _paged_attention_kernel(
                                     tmp_out);
                                 #else
                                 for (int i = 0; i < ELEMS8_ELEMS4_RATIO; i++) {
-                                const int offset =
-                                    rowid * ELEMS16_ELEMS8_RATIO * ELEMS8_ELEMS4_RATIO +
-                                    j * ELEMS8_ELEMS4_RATIO + i;
-                                const int offset1 = offset % ROWS_PER_WARP;
-                                const int offset2 = offset / ROWS_PER_WARP;
-                                // output format is 16 qheads across 16 lanes, 16 head elems
-                                // spread across 4 rows
-                                tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
-                                    Vlocaltmp.xy[i],
-                                    shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1],
-                                    tmp_out);
+                                    const int offset =
+                                        rowid * ELEMS16_ELEMS8_RATIO * ELEMS8_ELEMS4_RATIO +
+                                        j * ELEMS8_ELEMS4_RATIO + i;
+                                    const int offset1 = offset % ROWS_PER_WARP;
+                                    const int offset2 = offset / ROWS_PER_WARP;
+                                    // output format is 16 qheads across 16 lanes, 16 head elems
+                                    // spread across 4 rows
+                                    tmp_out = gcn_mfma16x16x16_instr<scalar_t, 0, 0, 0>(
+                                        Vlocaltmp.xy[i],
+                                        shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1],
+                                        tmp_out);
                                 }
                                 #endif
                             }
@@ -936,6 +929,7 @@ __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
     acc *= inv_global_exp_sum;
     acc *= out_scale;
     OUTT* out_ptr = out + query_loc * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE;
+
     if constexpr(std::is_same<OUTT, bit8_t>::value)
     {
         out_ptr[threadIdx.x] = hip_fp8(acc).data;

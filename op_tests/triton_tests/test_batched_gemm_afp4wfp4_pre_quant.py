@@ -1,7 +1,9 @@
 import torch
-import triton
 import pytest
-from aiter.ops.triton.batched_gemm_afp4wfp4_pre_quant import batched_gemm_afp4wfp4_pre_quant
+from aiter.ops.triton.batched_gemm_afp4wfp4_pre_quant import (
+    batched_gemm_afp4wfp4_pre_quant,
+)
+import aiter.ops.triton.utils.arch_info as arch_info
 
 # Note this is specified by the HW and cannot be changed.
 SCALE_GROUP_SIZE = 32
@@ -24,7 +26,7 @@ def generate_batched_gemm_afp4wfp4_pre_quant_inputs(B, M, N, K):
     x_f32 = x_f32 * x_scales_f32
     x = x_f32.to(torch.bfloat16)
 
-    #x = torch.rand((B, M, K), dtype=torch.bfloat16, device="cuda")
+    # x = torch.rand((B, M, K), dtype=torch.bfloat16, device="cuda")
     w_low = torch.randint(0, 16, (B, N, K // 2), dtype=torch.uint8, device="cuda")
     w_high = torch.randint(0, 16, (B, N, K // 2), dtype=torch.uint8, device="cuda")
     w = w_low | w_high << 4
@@ -82,10 +84,12 @@ def get_x_vals():
         b = batch_sizes[i % num_batch_sizes]
         x_vals_with_batch.append((b, m, n, k))
 
-    x_vals_with_batch = [(b, 2 ** m, n, k)
-                        for b in range(1, 17)
-                        for m in range(0, 9)
-                        for (n, k) in [(512, 128), (128, 512)]]
+    x_vals_with_batch = [
+        (b, 2**m, n, k)
+        for b in range(1, 17)
+        for m in range(0, 9)
+        for (n, k) in [(512, 128), (128, 512)]
+    ]
     return x_vals_with_batch
 
 
@@ -128,9 +132,9 @@ def run_torch(x, w, x_scales, w_scales, dtype):
     w_f32 = mxfp4_to_f32(w.transpose(-2, -1))
     w_f32 = w_f32.transpose(-2, -1)
     # Next convert the e8m0 scales to f32.
-    #x_scales = x_scales.repeat_interleave(SCALE_GROUP_SIZE, dim=-1).to(torch.float32)
-    #x_scales_f32 = e8m0_to_f32(x_scales)
-    #x_f32 = x_f32 * x_scales_f32
+    # x_scales = x_scales.repeat_interleave(SCALE_GROUP_SIZE, dim=-1).to(torch.float32)
+    # x_scales_f32 = e8m0_to_f32(x_scales)
+    # x_f32 = x_f32 * x_scales_f32
     w_scales = w_scales.repeat_interleave(SCALE_GROUP_SIZE, dim=-1).to(torch.float32)
     w_scales_f32 = e8m0_to_f32(w_scales)
     w_f32 = w_f32 * w_scales_f32.transpose(-2, -1)
@@ -140,10 +144,12 @@ def run_torch(x, w, x_scales, w_scales, dtype):
 @pytest.mark.parametrize("B, M, N, K", get_x_vals())
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 def test_batched_gemm_afp4_wfp4_pre_quant(B: int, M: int, N: int, K: int, dtype):
-    if triton.runtime.driver.active.get_current_target().arch not in ("gfx950"):
+    if not (arch_info.is_fp4_avail()):
         pytest.skip("MXFP4 not supported on this architecture")
 
-    x, w, x_scales, w_scales = generate_batched_gemm_afp4wfp4_pre_quant_inputs(B, M, N, K)
+    x, w, x_scales, w_scales = generate_batched_gemm_afp4wfp4_pre_quant_inputs(
+        B, M, N, K
+    )
     out = torch.empty(B, x.shape[1], w.shape[2], device=x.device, dtype=dtype)
 
     torch_out = run_torch(x, w, x_scales, w_scales, dtype).to(dtype)

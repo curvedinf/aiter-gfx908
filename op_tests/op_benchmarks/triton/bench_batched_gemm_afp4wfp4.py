@@ -1,13 +1,15 @@
 import argparse
 import sys
-import os
 import torch
 import triton
-from op_tests.triton_tests.test_batched_gemm_afp4wfp4 import generate_batched_gemm_afp4wfp4_inputs
+from op_tests.triton_tests.test_batched_gemm_afp4wfp4 import (
+    generate_batched_gemm_afp4wfp4_inputs,
+)
 from utils.benchmark_utils import get_model_configs, get_available_models
-import os
 
-from aiter.ops.triton.batched_gemm_afp4wfp4 import batched_gemm_afp4wfp4 as batched_gemm_afp4wfp4
+from aiter.ops.triton.batched_gemm_afp4wfp4 import (
+    batched_gemm_afp4wfp4 as batched_gemm_afp4wfp4,
+)
 
 
 def model_benchmark_shapes(args):
@@ -83,9 +85,7 @@ def run_benchmark(args):
     @triton.testing.perf_report([benchmark])
     def bench_gemm_afp4wfp4_blockscale(batch, M, N, K, metric, provider):
         c_dtype = torch.bfloat16
-        x, w, x_scale, w_scale = generate_batched_gemm_afp4wfp4_inputs(
-            batch, M, N, K
-        )
+        x, w, x_scale, w_scale = generate_batched_gemm_afp4wfp4_inputs(batch, M, N, K)
         # flops
         flops = 2.0 * M * N * K
         # memory transfer
@@ -96,7 +96,9 @@ def run_benchmark(args):
         )
         mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
         mem = mem_read + mem_write
-        out = torch.empty(x.shape[0], x.shape[1], w.shape[2], device=x.device, dtype=c_dtype)
+        out = torch.empty(
+            x.shape[0], x.shape[1], w.shape[2], device=x.device, dtype=c_dtype
+        )
 
         ms = triton.testing.do_bench(
             lambda: batched_gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),

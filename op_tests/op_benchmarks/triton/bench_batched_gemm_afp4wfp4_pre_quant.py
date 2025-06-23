@@ -1,13 +1,15 @@
 import argparse
 import sys
-import os
 import torch
 import triton
-from op_tests.triton_tests.test_batched_gemm_afp4wfp4_pre_quant import generate_batched_gemm_afp4wfp4_pre_quant_inputs
+from op_tests.triton_tests.test_batched_gemm_afp4wfp4_pre_quant import (
+    generate_batched_gemm_afp4wfp4_pre_quant_inputs,
+)
 from utils.benchmark_utils import get_model_configs, get_available_models
-import os
 
-from aiter.ops.triton.batched_gemm_afp4wfp4_pre_quant import batched_gemm_afp4wfp4_pre_quant as batched_gemm_afp4wfp4_pre_quant
+from aiter.ops.triton.batched_gemm_afp4wfp4_pre_quant import (
+    batched_gemm_afp4wfp4_pre_quant as batched_gemm_afp4wfp4_pre_quant,
+)
 
 
 def model_benchmark_shapes(args):
@@ -96,10 +98,14 @@ def run_benchmark(args):
         )
         mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
         mem = mem_read + mem_write
-        out = torch.empty(x.shape[0], x.shape[1], w.shape[2], device=x.device, dtype=c_dtype)
+        out = torch.empty(
+            x.shape[0], x.shape[1], w.shape[2], device=x.device, dtype=c_dtype
+        )
 
         ms = triton.testing.do_bench(
-            lambda: batched_gemm_afp4wfp4_pre_quant(x, w, x_scale, w_scale, c_dtype, out),
+            lambda: batched_gemm_afp4wfp4_pre_quant(
+                x, w, x_scale, w_scale, c_dtype, out
+            ),
             warmup=25,
             rep=100,
         )

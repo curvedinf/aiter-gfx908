@@ -115,19 +115,29 @@ def _get_config(
     N: int,
     K: int,
 ):
-    dev = arch_info.get_device()
-    fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-A16W16-N={N}-K={K}.json"
-    if not os.path.exists(fpath):
-        fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-A16W16.json"
+    if not hasattr(_get_config, "_config_dict"):
+        dev = arch_info.get_device()
+        _get_config._config_dict = {}
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM-A16W16.json"
+        with open(fpath, "r") as file:
+            config = json.load(file)
+        _get_config._config_dict["default"] = config
 
-    with open(fpath, "r") as file:
-        config = json.load(file)
-    _get_config._config_dict = config
+    key = f"{N}_{K}"
+    if key not in _get_config._config_dict.keys():
+        dev = arch_info.get_device()
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM-A16W16-N={N}-K={2*K}.json"
+        if os.path.exists(fpath):
+            with open(fpath, "r") as file:
+                config = json.load(file)
+                _get_config._config_dict[key] = config
+        else:
+            key = "default"  # fall back to default config
 
-    if M < 128 and "small" in _get_config._config_dict:
-        return _get_config._config_dict["small"]
+    if M < 128 and "small" in _get_config._config_dict[key]:
+        return _get_config._config_dict[key]["small"]
     else:
-        return _get_config._config_dict["any"]
+        return _get_config._config_dict[key]["any"]
 
 
 def gemm_a16w16(

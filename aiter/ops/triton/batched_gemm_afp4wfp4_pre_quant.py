@@ -3,7 +3,6 @@
 
 from typing import Optional
 import functools
-import sys
 import json
 import os
 import torch
@@ -11,9 +10,16 @@ import triton
 import triton.language as tl
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 import aiter.ops.triton.utils.arch_info as arch_info
-from aiter.ops.triton.utils.core import AITER_TRITON_OPS_PATH, AITER_TRITON_CONFIGS_PATH
-from aiter.ops.triton.utils.tuning_util import aiter_register
+from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
 from aiter.ops.triton.quant import _mxfp4_quant_op
+
+global _USE_GEMM_SPLITK_BF16
+_USE_GEMM_SPLITK_BF16 = False
+
+
+def set_use_gemm_splitk_bf16(value: bool):
+    global _USE_GEMM_SPLITK_BF16
+    _USE_GEMM_SPLITK_BF16 = value
 
 
 @triton.heuristics(
@@ -239,9 +245,6 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
         triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
     )
     while NUM_KSPLIT > 1 and BLOCK_SIZE_K > 16:
-        # print(K, SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT)
-        # print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
-
         if (
             K % (SPLITK_BLOCK_SIZE // 2) == 0
             and SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0
@@ -264,8 +267,6 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
             triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
         )
 
-    # print(K, SPLITK_BLOCK_SIZE // 2, BLOCK_SIZE_K // 2, NUM_KSPLIT)
-    # print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
     return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
 
 
@@ -275,35 +276,41 @@ def _get_config(
     N: int,
     K: int,
 ):
-    dev = arch_info.get_device()
-    fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4-N={N}-K={2*K}.json"
-    if not os.path.exists(fpath):
-        fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4.json"
+    if not hasattr(_get_config, "_config_dict"):
+        dev = arch_info.get_device()
+        _get_config._config_dict = {}
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-BATCHED_GEMM_PREQUANT-AFP4WFP4.json"
+        with open(fpath, "r") as file:
+            config = json.load(file)
+        _get_config._config_dict["default"] = config
 
-    with open(fpath, "r") as file:
-        config = json.load(file)
-    _get_config._config_dict = config
+    key = f"{N}_{K}"
+    if key not in _get_config._config_dict.keys():
+        dev = arch_info.get_device()
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-BATCHED_GEMM_PREQUANT-AFP4WFP4-N={N}-K={2*K}.json"
+        if os.path.exists(fpath):
+            with open(fpath, "r") as file:
+                config = json.load(file)
+                _get_config._config_dict[key] = config
+        else:
+            key = "default"  # fall back to default config
 
     if M < 32:
-        return _get_config._config_dict["small"]
+        return _get_config._config_dict[key]["small"]
     elif M <= 128:
         BLK_M = triton.next_power_of_2(M)
         if BLK_M == 32:
-            return _get_config._config_dict["medium_M32"]
+            return _get_config._config_dict[key]["medium_M32"]
         elif BLK_M == 64:
-            return _get_config._config_dict["medium_M64"]
+            return _get_config._config_dict[key]["medium_M64"]
         elif BLK_M == 128:
-            return _get_config._config_dict["medium_M128"]
+            return _get_config._config_dict[key]["medium_M128"]
     elif M <= 256:
-        return _get_config._config_dict["large"]
+        return _get_config._config_dict[key]["large"]
     else:
-        return _get_config._config_dict["xlarge"]
+        return _get_config._config_dict[key]["xlarge"]
 
 
-# Wrapper for gemm kernel.
-@aiter_register(
-    module=sys.modules[__name__], kernels=["_batched_gemm_afp4_wfp4_pre_quant_kernel"]
-)
 def batched_gemm_afp4wfp4_pre_quant(
     x,
     w,
@@ -338,7 +345,7 @@ def batched_gemm_afp4wfp4_pre_quant(
 
     if config is None:
         config = _get_config(M, N, K)
-    # print(f"AFP4WFP4_config={config}")
+
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
@@ -348,7 +355,7 @@ def batched_gemm_afp4wfp4_pre_quant(
         config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
         config["NUM_KSPLIT"] = NUM_KSPLIT
 
-        if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
+        if _USE_GEMM_SPLITK_BF16:
             y_pp = torch.empty(
                 (Batch, config["NUM_KSPLIT"], M, N), dtype=y.dtype, device=y.device
             )
@@ -399,9 +406,7 @@ def batched_gemm_afp4wfp4_pre_quant(
         # TODO: Need to debug - REDUCE_BLOCK_SIZE_N=128 with fp32 partials fails
         # NOTE: REDUCE_BLOCK_SIZE_N=16 gives best perf with fp32 partials and
         # REDUCE_BLOCK_SIZE_N=128 gives best perf with bf16 partials
-        REDUCE_BLOCK_SIZE_N = (
-            128 if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1" else 64
-        )
+        REDUCE_BLOCK_SIZE_N = 128 if _USE_GEMM_SPLITK_BF16 else 64
         ACTUAL_KSPLIT = triton.cdiv(K, (config["SPLITK_BLOCK_SIZE"] // 2))
 
         grid_reduce = (

@@ -3,6 +3,7 @@
 
 from typing import Optional
 import functools
+import sys
 import json
 import os
 import torch
@@ -10,16 +11,9 @@ import triton
 import triton.language as tl
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 import aiter.ops.triton.utils.arch_info as arch_info
-from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
-
-
-global _USE_GEMM_SPLITK_BF16
-_USE_GEMM_SPLITK_BF16 = False
-
-
-def set_use_gemm_splitk_bf16(value: bool):
-    global _USE_GEMM_SPLITK_BF16
-    _USE_GEMM_SPLITK_BF16 = value
+from aiter.ops.triton.utils.core import AITER_TRITON_OPS_PATH, AITER_TRITON_CONFIGS_PATH
+from aiter.ops.triton.utils.tuning_util import aiter_register
+from aiter.ops.triton.quant import _mxfp4_quant_op
 
 
 @triton.heuristics(
@@ -32,11 +26,10 @@ def set_use_gemm_splitk_bf16(value: bool):
     }
 )
 @triton.jit
-def _batched_gemm_afp4_wfp4_kernel(
+def _batched_gemm_afp4_wfp4_pre_quant_kernel(
     a_ptr,
     b_ptr,
     c_ptr,
-    a_scales_ptr,
     b_scales_ptr,
     M,
     N,
@@ -51,9 +44,6 @@ def _batched_gemm_afp4_wfp4_kernel(
     stride_ck,
     stride_cm,
     stride_cn,
-    stride_asb,
-    stride_asm,
-    stride_ask,
     stride_bsb,
     stride_bsn,
     stride_bsk,
@@ -83,9 +73,6 @@ def _batched_gemm_afp4_wfp4_kernel(
     tl.assume(stride_cb > 0)
     tl.assume(stride_cm > 0)
     tl.assume(stride_cn > 0)
-    tl.assume(stride_asb > 0)
-    tl.assume(stride_asm > 0)
-    tl.assume(stride_ask > 0)
     tl.assume(stride_bsb > 0)
     tl.assume(stride_bsk > 0)
     tl.assume(stride_bsn > 0)
@@ -120,15 +107,18 @@ def _batched_gemm_afp4_wfp4_kernel(
 
         # Create pointers for first block of A and B input matrices
         # The BLOCK sizes are of the elements and in fp4 we pack 2 per uint8 container.
-        offs_k = tl.arange(0, BLOCK_SIZE_K // 2)
-        offs_k_split = pid_k * (SPLITK_BLOCK_SIZE // 2) + offs_k
+        offs_k_bf16 = tl.arange(0, BLOCK_SIZE_K)
+        offs_k_split_bf16 = pid_k * SPLITK_BLOCK_SIZE + offs_k_bf16
         offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-        offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
         a_ptrs = a_ptr + (
             pid_batch * stride_ab
             + offs_am[:, None] * stride_am
-            + offs_k_split[None, :] * stride_ak
+            + offs_k_split_bf16[None, :] * stride_ak
         )
+
+        offs_k = tl.arange(0, BLOCK_SIZE_K // 2)
+        offs_k_split = pid_k * (SPLITK_BLOCK_SIZE // 2) + offs_k
+        offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
         b_ptrs = b_ptr + (
             pid_batch * stride_bb
             + offs_k_split[:, None] * stride_bk
@@ -137,12 +127,6 @@ def _batched_gemm_afp4_wfp4_kernel(
         # Create pointers for the first block of A and B scales
         offs_ks = (pid_k * (SPLITK_BLOCK_SIZE // SCALE_GROUP_SIZE)) + tl.arange(
             0, BLOCK_SIZE_K // SCALE_GROUP_SIZE
-        )
-        a_scale_ptrs = (
-            a_scales_ptr
-            + pid_batch * stride_asb
-            + offs_am[:, None] * stride_asm
-            + offs_ks[None, :] * stride_ask
         )
         # B scales are N x K even though B operand is K x N.
         b_scale_ptrs = (
@@ -155,29 +139,29 @@ def _batched_gemm_afp4_wfp4_kernel(
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
         for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
-            a_scales = tl.load(a_scale_ptrs)
             b_scales = tl.load(b_scale_ptrs)
             # a_scales = tl.full((BLOCK_SIZE_M, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)
             # b_scales = tl.full((BLOCK_SIZE_N, BLOCK_SIZE_K//SCALE_GROUP_SIZE), 127, dtype=tl.uint8)
             # Load the next block of A and B, generate a mask by checking the K dimension.
             # If it is out of bounds, set it to 0.
             if EVEN_K:
-                a = tl.load(a_ptrs)
+                a_bf16 = tl.load(a_ptrs)
                 b = tl.load(b_ptrs, cache_modifier=cache_modifier)
             else:
-                a = tl.load(
-                    a_ptrs, mask=offs_k[None, :] < K - k * (BLOCK_SIZE_K // 2), other=0
+                a_bf16 = tl.load(
+                    a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0
                 )
                 b = tl.load(
                     b_ptrs, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
                 )
 
+            a, a_scales = _mxfp4_quant_op(a_bf16, BLOCK_SIZE_K, BLOCK_SIZE_M, 32)
+
             accumulator += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
 
             # Advance the ptrs to the next K block.
-            a_ptrs += (BLOCK_SIZE_K // 2) * stride_ak
+            a_ptrs += BLOCK_SIZE_K * stride_ak
             b_ptrs += (BLOCK_SIZE_K // 2) * stride_bk
-            a_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_ask
             b_scale_ptrs += (BLOCK_SIZE_K // SCALE_GROUP_SIZE) * stride_bsk
 
         c = accumulator.to(c_ptr.type.element_ty)
@@ -197,7 +181,7 @@ def _batched_gemm_afp4_wfp4_kernel(
 
 
 @triton.jit
-def _batched_gemm_afp4_wfp4_reduce_kernel(
+def _batched_gemm_afp4_wfp4_pre_quant_reduce_kernel(
     c_in_ptr,
     c_out_ptr,
     M,
@@ -280,6 +264,8 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
             triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
         )
 
+    # print(K, SPLITK_BLOCK_SIZE // 2, BLOCK_SIZE_K // 2, NUM_KSPLIT)
+    # print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
     return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
 
 
@@ -289,41 +275,36 @@ def _get_config(
     N: int,
     K: int,
 ):
-    if not hasattr(_get_config, "_config_dict"):
-        dev = arch_info.get_device()
-        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-BATCHED_GEMM-AFP4WFP4.json"
-        with open(fpath, "r") as file:
-            config = json.load(file)
-        _get_config._config_dict = config
+    dev = arch_info.get_device()
+    fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4-N={N}-K={2*K}.json"
+    if not os.path.exists(fpath):
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4.json"
+
+    with open(fpath, "r") as file:
+        config = json.load(file)
+    _get_config._config_dict = config
 
     if M < 32:
-        config = _get_config._config_dict["M_LT_32"]
-    elif M < 64:
-        config = _get_config._config_dict["M_LT_64"]
-    elif M < 128:
-        config = _get_config._config_dict["M_LT_128"]
-    elif M == 128:
-        config = _get_config._config_dict["M_EQ_128"]
+        return _get_config._config_dict["small"]
+    elif M <= 128:
+        BLK_M = triton.next_power_of_2(M)
+        if BLK_M == 32:
+            return _get_config._config_dict["medium_M32"]
+        elif BLK_M == 64:
+            return _get_config._config_dict["medium_M64"]
+        elif BLK_M == 128:
+            return _get_config._config_dict["medium_M128"]
     elif M <= 256:
-        config = _get_config._config_dict["M_LTE_256"]
+        return _get_config._config_dict["large"]
     else:
-        config = _get_config._config_dict["default"]
-
-    if M <= 128:
-        SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
-            K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
-        )
-        config["SPLITK_BLOCK_SIZE"] = SPLITK_BLOCK_SIZE
-        config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
-        config["NUM_KSPLIT"] = NUM_KSPLIT
-
-    else:
-        config["SPLITK_BLOCK_SIZE"] = 2 * K
-
-    return config
+        return _get_config._config_dict["xlarge"]
 
 
-def batched_gemm_afp4wfp4(
+# Wrapper for gemm kernel.
+@aiter_register(
+    module=sys.modules[__name__], kernels=["_batched_gemm_afp4_wfp4_pre_quant_kernel"]
+)
+def batched_gemm_afp4wfp4_pre_quant(
     x,
     w,
     x_scales,
@@ -349,8 +330,6 @@ def batched_gemm_afp4wfp4(
     - Y: The output matrix with shape (M, N).
     """
 
-    assert arch_info.is_fp4_avail(), "MXFP4 is not available on your device"
-
     Bx, M, K = x.shape
     Bw, K, N = w.shape
     By, _, _ = y.shape
@@ -359,9 +338,17 @@ def batched_gemm_afp4wfp4(
 
     if config is None:
         config = _get_config(M, N, K)
+    # print(f"AFP4WFP4_config={config}")
+    if config["NUM_KSPLIT"] > 1:
+        SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
+            K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
+        )
 
-    if M <= 128:
-        if _USE_GEMM_SPLITK_BF16:
+        config["SPLITK_BLOCK_SIZE"] = SPLITK_BLOCK_SIZE
+        config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
+        config["NUM_KSPLIT"] = NUM_KSPLIT
+
+        if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
             y_pp = torch.empty(
                 (Batch, config["NUM_KSPLIT"], M, N), dtype=y.dtype, device=y.device
             )
@@ -372,6 +359,7 @@ def batched_gemm_afp4wfp4(
                 device=y.device,
             )
     else:
+        config["SPLITK_BLOCK_SIZE"] = 2 * K
         y_pp = None
 
     grid = lambda META: (  # noqa: E731
@@ -382,11 +370,10 @@ def batched_gemm_afp4wfp4(
             * triton.cdiv(N, META["BLOCK_SIZE_N"])
         ),
     )
-    _batched_gemm_afp4_wfp4_kernel[grid](
+    _batched_gemm_afp4_wfp4_pre_quant_kernel[grid](
         x,
         w,
         y if config["NUM_KSPLIT"] == 1 else y_pp,
-        x_scales,
         w_scales,
         M,
         N,
@@ -401,9 +388,6 @@ def batched_gemm_afp4wfp4(
         0 if config["NUM_KSPLIT"] == 1 else y_pp.stride(1),
         y.stride(1) if config["NUM_KSPLIT"] == 1 else y_pp.stride(2),
         y.stride(2) if config["NUM_KSPLIT"] == 1 else y_pp.stride(3),
-        x_scales.stride(0),
-        x_scales.stride(1),
-        x_scales.stride(2),
         w_scales.stride(0),
         w_scales.stride(1),
         w_scales.stride(2),
@@ -415,7 +399,9 @@ def batched_gemm_afp4wfp4(
         # TODO: Need to debug - REDUCE_BLOCK_SIZE_N=128 with fp32 partials fails
         # NOTE: REDUCE_BLOCK_SIZE_N=16 gives best perf with fp32 partials and
         # REDUCE_BLOCK_SIZE_N=128 gives best perf with bf16 partials
-        REDUCE_BLOCK_SIZE_N = 128 if _USE_GEMM_SPLITK_BF16 else 64
+        REDUCE_BLOCK_SIZE_N = (
+            128 if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1" else 64
+        )
         ACTUAL_KSPLIT = triton.cdiv(K, (config["SPLITK_BLOCK_SIZE"] // 2))
 
         grid_reduce = (
@@ -423,7 +409,7 @@ def batched_gemm_afp4wfp4(
             triton.cdiv(M, REDUCE_BLOCK_SIZE_M),
             triton.cdiv(N, REDUCE_BLOCK_SIZE_N),
         )
-        _batched_gemm_afp4_wfp4_reduce_kernel[grid_reduce](
+        _batched_gemm_afp4_wfp4_pre_quant_reduce_kernel[grid_reduce](
             y_pp,
             y,
             M,

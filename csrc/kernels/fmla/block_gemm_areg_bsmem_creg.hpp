@@ -84,16 +84,7 @@ struct BlockGemmARegBSmemCReg
 
         const int32_t iNWarp = ck_tile::get_warp_id() % NWarp;
 
-        constexpr auto c_block_outer_dstr_encoding = ck_tile::tile_distribution_encoding<
-            ck_tile::sequence<>,
-            ck_tile::tuple<ck_tile::sequence<MIterPerWarp, MWarp>, ck_tile::sequence<NIterPerWarp, NWarp>>,
-            ck_tile::tuple<ck_tile::sequence<1, 2>>,
-            ck_tile::tuple<ck_tile::sequence<1, 1>>,
-            ck_tile::sequence<1, 2>,
-            ck_tile::sequence<0, 0>>{};
-
-        constexpr auto c_block_dstr_encode = ck_tile::detail::make_embed_tile_distribution_encoding(
-            c_block_outer_dstr_encoding, typename WG::CWarpDstrEncoding{});
+        constexpr auto c_block_dstr_encode = GetCBlockTileDistributionEncoding();
 
         // constrcut from A-block-tensor from A-Block-tensor-tmp
         // FIXME: need method to check a_block_tensor and a_block_tensor_tmp have equivalent
@@ -222,7 +213,7 @@ struct BlockGemmARegBSmemCReg
         return ck_tile::make_static_tile_distribution(a_block_dstr_encode);
     }
 
-    CK_TILE_DEVICE static constexpr auto MakeCBlockTile()
+    CK_TILE_DEVICE static constexpr auto GetCBlockTileDistributionEncoding()
     {
         constexpr int32_t MPerBlock = BlockGemmShape::kM;
         constexpr int32_t NPerBlock = BlockGemmShape::kN;
@@ -236,18 +227,24 @@ struct BlockGemmARegBSmemCReg
 
         constexpr int32_t MIterPerWarp = MPerBlock / (MWarp * WG::kM);
         constexpr int32_t NIterPerWarp = NPerBlock / (NWarp * WG::kN);
-        // constexpr int32_t KIterPerWarp = KPerBlock / WG::kK;
 
         constexpr auto c_block_outer_dstr_encoding = ck_tile::tile_distribution_encoding<
             ck_tile::sequence<>,
-            ck_tile::tuple<ck_tile::sequence<MIterPerWarp, MWarp>, ck_tile::sequence<NIterPerWarp, NWarp>>,
+            ck_tile::tuple<ck_tile::sequence<MIterPerWarp, MWarp>, ck_tile::sequence<NWarp, NIterPerWarp>>,
             ck_tile::tuple<ck_tile::sequence<1, 2>>,
-            ck_tile::tuple<ck_tile::sequence<1, 1>>,
+            ck_tile::tuple<ck_tile::sequence<1, 0>>,
             ck_tile::sequence<1, 2>,
-            ck_tile::sequence<0, 0>>{};
+            ck_tile::sequence<0, 1>>{};
 
         constexpr auto c_block_dstr_encode = ck_tile::detail::make_embed_tile_distribution_encoding(
             c_block_outer_dstr_encoding, typename WG::CWarpDstrEncoding{});
+
+        return c_block_dstr_encode;
+    }
+
+    CK_TILE_DEVICE static constexpr auto MakeCBlockTile()
+    {
+        constexpr auto c_block_dstr_encode = GetCBlockTileDistributionEncoding();
         constexpr auto c_block_dstr = ck_tile::make_static_tile_distribution(c_block_dstr_encode);
         auto c_block_tensor         = ck_tile::make_static_distributed_tensor<CDataType>(c_block_dstr);
         return c_block_tensor;

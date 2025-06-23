@@ -61,7 +61,7 @@ struct FlashMlaPrefillKernelTrait
     static constexpr int32_t kSizeDV                    = kSizeDV_;   // hidden dimension size of value
     static constexpr int32_t kNumWarps                  = kNumWarps_;
     static constexpr int32_t kNumThreads                = kNumWarps * ck_tile::get_warp_size();
-    static constexpr int32_t kWaveOccupancy             = 2;
+    static constexpr int32_t kWaveOccupancy             = 1;
     static constexpr int32_t kNumWarpsSoftmax           = 4;
     static constexpr int32_t kNumThreadsSoftmax         = kNumWarpsSoftmax * ck_tile::get_warp_size();
     static constexpr int32_t kNumWarpsCombine           = 4;
@@ -88,7 +88,7 @@ struct FlashMlaPrefillKernelTrait
     static constexpr int32_t kNumPrefetchV  = 1;
     static constexpr int32_t kNumPrefetchKV = ck_tile::max(kNumPrefetchK, kNumPrefetchV);
 
-    using QKWarpTile = ck_tile::sequence<16, 16, 16>;
+    using QKWarpTile = ck_tile::sequence<16, 16, 32>;
     using KVWarpTile = ck_tile::sequence<16, 16, 16>;
 
     static_assert(kSizeD % 64 == 0);
@@ -307,7 +307,7 @@ public:
                 if constexpr(kWarpGemmM == 32)
                     return ck_tile::WarpGemmMfmaF16F16F32M32N32K16SwizzleBTransposedCDistribution{};
                 else if constexpr(kWarpGemmM == 16)
-                    return ck_tile::WarpGemmMfmaF16F16F32M16N16K16TransposedCDistribution{};
+                    return ck_tile::WarpGemmMfmaF16F16F32M16N16K32TransposedCDistribution{};
                 else // kWarpGemmM == 4
                     return ck_tile::WarpGemmMfmaF16F16F32M4N64K16{};
             }
@@ -316,7 +316,7 @@ public:
                 if constexpr (kWarpGemmM == 32)
                     return ck_tile::WarpGemmMfmaBf16Bf16F32M32N32K16SwizzleBTransposedCDistribution{};
                 else if constexpr (kWarpGemmM == 16)
-                    return ck_tile::WarpGemmMfmaBf16Bf16F32M16N16K16TransposedCDistribution{};
+                    return ck_tile::WarpGemmMfmaBf16Bf16F32M16N16K32TransposedCDistribution{};
                 else // kWarpGemmM == 4
                     return ck_tile::WarpGemmMfmaBf16Bf16F32M4N64K16{};
             }
@@ -346,7 +346,7 @@ public:
                 if constexpr(kWarpGemmM == 32)
                     return ck_tile::WarpGemmMfmaF16F16F32M32N32K16SwizzleBTransposedCDistribution{};
                 else if constexpr(kWarpGemmM == 16)
-                    return ck_tile::WarpGemmMfmaF16F16F32M16N16K16TransposedCDistribution{};
+                    return ck_tile::WarpGemmMfmaF16F16F32M16N16K32TransposedCDistribution{};
                 else // kWarpGemmM == 4
                     return ck_tile::WarpGemmMfmaF16F16F32M4N64K16{};
             }
@@ -355,7 +355,7 @@ public:
                 if constexpr (kWarpGemmM == 32)
                     return ck_tile::WarpGemmMfmaBf16Bf16F32M32N32K16SwizzleBTransposedCDistribution{};
                 else if constexpr (kWarpGemmM == 16)
-                    return ck_tile::WarpGemmMfmaBf16Bf16F32M16N16K16TransposedCDistribution{};
+                    return ck_tile::WarpGemmMfmaBf16Bf16F32M16N16K32TransposedCDistribution{};
                 else // kWarpGemmM == 4
                     return ck_tile::WarpGemmMfmaBf16Bf16F32M4N64K16{};
             }

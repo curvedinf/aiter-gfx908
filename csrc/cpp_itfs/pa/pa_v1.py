@@ -1,5 +1,5 @@
 from jinja2 import Template
-from csrc.cpp_itfs.utils import compile_template_op, AITER_CORE_DIR
+from csrc.cpp_itfs.utils import compile_template_op, AITER_CORE_DIR, AITER_LOG_MORE
 import ctypes
 import math
 
@@ -74,7 +74,31 @@ def paged_attention_v1(
 ):
     import torch
     from csrc.cpp_itfs.torch_utils import torch_to_c_types
+    from aiter.test_common import log_args
 
+    if AITER_LOG_MORE == 2:
+        log_args(
+            paged_attention_v1,
+            out,
+            workspace_buffer,
+            query,
+            key_cache,
+            value_cache,
+            scale,
+            block_tables,
+            cu_query_lens,
+            context_lens,
+            max_context_len,
+            alibi_slopes,
+            kv_cache_dtype,
+            kv_cache_layout,
+            logits_soft_cap,
+            k_scale,
+            v_scale,
+            fp8_out_scale,
+            partition_size,
+            mtp,
+        )
     warpSize = torch.cuda.get_device_properties(out.device).warp_size
     if kv_cache_dtype == "auto":
         if query.dtype == torch.bfloat16:

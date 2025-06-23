@@ -296,31 +296,29 @@ def _get_config(
             config = json.load(file)
         _get_config._config_dict = config
 
+    dev = arch_info.get_device()
+    fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4-N={N}-K={2*K}.json"
+    if not os.path.exists(fpath):
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/{dev}-GEMM-AFP4WFP4.json"
+
+    with open(fpath, "r") as file:
+        config = json.load(file)
+    _get_config._config_dict = config
+
     if M < 32:
-        config = _get_config._config_dict["M_LT_32"]
-    elif M < 64:
-        config = _get_config._config_dict["M_LT_64"]
-    elif M < 128:
-        config = _get_config._config_dict["M_LT_128"]
-    elif M == 128:
-        config = _get_config._config_dict["M_EQ_128"]
+        return _get_config._config_dict["small"]
+    elif M <= 128:
+        BLK_M = triton.next_power_of_2(M)
+        if BLK_M == 32:
+            return _get_config._config_dict["medium_M32"]
+        elif BLK_M == 64:
+            return _get_config._config_dict["medium_M64"]
+        elif BLK_M == 128:
+            return _get_config._config_dict["medium_M128"]
     elif M <= 256:
-        config = _get_config._config_dict["M_LTE_256"]
+        return _get_config._config_dict["large"]
     else:
-        config = _get_config._config_dict["default"]
-
-    if M <= 128:
-        SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
-            K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
-        )
-        config["SPLITK_BLOCK_SIZE"] = SPLITK_BLOCK_SIZE
-        config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
-        config["NUM_KSPLIT"] = NUM_KSPLIT
-
-    else:
-        config["SPLITK_BLOCK_SIZE"] = 2 * K
-
-    return config
+        return _get_config._config_dict["xlarge"]
 
 
 def batched_gemm_afp4wfp4(
@@ -360,18 +358,25 @@ def batched_gemm_afp4wfp4(
     if config is None:
         config = _get_config(M, N, K)
 
-    if M <= 128:
+    if config["NUM_KSPLIT"] > 1:
+        SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
+            K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
+        )
+
+        config["SPLITK_BLOCK_SIZE"] = SPLITK_BLOCK_SIZE
+        config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
+        config["NUM_KSPLIT"] = NUM_KSPLIT
+
         if _USE_GEMM_SPLITK_BF16:
             y_pp = torch.empty(
                 (Batch, config["NUM_KSPLIT"], M, N), dtype=y.dtype, device=y.device
             )
         else:
             y_pp = torch.empty(
-                (Batch, config["NUM_KSPLIT"], M, N),
-                dtype=torch.float32,
-                device=y.device,
+                (Batch, config["NUM_KSPLIT"], M, N), dtype=torch.float32, device=y.device
             )
     else:
+        config["SPLITK_BLOCK_SIZE"] = 2 * K
         y_pp = None
 
     grid = lambda META: (  # noqa: E731

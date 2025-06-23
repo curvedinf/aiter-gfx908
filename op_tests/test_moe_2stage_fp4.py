@@ -156,6 +156,7 @@ def test_fmoe(
         BLOCK_SIZE_M = 64
     elif qType == aiter.QuantType.per_1x32:
         BLOCK_SIZE_M = 32
+
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
         topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M
     )
@@ -452,30 +453,31 @@ def test_fmoe(
 
 
 list_dtype = [dtypes.bf16, dtypes.fp16][:1]
-list_dim = [(6144, 4096)]
+list_dim = [(7168, 256)]
 list_tokenNum = [
-    # 1,
-    # 3,
-    # 5,
-    # 16,
-    # 32,
-    # 64,
-    # 128,
+    1,
+    3,
+    5,
+    16,
+    32,
+    64,
+    128,
     256,
     1024,
     4096,
     163840,
 ][:]
 list_quant = [
-    (aiter.QuantType.No, None, None),  # a16w16
-    (aiter.QuantType.per_Tensor, dtypes.fp8, dtypes.fp8),  # a8w8
-    (aiter.QuantType.per_Token, dtypes.fp8, dtypes.fp8),  # a8w8
+    # (aiter.QuantType.No, None, None),  # a16w16
+    # (aiter.QuantType.per_Tensor, dtypes.fp8, dtypes.fp8),  # a8w8
+    # (aiter.QuantType.per_Token, dtypes.fp8, dtypes.fp8),  # a8w8
+    # (aiter.QuantType.per_Token, dtypes.fp8, torch.int4),  # a8w4
     (aiter.QuantType.per_1x32, dtypes.fp4x2, dtypes.fp4x2),  # a8w4
     # (aiter.QuantType.per_128x128, dtypes.fp8, dtypes.fp8),  # a8w8 TODO add test
 ]
 list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][:]
 list_doweight_stage1 = [False, True][1:]
-expert, topk = 8, 2
+expert, topk = 256, 8
 
 import pandas as pd
 

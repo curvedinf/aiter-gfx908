@@ -12,6 +12,8 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qx_ks_vs_custom_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
+#include "block_gemm_areg_breg_creg_v1.hpp"
+#include "block_gemm_areg_breg_creg_v1_custom_policy.hpp"
 #include "block_gemm_areg_bsmem_creg_v2.hpp"
 #include "block_gemm_areg_bsmem_creg_v2_custom_policy.hpp"
 
@@ -271,14 +273,14 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
             }
         }();
 
-        using BlockGemmPolicy =
-            BlockGemmARegBRegCRegV1CustomPolicy<typename Problem::QDataType,
-                                                typename Problem::KDataType,
-                                                typename Problem::SaccDataType,
-                                                typename Problem::BlockFmhaShape::Gemm0BlockWarps,
-                                                decltype(warp_gemm)>;
+        using BlockGemmPolicy = aiter::BlockGemmARegBRegCRegV1CustomPolicy<
+            typename Problem::QDataType,
+            typename Problem::KDataType,
+            typename Problem::SaccDataType,
+            typename Problem::BlockFmhaShape::Gemm0BlockWarps,
+            decltype(warp_gemm)>;
 
-        return BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy>{};
+        return aiter::BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy>{};
     }
 
     template <typename Problem>

@@ -789,7 +789,7 @@ def torch_moe_stage2(
         hidden_states = mxfp4_to_f32(hidden_states.view(hidden_states.shape[0] * hidden_states.shape[1], -1)).view(hidden_states.shape[0], hidden_states.shape[1], -1)
         w1 = mxfp4_to_f32(w1.view(w1.shape[0] * w1.shape[1], -1)).view(w1.shape[0], w1.shape[1], -1)
         w2 = mxfp4_to_f32(w2.view(w2.shape[0] * w2.shape[1], -1)).view(w2.shape[0], w2.shape[1], -1)
-    print(f"{w1.shape=}")
+ 
     token_num, topk = topk_ids.shape
     num_experts, model_dim, inter_dim = w2.shape
     hidden_states = hidden_states.view(token_num, topk, inter_dim)

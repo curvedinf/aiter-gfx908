@@ -169,9 +169,6 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
         triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
     )
     while NUM_KSPLIT > 1 and BLOCK_SIZE_K > 16:
-        # print(K, SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT)
-        # print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
-
         if (
             K % (SPLITK_BLOCK_SIZE // 2) == 0
             and SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0
@@ -194,8 +191,6 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
             triton.cdiv((2 * triton.cdiv(K, NUM_KSPLIT)), BLOCK_SIZE_K) * BLOCK_SIZE_K
         )
 
-    # print(K, SPLITK_BLOCK_SIZE // 2, BLOCK_SIZE_K // 2, NUM_KSPLIT)
-    # print(K % (SPLITK_BLOCK_SIZE // 2) == 0, SPLITK_BLOCK_SIZE % BLOCK_SIZE_K == 0, K % (BLOCK_SIZE_K // 2) == 0)
     return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
 
 
@@ -205,31 +200,30 @@ def _get_config(
     N: int,
     K: int,
 ):
-    dev = arch_info.get_device()
-    fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM-AFP4WFP4-N={N}-K={2*K}.json"
-    if not os.path.exists(fpath):
-        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM-AFP4WFP4.json"
+    if not hasattr(_get_config, "_config_dict"):
+        dev = arch_info.get_device()
+        _get_config._config_dict = {}
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM_PREQUANT-AFP4WFP4.json"
+        with open(fpath, "r") as file:
+            config = json.load(file)
+        _get_config._config_dict["default"] = config
 
-    with open(fpath, "r") as file:
-        config = json.load(file)
-    _get_config._config_dict = config
+    key = f"{N}_{K}"
+    if key not in _get_config._config_dict.keys():
+        dev = arch_info.get_device()
+        fpath = (
+            f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM_PREQUANT-AFP4WFP4-N={N}-K={2*K}.json"
+        )
+        if os.path.exists(fpath):
+            with open(fpath, "r") as file:
+                config = json.load(file)
+                _get_config._config_dict[key] = config
+        else:
+            key = "default"  # fall back to default config
 
-    # TODO enable and optimize for all all configs
-    return _get_config._config_dict["small"]
-    if M < 32:
-        return _get_config._config_dict["small"]
-    elif M <= 128:
-        BLK_M = triton.next_power_of_2(M)
-        if BLK_M == 32:
-            return _get_config._config_dict["medium_M32"]
-        elif BLK_M == 64:
-            return _get_config._config_dict["medium_M64"]
-        elif BLK_M == 128:
-            return _get_config._config_dict["medium_M128"]
-    elif M <= 256:
-        return _get_config._config_dict["large"]
-    else:
-        return _get_config._config_dict["xlarge"]
+
+    # TODO enable and optimize for all configs
+    return _get_config._config_dict[key]["small"]
 
 
 def gemm_afp4wfp4_pre_quant(

@@ -70,7 +70,6 @@ def get_x_vals():
         (16384, 8192, 1024),
     ]
     x_vals += [(2 ** (v - 1), 4096 * v, 4096 * v) for v in range(1, 6)]
-    # x_vals = [(128, 1024, 4096)]
     x_vals += [(16, 16384, 3328 * 2), (128, 16384, 3328 * 2)]
     x_vals += [(32, 512, 7168)]
     return x_vals
@@ -115,9 +114,6 @@ def run_torch(x, w, x_scales, w_scales, dtype):
     w_f32 = mxfp4_to_f32(w.transpose(-2, -1))
     w_f32 = w_f32.transpose(-2, -1)
     # Next convert the e8m0 scales to f32.
-    # x_scales = x_scales.repeat_interleave(SCALE_GROUP_SIZE, dim=-1).to(torch.float32)
-    # x_scales_f32 = e8m0_to_f32(x_scales)
-    # x_f32 = x_f32 * x_scales_f32
     w_scales = w_scales.repeat_interleave(SCALE_GROUP_SIZE, dim=-1).to(torch.float32)
     w_scales_f32 = e8m0_to_f32(w_scales)
     w_f32 = w_f32 * w_scales_f32.transpose(-2, -1)
@@ -127,7 +123,7 @@ def run_torch(x, w, x_scales, w_scales, dtype):
 @pytest.mark.parametrize("M, N, K", get_x_vals())
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
 @pytest.mark.parametrize("output", [True, False])
-def test_batched_gemm_afp4_wfp4_pre_quant(M: int, N: int, K: int, dtype, output: bool):
+def test_gemm_afp4_wfp4_pre_quant(M: int, N: int, K: int, dtype, output: bool):
     if triton.runtime.driver.active.get_current_target().arch not in ("gfx950"):
         pytest.skip("MXFP4 not supported on this architecture")
 

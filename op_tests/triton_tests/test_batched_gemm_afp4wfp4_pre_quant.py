@@ -132,9 +132,6 @@ def run_torch(x, w, x_scales, w_scales, dtype):
     w_f32 = mxfp4_to_f32(w.transpose(-2, -1))
     w_f32 = w_f32.transpose(-2, -1)
     # Next convert the e8m0 scales to f32.
-    # x_scales = x_scales.repeat_interleave(SCALE_GROUP_SIZE, dim=-1).to(torch.float32)
-    # x_scales_f32 = e8m0_to_f32(x_scales)
-    # x_f32 = x_f32 * x_scales_f32
     w_scales = w_scales.repeat_interleave(SCALE_GROUP_SIZE, dim=-1).to(torch.float32)
     w_scales_f32 = e8m0_to_f32(w_scales)
     w_f32 = w_f32 * w_scales_f32.transpose(-2, -1)

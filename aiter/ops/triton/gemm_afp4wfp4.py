@@ -430,7 +430,7 @@ def get_splitk(K: int, BLOCK_SIZE_K: int, NUM_KSPLIT: int):
     return SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT
 
 
-@functools.lru_cache(maxsize=1024)
+# @functools.lru_cache(maxsize=1024)
 def _get_config(
     M: int,
     N: int,
@@ -494,18 +494,16 @@ def gemm_afp4wfp4(
     if y is None:
         y = torch.empty((M, N), dtype=dtype, device=x.device)
 
-
     if config is None:
         config = _get_config(M, N, K)
-    # print(f"AFP4WFP4_config={config}")
+    
     if config["NUM_KSPLIT"] > 1:
         SPLITK_BLOCK_SIZE, BLOCK_SIZE_K, NUM_KSPLIT = get_splitk(
             K, config["BLOCK_SIZE_K"], config["NUM_KSPLIT"]
         )
-
-        config["SPLITK_BLOCK_SIZE"] = SPLITK_BLOCK_SIZE
         config["BLOCK_SIZE_K"] = BLOCK_SIZE_K
-        config["NUM_KSPLIT"] = NUM_KSPLIT
+        config["NUM_KSPLIT"] = NUM_KSPLIT        
+        config["SPLITK_BLOCK_SIZE"] = SPLITK_BLOCK_SIZE
 
         if os.getenv("VLLM_TRITON_FP4_GEMM_SPLITK_USE_BF16") == "1":
             y_pp = torch.empty(
@@ -518,6 +516,9 @@ def gemm_afp4wfp4(
     else:
         config["SPLITK_BLOCK_SIZE"] = 2 * K
         y_pp = None
+
+    print("AFP4WFP4_config=", config)
+
 
     grid = lambda META: (  # noqa: E731
         (

@@ -161,7 +161,7 @@ def _gemm_afp4_wfp4_kernel(
             + pid_k * stride_ck
         )
         c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-        tl.store(c_ptrs, c, mask=c_mask)
+        tl.store(c_ptrs, c, mask=c_mask, cache_modifier=".wt")
 
 
 @triton.heuristics(

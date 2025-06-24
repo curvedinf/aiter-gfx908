@@ -61,9 +61,11 @@ struct FlashMlaPrefillKernelTrait
 {
     static constexpr int32_t kSizeD                     = kSizeD_;    // hidden dimension size of query and key
     static constexpr int32_t kSizeDV                    = kSizeDV_;   // hidden dimension size of value
+    static constexpr int32_t kSizeNope                  = kSizeDV;
+    static constexpr int32_t kSizeRope                  = kSizeD - kSizeNope;
     static constexpr int32_t kNumWarps                  = kNumWarps_;
     static constexpr int32_t kNumThreads                = kNumWarps * ck_tile::get_warp_size();
-    static constexpr int32_t kWaveOccupancy             = 1;
+    static constexpr int32_t kWaveOccupancy             = 2;
     static constexpr int32_t kNumWarpsSoftmax           = 4;
     static constexpr int32_t kNumThreadsSoftmax         = kNumWarpsSoftmax * ck_tile::get_warp_size();
     static constexpr int32_t kNumWarpsCombine           = 4;
@@ -71,11 +73,7 @@ struct FlashMlaPrefillKernelTrait
     static constexpr int32_t kBlockM                    = kBlockM_;
     static constexpr int32_t kBlockN0                   = kBlockN0_;
     static constexpr int32_t kBlockN1                   = kBlockN1_;
-
-    static constexpr int32_t kBlockK0                   = kBlockN1 == kSizeD ? kSizeD : 64;
-    static constexpr int32_t kBlockK1                   = ck_tile::min(64, kBlockN0);
-    static constexpr int32_t kBlockNope                 = kSizeDV;
-    static constexpr int32_t kBlockRope                 = kSizeD - kBlockNope;
+    static constexpr int32_t kBlockK1                   = ck_tile::min(16, kBlockN0);
     static constexpr int32_t kFixedOverheadNumBlocks    = 5;
     static constexpr int32_t kMaxBatchSize              = 4096;
     static constexpr int32_t kCuReuse                   = 2;
@@ -85,7 +83,8 @@ struct FlashMlaPrefillKernelTrait
     static constexpr bool    kPadSeqLenQ                = true;
     static constexpr bool    kPadSeqLenK                = true;
     static constexpr bool    kEnableXQA                 = kEnableXQA_;
-    static constexpr bool    kLoadOnce                  = kBlockN1 == kSizeD;
+    static constexpr bool    kKVLoadOnce                = kBlockN1 == kSizeD;
+    static constexpr int32_t kBlockK0                   = kKVLoadOnce ? kSizeD : 32;
 
     static constexpr int32_t kNumPrefetchK  = 1;
     static constexpr int32_t kNumPrefetchV  = 1;
@@ -207,8 +206,7 @@ public:
     CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsBlockDescriptor()
     {
         constexpr int32_t kNPerBlock = Traits::kBlockN0;
-        // constexpr int32_t kKPerBlock = Traits::kBlockK0;
-        constexpr int32_t kKPerBlock = 576;
+        constexpr int32_t kKPerBlock = Traits::kKVLoadOnce ? Traits::kSizeD : Traits::kBlockK0;
         constexpr int32_t kKPack     = 16 / sizeof(scalar_t);
 
         constexpr auto k_lds_block_desc_0 = ck_tile::make_naive_tensor_descriptor(
@@ -301,7 +299,6 @@ public:
         static_assert((Traits::kNumWarps >= ColWarps) && ((Traits::kNumWarps % ColWarps) == 0));
 
         using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0, Traits::kBlockK0>;
-        // using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0, Traits::kBlockNope>;
         using BlockWarps    = ck_tile::sequence<ColWarps, RowWarps, 1>;
         using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, typename Traits::QKWarpTile>;
 
@@ -337,7 +334,7 @@ public:
 
     CK_TILE_HOST_DEVICE static constexpr auto GetQKRopeBlockGemm()
     {
-        using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0, Traits::kBlockRope>;
+        using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0, Traits::kSizeRope>;
         using BlockWarps    = ck_tile::sequence<Traits::kNumWarps, 1, 1>;
         using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, typename Traits::QKWarpTile>;
 
@@ -431,8 +428,7 @@ public:
 
         return BlockGemm::template MakeABlockTileDistribution<
             Traits::kBlockM,
-            // Traits::kSizeD>();
-            Traits::kBlockNope>();
+            Traits::kSizeNope>();
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeQRopeRegTileDistribution()
@@ -441,81 +437,46 @@ public:
 
         return BlockGemm::template MakeABlockTileDistribution<
             Traits::kBlockM,
-            Traits::kBlockRope>();
+            Traits::kSizeRope>();
     }
     
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
     {
-        // constexpr int32_t kBlockSize = Traits::kNumThreads;
-        // constexpr int32_t kNPerBlock = Traits::kBlockN0;
-        // constexpr int32_t kKPerBlock = Traits::kBlockK0;
-        //
-        // constexpr int32_t MaxVectorSize = 16 / sizeof(scalar_t);
-        // constexpr int32_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
-        //
-        // constexpr int32_t K1 = ck_tile::min(MaxVectorSize, ElemPerThread);
-        // constexpr int32_t K0 = kKPerBlock / K1;
-        // constexpr int32_t N2 = ck_tile::get_warp_size() / K0;
-        // constexpr int32_t N1 = kBlockSize / ck_tile::get_warp_size();
-        // constexpr int32_t N0 = kNPerBlock / (N2 * N1);
-        //
-        // return ck_tile::make_static_tile_distribution(
-        //     ck_tile::tile_distribution_encoding<ck_tile::sequence<1>,
-        //                                         ck_tile::tuple<ck_tile::sequence<N0, N1, N2>, ck_tile::sequence<K0, K1>>,
-        //                                         ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>,
-        //                                         ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2, 0>>,
-        //                                         ck_tile::sequence<1, 2>,
-        //                                         ck_tile::sequence<0, 1>>{});
+        if constexpr (!Traits::kKVLoadOnce)
+        {
+            constexpr int32_t kBlockSize = Traits::kNumThreads;
+            constexpr int32_t kNPerBlock = Traits::kBlockN0;
+            constexpr int32_t kKPerBlock = Traits::kBlockK0;
 
-        // constexpr int32_t kBlockSize = Traits::kNumThreads;
-        // constexpr int32_t RepeatsK = Traits::kSizeD / 64;
-        // constexpr int32_t RepeatsN = 1;
-        //
-        // constexpr int32_t kVectorN = 1; // for continous K copy
-        // constexpr int32_t VectorKMax = 16 / sizeof(scalar_t);
-        //
-        // constexpr int32_t ThreadsPerKMin = Traits::kSizeD / VectorKMax / RepeatsK; //  8
-        // constexpr int32_t kThrPerBlockN =
-        //     ck_tile::min(Traits::kBlockN0 / kVectorN, kBlockSize / ThreadsPerKMin); // 16 / 1, 256 / 8=32 , 16
-        // constexpr int32_t kThrPerBlockK = kBlockSize / kThrPerBlockN; // 16
-        //
-        // constexpr int32_t kNumWarpN = Traits::kNumWarps; // 4
-        // constexpr int32_t kNumWarpK = 1;
-        //
-        // constexpr int32_t kThrPerWarpN = kThrPerBlockN / kNumWarpN; // 
-        // constexpr int32_t kThrPerWarpK = ck_tile::get_warp_size() / kThrPerWarpN;
-        //
-        // constexpr int32_t kVectorK = Traits::kSizeD / RepeatsK / kThrPerBlockK;
-        //
-        // return ck_tile::make_static_tile_distribution(
-        //     ck_tile::tile_distribution_encoding<
-        //         ck_tile::sequence<>,
-        //         ck_tile::tuple<ck_tile::sequence<kNumWarpN, kThrPerWarpN>,
-        //                        ck_tile::sequence<RepeatsK, kThrPerWarpK, kVectorK>>,
-        //         ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>,
-        //         ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<0, 1>>,
-        //         ck_tile::sequence<2, 2>,
-        //         ck_tile::sequence<0, 2>>{});
+            constexpr int32_t MaxVectorSize = 16 / sizeof(scalar_t);
+            constexpr int32_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
 
-        return ck_tile::make_static_tile_distribution(
-            ck_tile::tile_distribution_encoding<
-                ck_tile::sequence<>,
-                ck_tile::tuple<ck_tile::sequence<1, 1, 8, 2>, ck_tile::sequence<9, 4, 8, 2>>,
-                ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<1, 2>>,
-                ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
-                ck_tile::sequence<1, 1, 2, 2>,
-                ck_tile::sequence<0, 3, 0, 3>>{});
-    }
-    CK_TILE_HOST_DEVICE static constexpr auto MakeKNopeDramTileDistribution()
-    {
-        return ck_tile::make_static_tile_distribution(
-            ck_tile::tile_distribution_encoding<
-                ck_tile::sequence<>,
-                ck_tile::tuple<ck_tile::sequence<1, 1, 8, 2>, ck_tile::sequence<4, 4, 8, 4>>,
-                ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<1, 2>>,
-                ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
-                ck_tile::sequence<1, 1, 2, 2>,
-                ck_tile::sequence<0, 3, 0, 3>>{});
+            constexpr int32_t K1 = ck_tile::min(MaxVectorSize, ElemPerThread);
+            constexpr int32_t K0 = kKPerBlock / K1;
+            constexpr int32_t N2 = ck_tile::get_warp_size() / K0;
+            constexpr int32_t N1 = kBlockSize / ck_tile::get_warp_size();
+            constexpr int32_t N0 = kNPerBlock / (N2 * N1);
+
+            return ck_tile::make_static_tile_distribution(
+                ck_tile::tile_distribution_encoding<ck_tile::sequence<1>,
+                                                    ck_tile::tuple<ck_tile::sequence<N0, N1, N2>, ck_tile::sequence<K0, K1>>,
+                                                    ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>,
+                                                    ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2, 0>>,
+                                                    ck_tile::sequence<1, 2>,
+                                                    ck_tile::sequence<0, 1>>{});
+        }
+        else
+        {
+            // TODO: add distribution calculate
+            return ck_tile::make_static_tile_distribution(
+                ck_tile::tile_distribution_encoding<
+                    ck_tile::sequence<>,
+                    ck_tile::tuple<ck_tile::sequence<1, 1, 8, 2>, ck_tile::sequence<9, 4, 8, 2>>,
+                    ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<1, 2>>,
+                    ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
+                    ck_tile::sequence<1, 1, 2, 2>,
+                    ck_tile::sequence<0, 3, 0, 3>>{});
+        }
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeVTDramTileDistribution()
@@ -531,7 +492,6 @@ public:
                 ck_tile::sequence<2, 2, 1, 1>,
                 ck_tile::sequence<0, 3, 0, 3>>{});
     }
-
 
     CK_TILE_HOST_DEVICE static constexpr auto GetNumRepeatOfKDramTileDistribution()
     {
@@ -708,7 +668,6 @@ public:
 
         return ck_tile::make_tile_window(tile_window, MakeOutputTileDistribution<scalar_t>());
     }
-
 };
 
 union TileSchedulerMetaData
@@ -838,11 +797,10 @@ CK_TILE_DEVICE static auto MakeQDram(
         ck_tile::number<Policy::GetAlignmentQ()>{},
         ck_tile::number<1>{});
 
-    // return ck_tile::pad_tensor_view(
-    //     q_dram_naive,
-    //     ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlockK0>{}),
-    //     ck_tile::sequence<false, Traits::kPadHeadDimQ>{});
-    return q_dram_naive;
+    return ck_tile::pad_tensor_view(
+        q_dram_naive,
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlockK0>{}),
+        ck_tile::sequence<false, Traits::kPadHeadDimQ>{});
 }
 
 template <typename Policy, typename scalar_t = typename Policy::InOutType>
@@ -1547,6 +1505,10 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     );
 }
 
+// this function work for mla which load key&value tensor once, 
+// transpose the k-nope tensor into v tensor, and never load v tensor from dram again.
+// TODO: 1. async load from dram to lds. use double lds buffer to load two kv blocks.
+//       2. transpose v value while gemm_0.
 template<typename Traits,
          typename scalar_t,
          typename acc_t,
@@ -1593,9 +1555,9 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
         k_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeD>{}), {0, 0});
 
     auto k_nope_ld_lds_window = ck_tile::make_tile_window(
-        k_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kBlockNope>{}), {0, 0});
+        k_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeNope>{}), {0, 0});
     auto k_rope_ld_lds_window = ck_tile::make_tile_window(
-        k_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kBlockRope>{}), {0, Traits::kBlockNope});
+        k_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeRope>{}), {0, Traits::kSizeNope});
     auto v_lds_window = ck_tile::make_tile_window(
         v_lds, Policy::MakeVLdsBlockDescriptor().get_lengths(), {0, 0});
 
@@ -2031,9 +1993,9 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
     constexpr auto q_dram_window_lengths =
         ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlockK0>{});
     constexpr auto q_nope_dram_window_lengths =
-        ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlockNope>{});
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kSizeNope>{});
     constexpr auto q_rope_dram_window_lengths =
-        ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kBlockRope>{});
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kSizeRope>{});
     constexpr auto k_dram_window_lengths =
         ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kBlockK0>{});
     constexpr auto v_dram_window_lengths =
@@ -2052,7 +2014,6 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
     const int32_t kv_cache_width = params.num_page_blocks * params.page_block_size;
 
     const auto q_dram = MakeQDram<Policy>(p_query, params.size_s,  params.stride_s_q);
-
     const auto k_dram = MakeKDram<Policy>(p_key,   kv_cache_width, params.stride_s_k);
     const auto v_dram = MakeVDram<Policy>(p_value, kv_cache_width, params.stride_s_v);    
 
@@ -2085,7 +2046,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             ck_tile::make_tile_window(out_acc_dram, out_acc_dram_window_lengths, {mid, 0});
 
 
-        if constexpr (!Traits::kLoadOnce) {
+        if constexpr (!Traits::kKVLoadOnce) {
             kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t>(
                 // q_nope_dram_window,
                 // q_rope_dram_window,
@@ -2114,7 +2075,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             const auto q_rope_dram_window = ck_tile::make_tile_window(
                 q_dram,
                 q_rope_dram_window_lengths,
-                {mid, Traits::kBlockNope});
+                {mid, Traits::kSizeNope});
             kn_fmla_fwd_splitkv_prefill_load_once_tile<Traits, scalar_t, acc_t, out_t>(
                 q_nope_dram_window,
                 q_rope_dram_window,
@@ -2156,7 +2117,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
         auto out_dram_window =
             ck_tile::make_tile_window(out_dram, out_dram_window_lengths, {mid, 0});
 
-        if constexpr (!Traits::kLoadOnce)
+        if constexpr (!Traits::kKVLoadOnce)
         {
             kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t>(
                 q_dram_window,
@@ -2184,7 +2145,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             const auto q_rope_dram_window = ck_tile::make_tile_window(
                 q_dram,
                 q_rope_dram_window_lengths,
-                {mid, Traits::kBlockNope});
+                {mid, Traits::kSizeNope});
             kn_fmla_fwd_splitkv_prefill_load_once_tile<Traits, scalar_t, acc_t, out_t>(
                 q_nope_dram_window,
                 q_rope_dram_window,
@@ -2494,9 +2455,11 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const bool           is_causal)
 {
     constexpr bool kEnablePackQkRatio = true;
+    constexpr bool kKVLoadOnce        = true;
     //                                        dqk  dv   m0  n0  n1  #warp
-    // using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4, kEnablePackQkRatio>;
-    using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 4, kEnablePackQkRatio>;
+    using Traits = std::conditional_t<kKVLoadOnce, FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 4, kEnablePackQkRatio>,
+                                                   FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4, kEnablePackQkRatio>>;
+
     constexpr bool kForceOutAcc = false;
     using acc_t                 = float;
 

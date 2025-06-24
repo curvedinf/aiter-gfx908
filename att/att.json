@@ -1,0 +1,18 @@
+{
+    "jobs": [
+        {
+            "kernel_include_regex": ".*gemm.*",
+            "kernel_exclude_regex": "",
+            "output_format": [
+                "json"
+            ],
+            "truncate_kernels": true,
+            "advanced_thread_trace": true,
+            "att_parse" : "trace",
+            "att_target_cu" : 0,
+            "att_shader_engine_mask" : "0xF",
+            "att_simd_select": "0xF",
+            "att_buffer_size": "0x6000000"
+        }
+    ]
+}

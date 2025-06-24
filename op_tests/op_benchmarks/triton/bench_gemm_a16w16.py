@@ -96,9 +96,20 @@ def run_benchmark(args):
         mem_read = (M * K) * x.element_size() + (N * K) * w.element_size()
         mem_write = (M * N) * x.element_size()
         mem = mem_read + mem_write
-
+        triton_config = {
+            "BLOCK_SIZE_M": 256,
+            "BLOCK_SIZE_N": 256,
+            "BLOCK_SIZE_K": 64,
+            "GROUP_SIZE_M": 4,
+            "num_warps": 8,
+            "num_stages": 2,
+            "waves_per_eu": 2,
+            "matrix_instr_nonkdim": 16,
+            "kpack": 1,
+            "schedule_hint": "refine_ops"
+        }
         ms = triton.testing.do_bench(
-            lambda: gemm_a16w16(x, w, c_dtype, y), warmup=25, rep=100  # noqa: E731
+            lambda: gemm_a16w16(x, w, c_dtype, y, triton_config), warmup=25, rep=100  # noqa: E731
         )
 
         # Return exactly one scalar depending on which metric is active

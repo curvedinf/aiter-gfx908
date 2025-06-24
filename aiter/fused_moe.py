@@ -537,7 +537,6 @@ def fused_moe_2stages(
         sorted_weights=sorted_weights if not doweight_stage1 else None,
     )
 
-
     return moe_out
 
 

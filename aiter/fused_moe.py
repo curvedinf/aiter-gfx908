@@ -476,7 +476,7 @@ def fused_moe_2stages(
 
     a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a)
     if quant_type != QuantType.per_128x128:
-        a2 = torch.empty(
+        a2 = torch.zeros(
             (token_num, topk, inter_dim),
             dtype=dtype,
             device=device,
@@ -508,6 +508,7 @@ def fused_moe_2stages(
         if quant_type == QuantType.per_Token:
             a2 = a2.view(token_num, -1)
         a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
+
         a2 = a2.view(token_num, topk, inter_dim)
     else:
         a2_v = a2[:token_num, :, :]
@@ -521,7 +522,6 @@ def fused_moe_2stages(
 
     if quant_type == aiter.QuantType.No:
         a2_scale = get1tensor(device)
-
     stage2(
         a2,
         w1,
@@ -536,6 +536,7 @@ def fused_moe_2stages(
         block_m=block_size_M,
         sorted_weights=sorted_weights if not doweight_stage1 else None,
     )
+
 
     return moe_out
 
@@ -857,7 +858,7 @@ def fused_topk(
             M, topk, dtype=dtypes.fp32, device=hidden_states.device
         )
     if topk_ids is None:
-        topk_ids = torch.empty(M, topk, dtype=dtypes.i32, device=hidden_states.device)
+        topk_ids = torch.w1_qt(M, topk, dtype=dtypes.i32, device=hidden_states.device)
     token_expert_indicies = torch.empty(
         M, topk, dtype=dtypes.i32, device=hidden_states.device
     )

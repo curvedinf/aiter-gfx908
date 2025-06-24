@@ -283,14 +283,14 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
             }
         }();
 
-        using BlockGemmPolicy = aiter::BlockGemmARegBRegCRegV1CustomPolicy<
+        using BlockGemmPolicy = aiter::BlockGemmARegBRegCRegV2CustomPolicy<
             typename Problem::QDataType,
             typename Problem::KDataType,
             typename Problem::SaccDataType,
             typename Problem::BlockFmhaShape::Gemm0BlockWarps,
             decltype(warp_gemm)>;
 
-        return aiter::BlockGemmARegBRegCRegV1<GemmProblem, BlockGemmPolicy>{};
+        return aiter::BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
     }
 
     template <typename Problem>

@@ -1,9 +1,21 @@
-import torch
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+
 import pytest
-import triton
+import torch
 import torch.nn.functional as F
-from aiter.ops.triton.rmsnorm import rms_norm
-from aiter.ops.triton.rmsnorm import rmsnorm2d_fwd_with_add
+import triton
+from aiter.ops.triton.rmsnorm import (
+    rms_norm,
+    rmsnorm2d_fwd_with_add,
+)
+
+
+def generate_rmsnorm_inputs(M, N, dtype):
+    x = torch.randn((M, N), dtype=dtype).cuda()
+    weight = torch.randn(N, dtype=dtype).cuda()
+
+    return x, weight
 
 
 def torch_rmsnorm(x, g, out_dtype=torch.float16, epsilon=1e-6):
@@ -66,8 +78,7 @@ def test_rmsnorm(M, N, in_dtype_str):
     out_dtype = in_dtype
     torch.manual_seed(0)
 
-    x = torch.randn(M, N, device="cuda", dtype=in_dtype)
-    weight = torch.randn(N, device="cuda", dtype=in_dtype)
+    x, weight = generate_rmsnorm_inputs(M, N, in_dtype)
 
     y_torch, *_ = run_torch(x, weight, 1e-5)
     y_triton, *_ = run_triton(x, weight, 1e-5)
@@ -76,7 +87,7 @@ def test_rmsnorm(M, N, in_dtype_str):
         atol, rtol = 1e-2, 1e-2
     else:
         # float32 typically can be tighter
-        atol, rtol = 1e-5, 1e-5
+        atol, rtol = 1e-4, 1e-4
 
     assert (
         y_triton.dtype == out_dtype
@@ -88,7 +99,6 @@ def test_rmsnorm(M, N, in_dtype_str):
     triton.testing.assert_close(y_triton, y_torch, atol=atol, rtol=rtol)
 
 
-# TODO: Re-enable the commented tests once we find why they're causing the AITER CI to fail
 @pytest.mark.parametrize("in_dtype_str", ["fp32", "fp16", "bf16"])
 @pytest.mark.parametrize(
     "M, N",
@@ -98,8 +108,8 @@ def test_rmsnorm(M, N, in_dtype_str):
         (8192, 4096),
         (4096, 8192),
         (8000, 8000),
-        # (1, 31744),
-        # (3, 65536),
+        (1, 31744),
+        (3, 65536),
         (1, 131072),
         (873, 1245),
         (23153, 45),

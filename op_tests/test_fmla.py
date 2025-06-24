@@ -106,12 +106,12 @@ def cal_diff(x: torch.Tensor, y: torch.Tensor, name: str) -> None:
 
 
 @torch.inference_mode()
-def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, test_quality, test_perf):
+def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, page_block_size, causal, varlen, test_quality, test_perf):
     if not test_quality and not test_perf:
         return
 
     print(
-        f"{dtype=}, {b=}, {s_q=}, {mean_sk=}, {h_q=}, {h_kv=}, {d=}, {dv=}, {causal=}, {varlen=}"
+        f"{dtype=}, {b=}, {s_q=}, {mean_sk=}, {h_q=}, {h_kv=}, {d=}, {dv=}, {page_block_size=}, {causal=}, {varlen=}"
     )
 
     cache_seqlens = torch.full((b,), mean_sk, dtype=torch.int32, device="cuda")
@@ -128,12 +128,10 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, tes
 
     q = torch.randn(b, s_q, h_q, d, device="cuda", dtype=dtype)
 
-    block_size = 64
-
     block_table = torch.arange(
-        b * max_seqlen_pad // block_size, dtype=torch.int32, device="cuda"
-    ).view(b, max_seqlen_pad // block_size)
-    blocked_k = torch.randn(block_table.numel(), block_size, h_kv, d, device="cuda", dtype=dtype)
+        b * max_seqlen_pad // page_block_size, dtype=torch.int32, device="cuda"
+    ).view(b, max_seqlen_pad // page_block_size)
+    blocked_k = torch.randn(block_table.numel(), page_block_size, h_kv, d, device="cuda", dtype=dtype)
     for i in range(b):
         blocked_k.view(b, max_seqlen_pad, h_kv, d)[i, cache_seqlens[i].item():] = (
             float("nan")
@@ -212,27 +210,29 @@ if __name__ == "__main__":
     h_kv = 1
     d, dv = 576, 512
 
-    # for (dtype, b, s, h_q, s_q, varlen, causal) in itertools.product(
-    #     (torch.float16, torch.bfloat16),
-    #     (2,4),
-    #     (64, 512, 4096, 8192),
-    #     (16, 64, 128),
-    #     # (1, 2), # s_q for decode
-    #     (64,),  # s_q for prefill
-    #     (False, True),
-    #     (False, True)
-    # ):
-    #     test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, causal, varlen, True, False)
-
-    # for (dtype, b, s, h_q, varlen, causal) in itertools.product(
+    # for (dtype, b, s, h_q, s_q, page_block_size, varlen, causal) in itertools.product(
     #     (torch.float16, torch.bfloat16)[1:],
     #     [1, 3, 5, 16, 32, 64, 128, 256][3:4],
-    #     [21, 64, 256, 512, 1200, 3200, 5200, 8192],
+    #     [21, 64, 256, 512, 1200, 3200, 5200, 8192][:],
+    #     (16, 64, 128)[:],
+    #     # (1, 2), # s_q for decode
+    #     (64,),  # s_q for prefill
+    #     (1, 16, 64)[:],
+    #     (False, True)[:],
+    #     (False, True)[:]
+    # ):
+    #     test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, page_block_size, causal, varlen, True, False)
+
+    # for (dtype, b, s, h_q, page_block_size, varlen, causal) in itertools.product(
+    #     (torch.float16, torch.bfloat16)[1:],
+    #     [1, 3, 5, 16, 32, 64, 128, 256][3:4],
+    #     [21, 64, 256, 512, 1200, 3200, 5200, 8192][:],
     #     (16, 64, 128)[:1],
+    #     (1, 16, 64)[:1],
     #     (False, True)[:1],
     #     (False, True)[1:]
     # ):
-    #     test_flash_mla(dtype, b, s, s, h_q, h_kv, d, dv, causal, varlen, True, True)
-    
+    #     test_flash_mla(dtype, b, s, s, h_q, h_kv, d, dv, page_block_size, causal, varlen, False, True)
+
     # 873us
     test_flash_mla(torch.float16, 32, 3, 6001, 16, 1, 576, 512, False, False, True, True)

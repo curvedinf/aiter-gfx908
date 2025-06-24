@@ -1,18 +1,17 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
 from torch import Tensor
-from typing import List, Optional
+from typing import Optional
 import functools
 import pandas as pd
 from ..jit.core import (
     compile_ops,
-    CK_DIR,
-    AITER_CSRC_DIR,
     AITER_ROOT_DIR,
-    AITER_CORE_DIR,
 )
+from ..utility import dtypes
+from ..jit.utils.chip_info import get_cu_num
 
 
 @compile_ops("module_gemm_a8w8", fc_name="gemm_a8w8")
@@ -25,6 +24,16 @@ def gemm_a8w8(
     bias: Optional[torch.Tensor] = None,
     splitK: int = 0,
 ) -> torch.Tensor: ...
+
+
+@compile_ops("module_gemm_a8w8_bpreshuffle", fc_name="gemm_a8w8_bpreshuffle")
+def gemm_a8w8_bpreshuffle(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    out: Tensor,
+): ...
 
 
 @compile_ops("module_gemm_a8w8_asm", fc_name="gemm_a8w8_asm")
@@ -66,9 +75,7 @@ def flatmm_a8w8_blockscale_asm(
 
 @functools.lru_cache(maxsize=1024)
 def compute_gemm_SplitK(M: int, N: int, K: int, tile_m: int, tile_n: int, tile_k: int):
-
-    device_properties = torch.cuda.get_device_properties(0)
-    cu_num = device_properties.multi_processor_count
+    cu_num = get_cu_num()
     tile_num = ((M + tile_m - 1) // tile_m) * ((N + tile_n - 1) // tile_n)
     cusPerTile = cu_num / tile_num
     splitK = 0
@@ -85,7 +92,7 @@ def get_CKGEMM_config(
 ):
     if not hasattr(get_CKGEMM_config, "ckgemm_dict"):
         ckgemm_dict = pd.read_csv(
-            f"{AITER_CORE_DIR}/aiter/configs/a8w8_tuned_gemm.csv"
+            f"{AITER_ROOT_DIR}/aiter/configs/a8w8_tuned_gemm.csv"
         ).drop_duplicates()
         get_CKGEMM_config.ckgemm_dict = ckgemm_dict.set_index(["M", "N", "K"]).to_dict(
             "index"
@@ -103,7 +110,7 @@ def get_CKGEMM_config(
 def get_ASMGEMM_config(M: int, N: int, K: int, bias: bool, dtype: torch.dtype):
     if not hasattr(get_ASMGEMM_config, "asmgemm_dict"):
         asmGemmDictDf = pd.read_csv(
-            f"{AITER_CORE_DIR}/aiter/configs/asm_a8w8_gemm.csv"
+            f"{AITER_ROOT_DIR}/aiter/configs/asm_a8w8_gemm.csv"
         ).drop_duplicates()
         asmGemmDictDf.bias = asmGemmDictDf.bias.apply(
             lambda s: True if s in ["True", 1, "true"] else False
@@ -120,7 +127,7 @@ def gemm_a8w8_ASM(
     x_scale: Tensor,
     w_scale: Tensor,
     bias: Tensor,
-    dtype=torch.bfloat16,
+    dtype=dtypes.bf16,
     check=False,
 ):
     """
@@ -128,27 +135,27 @@ def gemm_a8w8_ASM(
     1. WQ(weight) must be shuffle, you can use \
         'weightshuffle = shuffle_weight(weight,layout=(32,16))'
     2. Use asm gemm must give bias, if not have bias, please give  \
-        'bias=torch.zeros(n,dtype=torch.float32,device='cuda')'
+        'bias=torch.zeros(n,dtype=dtypes.fp32,device='cuda')'
     """
     if check:
         assert dtype in [
-            torch.bfloat16,
+            dtypes.bf16,
         ], f"Output {dtype=} is currently not supported in gemm_a8w8_ASM"
         assert (
-            x_scale.dtype == torch.float32 and w_scale.dtype == torch.float32
-        ), f"{x_scale.dtype=} or {w_scale.dtype=} must be torch.float32"
+            x_scale.dtype == dtypes.fp32 and w_scale.dtype == dtypes.fp32
+        ), f"{x_scale.dtype=} or {w_scale.dtype=} must be dtypes.fp32"
     m = XQ.shape[0]
     n = WQ.shape[0]
     k = XQ.shape[-1]
     if (
-        x_scale.dtype == torch.float32
-        and w_scale.dtype == torch.float32
+        x_scale.dtype == dtypes.fp32
+        and w_scale.dtype == dtypes.fp32
         and (asm_config := get_ASMGEMM_config(m, n, k, bias != None, dtype)) != None
     ):
         assert (
             bias != None
         ), "Use asm gemm must give bias, please give a \
-            bias=torch.zeros(n,dtype=torch.float32,device='cuda')"
+            bias=torch.zeros(n,dtype=dtypes.fp32,device='cuda')"
         splitK = asm_config["splitK"]
         Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
         return gemm_a8w8_asm(XQ, WQ, x_scale, w_scale, Y, bias, splitK=splitK)
@@ -161,12 +168,12 @@ def gemm_a8w8_CK(
     x_scale: Tensor,
     w_scale: Tensor,
     bias: Optional[Tensor] = None,
-    dtype=torch.bfloat16,
+    dtype=dtypes.bf16,
     splitK: Optional[int] = None,
 ):
     assert dtype in [
-        torch.bfloat16,
-        torch.float16,
+        dtypes.bf16,
+        dtypes.fp16,
     ], f"Output {dtype=} is currently not supported in gemm_a8w8"
     m = XQ.shape[0]
     n = WQ.shape[0]
@@ -181,8 +188,8 @@ def gemm_a8w8_CK(
     return gemm_a8w8(XQ, WQ, x_scale, w_scale, Y, bias, splitK)
 
 
-def gemm_a8w8_blockscale_CK(
-    XQ: Tensor, WQ: Tensor, x_scale: Tensor, w_scale: Tensor, dtype=torch.bfloat16
+def gemm_a8w8_bpreshuffle_CK(
+    XQ: Tensor, WQ: Tensor, x_scale: Tensor, w_scale: Tensor, dtype=torch.float16
 ):
     assert dtype in [
         torch.bfloat16,
@@ -190,7 +197,21 @@ def gemm_a8w8_blockscale_CK(
     ], f"Output {dtype=} is currently not supported in gemm_a8w8"
     m = XQ.shape[0]
     n = WQ.shape[0]
-    k = XQ.shape[-1]
+    # k = XQ.shape[-1]
+    Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
+    return gemm_a8w8_bpreshuffle(XQ, WQ, x_scale, w_scale, Y)
+
+
+def gemm_a8w8_blockscale_CK(
+    XQ: Tensor, WQ: Tensor, x_scale: Tensor, w_scale: Tensor, dtype=dtypes.bf16
+):
+    assert dtype in [
+        dtypes.bf16,
+        dtypes.fp16,
+    ], f"Output {dtype=} is currently not supported in gemm_a8w8"
+    m = XQ.shape[0]
+    n = WQ.shape[0]
+    # k = XQ.shape[-1]
     Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
     return gemm_a8w8_blockscale(XQ, WQ, x_scale, w_scale, Y)
 
@@ -200,14 +221,14 @@ def flatmm_a8w8_blockscale_ASM(
     WQ: Tensor,
     x_scale: Tensor,
     w_scale: Tensor,
-    dtype=torch.float16,
+    dtype=dtypes.fp16,
 ):
     assert dtype in [
-        torch.float16,
+        dtypes.fp16,
     ], f"Output {dtype=} is currently not supported in gemm_a8w8"
     m = XQ.shape[0]
     n = WQ.shape[0]
-    k = XQ.shape[-1]
+    # k = XQ.shape[-1]
     Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
     return flatmm_a8w8_blockscale_asm(XQ, WQ, x_scale, w_scale, Y)
 
@@ -226,6 +247,16 @@ def gemm_a8w8_tune(
 
 @compile_ops("module_gemm_a8w8_blockscale_tune", fc_name="gemm_a8w8_blockscale_tune")
 def gemm_a8w8_blockscale_tune(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    out: Tensor,
+    kernelId: int,
+    splitK=0,
+): ...
+@compile_ops("module_gemm_a8w8_bpreshuffle_tune", fc_name="gemm_a8w8_bpreshuffle_tune")
+def gemm_a8w8_bpreshuffle_tune(
     XQ: Tensor,
     WQ: Tensor,
     x_scale: Tensor,

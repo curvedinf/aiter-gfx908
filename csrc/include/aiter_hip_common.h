@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+#pragma once
 #include <hip/hip_runtime.h>
 #include <iostream>
+#include "ck_tile/core.hpp"
+
 
 #define HIP_CALL(call)                                                                                                           \
     do                                                                                                                           \
@@ -29,6 +32,7 @@ struct p1
 {
     unsigned int _p0;
 };
+
 struct AiterAsmKernelArgs
 {
     void *args_ptr;
@@ -59,6 +63,38 @@ public:
     };
 
     ~AiterAsmKernel()
+    {
+        HIP_CALL(hipModuleUnload(module));
+    }
+
+    void launch_kernel(const AiterAsmKernelArgs &kargs)
+    {
+        void *config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, kargs.args_ptr,
+                          HIP_LAUNCH_PARAM_BUFFER_SIZE, kargs.arg_size_ptr,
+                          HIP_LAUNCH_PARAM_END};
+
+        HIP_CALL(hipModuleLaunchKernel(kernel_func,
+                                       kargs.gdx, kargs.gdy, kargs.gdz,
+                                       kargs.bdx, kargs.bdy, kargs.bdz,
+                                       0, kargs.stream, nullptr, (void **)&config));
+    };
+};
+
+class AiterAsmKernelFast
+{
+private:
+    hipModule_t module;
+    hipFunction_t kernel_func;
+
+public:
+    AiterAsmKernelFast(const char *name, void *hsaco)
+    {
+        HIP_CALL(hipModuleLoadData(&module, hsaco));
+        HIP_CALL(hipModuleGetFunction(&kernel_func, module, name));
+        std::cout << " Success" << std::endl;
+    };
+
+    ~AiterAsmKernelFast()
     {
         HIP_CALL(hipModuleUnload(module));
     }

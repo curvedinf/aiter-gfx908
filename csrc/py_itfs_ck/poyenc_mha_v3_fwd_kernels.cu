@@ -12,8 +12,8 @@
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qx_ks_vs_custom_policy.hpp"
 #include "ck_tile/ops/reduce/block/block_reduce.hpp"
 
-#include "block_gemm_areg_breg_creg_v1.hpp"
-#include "block_gemm_areg_breg_creg_v1_custom_policy.hpp"
+#include "block_gemm_areg_breg_creg_v2.hpp"
+#include "block_gemm_areg_breg_creg_v2_custom_policy.hpp"
 #include "block_gemm_areg_bsmem_creg_v2.hpp"
 #include "block_gemm_areg_bsmem_creg_v2_custom_policy.hpp"
 
@@ -230,6 +230,16 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
     }
 
     template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVRegTileDistribution()
+    {
+        using namespace ck_tile;
+
+        using BlockGemm = remove_cvref_t<decltype(GetKVBlockGemm<Problem>())>;
+
+        return BlockGemm::MakeBBlockTileDistribution();
+    }
+
+    template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto GetQKBlockGemm()
     {
         using namespace ck_tile;
@@ -325,13 +335,13 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
 
         using WarpGemm = remove_cvref_t<decltype(warp_gemm)>;
 
-        using BlockGemmPolicy = aiter::BlockGemmARegBSmemCRegV2CustomPolicy<
+        using BlockGemmPolicy = aiter::BlockGemmARegBRegCRegV2CustomPolicy<
             typename Problem::PDataType,
             typename Problem::VDataType,
             typename Problem::OaccDataType,
             typename Problem::BlockFmhaShape::Gemm1BlockWarps,
             WarpGemm>;
-        return aiter::BlockGemmARegBSmemCRegV2<GemmProblem, BlockGemmPolicy>{};
+        return aiter::BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
     }
 
     template <typename Problem>
@@ -684,10 +694,17 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto run_gemm1 = [&] {
+            auto v_lds_window_for_load = make_tile_window(
+                v_lds_window, Policy::template MakeVRegTileDistribution<Problem>());
+
+            auto v_tile = load_tile(v_lds_window_for_load);
             gemm_1(metadata.o_acc,
-                   get_slice_tile(
-                       metadata.p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
-                   v_lds_window);
+                   get_slice_tile(metadata.p,
+                                  sequence<0, (k1_loops - 1) * kK1>{},
+                                  sequence<kM0, k1_loops * kK1>{}),
+                   get_slice_tile(v_tile,
+                                  sequence<0, (k1_loops - 1) * kK1>{},
+                                  sequence<kN1, k1_loops * kK1>{}));
         };
 
         auto run_fmha_alu = [&] {

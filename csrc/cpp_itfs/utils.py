@@ -21,6 +21,8 @@ HOME_PATH = os.environ.get("HOME")
 AITER_MAX_CACHE_SIZE = os.environ.get("AITER_MAX_CACHE_SIZE", None)
 AITER_ROOT_DIR = os.environ.get("AITER_ROOT_DIR", f"{HOME_PATH}/.aiter")
 BUILD_DIR = os.path.abspath(os.path.join(AITER_ROOT_DIR, "build"))
+AITER_LOG_MORE = int(os.getenv("AITER_LOG_MORE", 0))
+
 if AITER_REBUILD >= 1:
     subprocess.run(f"rm -rf {BUILD_DIR}/*", shell=True)
 os.makedirs(BUILD_DIR, exist_ok=True)

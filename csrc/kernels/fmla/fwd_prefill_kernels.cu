@@ -416,6 +416,15 @@ public:
         return BlockGemmARegBSmemCReg<GemmProblem, BlockGemmPolicy>{};
     }
 
+    CK_TILE_HOST_DEVICE static constexpr auto MakeQRegTileDistribution()
+    {
+        using BlockGemm = ck_tile::remove_cvref_t<decltype(GetQKBlockGemm())>;
+
+        return BlockGemm::template MakeABlockTileDistribution<
+            Traits::kBlockM,
+            Traits::kBlockK0>();
+    }
+
     CK_TILE_HOST_DEVICE static constexpr auto MakeQNopeRegTileDistribution()
     {
         using BlockGemm = ck_tile::remove_cvref_t<decltype(GetQKBlockGemm())>;
@@ -434,7 +443,7 @@ public:
             Traits::kBlockM,
             Traits::kBlockRope>();
     }
-
+    
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
     {
         // constexpr int32_t kBlockSize = Traits::kNumThreads;
@@ -1544,10 +1553,10 @@ template<typename Traits,
          typename out_t,
          typename QNopeDramRegBlockWindow,
          typename QRopeDramRegBlockWindow,
+         typename KDramBlockWindow,
+         typename VDramBlockWindow,
          typename LseDramBlockWindow,
          typename OutDramBlockWindow,
-         typename KPageBlockNavigator,
-         typename VPageBlockNavigator,
          typename Mask>
 CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
     const QNopeDramRegBlockWindow&  q_nope_dram_window_,
@@ -1896,9 +1905,9 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
             ck_tile::load_tile(k_dram_window, k_block_tile);
         }
 
+        const auto p = ck_tile::cast_tile<scalar_t>(p_intermedia);
         if constexpr (k1_loops == 1)
         {
-            const auto p = ck_tile::cast_tile<scalar_t>(p_intermedia);
             ck_tile::block_sync_lds();
             ck_tile::store_tile(v_lds_window, vt_tile);
 
@@ -1911,18 +1920,20 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
         }
         else
         {
-            ck_tile::static_for<0, k1_loops, 1>{}([&](auto k1_id) {
-                ck_tile::block_sync_lds();
-                gemm_1(o_acc[n1_id],
-                       ck_tile::get_slice_tile(
-                           p,
-                           ck_tile::sequence<0, k1_id * Traits::kBlockK1>{},
-                           ck_tile::sequence<Traits::kBlockM, (k1_id + 1) * Traits::kBlockK1>{}),
-                       v_lds_window);
-                ck_tile::block_sync_lds();
-                ck_tile::move_tile_window(v_lds_window, {0, Traits::kBlockK1});
+            ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id) {
+                ck_tile::static_for<0, k1_loops, 1>{}([&](auto k1_id) {
+                    ck_tile::block_sync_lds();
+                    gemm_1(o_acc[n1_id],
+                           ck_tile::get_slice_tile(
+                               p,
+                               ck_tile::sequence<0, k1_id * Traits::kBlockK1>{},
+                               ck_tile::sequence<Traits::kBlockM, (k1_id + 1) * Traits::kBlockK1>{}),
+                           v_lds_window);
+                    ck_tile::block_sync_lds();
+                    ck_tile::move_tile_window(v_lds_window, {0, Traits::kBlockK1});
+                });
+                v_lds_window.set_window_origin({(n1_id + 1) * Traits::kBlockN1, 0});
             });
-            v_lds_window.set_window_origin({0, 0});
         }
     };
 
@@ -2041,8 +2052,6 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
     const int32_t kv_cache_width = params.num_page_blocks * params.page_block_size;
 
     const auto q_dram = MakeQDram<Policy>(p_query, params.size_s,  params.stride_s_q);
-    const auto q_nope_dram_window = ck_tile::make_tile_window(q_dram_complete, q_nope_dram_window_lengths, {mid, 0});
-    const auto q_rope_dram_window = ck_tile::make_tile_window(q_dram_complete, q_rope_dram_window_lengths, {mid, Traits::kBlockNope});
 
     const auto k_dram = MakeKDram<Policy>(p_key,   kv_cache_width, params.stride_s_k);
     const auto v_dram = MakeVDram<Policy>(p_value, kv_cache_width, params.stride_s_v);    
@@ -2076,25 +2085,54 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             ck_tile::make_tile_window(out_acc_dram, out_acc_dram_window_lengths, {mid, 0});
 
 
-        kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t>(
-            // q_nope_dram_window,
-            // q_rope_dram_window,
-            q_dram_window,
-            k_dram_window,
-            v_dram_window,
-            lse_acc_dram_window,
-            out_acc_dram_window,
-            p_block_table,
-            params.page_block_size,
-            params.stride_s_k,
-            params.stride_s_v,
-            seqlen_k,
-            params.num_splits,
-            split_id,
-            mask,
-            params.scale_softmax,
-            p_smem,
-            );
+        if constexpr (!Traits::kLoadOnce) {
+            kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t>(
+                // q_nope_dram_window,
+                // q_rope_dram_window,
+                q_dram_window,
+                k_dram_window,
+                v_dram_window,
+                lse_acc_dram_window,
+                out_acc_dram_window,
+                p_block_table,
+                params.page_block_size,
+                params.stride_s_k,
+                params.stride_s_v,
+                seqlen_k,
+                params.num_splits,
+                split_id,
+                mask,
+                params.scale_softmax,
+                p_smem);
+        }
+        else
+        {
+            const auto q_nope_dram_window = ck_tile::make_tile_window(
+                q_dram,
+                q_nope_dram_window_lengths,
+                {mid, 0});
+            const auto q_rope_dram_window = ck_tile::make_tile_window(
+                q_dram,
+                q_rope_dram_window_lengths,
+                {mid, Traits::kBlockNope});
+            kn_fmla_fwd_splitkv_prefill_load_once_tile<Traits, scalar_t, acc_t, out_t>(
+                q_nope_dram_window,
+                q_rope_dram_window,
+                k_dram_window,
+                v_dram_window,
+                lse_acc_dram_window,
+                out_acc_dram_window,
+                p_block_table,
+                params.page_block_size,
+                params.stride_s_k,
+                params.stride_s_v,
+                seqlen_k,
+                params.num_splits,
+                split_id,
+                mask,
+                params.scale_softmax,
+                p_smem);
+        }
     }
     else
     {
@@ -2118,25 +2156,53 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
         auto out_dram_window =
             ck_tile::make_tile_window(out_dram, out_dram_window_lengths, {mid, 0});
 
-        kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t>(
-            // q_nope_dram_window,
-            // q_rope_dram_window,
-            q_dram_window,
-            k_dram_window,
-            v_dram_window,
-            lse_dram_window,
-            out_dram_window,
-            p_block_table,
-            params.page_block_size,
-            params.stride_s_k,
-            params.stride_s_v,
-            seqlen_k,
-            1, // num_splits
-            0, // split_id
-            mask,
-            params.scale_softmax,
-            p_smem,
-            );
+        if constexpr (!Traits::kLoadOnce)
+        {
+            kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t>(
+                q_dram_window,
+                k_dram_window,
+                v_dram_window,
+                lse_dram_window,
+                out_dram_window,
+                p_block_table,
+                params.page_block_size,
+                params.stride_s_k,
+                params.stride_s_v,
+                seqlen_k,
+                1, // num_splits
+                0, // split_id
+                mask,
+                params.scale_softmax,
+                p_smem);
+        }
+        else
+        {
+            const auto q_nope_dram_window = ck_tile::make_tile_window(
+                q_dram,
+                q_nope_dram_window_lengths,
+                {mid, 0});
+            const auto q_rope_dram_window = ck_tile::make_tile_window(
+                q_dram,
+                q_rope_dram_window_lengths,
+                {mid, Traits::kBlockNope});
+            kn_fmla_fwd_splitkv_prefill_load_once_tile<Traits, scalar_t, acc_t, out_t>(
+                q_nope_dram_window,
+                q_rope_dram_window,
+                k_dram_window,
+                v_dram_window,
+                lse_dram_window,
+                out_dram_window,
+                p_block_table,
+                params.page_block_size,
+                params.stride_s_k,
+                params.stride_s_v,
+                seqlen_k,
+                params.num_splits,
+                split_id,
+                mask,
+                params.scale_softmax,
+                p_smem);
+        }
     }    
 }
 
@@ -2429,7 +2495,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
 {
     constexpr bool kEnablePackQkRatio = true;
     //                                        dqk  dv   m0  n0  n1  #warp
-    using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4, kEnablePackQkRatio>;
+    // using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4, kEnablePackQkRatio>;
     using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 4, kEnablePackQkRatio>;
     constexpr bool kForceOutAcc = false;
     using acc_t                 = float;

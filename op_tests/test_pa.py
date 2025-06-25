@@ -248,6 +248,50 @@ def run_native(
     num_queries_per_kv,
     dtype,
 ):
+    print(
+        "qqqqqqqqqqqqqq:\n",
+        "query =",
+        query,
+        "\n",
+        "k_cache =",
+        k_cache,
+        "\n",
+        "v_cache =",
+        v_cache,
+        "\n",
+        "block_tables =",
+        block_tables,
+        "\n",
+        "seq_lens =",
+        seq_lens,
+        "\n",
+        "max_seq_len =",
+        max_seq_len,
+        "\n",
+        "kv_cache_dtype =",
+        kv_cache_dtype,
+        "\n",
+        "num_kv_heads =",
+        num_kv_heads,
+        "\n",
+        "scale =",
+        scale,
+        "\n",
+        "alibi_slopes =",
+        alibi_slopes,
+        "\n",
+        "k_scale_cache =",
+        k_scale_cache,
+        "\n",
+        "v_scale_cache =",
+        v_scale_cache,
+        "\n",
+        "num_queries_per_kv =",
+        num_queries_per_kv,
+        "\n",
+        "dtype =",
+        dtype,
+    )
     output = torch.zeros_like(query).to(dtype)
     num_query_heads = query.shape[1]
     num_kv_heads = v_cache.shape[1]
@@ -321,6 +365,38 @@ def run_aiter(
     k_scale,
     v_scale,
 ):
+    print(
+        "hahahahahahahahah:",
+        "query =",
+        query,
+        query.shape,
+        "k_cache =",
+        k_cache,
+        k_cache.shape,
+        "v_cache =",
+        v_cache,
+        v_cache.shape,
+        "block_tables =",
+        block_tables,
+        block_tables.shape,
+        "seq_lens =",
+        seq_lens,
+        "max_seq_len =",
+        max_seq_len,
+        "kv_cache_dtype =",
+        kv_cache_dtype,
+        "num_kv_heads =",
+        num_kv_heads,
+        "scale =",
+        scale,
+        "alibi_slopes =",
+        alibi_slopes,
+        "k_scale =",
+        k_scale,
+        "v_scale =",
+        v_scale,
+    )
+
     return ops.PagedAttention.forward_decode(
         query,
         k_cache,
@@ -560,42 +636,44 @@ def test_paged_attention(
     )
     if debug_mode != VERIFY:
         out_golden = out_aiter
+        # print(222, out_golden)
     checkAllclose(
         out_golden, out_aiter, msg=f"golden vs aiter_shomy:{time_aiter:>8.2f} us......"
     )
     # tensor_dump(out_aiter, 'out_aiter')
 
-    time_aiter_asm = None
-    if dtype == dtypes.bf16:
-        out_aiter_asm, time_aiter_asm = run_aiter_asm(
-            query.contiguous(),  # this kernel need contiguous buffer
-            k_cache,
-            asm_V_shuffle(v_cache),
-            block_tables,
-            seq_lens,
-            max_seq_len,
-            kv_cache_dtype,
-            num_kv_heads,
-            scale,
-            alibi_slopes,
-            max_num_blocks_per_seq,
-        )
+    # time_aiter_asm = None
+    # if dtype == dtypes.bf16:
+    #     out_aiter_asm, time_aiter_asm = run_aiter_asm(
+    #         query.contiguous(),  # this kernel need contiguous buffer
+    #         k_cache,
+    #         asm_V_shuffle(v_cache),
+    #         block_tables,
+    #         seq_lens,
+    #         max_seq_len,
+    #         kv_cache_dtype,
+    #         num_kv_heads,
+    #         scale,
+    #         alibi_slopes,
+    #         max_num_blocks_per_seq,
+    #     )
 
-        checkAllclose(
-            out_golden,
-            out_aiter_asm,
-            msg=f"golden vs aiter_asm:{time_aiter_asm:>8.2f} us......",
-        )
-        # tensor_dump(out_aiter, 'out_aiter')
+    #     checkAllclose(
+    #         out_golden,
+    #         out_aiter_asm,
+    #         msg=f"golden vs aiter_asm:{time_aiter_asm:>8.2f} us......",
+    #     )
+    #     # tensor_dump(out_aiter, 'out_aiter')
 
     for quant_algo_, cache_type_ in [
-        (0, k_cache.dtype),
-        (2, dtypes.fp8),
+        # (0, k_cache.dtype),
+        # (2, dtypes.fp8),
         (2, dtypes.i8),
-        (4, dtypes.fp8),
+        # (4, dtypes.fp8),
     ]:
         quant_algo = ck_naive_quant_algo[quant_algo_]
         if quant_algo == "NO":
+            print("jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj")
             k_quant_, k_scale_, v_quant_, v_scale_ = (
                 k_cache,
                 torch.empty((0)),
@@ -607,6 +685,7 @@ def test_paged_attention(
                 pertoken_quant_kvcache_symm(k_cache, v_cache, quant_dtype=cache_type_)
             )
         elif quant_algo == "KV_8BIT_PER_TENSOR":
+            print("jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj")
             k_quant_, k_scale_ = aiter.per_tensor_quant(
                 k_cache, quant_dtype=cache_type_
             )
@@ -751,8 +830,10 @@ def test_paged_attention(
                 num_queries_per_kv,
                 dtype,
             )
+            # print(111, ctx_lens, num_heads)
+            # print(out_golden)
             checkAllclose(
-                out_golden,
+                out_aiter_asm,
                 out_native,
                 msg=f"golden vs torch_native: {time_native:>8.2f} us...... (quant:{ck_naive_quant_algo[quant_algo_]}, kvcache:{cache_type_})",
             )

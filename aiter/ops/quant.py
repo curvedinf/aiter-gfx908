@@ -29,6 +29,7 @@ def get_dtype_max(dtype):
         dtypeMax = torch.finfo(dtype).max
     except:
         dtypeMax = torch.iinfo(dtype).max
+    print(111111111111111111111111111111, dtype, dtypeMax)
     return dtypeMax
 
 

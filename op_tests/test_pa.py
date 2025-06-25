@@ -527,20 +527,20 @@ def load_input():
     #         tensor_load('/mnt/raid0/ljin1/pa_data/x8_Kzero/OUT_16.bin'),
     #         )
     return (
-        tensor_load("/mnt/raid0/ljin1/pa_data/bf16in/Q_BF16.bin"),
-        tensor_load("/mnt/raid0/ljin1/pa_data/bf16in/K_BF16.bin"),
-        tensor_load("/mnt/raid0/ljin1/pa_data/bf16in/V_BF16.bin"),
-        tensor_load("/mnt/raid0/ljin1/pa_data/bf16in/block_tables.bin"),
-        tensor_load("/mnt/raid0/ljin1/pa_data/bf16in/seq_lens.bin"),
-        tensor_load("/mnt/raid0/ljin1/pa_data/bf16in/OUT_BF16.bin"),
+        tensor_load("./op_tests/bin/Q_BF16.bin"),
+        tensor_load("./op_tests/bin/K_BF16.bin"),
+        tensor_load("./op_tests/bin/V_BF16.bin"),
+        tensor_load("./op_tests/bin/block_tables.bin"),
+        tensor_load("./op_tests/bin/seq_lens.bin"),
+        tensor_load("./op_tests/bin/OUT_BF16.bin"),
     )
 
 
 DUMP = 1
 VERIFY = 2
 # debug_mode = DUMP
-# debug_mode = VERIFY
-debug_mode = 0
+debug_mode = VERIFY
+# debug_mode = 0
 torch.set_printoptions(sci_mode=False)
 
 
@@ -562,8 +562,8 @@ def test_paged_attention(
     head_size: int,  # 128
     use_alibi: bool,  # false
     block_size: int,  # 16
-    dtype: torch.dtype,
-    kv_cache_dtype: str,
+    dtype: torch.dtype,  # bf16
+    kv_cache_dtype: str,  # auto
     seed: int,  # 0
     device: str,
 ) -> None:
@@ -571,14 +571,14 @@ def test_paged_attention(
     # Using default kv_scale
     k_scale = v_scale = 1.0
     scale = float(1.0 / (head_size**0.5))
-    num_query_heads, num_kv_heads = num_heads
+    num_query_heads, num_kv_heads = num_heads  # 4,1
     alibi_slopes = None
     if use_alibi:
         alibi_slopes = torch.randn(num_query_heads, dtype=dtypes.fp32)
     assert num_query_heads % num_kv_heads == 0
-    num_queries_per_kv = num_query_heads // num_kv_heads
+    num_queries_per_kv = num_query_heads // num_kv_heads  # // 整除
     max_seq_len = ctx_lens
-    max_num_blocks_per_seq = (max_seq_len + block_size - 1) // block_size
+    max_num_blocks_per_seq = (max_seq_len + block_size - 1) // block_size  # 向上取整
     num_blocks = max_num_blocks_per_seq * num_seqs
     print(f"{debug_mode=}")
 
@@ -618,7 +618,10 @@ def test_paged_attention(
             seed,
             device,
         )
-        k_cache, v_cache = k_caches[0], v_caches[0]
+        k_cache, v_cache = (
+            k_caches[0],
+            v_caches[0],
+        )  # 因为layers=1, k_caches 里面只有一个元素
 
     out_aiter, time_aiter = run_aiter(
         query,

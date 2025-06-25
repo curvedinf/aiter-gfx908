@@ -556,15 +556,15 @@ def asm_V_shuffle(VC):
 
 @benchmark()
 def test_paged_attention(
-    ctx_lens: int,
-    num_seqs: int,
-    num_heads: Tuple[int, int],
-    head_size: int,
-    use_alibi: bool,
-    block_size: int,
+    ctx_lens: int,  # 66
+    num_seqs: int,  # 128
+    num_heads: Tuple[int, int],  # 4,1
+    head_size: int,  # 128
+    use_alibi: bool,  # false
+    block_size: int,  # 16
     dtype: torch.dtype,
     kv_cache_dtype: str,
-    seed: int,
+    seed: int,  # 0
     device: str,
 ) -> None:
     torch.set_default_device(device)

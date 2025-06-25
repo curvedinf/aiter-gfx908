@@ -1,10 +1,13 @@
 import argparse
 import sys
+import os
 import torch
 import triton
-from aiter.ops.triton.gemm_a16w16 import gemm_a16w16
-from op_tests.triton_tests.test_gemm_a16w16 import generate_gemm_a16w16_inputs
+from op_tests.triton_tests.test_batched_gemm_afp4wfp4 import generate_batched_gemm_afp4wfp4_inputs
 from utils.benchmark_utils import get_model_configs, get_available_models
+import os
+
+from aiter.ops.triton.batched_gemm_afp4wfp4 import batched_gemm_afp4wfp4 as batched_gemm_afp4wfp4
 
 
 def model_benchmark_shapes(args):
@@ -17,32 +20,26 @@ def model_benchmark_shapes(args):
             N = config["intermediate_size"]
             K = config["hidden_size"]
 
-            shapes.append((M, N, K, "TN"))
+            shapes.append((16, M, N, K))
 
     return shapes
 
 
 def get_x_vals():
     x_vals = [
-        (1, 1280, 8192, "TN"),
-        (32, 1280, 8192, "TN"),
-        (64, 1280, 8192, "TN"),
-        (128, 1280, 8192, "TN"),
-        (192, 1280, 8192, "TN"),
-        (256, 1280, 8192, "TN"),
-        (320, 1280, 8192, "TN"),
-        (512, 1280, 8192, "TN"),
-        (1024, 1280, 8192, "TN"),
-        (2048, 1280, 8192, "TN"),
-        (4096, 1280, 8192, "TN"),
-        (8192, 1280, 8192, "TN"),
-        (16384, 1280, 8192, "TN"),
-        (8192, 7168, 20480, "NT"),
-        (1024, 20480, 8192, "NT"),
-        (1024, 8192, 20480, "NT"),
-        (8192, 7168, 20480, "TN"),
-        (1024, 20480, 8192, "TN"),
-        (1024, 8192, 20480, "TN"),
+        (16, 1, 1280, 8192),
+        (16, 32, 1280, 8192),
+        (16, 64, 1280, 8192),
+        (16, 128, 1280, 8192),
+        (16, 192, 1280, 8192),
+        (16, 256, 1280, 8192),
+        (16, 320, 1280, 8192),
+        (16, 512, 1280, 8192),
+        (16, 1024, 1280, 8192),
+        (16, 2048, 1280, 8192),
+        (16, 4096, 1280, 8192),
+        (16, 8192, 1280, 8192),
+        (16, 16384, 1280, 8192),
     ]
     return x_vals
 
@@ -52,11 +49,11 @@ def run_benchmark(args):
         args.shape and args.M
     ), "User can specify --shape or --model MODEL -M VAL exclusively"
 
-    x_names = ["M", "N", "K", "layout"]
+    x_names = ["batch", "M", "N", "K"]
     if args.model:
         x_vals_list = model_benchmark_shapes(args)
     elif args.shape:
-        x_vals_list = [args.shape + [args.layout]]
+        x_vals_list = [args.shape]
     else:
         x_vals_list = get_x_vals()
 
@@ -79,24 +76,32 @@ def run_benchmark(args):
         line_names=line_names,
         styles=[("green", "-")],
         ylabel=ylabel,
-        plot_name="GEMM A16W16 Benchmark",
+        plot_name="GEMM MXFP4 x MXFP4 Benchmark",
         args={"metric": args.metric},
     )
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_a16w16(M, N, K, layout, metric, provider):
-        # NOTE: Assume bias and output has the same dtype
+    def bench_gemm_afp4wfp4_blockscale(batch, M, N, K, metric, provider):
         c_dtype = torch.bfloat16
-        x, w, outdtype, y = generate_gemm_a16w16_inputs(M, N, K, c_dtype, layout, output=True)
+        x, w, x_scale, w_scale = generate_batched_gemm_afp4wfp4_inputs(
+            batch, M, N, K
+        )
         # flops
         flops = 2.0 * M * N * K
         # memory transfer
-        mem_read = (M * K) * x.element_size() + (N * K) * w.element_size()
-        mem_write = (M * N) * x.element_size()
+        mem_read = x.numel() * x.element_size() + w.numel() * w.element_size()
+        mem_read += (
+            x_scale.numel() * x_scale.element_size()
+            + w_scale.numel() * w_scale.element_size()
+        )
+        mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
         mem = mem_read + mem_write
+        out = torch.empty(x.shape[0], x.shape[1], w.shape[2], device=x.device, dtype=c_dtype)
 
         ms = triton.testing.do_bench(
-            lambda: gemm_a16w16(x, w, c_dtype, y), warmup=25, rep=100  # noqa: E731
+            lambda: batched_gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
+            warmup=25,
+            rep=100,
         )
 
         # Return exactly one scalar depending on which metric is active
@@ -111,12 +116,12 @@ def run_benchmark(args):
         else:
             raise ValueError("Unknown metric: " + metric)
 
-    bench_gemm_a16w16.run(save_path=".", print_data=True)
+    bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        prog="Benchmark A16W16 GEMM",
+        prog="Benchmark MXFP4 x MXFP4 GEMM",
         allow_abbrev=False,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -142,8 +147,8 @@ def parse_args():
     parser.add_argument(
         "--shape",
         type=int,
-        nargs=3,
-        metavar=("M", "N", "K"),
+        nargs=4,
+        metavar=("batch", "M", "N", "K"),
         help="user-defined shape to benchmark",
     )
     parser.add_argument(
@@ -152,13 +157,6 @@ def parse_args():
         choices=["time", "throughput", "bandwidth"],
         default="throughput",
         help="metric to plot",
-    )
-    parser.add_argument(
-        "--layout",
-        type=str,
-        choices=["TT", "TN", "NT", "NN"],
-        default="TN",
-        help="Layout of input and weight matrix",
     )
     args = parser.parse_args()
     return args

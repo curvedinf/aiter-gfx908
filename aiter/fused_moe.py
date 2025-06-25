@@ -640,6 +640,7 @@ def torch_moe(
         topk_ids = local_expert_hash[topk_ids]
 
     hidden_states = hidden_states.view(B, -1, D).repeat(1, topk, 1)
+
     out = torch.zeros(
         (B, topk, D),
         dtype=computeType,
@@ -663,7 +664,9 @@ def torch_moe(
     for E_id in range(w1.shape[0]):
         mask = topk_ids == E_id
         if mask.sum():
+
             sub_tokens = hidden_states[mask]
+
             if fc1_smooth_scale is not None:
                 sub_tokens = sub_tokens * (fc1_smooth_scale[E_id])
 
@@ -857,7 +860,7 @@ def fused_topk(
             M, topk, dtype=dtypes.fp32, device=hidden_states.device
         )
     if topk_ids is None:
-        topk_ids = torch.w1_qt(M, topk, dtype=dtypes.i32, device=hidden_states.device)
+        topk_ids = torch.empty(M, topk, dtype=dtypes.i32, device=hidden_states.device)
     token_expert_indicies = torch.empty(
         M, topk, dtype=dtypes.i32, device=hidden_states.device
     )

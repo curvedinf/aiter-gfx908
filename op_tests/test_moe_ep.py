@@ -158,7 +158,7 @@ def test_fmoe_ep(
     quant_dtype = dtypes.i8 if quantstr.startswith("int8") else dtypes.fp8
     use_smooth = "smooth" in quantstr
 
-    input = torch.randn((token, model_dim), dtype=dtype, device="cuda") / 10
+    input = torch.randn((token, model_dim), dtype=dtype, device="cuda")
     if use_g1u1:
         w1 = (
             torch.randn(
@@ -166,7 +166,7 @@ def test_fmoe_ep(
                 dtype=dtype,
                 device="cuda",
             )
-            / 1
+            / 10
         )
     else:
         w1 = (

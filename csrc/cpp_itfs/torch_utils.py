@@ -2,6 +2,8 @@ import torch
 import ctypes
 from torch.library import Library
 from typing import Callable, Optional, Tuple
+from csrc.cpp_itfs.utils import AITER_LOG_MORE
+from aiter.test_common import log_args
 
 
 ctypes_map = {
@@ -75,6 +77,11 @@ def direct_register_custom_op(
     """
     import torch.library
 
+    def _op_func(*args, **kwargs):
+        if AITER_LOG_MORE >= 2:
+            log_args(op_func, *args, **kwargs)
+        return op_func(*args, **kwargs)
+
     if hasattr(torch.library, "infer_schema"):
         schema_str = torch.library.infer_schema(op_func, mutates_args=mutates_args)
     else:
@@ -84,6 +91,6 @@ def direct_register_custom_op(
         schema_str = torch._custom_op.impl.infer_schema(op_func, mutates_args)
     my_lib = target_lib or aiter_lib
     my_lib.define(op_name + schema_str, tags=tags)
-    my_lib.impl(op_name, op_func, dispatch_key=dispatch_key)
+    my_lib.impl(op_name, _op_func, dispatch_key=dispatch_key)
     if fake_impl is not None:
         my_lib._register_fake(op_name, fake_impl)

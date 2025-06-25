@@ -33,7 +33,6 @@ def compile(
             f"{AITER_CORE_DIR}/csrc/include",
             f"{AITER_CORE_DIR}/csrc/include/ck_tile",
         ],
-        [],
         gqa_ratio=gqa_ratio,
         head_size=head_size,
         npar_loops=npar_loops,
@@ -67,7 +66,7 @@ def paged_attention_rocm(
     k_scale,
     v_scale,
     fp8_out_scale=None,
-    num_threads=256,
+    partition_size=256,
     mtp=1,
 ):
     import torch
@@ -110,7 +109,7 @@ def paged_attention_rocm(
     kv_block_stride = key_cache.stride(0)
     kv_head_stride = key_cache.stride(1)
     gqa_ratio = int(num_heads / num_kv_heads)
-    max_num_partitions = int(math.ceil(max_context_len / 256))
+    max_num_partitions = int(math.ceil(max_context_len / partition_size))
     npar_loops = int(math.ceil(max_num_partitions / warpSize))
     func = compile(
         gqa_ratio,

@@ -82,8 +82,20 @@ def _fwd_kernel_stage2_asm(
     )
 
 
+@functools.lru_cache(maxsize=1)
+def get_kv_splits_indptr(num_kv_splits, bs, device):
+    """
+    Returns the kv_splits_indptr tensor for the given number of kv splits.
+    """
+    num_kv_splits = min(16, max(1, num_kv_splits))
+    kv_splits_indptr = torch.arange(
+        0, (num_kv_splits + 1) * bs, num_kv_splits, device=device, dtype=torch.int32
+    )
+    return kv_splits_indptr
+
+
 @functools.lru_cache()
-def get_meta_param(num_kv_splits, bs, total_kv, nhead, max_seqlen_q):
+def get_meta_param(num_kv_splits, bs, total_kv, nhead, max_seqlen_q, device):
     if num_kv_splits is None:
         cu_num = get_cu_num()
         avg_kv = total_kv / bs
@@ -108,7 +120,7 @@ def get_meta_param(num_kv_splits, bs, total_kv, nhead, max_seqlen_q):
     mgc = get_mgc[nhead]
     if max_seqlen_q == 1 and nhead == 16:
         mgc = 64
-    return num_kv_splits, mgc
+    return num_kv_splits, get_kv_splits_indptr(num_kv_splits, bs, device), mgc
 
 
 def mla_decode_fwd(
@@ -123,6 +135,7 @@ def mla_decode_fwd(
     sm_scale=None,  # 1.0 / (qk_head_dim**0.5)
     logit_cap=0.0,
     num_kv_splits=None,  # for experts only!!!
+    num_kv_splits_indptr=None,  # for experts only!!!
 ):
     device = q.device
     assert logit_cap <= 0, f"{logit_cap=} is not support yet"
@@ -134,8 +147,8 @@ def mla_decode_fwd(
     bs = qo_indptr.shape[0] - 1
     total_kv = kv_indices.shape[0]
 
-    num_kv_splits, mgc = get_meta_param(
-        num_kv_splits, bs, total_kv, nhead, max_seqlen_q
+    num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(
+        num_kv_splits, bs, total_kv, nhead, max_seqlen_q, device
     )
 
     if nhead == 16 and max_seqlen_q == 1:
@@ -169,6 +182,7 @@ def mla_decode_fwd(
         kv_indptr,
         kv_indices,
         kv_last_page_lens,
+        num_kv_splits_indptr,
         max_seqlen_q,
         sm_scale,
         logits,

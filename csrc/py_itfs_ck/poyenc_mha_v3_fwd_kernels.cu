@@ -542,15 +542,6 @@ struct BlockFmhaPipelineQRKSVS
 
         const index_t warp_group_id = get_warp_id() / 4;
 
-        // K tile in LDS
-        auto k_lds_window = make_lds_tile_window<KDataType>(
-            static_cast<char*>(smem_ptr) + 0, Policy::template MakeKLdsBlockDescriptor<Problem>());
-
-        // V tile in LDS
-        auto v_lds_window = make_lds_tile_window<VDataType>(
-            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeKV<Problem>(),
-            Policy::template MakeVLdsBlockDescriptor<Problem>());
-
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
         constexpr auto gemm_1 = Policy::template GetKVBlockGemm<Problem>();
@@ -564,6 +555,17 @@ struct BlockFmhaPipelineQRKSVS
 
         struct Metadata
         {
+            statically_indexed_array<decltype(make_lds_tile_window<KDataType>(
+                                         nullptr,
+                                         Policy::template MakeKLdsBlockDescriptor<Problem>())),
+                                     2>
+                k_lds_window;
+            statically_indexed_array<decltype(make_lds_tile_window<VDataType>(
+                                         nullptr,
+                                         Policy::template MakeVLdsBlockDescriptor<Problem>())),
+                                     2>
+                v_lds_window;
+
             decltype(make_static_distributed_tensor<QDataType>(
                 Policy::template MakeQRegTileDistribution<Problem>())) q_tile;
             statically_indexed_array<decltype(gemm_0.MakeCBlockTile()), 2> s_acc;
@@ -586,6 +588,19 @@ struct BlockFmhaPipelineQRKSVS
                                      2>
                 p;
         } metadata;
+
+        // initialize k_lds_window and v_lds_window
+        static_for<0, 2, 1>{}([&](auto idx) {
+            metadata.k_lds_window(idx) = make_lds_tile_window<KDataType>(
+                static_cast<char*>(smem_ptr) + idx * Policy::template GetSmemSizeKV<Problem>(),
+                Policy::template MakeKLdsBlockDescriptor<Problem>());
+        });
+        static_for<0, 2, 1>{}([&](auto idx) {
+            metadata.v_lds_window(idx) = make_lds_tile_window<VDataType>(
+                static_cast<char*>(smem_ptr) +
+                    (2 + idx) * Policy::template GetSmemSizeKV<Problem>(),
+                Policy::template MakeVLdsBlockDescriptor<Problem>());
+        });
 
         {
             auto origin_q      = load_tile(q_dram_window);
@@ -653,25 +668,27 @@ struct BlockFmhaPipelineQRKSVS
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
-        auto global_load_k = [&] {
+        auto global_load_k = [&](auto k_lds_write_idx) {
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
 
             __builtin_amdgcn_sched_barrier(0);
 
-            store_tile(k_lds_window, tile_elementwise_in(k_element_func, k_block_tile));
+            store_tile(metadata.k_lds_window(k_lds_write_idx),
+                       tile_elementwise_in(k_element_func, k_block_tile));
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
-        auto local_load_k = [&] {
-            auto k_lds_window_for_load = make_tile_window(
-                k_lds_window, Policy::template MakeKRegTileDistribution<Problem>());
+        auto local_load_k = [&](auto k_lds_read_idx) {
+            auto k_lds_window_for_load =
+                make_tile_window(metadata.k_lds_window(k_lds_read_idx),
+                                 Policy::template MakeKRegTileDistribution<Problem>());
 
             return load_tile(k_lds_window_for_load);
         };
 
-        auto global_load_v = [&] {
+        auto global_load_v = [&](auto v_lds_write_idx) {
             const auto v_tile = load_tile(v_dram_window);
             __builtin_amdgcn_sched_barrier(0);
 
@@ -682,13 +699,13 @@ struct BlockFmhaPipelineQRKSVS
                 shuffle_tile(v_shuffle_tmp, v_tile);
                 __builtin_amdgcn_sched_barrier(0);
                 store_tile(
-                    v_lds_window,
+                    metadata.v_lds_window(v_lds_write_idx),
                     tile_elementwise_in(v_element_func, v_shuffle_tmp)); // store the prefetch
             }
             else
             {
                 __builtin_amdgcn_sched_barrier(0);
-                store_tile(v_lds_window,
+                store_tile(metadata.v_lds_window(v_lds_write_idx),
                            tile_elementwise_in(v_element_func, v_tile)); // store the prefetch
             }
             move_tile_window(v_dram_window, {0, kK1});
@@ -696,9 +713,10 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
-        auto local_load_v = [&] {
-            auto v_lds_window_for_load = make_tile_window(
-                v_lds_window, Policy::template MakeVRegTileDistribution<Problem>());
+        auto local_load_v = [&](auto v_lds_read_idx) {
+            auto v_lds_window_for_load =
+                make_tile_window(metadata.v_lds_window(v_lds_read_idx),
+                                 Policy::template MakeVRegTileDistribution<Problem>());
 
             return load_tile(v_lds_window_for_load);
         };
@@ -752,9 +770,9 @@ struct BlockFmhaPipelineQRKSVS
             clear_tile(metadata.s_acc(number<0>{})); // initialize C
 
             // (1) load & store K =============================================
-            global_load_k();
+            global_load_k(/*k_lds_write_idx=*/number<0>{});
             __builtin_amdgcn_s_barrier();
-            auto k_tile = local_load_k();
+            auto k_tile = local_load_k(/*k_lds_read_idx=*/number<0>{});
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -823,9 +841,9 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (3) load & store V =============================================
-            global_load_v();
+            global_load_v(/*v_lds_write_idx=*/number<0>{});
             __builtin_amdgcn_s_barrier();
-            auto v_tile = local_load_v();
+            auto v_tile = local_load_v(/*v_lds_read_idx=*/number<0>{});
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();

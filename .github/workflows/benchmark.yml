@@ -1,25 +1,13 @@
 name: vLLM Benchmark
 
 on:
-  workflow_dispatch:
-    inputs:
-      VLLM_BRANCH:
-        description: 'vLLM branch to use'
-        required: true
-        default: 'main'
-      AITER_BRANCH:
-        description: 'Aiter branch to test'
-        required: true
-        default: 'main'
-      AITER_REPO:
-        description: 'Aiter repo to clone'
-        required: true
-        default: 'https://github.com/ROCm/aiter.git'
+  pull_request:
+    branches: [main]  # Triggers on PRs targeting `main`
 
 jobs:
   build_image:
     name: Build Docker Image
-    runs-on: [self-hosted, aiter-build]  # Equivalent to `node('aiter-build')` in Jenkins
+    runs-on: [self-hosted, aiter-build]
     outputs:
       image_tag: ${{ steps.set-tag.outputs.image_tag }}
     steps:
@@ -28,11 +16,11 @@ jobs:
 
       - name: Clone vLLM repo
         run: |
-          git clone --branch "${{ inputs.VLLM_BRANCH }}" https://github.com/ROCm/vllm.git
+          git clone --branch "${{ github.head_ref || 'main' }}" https://github.com/ROCm/vllm.git
 
       - name: Set Image Tag
         id: set-tag
-        run: echo "image_tag=rocm/aiter-ci:${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+        run: echo "image_tag=rocm/aiter-ci:${{ github.run_id }}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -44,8 +32,8 @@ jobs:
         run: |
           cd vllm
           docker build --no-cache -f docker/Dockerfile.rocm_base \
-            --build-arg AITER_BRANCH=${{ inputs.AITER_BRANCH }} \
-            --build-arg AITER_REPO=${{ inputs.AITER_REPO }} \
+            --build-arg AITER_BRANCH=main \
+            --build-arg AITER_REPO=https://github.com/ROCm/aiter.git \
             --build-arg PYTORCH_ROCM_ARCH=gfx942 \
             -t vllm_aiter_base .
 
@@ -59,27 +47,26 @@ jobs:
 
   run_benchmark:
     name: Run Benchmark
-    runs-on: [self-hosted, linux, gpu, rocm]  # Equivalent to `node(params.NODE_LABEL)`
     needs: build_image
+    runs-on: [self-hosted, linux, gpu, rocm]
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:
       - name: Pull Benchmark Image
-        run: |
-          docker pull ${{ needs.build_image.outputs.image_tag }}
+        run: docker pull ${{ needs.build_image.outputs.image_tag }}
 
       - name: Run Benchmark and Save Result
         run: |
           docker run --rm --device=/dev/kfd --device=/dev/dri --group-add video \
             --ulimit core=0:0 --ulimit memlock=-1:-1 --cap-add=SYS_PTRACE \
-            -e HF_TOKEN=${HF_TOKEN} -e VLLM_ROCM_USE_AITER=1 \
+            -e HF_TOKEN=$HF_TOKEN -e VLLM_ROCM_USE_AITER=1 \
             ${{ needs.build_image.outputs.image_tag }} \
             python3 /app/vllm/benchmarks/benchmark_latency.py \
               --model mistralai/Mixtral-8x7B-Instruct-v0.1 \
               --batch-size 1 --input-len 128 --output-len 128 \
               -tp 8 --num-scheduler-steps 10 | tee result.log
 
-      - name: Extract Average Latency
+      - name: Extract and Print Average Latency
         run: |
           LATENCY=$(grep "Avg latency:" result.log | awk '{print $3}')
           echo "Average Latency: $LATENCY"

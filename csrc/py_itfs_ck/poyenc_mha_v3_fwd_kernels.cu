@@ -347,7 +347,7 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return 2 * GetSmemSizeKV<Problem>();
+        return 4 * GetSmemSizeKV<Problem>();
     }
 };
 
@@ -562,19 +562,19 @@ struct BlockFmhaPipelineQRKSVS
         {
             decltype(make_static_distributed_tensor<QDataType>(
                 Policy::template MakeQRegTileDistribution<Problem>())) q_tile;
-            decltype(gemm_0.MakeCBlockTile()) s_acc;
+            decltype(gemm_0.MakeCBlockTile()) s_acc[2];
             decltype(gemm_1.MakeCBlockTile()) o_acc;
 
             decltype(block_tile_reduce<SMPLComputeDataType>(
-                s_acc, sequence<1>{}, f_max, SMPLComputeDataType{0})) m;
+                s_acc[0], sequence<1>{}, f_max, SMPLComputeDataType{0})) m;
             decltype(m) m_local;
             decltype(m) l;
 
-            decltype(cast_tile<SMPLComputeDataType>(s_acc)) s;
+            decltype(cast_tile<SMPLComputeDataType>(s_acc[0])) s[2];
             decltype(make_static_distributed_tensor<SMPLComputeDataType>(
-                s.get_tile_distribution())) p_compute;
+                s[0].get_tile_distribution())) p_compute[2];
             decltype(cast_tile<PDataType>(
-                tile_elementwise_in(p_compute_element_func, p_compute))) p;
+                tile_elementwise_in(p_compute_element_func, p_compute[0]))) p[2];
         } metadata;
 
         {
@@ -684,7 +684,7 @@ struct BlockFmhaPipelineQRKSVS
                 k_lds_window, Policy::template MakeKRegTileDistribution<Problem>());
 
             auto k_tile = load_tile(k_lds_window_for_load);
-            gemm_0(metadata.s_acc,
+            gemm_0(metadata.s_acc[0],
                    get_slice_tile(metadata.q_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
                                   sequence<kM0, k0_loops * kK0>{}),
@@ -699,7 +699,7 @@ struct BlockFmhaPipelineQRKSVS
 
             auto v_tile = load_tile(v_lds_window_for_load);
             gemm_1(metadata.o_acc,
-                   get_slice_tile(metadata.p,
+                   get_slice_tile(metadata.p[0],
                                   sequence<0, (k1_loops - 1) * kK1>{},
                                   sequence<kM0, k1_loops * kK1>{}),
                    get_slice_tile(v_tile,
@@ -708,9 +708,9 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto run_fmha_alu = [&] {
-            metadata.s       = cast_tile<SMPLComputeDataType>(metadata.s_acc); // S{j}
+            metadata.s[0]    = cast_tile<SMPLComputeDataType>(metadata.s_acc[0]); // S{j}
             metadata.m_local = block_tile_reduce<SMPLComputeDataType>(
-                metadata.s,
+                metadata.s[0],
                 sequence<1>{},
                 f_max,
                 -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
@@ -731,7 +731,7 @@ struct BlockFmhaPipelineQRKSVS
         static_assert(1 == k1_loops);
         do
         {
-            clear_tile(metadata.s_acc); // initialize C
+            clear_tile(metadata.s_acc[0]); // initialize C
 
             // (1) load & store K =============================================
             mem_load_k();
@@ -745,7 +745,7 @@ struct BlockFmhaPipelineQRKSVS
             scheduler.schedule_gemm0();
 
             // scale_s, mask, softmax
-            metadata.s_acc = tile_elementwise_in(s_acc_element_func, metadata.s_acc);
+            metadata.s_acc[0] = tile_elementwise_in(s_acc_element_func, metadata.s_acc[0]);
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
@@ -756,7 +756,7 @@ struct BlockFmhaPipelineQRKSVS
                                                            number<kN0>{});
                 if(need_perpixel_check)
                 {
-                    set_tile_if(metadata.s_acc,
+                    set_tile_if(metadata.s_acc[0],
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&](auto tile_idx) {
                                     const auto row =
@@ -784,15 +784,16 @@ struct BlockFmhaPipelineQRKSVS
                 }
             };
 
-            constexpr auto p_spans = decltype(metadata.p_compute)::get_distributed_spans();
+            constexpr auto p_spans =
+                std::decay_t<decltype(metadata.p_compute[0])>::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
                 auto row_max         = scale_s * get_validated_m(metadata.m[i_idx]);
 
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    metadata.p_compute(i_j_idx) =
-                        ck_tile::exp2(scale_s * metadata.s[i_j_idx] - row_max);
+                    metadata.p_compute[0](i_j_idx) =
+                        ck_tile::exp2(scale_s * metadata.s[0][i_j_idx] - row_max);
                 });
             });
 
@@ -806,12 +807,12 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (4) softmax + mfma =============================================
-            metadata.p = cast_tile<PDataType>(
-                tile_elementwise_in(p_compute_element_func, metadata.p_compute));
+            metadata.p[0] = cast_tile<PDataType>(
+                tile_elementwise_in(p_compute_element_func, metadata.p_compute[0]));
             __builtin_amdgcn_sched_barrier(0);
 
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
-                metadata.p_compute,
+                metadata.p_compute[0],
                 sequence<1>{},
                 f_sum,
                 SMPLComputeDataType{0}); // rowsum(Pcompute{j})

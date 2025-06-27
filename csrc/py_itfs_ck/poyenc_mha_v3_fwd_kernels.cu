@@ -477,6 +477,16 @@ struct BlockFmhaPipelineQRKSVS
         return Policy::template GetSmemSize<Problem>();
     }
 
+    template <typename DataType, typename Descriptor>
+    CK_TILE_DEVICE static constexpr auto make_lds_tile_window(void* base, const Descriptor& desc)
+    {
+        using namespace ck_tile;
+
+        auto tensor_view =
+            make_tensor_view<address_space_enum::lds>(reinterpret_cast<DataType*>(base), desc);
+        return make_tile_window(tensor_view, desc.get_lengths(), {0, 0});
+    }
+
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -492,7 +502,7 @@ struct BlockFmhaPipelineQRKSVS
               typename PComputeElementFunction,
               typename OAccElementFunction,
               typename PositionEncoding>
-    CK_TILE_HOST_DEVICE auto
+    CK_TILE_DEVICE auto
     operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp, // M0*K0 tile
                const QElementFunction& q_element_func,
                const KDramBlockWindowTmp& k_dram_block_window_tmp, // N0*K0 tile
@@ -533,19 +543,13 @@ struct BlockFmhaPipelineQRKSVS
         const index_t warp_group_id = get_warp_id() / 4;
 
         // K tile in LDS
-        auto* k_lds_ptr = reinterpret_cast<KDataType*>(static_cast<char*>(smem_ptr) + 0);
-        auto k_lds      = make_tensor_view<address_space_enum::lds>(
-            k_lds_ptr, Policy::template MakeKLdsBlockDescriptor<Problem>());
-        auto k_lds_window = make_tile_window(
-            k_lds, Policy::template MakeKLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
+        auto k_lds_window = make_lds_tile_window<KDataType>(
+            static_cast<char*>(smem_ptr) + 0, Policy::template MakeKLdsBlockDescriptor<Problem>());
 
         // V tile in LDS
-        auto* v_lds_ptr = reinterpret_cast<VDataType*>(static_cast<char*>(smem_ptr) +
-                                                       Policy::template GetSmemSizeKV<Problem>());
-        auto v_lds      = make_tensor_view<address_space_enum::lds>(
-            v_lds_ptr, Policy::template MakeVLdsBlockDescriptor<Problem>());
-        auto v_lds_window = make_tile_window(
-            v_lds, Policy::template MakeVLdsBlockDescriptor<Problem>().get_lengths(), {0, 0});
+        auto v_lds_window = make_lds_tile_window<VDataType>(
+            static_cast<char*>(smem_ptr) + Policy::template GetSmemSizeKV<Problem>(),
+            Policy::template MakeVLdsBlockDescriptor<Problem>());
 
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();

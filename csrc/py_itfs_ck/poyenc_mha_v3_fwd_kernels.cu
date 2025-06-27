@@ -643,7 +643,7 @@ struct BlockFmhaPipelineQRKSVS
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
-        auto mem_load_k = [&] {
+        auto global_load_k = [&] {
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
@@ -654,15 +654,22 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
-        auto mem_load_v = [&] {
-            const auto v_prefetch = load_tile(v_dram_window);
+        auto local_load_k = [&] {
+            auto k_lds_window_for_load = make_tile_window(
+                k_lds_window, Policy::template MakeKRegTileDistribution<Problem>());
+
+            return load_tile(k_lds_window_for_load);
+        };
+
+        auto global_load_v = [&] {
+            const auto v_tile = load_tile(v_dram_window);
             __builtin_amdgcn_sched_barrier(0);
 
             if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
             {
                 auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
                     Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
-                shuffle_tile(v_shuffle_tmp, v_prefetch);
+                shuffle_tile(v_shuffle_tmp, v_tile);
                 __builtin_amdgcn_sched_barrier(0);
                 store_tile(
                     v_lds_window,
@@ -672,18 +679,21 @@ struct BlockFmhaPipelineQRKSVS
             {
                 __builtin_amdgcn_sched_barrier(0);
                 store_tile(v_lds_window,
-                           tile_elementwise_in(v_element_func, v_prefetch)); // store the prefetch
+                           tile_elementwise_in(v_element_func, v_tile)); // store the prefetch
             }
             move_tile_window(v_dram_window, {0, kK1});
 
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
-        auto run_gemm0 = [&] {
-            auto k_lds_window_for_load = make_tile_window(
-                k_lds_window, Policy::template MakeKRegTileDistribution<Problem>());
+        auto local_load_v = [&] {
+            auto v_lds_window_for_load = make_tile_window(
+                v_lds_window, Policy::template MakeVRegTileDistribution<Problem>());
 
-            auto k_tile = load_tile(k_lds_window_for_load);
+            return load_tile(v_lds_window_for_load);
+        };
+
+        auto run_gemm0 = [&](const auto& k_tile) {
             gemm_0(metadata.s_acc[0],
                    get_slice_tile(metadata.q_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
@@ -693,11 +703,7 @@ struct BlockFmhaPipelineQRKSVS
                                   sequence<kN0, k0_loops * kK0>{}));
         };
 
-        auto run_gemm1 = [&] {
-            auto v_lds_window_for_load = make_tile_window(
-                v_lds_window, Policy::template MakeVRegTileDistribution<Problem>());
-
-            auto v_tile = load_tile(v_lds_window_for_load);
+        auto run_gemm1 = [&](const auto& v_tile) {
             gemm_1(metadata.o_acc,
                    get_slice_tile(metadata.p[0],
                                   sequence<0, (k1_loops - 1) * kK1>{},
@@ -724,6 +730,7 @@ struct BlockFmhaPipelineQRKSVS
             if(warp_group_id == 1)
             {
                 __builtin_amdgcn_s_barrier();
+                __builtin_amdgcn_s_barrier();
             }
         }
 
@@ -734,13 +741,16 @@ struct BlockFmhaPipelineQRKSVS
             clear_tile(metadata.s_acc[0]); // initialize C
 
             // (1) load & store K =============================================
-            mem_load_k();
+            global_load_k();
+            __builtin_amdgcn_s_barrier();
+            auto k_tile = local_load_k();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (2) mfma + softmax =============================================
-            run_gemm0();
+            __builtin_amdgcn_s_barrier();
+            run_gemm0(k_tile);
 
             scheduler.schedule_gemm0();
 
@@ -801,7 +811,9 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (3) load & store V =============================================
-            mem_load_v();
+            global_load_v();
+            __builtin_amdgcn_s_barrier();
+            auto v_tile = local_load_v();
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -810,7 +822,7 @@ struct BlockFmhaPipelineQRKSVS
             metadata.p[0] = cast_tile<PDataType>(
                 tile_elementwise_in(p_compute_element_func, metadata.p_compute[0]));
             __builtin_amdgcn_sched_barrier(0);
-
+            __builtin_amdgcn_s_barrier();
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                 metadata.p_compute[0],
                 sequence<1>{},
@@ -837,7 +849,7 @@ struct BlockFmhaPipelineQRKSVS
                 });
             });
 
-            run_gemm1();
+            run_gemm1(v_tile);
 
             // move K tile windows
             move_tile_window(k_dram_block_window, {kN0, 0});
@@ -851,6 +863,7 @@ struct BlockFmhaPipelineQRKSVS
         {
             if(warp_group_id == 0)
             {
+                __builtin_amdgcn_s_barrier();
                 __builtin_amdgcn_s_barrier();
             }
         }

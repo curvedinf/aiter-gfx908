@@ -19,6 +19,7 @@ def _fwd_kernel_stage2_asm(
     O,
     qo_indptr,
     kv_indptr,
+    num_kv_splits_indptr,
     stride_mid_ob,
     stride_mid_oh,
     stride_mid_os,
@@ -38,6 +39,8 @@ def _fwd_kernel_stage2_asm(
 
     cur_qo_start = tl.load(qo_indptr + cur_batch)
     cur_qo_end = tl.load(qo_indptr + cur_batch + 1)
+    cur_split_start = tl.load(num_kv_splits_indptr + cur_batch)
+    cur_split_end = tl.load(num_kv_splits_indptr + cur_batch + 1)
     cur_qo = cur_qo_start + cur_qo_offs
     if cur_qo > cur_qo_end:
         return
@@ -50,30 +53,35 @@ def _fwd_kernel_stage2_asm(
     e_max = -float("inf")
     acc = tl.zeros([BLOCK_DV], dtype=tl.float32)
 
-    offs_v = (cur_qo * stride_mid_ob + cur_head * stride_mid_oh) * Lv + offs_d
-    offs_logic = cur_qo * stride_mid_ob + cur_head * stride_mid_oh
+    # offs_v = (cur_qo * stride_mid_ob + cur_head * stride_mid_oh) * Lv + offs_d
+    # offs_logic = cur_qo * stride_mid_ob + cur_head * stride_mid_oh
 
-    for split_kv_id in range(0, NUM_KV_SPLITS):
-        kv_len_per_split = tl.maximum(mgc, tl.cdiv(cur_kv_seq_len, NUM_KV_SPLITS))
-        split_kv_start = kv_len_per_split * split_kv_id
-        split_kv_end = tl.minimum(split_kv_start + kv_len_per_split, cur_kv_seq_len)
+    # TODO: this is tmp solution, will remove later
+    max_num_split = cur_split_end - cur_split_start
+    offs_v = (
+        cur_qo * stride_mid_os * max_num_split + cur_head * stride_mid_oh
+    ) * Lv + offs_d
+    offs_logic = cur_qo * stride_mid_os * max_num_split + cur_head * stride_mid_oh
 
-        if split_kv_end > split_kv_start:
-            tv = tl.load(
-                Mid_O + offs_v + split_kv_id * stride_mid_os * Lv,
-                mask=mask_d,
-                other=0.0,
-            )
-            tlogic = tl.load(Mid_lse + offs_logic + split_kv_id * stride_mid_os)
-            n_e_max = tl.maximum(tlogic, e_max)
+    num_valid_kv_splits = tl.minimum(
+        cur_split_end - cur_split_start, tl.cdiv(cur_kv_seq_len, mgc)
+    )
+    for split_kv_id in range(0, num_valid_kv_splits):
+        tv = tl.load(
+            Mid_O + offs_v + split_kv_id * stride_mid_os * Lv,
+            mask=mask_d,
+            other=0.0,
+        )
+        tlogic = tl.load(Mid_lse + offs_logic + split_kv_id * stride_mid_os)
+        n_e_max = tl.maximum(tlogic, e_max)
 
-            old_scale = tl.exp(e_max - n_e_max)
-            acc *= old_scale
-            exp_logic = tl.exp(tlogic - n_e_max)
-            acc += exp_logic * tv
+        old_scale = tl.exp(e_max - n_e_max)
+        acc *= old_scale
+        exp_logic = tl.exp(tlogic - n_e_max)
+        acc += exp_logic * tv
 
-            e_sum = e_sum * old_scale + exp_logic
-            e_max = n_e_max
+        e_sum = e_sum * old_scale + exp_logic
+        e_max = n_e_max
 
     tl.store(
         O + cur_qo * stride_obs + cur_head * stride_oh + offs_d,
@@ -89,7 +97,7 @@ def get_kv_splits_indptr(num_kv_splits, bs, device):
     """
     num_kv_splits = min(16, max(1, num_kv_splits))
     kv_splits_indptr = torch.arange(
-        0, (num_kv_splits + 1) * bs, num_kv_splits, device=device, dtype=torch.int32
+        0, (bs + 1) * num_kv_splits, num_kv_splits, device=device, dtype=torch.int32
     )
     return kv_splits_indptr
 
@@ -147,9 +155,14 @@ def mla_decode_fwd(
     bs = qo_indptr.shape[0] - 1
     total_kv = kv_indices.shape[0]
 
-    num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(
-        num_kv_splits, bs, total_kv, nhead, max_seqlen_q, device
-    )
+    if num_kv_splits is None:
+        num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(
+            num_kv_splits, bs, total_kv, nhead, max_seqlen_q, device
+        )
+    else:
+        assert (
+            num_kv_splits_indptr is not None
+        ), "num_kv_splits_indptr must be provided when num_kv_splits is specified"
 
     if nhead == 16 and max_seqlen_q == 1:
         # special case for 16 heads and max_seqlen_q == 1
@@ -201,6 +214,7 @@ def mla_decode_fwd(
         o,
         qo_indptr,
         kv_indptr,
+        num_kv_splits_indptr,
         attn_lse.stride(0),
         attn_lse.stride(2),
         attn_lse.stride(1),

@@ -210,7 +210,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, tes
 
 if __name__ == "__main__":
     h_kv = 1
-    d, dv = 576, 512
+    d, dv = 576, 256
 
     # for (dtype, b, s, h_q, s_q, varlen, causal) in itertools.product(
     #     (torch.float16, torch.bfloat16),
@@ -235,4 +235,4 @@ if __name__ == "__main__":
     #     test_flash_mla(dtype, b, s, s, h_q, h_kv, d, dv, causal, varlen, True, True)
     
     # 873us
-    test_flash_mla(torch.float16, 32, 3, 6001, 16, 1, 576, 512, False, False, True, True)
+    test_flash_mla(torch.float16, 32, 3, 6001, 16, 1, 576, dv, False, False, True, True)

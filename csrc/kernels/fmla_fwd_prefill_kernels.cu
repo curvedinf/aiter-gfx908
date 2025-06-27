@@ -11,6 +11,7 @@
 // =====================================================================================================================
 // Utils
 //
+#define DV 256
 #define ZZDebug
 
 CK_TILE_DEVICE bool IsDebugThreadBlock(const int x = 0, const int y = 0, const int z = 0)
@@ -61,7 +62,7 @@ struct FlashMlaPrefillKernelTrait
     static constexpr int32_t kSizeDV                    = kSizeDV_;   // hidden dimension size of value
     static constexpr int32_t kNumWarps                  = kNumWarps_;
     static constexpr int32_t kNumThreads                = kNumWarps * ck_tile::get_warp_size();
-    static constexpr int32_t kWaveOccupancy             = 1;
+    static constexpr int32_t kWaveOccupancy             = 2;
     static constexpr int32_t kNumWarpsSoftmax           = 4;
     static constexpr int32_t kNumThreadsSoftmax         = kNumWarpsSoftmax * ck_tile::get_warp_size();
     static constexpr int32_t kNumWarpsCombine           = 4;
@@ -1180,27 +1181,6 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     using KBlockTileType = decltype(k_dram_window.load());
     auto k_block_tile = ck_tile::load_tile(k_dram_window);
 
-
-
-    // using PageBlockVRet = decltype(v_page_block_navigator.make_tile_window(v_dram_window_lengths,
-    //                                                                        {0, seqlen_k_start},
-    //                                                                        Policy::MakeVDramTileDistribution()));
-    // using PageBlockVId     = std::tuple_element_t<0, PageBlockVRet>;
-    // using PageBlockVWindow = std::tuple_element_t<1, PageBlockVRet>;
-    // PageBlockVId page_block_v_ids[n1_loops];
-    // PageBlockVWindow v_dram_windows[n1_loops];
-    // ck_tile::static_for<0, n1_loops, 1>{}(
-    //     [&](auto n1_id){
-    //         auto [page_block_v_id, v_dram_window] =
-    //             v_page_block_navigator.make_tile_window(
-    //                 v_dram_window_lengths,
-    //                 {n1_id * Traits::kBlockN1, seqlen_k_start},
-    //                 Policy::MakeVDramTileDistribution());
-    //         page_block_v_ids[n1_id] = page_block_v_id;
-    //         v_dram_windows[n1_id] = v_dram_window;
-    // });
-
-
     // 6. Main loop
     //
 
@@ -1259,23 +1239,34 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             constexpr ck_tile::index_t VTNRepeat = VTDstrEncode::hs_lengthss_[I0][I0];
 
             ck_tile::static_for<0, VTNRepeat, 1>{}([&, perm0 = s_perm0](auto buffer_id){
-                asm volatile("v_perm_b32 %[v_dest], %[v_src1], %[v_src2], %[s_perm]\n"
-                            : [v_dest] "=v"(reinterpret_cast<uint32_t*>(v_thread_buffer )[buffer_id])
-                            : [v_src1] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + KKRepeat>{}])
-                            , [v_src2] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}])
-                            , [s_perm] "s"(s_perm1));
+                reinterpret_cast<uint32_t*>(v_thread_buffer )[buffer_id] = __builtin_amdgcn_perm(
+                                                                                reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + KKRepeat>{}],
+                                                                                reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}],
+                                                                                s_perm1
+                                                                            );
+                reinterpret_cast<uint32_t*>(v_thread_buffer )[buffer_id + VTNRepeat] = __builtin_amdgcn_perm(
+                                                                                reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + KKRepeat>{}],
+                                                                                reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}],
+                                                                                perm0
+                                                                            );
+                // asm volatile("v_perm_b32 %[v_dest], %[v_src1], %[v_src2], %[s_perm]\n"
+                //             : [v_dest] "=v"(reinterpret_cast<uint32_t*>(v_thread_buffer )[buffer_id])
+                //             : [v_src1] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + KKRepeat>{}])
+                //             , [v_src2] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}])
+                //             , [s_perm] "s"(s_perm1));
 
-                asm volatile("v_perm_b32 %[v_dest], %[v_src1], %[v_src2], %[s_perm]\n"
-                            : [v_dest] "=v"(reinterpret_cast<uint32_t*>(v_thread_buffer )[buffer_id + VTNRepeat])
-                            : [v_src1] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + KKRepeat>{}])
-                            , [v_src2] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}])
-                            , [s_perm] "s"(perm0));
+                // asm volatile("v_perm_b32 %[v_dest], %[v_src1], %[v_src2], %[s_perm]\n"
+                //             : [v_dest] "=v"(reinterpret_cast<uint32_t*>(v_thread_buffer )[buffer_id + VTNRepeat])
+                //             : [v_src1] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + KKRepeat>{}])
+                //             , [v_src2] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}])
+                //             , [s_perm] "s"(perm0));
             });
         }
 
         // I. QK GEMM
 
         // Main part of QK GEMM_0: conduct GEMM and load K tiles 
+        static_assert(k0_loops==1,"must k0_loops==1");
         if constexpr (k0_loops > 1)
         {
             constexpr ck_tile::array<int32_t, 2> qk_direction = {0, Traits::kBlockK0};
@@ -1309,11 +1300,6 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
         // Tailing 2 tiles of QK GEMM_0
 
         ck_tile::tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
-
-#if 0
-        // prefetch load V tile
-        auto v_prefetch = ck_tile::load_tile(v_dram_windows[0]);
-#endif
 
         // II. scale_s, mask, softmax
         //
@@ -1385,7 +1371,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                     {
                         constexpr auto ij = ck_tile::make_tuple(id0, id1);
                         ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id){
-#if 1
+#if 0
                             acc_t o_acc_v = o_acc[n1_id](ij);
                             asm volatile("v_mul_f32 %[v_o_acc], %[v_tmp], %[v_o_acc]\n"
                                         : [v_o_acc] "+v"(o_acc_v)
@@ -1417,7 +1403,6 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
         }
 
         // Store V tile to LDS. V is expected as row-major so it needs to be shuffled before store.
-#if 1
         const auto p = ck_tile::cast_tile<scalar_t>(p_intermedia);
         ck_tile::block_sync_lds();
         ck_tile::store_tile(v_lds_window, vt_tile);
@@ -1428,55 +1413,6 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                    p,
                    v_lds_window);
         });
-
-#else
-        ck_tile::block_sync_lds();
-        const auto p = ck_tile::cast_tile<scalar_t>(p_intermedia);
-        ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id) {
-            auto v_shuffled = ck_tile::make_static_distributed_tensor<scalar_t>(Policy::MakeShuffledVRegBlockDescriptor());
-            ck_tile::shuffle_tile(v_shuffled, v_prefetch);
-            ck_tile::store_tile(v_lds_window, v_shuffled);
-            page_block_v_ids[n1_id] =
-                v_page_block_navigator.move_tile_window(page_block_v_ids[n1_id], v_dram_windows[n1_id], {0, Traits::kBlockK1});
-
-            if constexpr (k1_loops > 1)
-            {
-                ck_tile::static_for<0, k1_loops - 1, 1>{}([&](auto k1_id) {
-                    const auto v = ck_tile::load_tile(v_dram_windows[n1_id]); // load next v
-                    ck_tile::block_sync_lds();
-                    gemm_1(o_acc[n1_id],
-                           ck_tile::get_slice_tile(
-                               p,
-                               ck_tile::sequence<0, k1_id * Traits::kBlockK1>{},
-                               ck_tile::sequence<Traits::kBlockM, (k1_id + 1) * Traits::kBlockK1>{}),
-                           v_lds_window);
-                    ck_tile::block_sync_lds();
-                    auto v_shuffled = ck_tile::make_static_distributed_tensor<scalar_t>(
-                        Policy::MakeShuffledVRegBlockDescriptor());
-                        ck_tile::shuffle_tile(v_shuffled, v);
-                        ck_tile::store_tile(v_lds_window, v_shuffled); // store the prefetch
-                    page_block_v_ids[n1_id] = v_page_block_navigator.move_tile_window(
-                        page_block_v_ids[n1_id], v_dram_windows[n1_id], {0, Traits::kBlockK1});
-                });
-            }
-
-            // Output tail
-            ck_tile::block_sync_lds();
-
-            if constexpr (n1_id < (n1_loops-1))
-            {
-                v_prefetch = ck_tile::load_tile(v_dram_windows[n1_id + 1]);
-            }
-
-            gemm_1(o_acc[n1_id],
-                   ck_tile::get_slice_tile(
-                        p,
-                        ck_tile::sequence<0, (k1_loops - 1) * Traits::kBlockK1>{},
-                        ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0>{}),
-                   v_lds_window);
-            ck_tile::block_sync_lds();
-        });
-#endif
 
         // Move K to next column
     };
@@ -1813,18 +1749,19 @@ void dispatch_fmla_fwd_splictkv_prefill(
 
     if (params.num_splits > 1)
     {
+        assert(0);
         // out_t is not take into consideration when doing splits because combine shader is always expected to do
         // the final output type conversion.
-        auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, acc_t, kIsCausal, true>;
-        auto kn_comb =
-            (params.num_splits <= 32)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 32,  scalar_t, acc_t> :
-            // (params.num_splits <= 64)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 64,  scalar_t, acc_t> :
-            // (params.num_splits <= 96)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 96,  scalar_t, acc_t> :
-            // (params.num_splits <= 128) ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 128, scalar_t, acc_t> :
-            static_cast<decltype(kn_fmla_fwd_splictkv_prefill_combine<Traits, 32, scalar_t, acc_t>)*>(nullptr);
-        TORCH_CHECK(kn_comb != nullptr, "num_splits is larger than expected (<=128) !");
-        kn_attn<<<grid_attn, Traits::kNumThreads, 0, stream>>>(params);
-        kn_comb<<<grid_comb, Traits::kNumThreadsCombine, 0, stream>>>(params);
+        // auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, acc_t, kIsCausal, true>;
+        // auto kn_comb =
+        //     (params.num_splits <= 32)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 32,  scalar_t, acc_t> :
+        //     // (params.num_splits <= 64)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 64,  scalar_t, acc_t> :
+        //     // (params.num_splits <= 96)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 96,  scalar_t, acc_t> :
+        //     // (params.num_splits <= 128) ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 128, scalar_t, acc_t> :
+        //     static_cast<decltype(kn_fmla_fwd_splictkv_prefill_combine<Traits, 32, scalar_t, acc_t>)*>(nullptr);
+        // TORCH_CHECK(kn_comb != nullptr, "num_splits is larger than expected (<=128) !");
+        // kn_attn<<<grid_attn, Traits::kNumThreads, 0, stream>>>(params);
+        // kn_comb<<<grid_comb, Traits::kNumThreadsCombine, 0, stream>>>(params);
     }
     else
     {
@@ -1965,7 +1902,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     bool ENABLE_PACK_QK_RATIO = true;
     //                                        dqk  dv   m0  n0  n1  #warp
     // using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4>;
-    using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 4>;
+    using Traits = FlashMlaPrefillKernelTrait<576, DV, 64, 16, DV, 4>;
     constexpr bool kForceOutAcc = true;
     using acc_t = float;
 
@@ -1982,7 +1919,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     int32_t num_heads_q = num_heads_q_ori;
 
     const int32_t head_size = query.size(3);
-    TORCH_CHECK((head_size == 576) && (head_size_v == 512), "Only support QK head dim 576 and V head dim 512!");
+    TORCH_CHECK((head_size == 576) && (head_size_v == DV), "Only support QK head dim 576 and V head dim DV!");
 
     const int32_t num_blocks = key_cache.size(0);
     const int32_t page_block_size = key_cache.size(1);

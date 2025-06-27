@@ -13,6 +13,7 @@
 //
 #define DV 256
 #define ZZDebug
+#define FMLA_FWD_FAST_EXP2 1
 
 CK_TILE_DEVICE bool IsDebugThreadBlock(const int x = 0, const int y = 0, const int z = 0)
 {
@@ -1299,7 +1300,9 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
 
         // Tailing 2 tiles of QK GEMM_0
 
+// #if !FMLA_FWD_FAST_EXP2
         ck_tile::tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
+// #endif
 
         // II. scale_s, mask, softmax
         //
@@ -1341,6 +1344,16 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             [&](auto id0)
             {
                 constexpr auto i = ck_tile::make_tuple(id0);
+#if FMLA_FWD_FAST_EXP2
+                auto row_max =  GetValidatedMax<Mask::IsMasking>(m[i]);
+                ck_tile::sweep_tile_span(
+                    p_spans[ck_tile::number<1>{}],
+                    [&](auto id1)
+                    {
+                        constexpr auto ij = ck_tile::make_tuple(id0, id1);
+                        p_intermedia(ij) = ck_tile::exp2(s_acc[ij] - row_max);
+                    });
+#else
                 auto row_max  = GetValidatedMax<Mask::IsMasking>(m[i]);
                 ck_tile::sweep_tile_span(
                     p_spans[ck_tile::number<1>{}],
@@ -1349,6 +1362,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                         constexpr auto ij = ck_tile::make_tuple(id0, id1);
                         p_intermedia(ij) = ck_tile::exp(s_acc[ij] - row_max);
                     });
+#endif
             });
 
         // Compute row sum of exp(x_i - m)
@@ -1362,8 +1376,13 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             [&](auto id0)
             {
                 constexpr auto i = ck_tile::make_tuple(id0);
+#if FMLA_FWD_FAST_EXP2
+                const auto row_max = GetValidatedMax<Mask::IsMasking>(m[i]) ;
+                const auto temp_i  = ck_tile::exp2( m_old[i] - row_max);
+#else
                 const auto row_max = GetValidatedMax<Mask::IsMasking>(m[i]);
                 const auto temp_i  = ck_tile::exp(m_old[i] - row_max);
+#endif
                 l(i) = temp_i * l[i] + rowsum_p[i];
                 ck_tile::sweep_tile_span(
                     o_spans[ck_tile::number<1>{}],
@@ -1371,15 +1390,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                     {
                         constexpr auto ij = ck_tile::make_tuple(id0, id1);
                         ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id){
-#if 0
-                            acc_t o_acc_v = o_acc[n1_id](ij);
-                            asm volatile("v_mul_f32 %[v_o_acc], %[v_tmp], %[v_o_acc]\n"
-                                        : [v_o_acc] "+v"(o_acc_v)
-                                        : [v_tmp] "v"(temp_i));
-                            o_acc[n1_id](ij) = o_acc_v;
-#else
                             o_acc[n1_id](ij) *= temp_i;
-#endif
                         });
                     });
             });
@@ -1432,7 +1443,14 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     constexpr auto lse_acc_spans = decltype(lse_acc)::get_distributed_spans();
     ck_tile::sweep_tile_span(lse_acc_spans[ck_tile::number<0>{}], [&, m_ = m, l_ = l](auto id0) {
         constexpr auto i = make_tuple(id0);
+#if FMLA_FWD_FAST_EXP2
+#ifndef C_LOG2E
+#define C_LOG2E 1.44269504088896340736 // log2(e)
+#endif
+        lse_acc(i) = m_[i] / C_LOG2E  + log(l_[i]);
+#else
         lse_acc(i) = m_[i] + log(l_[i]);
+#endif
     });
     ck_tile::store_tile(lse_dram_window_, lse_acc);
 
@@ -1455,15 +1473,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             constexpr auto ij = ck_tile::make_tuple(id0, id1);
             ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id)
             {
-#if 1
-                acc_t o_acc_v = o_acc[n1_id](ij);
-                asm volatile("v_mul_f32 %[v_o_acc], %[v_tmp], %[v_o_acc]\n"
-                             : [v_o_acc] "+v"(o_acc_v)
-                             : [v_tmp] "v"(tmp));
-                o_acc[n1_id](ij) = o_acc_v;
-#else
                 o_acc[n1_id](ij) *= tmp;
-#endif
             });
         });
     });
@@ -1572,7 +1582,11 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             params.num_splits,
             split_id,
             mask,
+#if FMLA_FWD_FAST_EXP2
+            static_cast<float>(params.scale_softmax * ck_tile::log2e_v<>),
+#else
             params.scale_softmax,
+#endif
             p_smem,
 #ifdef ZZDebug
             params
@@ -1612,7 +1626,11 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             1, // num_splits
             0, // split_id
             mask,
+#if FMLA_FWD_FAST_EXP2
+            static_cast<float>(params.scale_softmax * ck_tile::log2e_v<>),
+#else
             params.scale_softmax,
+#endif
             p_smem,
 #ifdef ZZDebug
             params

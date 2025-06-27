@@ -1,13 +1,21 @@
 import argparse
 import sys
+import os
 import torch
 import triton
-from aiter.ops.triton.gemm_a8w8 import gemm_a8w8
-from aiter.ops.triton.utils.types import str_to_torch_dtype
-from op_tests.triton_tests.test_gemm_a8w8 import (
-    generate_gemm_a8w8_inputs,
+from aiter.ops.triton.gemm_afp4wfp4 import (
+    gemm_afp4wfp4,
+    gemm_afp4wfp4_preshuffled_scales,
 )
-from utils.benchmark_utils import get_model_configs, get_available_models
+from op_tests.triton_tests.test_gemm_afp4wfp4 import generate_gemm_afp4wfp4_inputs
+from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
+    get_model_configs,
+    get_available_models,
+)
+
+TRITON_HIP_PRESHUFFLE_SCALES = (
+    os.environ.get("TRITON_HIP_PRESHUFFLE_SCALES", "0") == "1"
+)
 
 
 def model_benchmark_shapes(args):
@@ -76,31 +84,42 @@ def run_benchmark(args):
         line_names=line_names,
         styles=[("green", "-")],
         ylabel=ylabel,
-        plot_name="GEMM A8W8 Benchmark",
+        plot_name="GEMM MXFP4 x MXFP4 Benchmark",
         args={"metric": args.metric},
     )
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_a8w8(M, N, K, metric, provider):
-        # NOTE: Assume bias and output has the same dtype
-        c_dtype = str_to_torch_dtype["bf16"]
-        x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
-            M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, output=True
+    def bench_gemm_afp4wfp4_blockscale(M, N, K, metric, provider):
+        c_dtype = torch.bfloat16
+        x, w, _, _, x_scale, w_scale, _, _ = generate_gemm_afp4wfp4_inputs(
+            M, N, K, c_dtype
         )
         # flops
         flops = 2.0 * M * N * K
         # memory transfer
-        mem_read = (M * K) * x.element_size() + (N * K) * weight.element_size()
-        mem_write = (M * N) * bias.element_size()
-        mem = mem_read + mem_write
-
-        ms = triton.testing.do_bench(
-            lambda: gemm_a8w8(
-                x, weight, x_scale, w_scale, bias, c_dtype, y
-            ),  # noqa: E731
-            warmup=25,
-            rep=100,
+        mem_read = x.numel() * x.element_size() + w.numel() * w.element_size()
+        mem_read += (
+            x_scale.numel() * x_scale.element_size()
+            + w_scale.numel() * w_scale.element_size()
         )
+        mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
+        mem = mem_read + mem_write
+        out = torch.empty(x.shape[0], w.shape[1], device=x.device, dtype=c_dtype)
+
+        if TRITON_HIP_PRESHUFFLE_SCALES:
+            ms = triton.testing.do_bench(
+                lambda: gemm_afp4wfp4_preshuffled_scales(
+                    x, w, x_scale, w_scale, c_dtype, out
+                ),
+                warmup=25,
+                rep=100,
+            )
+        else:
+            ms = triton.testing.do_bench(
+                lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
+                warmup=25,
+                rep=100,
+            )
 
         # Return exactly one scalar depending on which metric is active
         if metric == "time":
@@ -114,12 +133,12 @@ def run_benchmark(args):
         else:
             raise ValueError("Unknown metric: " + metric)
 
-    bench_gemm_a8w8.run(save_path=".", print_data=True)
+    bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        prog="Benchmark A8W8 GEMM",
+        prog="Benchmark MXFP4 x MXFP4 GEMM",
         allow_abbrev=False,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )

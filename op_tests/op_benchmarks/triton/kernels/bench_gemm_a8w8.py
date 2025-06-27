@@ -1,15 +1,16 @@
 import argparse
 import sys
-import torch
 import triton
-from op_tests.triton_tests.test_batched_gemm_afp4wfp4_pre_quant import (
-    generate_batched_gemm_afp4wfp4_pre_quant_inputs,
+from aiter.ops.triton.gemm_a8w8 import gemm_a8w8
+from aiter.ops.triton.utils.types import str_to_torch_dtype
+from op_tests.triton_tests.test_gemm_a8w8 import (
+    generate_gemm_a8w8_inputs,
 )
-from utils.benchmark_utils import get_model_configs, get_available_models
-
-from aiter.ops.triton.batched_gemm_afp4wfp4_pre_quant import (
-    batched_gemm_afp4wfp4_pre_quant as batched_gemm_afp4wfp4_pre_quant,
+from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
+    get_model_configs,
+    get_available_models,
 )
+import warnings
 
 
 def model_benchmark_shapes(args):
@@ -19,29 +20,30 @@ def model_benchmark_shapes(args):
     shapes = []
     for M in M_list:
         for _, config in configs.items():
-            N = config["intermediate_size"]
-            K = config["hidden_size"]
-
-            shapes.append((16, M, N, K))
+            # op order: (M, N, K)
+            if args.fc1:
+                shapes.append((M, config["hidden_size"], config["intermediate_size"]))
+            if args.fc2:
+                shapes.append((M, config["intermediate_size"], config["hidden_size"]))
 
     return shapes
 
 
 def get_x_vals():
     x_vals = [
-        (16, 1, 1280, 8192),
-        (16, 32, 1280, 8192),
-        (16, 64, 1280, 8192),
-        (16, 128, 1280, 8192),
-        (16, 192, 1280, 8192),
-        (16, 256, 1280, 8192),
-        (16, 320, 1280, 8192),
-        (16, 512, 1280, 8192),
-        (16, 1024, 1280, 8192),
-        (16, 2048, 1280, 8192),
-        (16, 4096, 1280, 8192),
-        (16, 8192, 1280, 8192),
-        (16, 16384, 1280, 8192),
+        (1, 1280, 8192),
+        (32, 1280, 8192),
+        (64, 1280, 8192),
+        (128, 1280, 8192),
+        (192, 1280, 8192),
+        (256, 1280, 8192),
+        (320, 1280, 8192),
+        (512, 1280, 8192),
+        (1024, 1280, 8192),
+        (2048, 1280, 8192),
+        (4096, 1280, 8192),
+        (8192, 1280, 8192),
+        (16384, 1280, 8192),
     ]
     return x_vals
 
@@ -51,8 +53,15 @@ def run_benchmark(args):
         args.shape and args.M
     ), "User can specify --shape or --model MODEL -M VAL exclusively"
 
-    x_names = ["batch", "M", "N", "K"]
+    x_names = ["M", "N", "K"]
     if args.model:
+        if not args.fc1 and not args.fc2:
+            # by default, benchmark both
+            warnings.info(
+                "No specific layer selected for benchmarking, defaulting to both. To specify a layer, use -fc1 or -fc2."
+            )
+            args.fc1 = True
+            args.fc2 = True
         x_vals_list = model_benchmark_shapes(args)
     elif args.shape:
         x_vals_list = [args.shape]
@@ -78,34 +87,28 @@ def run_benchmark(args):
         line_names=line_names,
         styles=[("green", "-")],
         ylabel=ylabel,
-        plot_name="GEMM MXFP4 x MXFP4 Benchmark",
+        plot_name="GEMM A8W8 Benchmark",
         args={"metric": args.metric},
     )
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_afp4wfp4_blockscale(batch, M, N, K, metric, provider):
-        c_dtype = torch.bfloat16
-        x, w, x_scale, w_scale = generate_batched_gemm_afp4wfp4_pre_quant_inputs(
-            batch, M, N, K
+    def bench_gemm_a8w8(M, N, K, metric, provider):
+        # NOTE: Assume bias and output has the same dtype
+        c_dtype = str_to_torch_dtype["bf16"]
+        x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
+            M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, output=True
         )
         # flops
         flops = 2.0 * M * N * K
         # memory transfer
-        mem_read = x.numel() * x.element_size() + w.numel() * w.element_size()
-        mem_read += (
-            x_scale.numel() * x_scale.element_size()
-            + w_scale.numel() * w_scale.element_size()
-        )
-        mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
+        mem_read = (M * K) * x.element_size() + (N * K) * weight.element_size()
+        mem_write = (M * N) * bias.element_size()
         mem = mem_read + mem_write
-        out = torch.empty(
-            x.shape[0], x.shape[1], w.shape[2], device=x.device, dtype=c_dtype
-        )
 
         ms = triton.testing.do_bench(
-            lambda: batched_gemm_afp4wfp4_pre_quant(
-                x, w, x_scale, w_scale, c_dtype, out
-            ),
+            lambda: gemm_a8w8(
+                x, weight, x_scale, w_scale, bias, c_dtype, y
+            ),  # noqa: E731
             warmup=25,
             rep=100,
         )
@@ -122,12 +125,12 @@ def run_benchmark(args):
         else:
             raise ValueError("Unknown metric: " + metric)
 
-    bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
+    bench_gemm_a8w8.run(save_path=".", print_data=True)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        prog="Benchmark MXFP4 x MXFP4 GEMM",
+        prog="Benchmark A8W8 GEMM",
         allow_abbrev=False,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -151,10 +154,20 @@ def parse_args():
         help="M dim of model benchmark if only one model is under test",
     )
     parser.add_argument(
+        "-fc1",
+        action="store_true",
+        help="Benchmark the up-projection (hidden dim to intermediate dim in the feed-forward layer)",
+    )
+    parser.add_argument(
+        "-fc2",
+        action="store_true",
+        help="Benchmark the down-projection (intermediate dim to hidden dim in the feed-forward layer)",
+    )
+    parser.add_argument(
         "--shape",
         type=int,
-        nargs=4,
-        metavar=("batch", "M", "N", "K"),
+        nargs=3,
+        metavar=("M", "N", "K"),
         help="user-defined shape to benchmark",
     )
     parser.add_argument(

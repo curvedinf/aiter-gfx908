@@ -2,13 +2,11 @@ import argparse
 import sys
 import torch
 import triton
-from op_tests.triton_tests.test_batched_gemm_afp4wfp4 import (
-    generate_batched_gemm_afp4wfp4_inputs,
-)
-from utils.benchmark_utils import get_model_configs, get_available_models
-
-from aiter.ops.triton.batched_gemm_afp4wfp4 import (
-    batched_gemm_afp4wfp4 as batched_gemm_afp4wfp4,
+from aiter.ops.triton.rmsnorm import rms_norm
+from op_tests.triton_tests.test_rmsnorm import generate_rmsnorm_inputs
+from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
+    get_model_configs,
+    get_available_models,
 )
 
 
@@ -19,29 +17,29 @@ def model_benchmark_shapes(args):
     shapes = []
     for M in M_list:
         for _, config in configs.items():
-            N = config["intermediate_size"]
-            K = config["hidden_size"]
+            num_heads = config["num_attention_heads"]
+            N = config["hidden_size"]
 
-            shapes.append((16, M, N, K))
+            shapes.append((M, N))
 
     return shapes
 
 
 def get_x_vals():
     x_vals = [
-        (16, 1, 1280, 8192),
-        (16, 32, 1280, 8192),
-        (16, 64, 1280, 8192),
-        (16, 128, 1280, 8192),
-        (16, 192, 1280, 8192),
-        (16, 256, 1280, 8192),
-        (16, 320, 1280, 8192),
-        (16, 512, 1280, 8192),
-        (16, 1024, 1280, 8192),
-        (16, 2048, 1280, 8192),
-        (16, 4096, 1280, 8192),
-        (16, 8192, 1280, 8192),
-        (16, 16384, 1280, 8192),
+        (1, 1280),
+        (32, 1280),
+        (64, 1280),
+        (128, 1280),
+        (192, 1280),
+        (256, 1280),
+        (320, 1280),
+        (512, 1280),
+        (1024, 1280),
+        (2048, 1280),
+        (4096, 1280),
+        (8192, 1280),
+        (16384, 1280),
     ]
     return x_vals
 
@@ -51,7 +49,7 @@ def run_benchmark(args):
         args.shape and args.M
     ), "User can specify --shape or --model MODEL -M VAL exclusively"
 
-    x_names = ["batch", "M", "N", "K"]
+    x_names = ["M", "N"]
     if args.model:
         x_vals_list = model_benchmark_shapes(args)
     elif args.shape:
@@ -61,8 +59,6 @@ def run_benchmark(args):
 
     if args.metric == "time":
         ylabel = "Time (ms)"
-    elif args.metric == "throughput":
-        ylabel = "Throughput (TFLOPS)"
     elif args.metric == "bandwidth":
         ylabel = "Bandwidth (GB/s)"
     else:
@@ -78,52 +74,37 @@ def run_benchmark(args):
         line_names=line_names,
         styles=[("green", "-")],
         ylabel=ylabel,
-        plot_name="GEMM MXFP4 x MXFP4 Benchmark",
+        plot_name="RMSNorm Fwd Benchmark",
         args={"metric": args.metric},
     )
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_afp4wfp4_blockscale(batch, M, N, K, metric, provider):
+    def bench_rmsnorm(M, N, metric, provider):
         c_dtype = torch.bfloat16
-        x, w, x_scale, w_scale = generate_batched_gemm_afp4wfp4_inputs(batch, M, N, K)
-        # flops
-        flops = 2.0 * M * N * K
-        # memory transfer
-        mem_read = x.numel() * x.element_size() + w.numel() * w.element_size()
-        mem_read += (
-            x_scale.numel() * x_scale.element_size()
-            + w_scale.numel() * w_scale.element_size()
-        )
-        mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
-        mem = mem_read + mem_write
-        out = torch.empty(
-            x.shape[0], x.shape[1], w.shape[2], device=x.device, dtype=c_dtype
-        )
+        x, w = generate_rmsnorm_inputs(M, N, c_dtype)
 
-        ms = triton.testing.do_bench(
-            lambda: batched_gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
-            warmup=25,
-            rep=100,
-        )
+        # memory transfer
+        mem_read = (M * 1) * N * x.element_size()  # x is (M,N) and g/weight is (N)
+        mem_write = M * N * x.element_size()  # output
+        mem = mem_read + mem_write
+
+        ms = triton.testing.do_bench(lambda: rms_norm(x, w), warmup=25, rep=100)
 
         # Return exactly one scalar depending on which metric is active
         if metric == "time":
             return ms
-        elif metric == "throughput":
-            tflops = flops / ms * 1e-9
-            return tflops
         elif metric == "bandwidth":
             bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
             return bandwidth
         else:
             raise ValueError("Unknown metric: " + metric)
 
-    bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
+    bench_rmsnorm.run(save_path=".", print_data=True)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        prog="Benchmark MXFP4 x MXFP4 GEMM",
+        prog="Benchmark RMSNorm",
         allow_abbrev=False,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -149,15 +130,15 @@ def parse_args():
     parser.add_argument(
         "--shape",
         type=int,
-        nargs=4,
-        metavar=("batch", "M", "N", "K"),
+        nargs=2,
+        metavar=("M", "N"),
         help="user-defined shape to benchmark",
     )
     parser.add_argument(
         "--metric",
         type=str,
-        choices=["time", "throughput", "bandwidth"],
-        default="throughput",
+        choices=["time", "bandwidth"],
+        default="bandwidth",
         help="metric to plot",
     )
     args = parser.parse_args()

@@ -107,7 +107,7 @@ void {{func_name}}(void* out_ptr,
                                     v_scale_ptr,                    
                                     &variant);
     
-    dim3 reduce_grid(num_heads, num_seqs);
+    dim3 reduce_grid(num_heads, num_seqs, {{mtp}});
     dim3 reduce_block(head_size);
     paged_attention_ll4mi_reduce_kernel<{{dtype}}, {{out_dtype}}, head_size, head_size, PARTITION_SIZE, {{npar_loops}}> 
     <<<reduce_grid, reduce_block, 0, reinterpret_cast<hipStream_t>(stream)>>>(reinterpret_cast<{{out_dtype}}*>(out_ptr),                                        
@@ -115,7 +115,8 @@ void {{func_name}}(void* out_ptr,
                                                                               max_logits_ptr,                                 
                                                                               tmp_out_ptr,                                   
                                                                               cu_query_lens_ptr,                                 
-                                                                              context_lens_ptr,max_num_partitions,                            
+                                                                              context_lens_ptr,
+                                                                              max_num_partitions,                            
                                                                               fp8_out_scale_ptr);
                                     
 }

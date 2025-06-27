@@ -150,9 +150,12 @@ def paged_attention_v1(
     block_tables_ptr = ctypes.cast(
         block_tables.data_ptr(), ctypes.POINTER(ctypes.c_int)
     )
-    cu_query_lens_ptr = ctypes.cast(
-        cu_query_lens.data_ptr(), ctypes.POINTER(ctypes.c_int)
+    cu_query_lens_ptr = (
+        ctypes.cast(cu_query_lens.data_ptr(), ctypes.POINTER(ctypes.c_int))
+        if cu_query_lens is not None
+        else ctypes.POINTER(ctypes.c_int)()
     )
+
     fp8_out_scale_ptr = (
         ctypes.cast(fp8_out_scale.data_ptr(), ctypes.POINTER(ctypes.c_float))
         if fp8_out_scale is not None

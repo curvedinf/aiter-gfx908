@@ -96,18 +96,6 @@ __inline__ __device__ void _paged_attention_kernel(
     using Mask = ck_tile::SimplifiedGenericAttentionMask</*IsMasking=*/false>;
     const Mask mask{/*seqlen_q=*/1, /*seqlen_k=*/context_len};
 
-    const auto variant_params = [&] {
-        if constexpr(AttentionVariant::use_logits_soft_cap)
-        {
-            return ck_tile::LogitsSoftCapParams<Mask, AttentionVariant::use_exp2>{
-                mask, scale, logits_soft_cap, logits_soft_cap_rcp};
-        }
-        else
-        {
-            return ck_tile::StandardAttentionParams<Mask>{mask, scale};
-        }
-    }();
-
     // for QK mfma, tokens in multiples of TOKENS_PER_WARP are spread across warps
     // each mfma takes QH16xT16x16HE across warp
     // repeat mfmas across QKHELOOP dimension
@@ -308,13 +296,25 @@ __inline__ __device__ void _paged_attention_kernel(
         scale2 *= *k_scale_ptr;
     }
 
+    const auto variant_params = [&] {
+        if constexpr(AttentionVariant::use_logits_soft_cap)
+        {
+            return ck_tile::LogitsSoftCapParams<Mask, AttentionVariant::use_exp2>{
+                mask, scale2, logits_soft_cap, logits_soft_cap_rcp};
+        }
+        else
+        {
+            return ck_tile::StandardAttentionParams<Mask>{mask, scale2};
+        }
+    }();
+
     floatx4 d_out[GQA_RATIO_LOOP][MTP_PER_THREAD][TLOOP];
     // qk mfma
-    for(int mtp = 0; mtp < mtp_loop; mtp++) {
+    for (int mtp = 0; mtp < mtp_loop; mtp++) {
         for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
-            for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+            for (int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
                 d_out[gqa_ratio_loop][mtp][token_depth] = {0};
-                for(int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
+                for (int head_loop = 0; head_loop < HEAD_LOOP; head_loop++) {
                     for (int qkhe_depth = 0; qkhe_depth < QKHELOOP; qkhe_depth++) {
                         if constexpr (KV_DTYPE == vllm::Fp8KVCacheDataType::kAuto) {
                             for (int qkratio = 0; qkratio < QK_SIZE_RATIO; qkratio++) {
@@ -354,7 +354,7 @@ __inline__ __device__ void _paged_attention_kernel(
                         }
                     }
                 }
-                for(int i = 0; i < 4; i++)
+                for (int i = 0; i < 4; i++)
                 {
                     d_out[gqa_ratio_loop][mtp][token_depth][i] = variant->QueryTransform(variant_params, d_out[gqa_ratio_loop][mtp][token_depth][i]);
                 }
@@ -369,8 +369,8 @@ __inline__ __device__ void _paged_attention_kernel(
         for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
             const int local_token_idx = qkout_token_idx + token_depth * 16;
             const int alibi_offset = local_token_idx - context_len + 1;
-            for(int mtp = 0; mtp < mtp_loop; mtp++) {
-                for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+            for (int mtp = 0; mtp < mtp_loop; mtp++) {
+                for (int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
                     for (int i = 0; i < 4; i++) {
                         d_out[gqa_ratio_loop][mtp][token_depth][i] += alibi_slope[gqa_ratio_loop] * (alibi_offset + i);
                     }
@@ -379,11 +379,11 @@ __inline__ __device__ void _paged_attention_kernel(
         }
     }
     // apply soft-capping to logits
-    for(int token_depth = 0; token_depth < TLOOP; token_depth++)
+    for (int token_depth = 0; token_depth < TLOOP; token_depth++)
     {
-        for(int mtp = 0; mtp < mtp_loop; mtp++) {
-            for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
-                for(int i = 0; i < 4; i++){
+        for (int mtp = 0; mtp < mtp_loop; mtp++) {
+            for (int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+                for (int i = 0; i < 4; i++) {
                     d_out[gqa_ratio_loop][mtp][token_depth][i] =
                         variant->LogitsTransform(variant_params,
                                                 d_out[gqa_ratio_loop][mtp][token_depth][i],
@@ -400,8 +400,8 @@ __inline__ __device__ void _paged_attention_kernel(
     float qk_max[GQA_RATIO_LOOP][MTP_PER_THREAD] = {-FLT_MAX};
     float exp_sum[GQA_RATIO_LOOP][MTP_PER_THREAD] = {0.0f};
 
-    for(int mtp = 0; mtp < mtp_loop; mtp++) {
-        for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
+    for (int mtp = 0; mtp < mtp_loop; mtp++) {
+        for (int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
             for (int token_depth = 0; token_depth < TLOOP; token_depth++) {
                 const int local_token_idx = qkout_token_idx + token_depth * 16;
                 for (int i = 0; i < 4; i++) {
@@ -518,7 +518,6 @@ __inline__ __device__ void _paged_attention_kernel(
 
     for (int mtp = 0; mtp < mtp_loop; mtp++) {
         for(int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
-
             for(int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++)
             {
                 // 1. store data into LDS
@@ -586,7 +585,7 @@ __inline__ __device__ void _paged_attention_kernel(
                                                 vfetch_depth * ELEMS8_ELEMS4_RATIO + i;
                                 const int offset1 = offset % ROWS_PER_WARP;
                                 const int offset2 = offset / ROWS_PER_WARP;
-                                        tmp_in.xy[i] = shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1];
+                                tmp_in.xy[i] = shared_logits[gqa_ratio_loop][0][mtp][vtoken_depth][offset2][lane16id][offset1];
                             }
                             tmp_out = gcn_mfma16x16x32_instr<scalar_t, 0, 0, 0>(
                                         Vlocal[vtoken_depth][vhe_depth][vfetch_depth],
@@ -731,19 +730,20 @@ template <typename scalar_t,
 __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
     const int64_t query_loc,
     int context_len,
-    OUTT* __restrict__ out,                    // [num_seqs, num_heads, head_size]
-    const float* __restrict__ exp_sums,        // [num_seqs, num_heads,
+    OUTT* __restrict__ out,                    // [num_seqs*mtp, num_heads, head_size]
+    const float* __restrict__ exp_sums,        // [num_seqs*mtp, num_heads,
                                                // max_num_partitions]
-    const float* __restrict__ max_logits,      // [num_seqs, num_heads,
+    const float* __restrict__ max_logits,      // [num_seqs*mtp, num_heads,
                                                // max_num_partitions]
-    const scalar_t* __restrict__ tmp_out,      // [num_seqs, num_heads,
+    const scalar_t* __restrict__ tmp_out,      // [num_seqs*mtp, num_heads,
                                                // max_num_partitions, head_size]
     const int max_num_partitions,
     const float* __restrict__ fp8_out_scale_ptr
 ){
     const int num_heads = gridDim.x;
     const int head_idx  = blockIdx.x;
-    const int seq_idx   = blockIdx.y;
+    const auto MTP = gridDim.z;
+    const auto mtp = blockIdx.z;
 
     const int num_partitions = DIVIDE_ROUND_UP(context_len, PARTITION_SIZE);
     constexpr int NUM_WARPS  = NUM_THREADS / WARP_SIZE;
@@ -757,7 +757,7 @@ __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
     if(warpid == 0)
     {
         const float* max_logits_ptr =
-            max_logits + seq_idx * num_heads * max_num_partitions + head_idx * max_num_partitions;
+            max_logits + (query_loc + mtp) * num_heads * max_num_partitions + head_idx * max_num_partitions;
 
         // valid partition is the last valid partition in case threadid > num
         // partitions
@@ -791,7 +791,7 @@ __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
         }
 
         const float* exp_sums_ptr =
-            exp_sums + seq_idx * num_heads * max_num_partitions + head_idx * max_num_partitions;
+            exp_sums + (query_loc + mtp) * num_heads * max_num_partitions + head_idx * max_num_partitions;
 
         float rescaled_exp_sum[NPAR_LOOPS];
 #pragma unroll
@@ -829,7 +829,7 @@ __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
             shared_global_exp_sum = global_exp_sum;
         }
     } // warpid == 0
-    const scalar_t* tmp_out_ptr = tmp_out + seq_idx * num_heads * max_num_partitions * HEAD_SIZE +
+    const scalar_t* tmp_out_ptr = tmp_out + (query_loc + mtp) * num_heads * max_num_partitions * HEAD_SIZE +
                                   head_idx * max_num_partitions * HEAD_SIZE + threadIdx.x;
     constexpr int MAX_NPAR = 64;
     scalar_t tmps[MAX_NPAR];
@@ -840,7 +840,7 @@ __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
         tmps[j] = from_float<scalar_t>(dzero);
     }
     const int last_partition_offset = (num_partitions - 1) * HEAD_SIZE;
-    const int num_partition_offset  = (num_partitions)*HEAD_SIZE;
+    const int num_partition_offset  = num_partitions * HEAD_SIZE;
     int idx                         = 0;
 
     constexpr int JCHUNK = 16;
@@ -928,7 +928,7 @@ __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
     const float out_scale = (fp8_out_scale_ptr != nullptr) ? 1.0f / (*fp8_out_scale_ptr) : 1.0f;
     acc *= inv_global_exp_sum;
     acc *= out_scale;
-    OUTT* out_ptr = out + query_loc * num_heads * HEAD_SIZE + head_idx * HEAD_SIZE;
+    OUTT* out_ptr = out + (query_loc + mtp) * num_heads * HEAD_SIZE + static_cast<int64_t>(head_idx) * HEAD_SIZE;
 
     if constexpr(std::is_same<OUTT, bit8_t>::value)
     {

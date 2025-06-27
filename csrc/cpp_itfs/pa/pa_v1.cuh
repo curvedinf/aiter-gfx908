@@ -47,7 +47,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
     const AttentionVariant* variant)
 {
     const int seq_idx = blockIdx.x;
-    int query_loc = seq_idx;
+    int query_loc = seq_idx * MTP;
     int query_len = 1;
     if (cu_query_lens != nullptr) {
         query_loc = cu_query_lens[seq_idx];
@@ -89,14 +89,18 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
     const float* __restrict__ fp8_out_scale_ptr)
 {
     const int num_heads = gridDim.x;
+    const auto MTP = gridDim.z;
     const int head_idx  = blockIdx.x;
     const int seq_idx   = blockIdx.y;
-    const int query_loc = cu_query_lens[seq_idx];
-    const int query_len = cu_query_lens[seq_idx + 1] - query_loc;
+    int query_loc = seq_idx * MTP;
+    int query_len = 1;
+    if (cu_query_lens != nullptr) {
+        query_loc = cu_query_lens[seq_idx];
+        query_len = cu_query_lens[seq_idx + 1] - query_loc;
+    }
     if(query_len > 1) {
         return;
     }
-
     const int context_len = context_lens[seq_idx];
     _paged_attention_ll4mi_reduce_kernel<scalar_t, OUTT, HEAD_SIZE, NUM_THREADS, PARTITION_SIZE, NPAR_LOOPS>(static_cast<int64_t>(query_loc), context_len, out, exp_sums, max_logits, tmp_out, max_num_partitions, fp8_out_scale_ptr);
 }

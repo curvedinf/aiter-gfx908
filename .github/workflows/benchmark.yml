@@ -7,7 +7,7 @@ on:
 jobs:
   build_image:
     name: Build Docker Image
-    runs-on: [self-hosted, aiter-build]
+    runs-on: [self-hosted, aiter-k8s-build]
     outputs:
       image_tag: ${{ steps.set-tag.outputs.image_tag }}
     steps:

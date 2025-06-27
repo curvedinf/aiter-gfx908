@@ -516,52 +516,51 @@ __inline__ __device__ void _paged_attention_kernel(
     constexpr int ELEMS8_ELEMS4_RATIO  = 8 / 4;
     constexpr int ELEMS16_ELEMS8_RATIO = 16 / 8;
 
-    for (int mtp = 0; mtp < mtp_loop; mtp++) {
-        for(int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
-            for(int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++)
+    for(int vhe_depth = 0; vhe_depth < VHELOOP; vhe_depth++) {
+        for(int vtoken_depth = 0; vtoken_depth < VTLOOP; vtoken_depth++)
+        {
+            // 1. store data into LDS
+            for(int vblock_depth = 0; vblock_depth < VBLOCKS_PER_LANE; vblock_depth++)
             {
-                // 1. store data into LDS
-                for(int vblock_depth = 0; vblock_depth < VBLOCKS_PER_LANE; vblock_depth++)
-                {
-                    const int vlds_col_idx = laneid % n_thread_per_block;
-                    const int vlocal_token_idx =
-                        vblock_depth * k_thread_per_block + threadIdx.x / n_thread_per_block;
-                    *reinterpret_cast<_B16x8*>(vlds_ptr +
-                                            (/*row=*/vlocal_token_idx * n_thread_per_block +
-                                                /*col=*/vlds_col_idx) *
-                                                16) = Vlocal[vtoken_depth][vhe_depth][vblock_depth];
-                }
-                __syncthreads();
-
-                // 2. load data from LDS (transposed), then do multification
-                for(int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++){
-                    const int vlocal_head_elem = warpid * 16 + lane16id;
-
-                    const int vlds_col_idx  = vlocal_head_elem / CONTIGUOUS_KV_ELEMS_16B_LOAD;
-                    const int vlds_elem_idx = vlocal_head_elem % CONTIGUOUS_KV_ELEMS_16B_LOAD;
-
-                    const int vlocal_token_idx =
-                        rowid * VTOKENS_PER_LANE + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
-
-                    // read data points individually and save them into array
-                    cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
-                    for(int d2 = 0; d2 < CONTIGUOUS_KV_ELEMS_16B_LOAD; ++d2)
-                    {
-                        const cache_t* fetched_elems = reinterpret_cast<const cache_t*>(
-                            vlds_ptr + (/*row=*/(vlocal_token_idx + d2) * n_thread_per_block +
-                                        /*col=*/vlds_col_idx) *
-                                        16);
-
-                        elems[d2] = fetched_elems[vlds_elem_idx];
-                    }
-
-                    // copy all the read data points together
-                    Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *reinterpret_cast<const _B16x8*>(elems);
-                }
+                const int vlds_col_idx = laneid % n_thread_per_block;
+                const int vlocal_token_idx =
+                    vblock_depth * k_thread_per_block + threadIdx.x / n_thread_per_block;
+                *reinterpret_cast<_B16x8*>(vlds_ptr +
+                                        (/*row=*/vlocal_token_idx * n_thread_per_block +
+                                            /*col=*/vlds_col_idx) *
+                                            16) = Vlocal[vtoken_depth][vhe_depth][vblock_depth];
             }
+            __syncthreads();
+
+            // 2. load data from LDS (transposed), then do multification
+            for(int vfetch_depth = 0; vfetch_depth < VTLANELOOP; vfetch_depth++){
+                const int vlocal_head_elem = warpid * 16 + lane16id;
+
+                const int vlds_col_idx  = vlocal_head_elem / CONTIGUOUS_KV_ELEMS_16B_LOAD;
+                const int vlds_elem_idx = vlocal_head_elem % CONTIGUOUS_KV_ELEMS_16B_LOAD;
+
+                const int vlocal_token_idx =
+                    rowid * VTOKENS_PER_LANE + vfetch_depth * CONTIGUOUS_KV_ELEMS_16B_LOAD;
+
+                // read data points individually and save them into array
+                cache_t elems[CONTIGUOUS_KV_ELEMS_16B_LOAD];
+                for(int d2 = 0; d2 < CONTIGUOUS_KV_ELEMS_16B_LOAD; ++d2)
+                {
+                    const cache_t* fetched_elems = reinterpret_cast<const cache_t*>(
+                        vlds_ptr + (/*row=*/(vlocal_token_idx + d2) * n_thread_per_block +
+                                    /*col=*/vlds_col_idx) *
+                                    16);
+
+                    elems[d2] = fetched_elems[vlds_elem_idx];
+                }
+
+                // copy all the read data points together
+                Vlocal[vtoken_depth][vhe_depth][vfetch_depth] = *reinterpret_cast<const _B16x8*>(elems);
+            }
+            __syncthreads();
         }
     }
-
+    
     _B16x4 outelems[GQA_RATIO_LOOP][MTP_PER_THREAD][VHELOOP];
 
     // Softmax V mfma

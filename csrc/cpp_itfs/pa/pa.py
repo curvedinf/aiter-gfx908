@@ -30,6 +30,7 @@ def compile(
             f"{AITER_CORE_DIR}/csrc/cpp_itfs/utils.h",
             f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa.cuh",
             f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa_common.cuh",
+            f"{AITER_CORE_DIR}/csrc/cpp_itfs/pa/pa_kernels.cuh",
             f"{AITER_CORE_DIR}/csrc/include",
             f"{AITER_CORE_DIR}/csrc/include/ck_tile",
         ],

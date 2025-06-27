@@ -562,19 +562,25 @@ struct BlockFmhaPipelineQRKSVS
         {
             decltype(make_static_distributed_tensor<QDataType>(
                 Policy::template MakeQRegTileDistribution<Problem>())) q_tile;
-            decltype(gemm_0.MakeCBlockTile()) s_acc[2];
+            statically_indexed_array<decltype(gemm_0.MakeCBlockTile()), 2> s_acc;
             decltype(gemm_1.MakeCBlockTile()) o_acc;
 
             decltype(block_tile_reduce<SMPLComputeDataType>(
-                s_acc[0], sequence<1>{}, f_max, SMPLComputeDataType{0})) m;
+                s_acc(number<0>{}), sequence<1>{}, f_max, SMPLComputeDataType{0})) m;
             decltype(m) m_local;
             decltype(m) l;
 
-            decltype(cast_tile<SMPLComputeDataType>(s_acc[0])) s[2];
-            decltype(make_static_distributed_tensor<SMPLComputeDataType>(
-                s[0].get_tile_distribution())) p_compute[2];
-            decltype(cast_tile<PDataType>(
-                tile_elementwise_in(p_compute_element_func, p_compute[0]))) p[2];
+            statically_indexed_array<decltype(cast_tile<SMPLComputeDataType>(s_acc(number<0>{}))),
+                                     2>
+                s;
+            statically_indexed_array<decltype(make_static_distributed_tensor<SMPLComputeDataType>(
+                                         s(number<0>{}).get_tile_distribution())),
+                                     2>
+                p_compute;
+            statically_indexed_array<decltype(cast_tile<PDataType>(tile_elementwise_in(
+                                         p_compute_element_func, p_compute(number<0>{})))),
+                                     2>
+                p;
         } metadata;
 
         {
@@ -694,7 +700,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto run_gemm0 = [&](const auto& k_tile) {
-            gemm_0(metadata.s_acc[0],
+            gemm_0(metadata.s_acc(number<0>{}),
                    get_slice_tile(metadata.q_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
                                   sequence<kM0, k0_loops * kK0>{}),
@@ -705,7 +711,7 @@ struct BlockFmhaPipelineQRKSVS
 
         auto run_gemm1 = [&](const auto& v_tile) {
             gemm_1(metadata.o_acc,
-                   get_slice_tile(metadata.p[0],
+                   get_slice_tile(metadata.p(number<0>{}),
                                   sequence<0, (k1_loops - 1) * kK1>{},
                                   sequence<kM0, k1_loops * kK1>{}),
                    get_slice_tile(v_tile,
@@ -714,9 +720,10 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto run_fmha_alu = [&] {
-            metadata.s[0]    = cast_tile<SMPLComputeDataType>(metadata.s_acc[0]); // S{j}
+            metadata.s(number<0>{}) =
+                cast_tile<SMPLComputeDataType>(metadata.s_acc(number<0>{})); // S{j}
             metadata.m_local = block_tile_reduce<SMPLComputeDataType>(
-                metadata.s[0],
+                metadata.s(number<0>{}),
                 sequence<1>{},
                 f_max,
                 -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
@@ -738,7 +745,7 @@ struct BlockFmhaPipelineQRKSVS
         static_assert(1 == k1_loops);
         do
         {
-            clear_tile(metadata.s_acc[0]); // initialize C
+            clear_tile(metadata.s_acc(number<0>{})); // initialize C
 
             // (1) load & store K =============================================
             global_load_k();
@@ -755,7 +762,8 @@ struct BlockFmhaPipelineQRKSVS
             scheduler.schedule_gemm0();
 
             // scale_s, mask, softmax
-            metadata.s_acc[0] = tile_elementwise_in(s_acc_element_func, metadata.s_acc[0]);
+            metadata.s_acc(number<0>{}) =
+                tile_elementwise_in(s_acc_element_func, metadata.s_acc(number<0>{}));
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
@@ -766,7 +774,7 @@ struct BlockFmhaPipelineQRKSVS
                                                            number<kN0>{});
                 if(need_perpixel_check)
                 {
-                    set_tile_if(metadata.s_acc[0],
+                    set_tile_if(metadata.s_acc(number<0>{}),
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&](auto tile_idx) {
                                     const auto row =
@@ -795,15 +803,15 @@ struct BlockFmhaPipelineQRKSVS
             };
 
             constexpr auto p_spans =
-                std::decay_t<decltype(metadata.p_compute[0])>::get_distributed_spans();
+                std::decay_t<decltype(metadata.p_compute(number<0>{}))>::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
                 auto row_max         = scale_s * get_validated_m(metadata.m[i_idx]);
 
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    metadata.p_compute[0](i_j_idx) =
-                        ck_tile::exp2(scale_s * metadata.s[0][i_j_idx] - row_max);
+                    metadata.p_compute(number<0>{})(i_j_idx) =
+                        ck_tile::exp2(scale_s * metadata.s(number<0>{})[i_j_idx] - row_max);
                 });
             });
 
@@ -819,12 +827,12 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (4) softmax + mfma =============================================
-            metadata.p[0] = cast_tile<PDataType>(
-                tile_elementwise_in(p_compute_element_func, metadata.p_compute[0]));
+            metadata.p(number<0>{}) = cast_tile<PDataType>(
+                tile_elementwise_in(p_compute_element_func, metadata.p_compute(number<0>{})));
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
-                metadata.p_compute[0],
+                metadata.p_compute(number<0>{}),
                 sequence<1>{},
                 f_sum,
                 SMPLComputeDataType{0}); // rowsum(Pcompute{j})

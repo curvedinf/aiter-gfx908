@@ -37,7 +37,6 @@ __inline__ __device__ void _paged_attention_kernel(
     const float* v_scale_ptr,
     const AttentionVariant* variant)
 {
-    const int seq_idx       = blockIdx.x;
     const int partition_idx = blockIdx.y;
     const int kv_head_idx = blockIdx.z;
     constexpr int T_PAR_SIZE = 256; 
@@ -124,7 +123,7 @@ __inline__ __device__ void _paged_attention_kernel(
     const int local_qhead_idx = 4 * warpid + rowid;
     const int local_mtp_qhead_idx = 4 * warp_row_idx + rowid;
     const int global_qhead_idx = wg_start_head_idx + local_mtp_qhead_idx;
-    const int64_t query_start_off = static_cast<int64_t>(seq_idx * MTP + warp_mtp_idx);
+    const int64_t query_start_off = static_cast<int64_t>(query_loc + warp_mtp_idx);
     constexpr int mtp_loop = MTP_PER_THREAD;
 
     for(int mtp = 0; mtp < mtp_loop; mtp++) {

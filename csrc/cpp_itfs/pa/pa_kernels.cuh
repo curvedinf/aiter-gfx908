@@ -37,6 +37,7 @@ __inline__ __device__ void _paged_attention_kernel(
     const float* v_scale_ptr,
     const AttentionVariant* variant)
 {
+    const int seq_idx = blockIdx.x;
     const int partition_idx = blockIdx.y;
     const int kv_head_idx = blockIdx.z;
     constexpr int T_PAR_SIZE = 256; 
@@ -497,7 +498,7 @@ __inline__ __device__ void _paged_attention_kernel(
         for(int mtp = 0; mtp < mtp_loop; mtp++) {
             for(int gqa_ratio_loop = 0; gqa_ratio_loop < GQA_RATIO_LOOP; gqa_ratio_loop++) {
                 const int qhead_idx = lane16id + gqa_ratio_loop * GQA_RATIO_PER_LOOP;
-                const int64_t offset = static_cast<int64_t>(query_start_off + mtp * MTP_PARALLEL_THREADS) *
+                const int64_t offset = static_cast<int64_t>(seq_idx + mtp * MTP_PARALLEL_THREADS) *
                                         static_cast<int64_t>(total_num_heads) *
                                         static_cast<int64_t>(max_num_partitions) +
                                     (static_cast<int64_t>(wg_start_head_idx) +
@@ -699,7 +700,7 @@ __inline__ __device__ void _paged_attention_kernel(
                         const int64_t hsz_maxp_mult =
                             static_cast<int64_t>(HEAD_SIZE * max_num_partitions);
                         
-                        scalar_t* out_ptr = out + (query_start_off + mtp * MTP_PARALLEL_THREADS) * total_num_heads * hsz_maxp_mult +
+                        scalar_t* out_ptr = out + (seq_idx + mtp * MTP_PARALLEL_THREADS) * total_num_heads * hsz_maxp_mult +
                                             partition_idx * HEAD_SIZE;
                         for (int h = 0; h < GQA_RATIO4; h++) {
                             const int local_head_idx = 4 * h + rowid;
@@ -740,6 +741,7 @@ __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
 ){
     const int num_heads = gridDim.x;
     const int head_idx  = blockIdx.x;
+    const int seq_idx  = blockIdx.y;
     const auto MTP = gridDim.z;
     const auto mtp = blockIdx.z;
 
@@ -755,7 +757,7 @@ __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
     if(warpid == 0)
     {
         const float* max_logits_ptr =
-            max_logits + (query_loc + mtp) * num_heads * max_num_partitions + head_idx * max_num_partitions;
+            max_logits + (seq_idx + mtp) * num_heads * max_num_partitions + head_idx * max_num_partitions;
 
         // valid partition is the last valid partition in case threadid > num
         // partitions
@@ -789,7 +791,7 @@ __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
         }
 
         const float* exp_sums_ptr =
-            exp_sums + (query_loc + mtp) * num_heads * max_num_partitions + head_idx * max_num_partitions;
+            exp_sums + (seq_idx + mtp) * num_heads * max_num_partitions + head_idx * max_num_partitions;
 
         float rescaled_exp_sum[NPAR_LOOPS];
 #pragma unroll
@@ -827,7 +829,7 @@ __inline__ __device__ void _paged_attention_ll4mi_reduce_kernel(
             shared_global_exp_sum = global_exp_sum;
         }
     } // warpid == 0
-    const scalar_t* tmp_out_ptr = tmp_out + (query_loc + mtp) * num_heads * max_num_partitions * HEAD_SIZE +
+    const scalar_t* tmp_out_ptr = tmp_out + (seq_idx + mtp) * num_heads * max_num_partitions * HEAD_SIZE +
                                   head_idx * max_num_partitions * HEAD_SIZE + threadIdx.x;
     constexpr int MAX_NPAR = 64;
     scalar_t tmps[MAX_NPAR];

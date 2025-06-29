@@ -677,6 +677,9 @@ struct BlockFmhaPipelineQRKSVS
 
             store_tile(metadata.k_lds_window(k_lds_write_idx),
                        tile_elementwise_in(k_element_func, k_block_tile));
+            // move K tile windows
+            move_tile_window(k_dram_block_window, {kN0, 0});
+
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
@@ -829,10 +832,9 @@ struct BlockFmhaPipelineQRKSVS
             });
         };
 
-        auto run_fmha_mask = [&](auto sp_reg_idx) {
+        auto run_fmha_mask = [&](auto sp_reg_idx, auto k_origin) {
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
-                const auto k_origin      = k_dram_block_window.get_window_origin();
                 bool need_perpixel_check = mask.IsEdgeTile(q_origin.at(number<0>{}),
                                                            k_origin.at(number<0>{}),
                                                            number<kM0>{},
@@ -873,6 +875,8 @@ struct BlockFmhaPipelineQRKSVS
             auto v_lds_write_idx = number<0>{};
             auto v_lds_read_idx  = number<0>{};
 
+            const auto k_origin = k_dram_block_window.get_window_origin();
+
             // (1) load & store K =============================================
             global_load_k(k_lds_write_idx);
             __builtin_amdgcn_s_barrier();
@@ -889,7 +893,7 @@ struct BlockFmhaPipelineQRKSVS
             metadata.s_acc(number<0>{}) =
                 tile_elementwise_in(s_acc_element_func, metadata.s_acc(number<0>{}));
 
-            run_fmha_mask(xdl_SP_p01_reg_idx);
+            run_fmha_mask(xdl_SP_p01_reg_idx, k_origin);
 
             run_fmha_alu0(xdl_SP_p23_reg_idx);
 
@@ -909,9 +913,6 @@ struct BlockFmhaPipelineQRKSVS
             run_fmha_alu_update_o_acc();
 
             run_gemm1(xdl_SP_p23_reg_idx, v_tile);
-
-            // move K tile windows
-            move_tile_window(k_dram_block_window, {kN0, 0});
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();

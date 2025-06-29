@@ -859,7 +859,7 @@ struct BlockFmhaPipelineQRKSVS
             }
         };
 
-        auto core_loop = [&] {
+        auto core_loop = [&]([[maybe_unused]] auto cl_p) {
             auto xdl_SP_p01_reg_idx = number<0>{};
             auto xdl_SP_p23_reg_idx = number<0>{};
 
@@ -966,8 +966,19 @@ struct BlockFmhaPipelineQRKSVS
 
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);
-        while(core_loop())
-            ;
+
+        if(warp_group_id == 0)
+        {
+            asm volatile("s_setprio 0");
+            while(core_loop(number<0>{}))
+                ;
+        }
+        else
+        {
+            asm volatile("s_setprio 1");
+            while(core_loop(number<1>{}))
+                ;
+        }
 
         if constexpr(NumWarpGroups == 2)
         {

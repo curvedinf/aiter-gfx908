@@ -668,6 +668,7 @@ struct BlockFmhaPipelineQRKSVS
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
+        // part of cl_load(memK) in .sp3
         auto global_load_k = [&](auto k_lds_write_idx) {
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
@@ -680,6 +681,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
+        // part of cl_load(memV) in .sp3
         auto local_load_k = [&](auto k_lds_read_idx) {
             auto k_lds_window_for_load =
                 make_tile_window(metadata.k_lds_window(k_lds_read_idx),
@@ -688,6 +690,7 @@ struct BlockFmhaPipelineQRKSVS
             return load_tile(k_lds_window_for_load);
         };
 
+        // part of cl_load(memV) in .sp3
         auto global_load_v = [&](auto v_lds_write_idx) {
             const auto v_tile = load_tile(v_dram_window);
             __builtin_amdgcn_sched_barrier(0);
@@ -713,6 +716,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
+        // part of cl_load(memK) in .sp3
         auto local_load_v = [&](auto v_lds_read_idx) {
             auto v_lds_window_for_load =
                 make_tile_window(metadata.v_lds_window(v_lds_read_idx),
@@ -721,7 +725,11 @@ struct BlockFmhaPipelineQRKSVS
             return load_tile(v_lds_window_for_load);
         };
 
+        // part of cl_calc(gemm1) in .sp3
         auto run_gemm0 = [&](const auto& k_tile) {
+            InstructionScheduler<Problem> scheduler;
+
+            clear_tile(metadata.s_acc(number<0>{})); // initialize C
             gemm_0(metadata.s_acc(number<0>{}),
                    get_slice_tile(metadata.q_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
@@ -729,8 +737,10 @@ struct BlockFmhaPipelineQRKSVS
                    get_slice_tile(k_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
                                   sequence<kN0, k0_loops * kK0>{}));
+            scheduler.schedule_gemm0();
         };
 
+        // part of cl_calc(gemm2) in .sp3
         auto run_gemm1 = [&](const auto& v_tile) {
             gemm_1(metadata.o_acc,
                    get_slice_tile(metadata.p(number<0>{}),
@@ -741,7 +751,18 @@ struct BlockFmhaPipelineQRKSVS
                                   sequence<kN1, k1_loops * kK1>{}));
         };
 
-        auto run_fmha_alu = [&] {
+        static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
+            /// NOTICE: bias might be materialized mask including -inf values, need
+            /// consideration
+            {
+                return raw_m;
+            }
+        };
+
+        decltype(metadata.m) m_old;
+
+        // part of fmha_alu() in .sp3
+        auto run_fmha_alu0 = [&] {
             metadata.s(number<0>{}) =
                 cast_tile<SMPLComputeDataType>(metadata.s_acc(number<0>{})); // S{j}
             metadata.m_local = block_tile_reduce<SMPLComputeDataType>(
@@ -750,80 +771,12 @@ struct BlockFmhaPipelineQRKSVS
                 f_max,
                 -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
             block_tile_reduce_sync(metadata.m_local, f_max, bool_constant<false>{});
-        };
 
-        InstructionScheduler<Problem> scheduler;
-
-        if constexpr(NumWarpGroups == 2)
-        {
-            if(warp_group_id == 1)
-            {
-                __builtin_amdgcn_s_barrier();
-                __builtin_amdgcn_s_barrier();
-            }
-        }
-
-        static_assert(1 == k0_loops);
-        static_assert(1 == k1_loops);
-        do
-        {
-            clear_tile(metadata.s_acc(number<0>{})); // initialize C
-
-            // (1) load & store K =============================================
-            global_load_k(/*k_lds_write_idx=*/number<0>{});
-            __builtin_amdgcn_s_barrier();
-            auto k_tile = local_load_k(/*k_lds_read_idx=*/number<0>{});
-
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-            // (2) mfma + softmax =============================================
-            __builtin_amdgcn_s_barrier();
-            run_gemm0(k_tile);
-
-            scheduler.schedule_gemm0();
-
-            // scale_s, mask, softmax
-            metadata.s_acc(number<0>{}) =
-                tile_elementwise_in(s_acc_element_func, metadata.s_acc(number<0>{}));
-
-            if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
-            {
-                const auto k_origin      = k_dram_block_window.get_window_origin();
-                bool need_perpixel_check = mask.IsEdgeTile(q_origin.at(number<0>{}),
-                                                           k_origin.at(number<0>{}),
-                                                           number<kM0>{},
-                                                           number<kN0>{});
-                if(need_perpixel_check)
-                {
-                    set_tile_if(metadata.s_acc(number<0>{}),
-                                -numeric<SMPLComputeDataType>::infinity(),
-                                [&](auto tile_idx) {
-                                    const auto row =
-                                        q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
-                                    const auto col =
-                                        k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
-                                    return mask.IsOutOfBound(row, col);
-                                });
-                }
-            }
-
-            run_fmha_alu();
-
-            const auto m_old = metadata.m; // m{j-1}
+            m_old = metadata.m; // m{j-1}
             tile_elementwise_inout([](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); },
                                    metadata.m,
                                    m_old,
                                    metadata.m_local); // m{j}
-
-            static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
-                /// NOTICE: bias might be materialized mask including -inf values, need
-                /// consideration
-                {
-                    return raw_m;
-                }
-            };
-
             constexpr auto p_spans =
                 std::decay_t<decltype(metadata.p_compute(number<0>{}))>::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
@@ -836,19 +789,10 @@ struct BlockFmhaPipelineQRKSVS
                         ck_tile::exp2(scale_s * metadata.s(number<0>{})[i_j_idx] - row_max);
                 });
             });
+        };
 
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-            // (3) load & store V =============================================
-            global_load_v(/*v_lds_write_idx=*/number<0>{});
-            __builtin_amdgcn_s_barrier();
-            auto v_tile = local_load_v(/*v_lds_read_idx=*/number<0>{});
-
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-            // (4) softmax + mfma =============================================
+        // part of fmha_alu() in .sp3
+        auto run_fmha_alu1 = [&] {
             metadata.p(number<0>{}) = cast_tile<PDataType>(
                 tile_elementwise_in(p_compute_element_func, metadata.p_compute(number<0>{})));
             __builtin_amdgcn_sched_barrier(0);
@@ -878,6 +822,83 @@ struct BlockFmhaPipelineQRKSVS
                     metadata.o_acc(i_j_idx) *= tmp;
                 });
             });
+        };
+
+        // part of fmha_mask() in .sp3
+        auto run_fmna_mask = [&] {
+            if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
+            {
+                const auto k_origin      = k_dram_block_window.get_window_origin();
+                bool need_perpixel_check = mask.IsEdgeTile(q_origin.at(number<0>{}),
+                                                           k_origin.at(number<0>{}),
+                                                           number<kM0>{},
+                                                           number<kN0>{});
+                if(need_perpixel_check)
+                {
+                    set_tile_if(metadata.s_acc(number<0>{}),
+                                -numeric<SMPLComputeDataType>::infinity(),
+                                [&](auto tile_idx) {
+                                    const auto row =
+                                        q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
+                                    const auto col =
+                                        k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
+                                    return mask.IsOutOfBound(row, col);
+                                });
+                }
+            }
+        };
+
+        if constexpr(NumWarpGroups == 2)
+        {
+            if(warp_group_id == 1)
+            {
+                __builtin_amdgcn_s_barrier();
+                __builtin_amdgcn_s_barrier();
+            }
+        }
+
+        static_assert(1 == k0_loops);
+        static_assert(1 == k1_loops);
+        do
+        {
+            auto k_lds_write_idx = number<0>{};
+            auto k_lds_read_idx  = number<0>{};
+            auto v_lds_write_idx = number<0>{};
+            auto v_lds_read_idx  = number<0>{};
+
+            // (1) load & store K =============================================
+            global_load_k(k_lds_write_idx);
+            __builtin_amdgcn_s_barrier();
+            auto k_tile = local_load_k(k_lds_read_idx);
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+            // (2) mfma + softmax =============================================
+            __builtin_amdgcn_s_barrier();
+            run_gemm0(k_tile);
+
+            // scale_s, mask, softmax
+            metadata.s_acc(number<0>{}) =
+                tile_elementwise_in(s_acc_element_func, metadata.s_acc(number<0>{}));
+
+            run_fmna_mask();
+
+            run_fmha_alu0();
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+            // (3) load & store V =============================================
+            global_load_v(v_lds_write_idx);
+            __builtin_amdgcn_s_barrier();
+            auto v_tile = local_load_v(v_lds_read_idx);
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+            // (4) softmax + mfma =============================================
+            run_fmha_alu1();
 
             run_gemm1(v_tile);
 

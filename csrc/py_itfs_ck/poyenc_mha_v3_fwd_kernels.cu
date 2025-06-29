@@ -566,6 +566,13 @@ struct BlockFmhaPipelineQRKSVS
                                      2>
                 v_lds_window;
 
+            decltype(load_tile(
+                make_tile_window(k_lds_window(number<0>{}),
+                                 Policy::template MakeKRegTileDistribution<Problem>()))) k_tile;
+            decltype(load_tile(
+                make_tile_window(v_lds_window(number<0>{}),
+                                 Policy::template MakeVRegTileDistribution<Problem>()))) v_tile;
+
             decltype(make_static_distributed_tensor<QDataType>(
                 Policy::template MakeQRegTileDistribution<Problem>())) q_tile;
             statically_indexed_array<decltype(gemm_0.MakeCBlockTile()), 2> s_acc;
@@ -688,7 +695,7 @@ struct BlockFmhaPipelineQRKSVS
                 make_tile_window(metadata.k_lds_window(k_lds_read_idx),
                                  Policy::template MakeKRegTileDistribution<Problem>());
 
-            return load_tile(k_lds_window_for_load);
+            metadata.k_tile = load_tile(k_lds_window_for_load);
         };
 
         auto global_load_v = [&](auto v_lds_write_idx) {
@@ -721,10 +728,10 @@ struct BlockFmhaPipelineQRKSVS
                 make_tile_window(metadata.v_lds_window(v_lds_read_idx),
                                  Policy::template MakeVRegTileDistribution<Problem>());
 
-            return load_tile(v_lds_window_for_load);
+            metadata.v_tile = load_tile(v_lds_window_for_load);
         };
 
-        auto run_gemm0 = [&](auto sp_reg_idx, const auto& k_tile) {
+        auto run_gemm0 = [&](auto sp_reg_idx) {
             InstructionScheduler<Problem> scheduler;
 
             clear_tile(metadata.s_acc(sp_reg_idx)); // initialize C
@@ -732,18 +739,18 @@ struct BlockFmhaPipelineQRKSVS
                    get_slice_tile(metadata.q_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
                                   sequence<kM0, k0_loops * kK0>{}),
-                   get_slice_tile(k_tile,
+                   get_slice_tile(metadata.k_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
                                   sequence<kN0, k0_loops * kK0>{}));
             scheduler.schedule_gemm0();
         };
 
-        auto run_gemm1 = [&](auto sp_reg_idx, const auto& v_tile) {
+        auto run_gemm1 = [&](auto sp_reg_idx) {
             gemm_1(metadata.o_acc,
                    get_slice_tile(metadata.p(sp_reg_idx),
                                   sequence<0, (k1_loops - 1) * kK1>{},
                                   sequence<kM0, k1_loops * kK1>{}),
-                   get_slice_tile(v_tile,
+                   get_slice_tile(metadata.v_tile,
                                   sequence<0, (k1_loops - 1) * kK1>{},
                                   sequence<kN1, k1_loops * kK1>{}));
         };
@@ -873,14 +880,14 @@ struct BlockFmhaPipelineQRKSVS
             // (1) load & store K =============================================
             global_load_k(k_lds_write_idx);
             __builtin_amdgcn_s_barrier();
-            auto k_tile = local_load_k(k_lds_read_idx);
+            local_load_k(k_lds_read_idx);
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (2) mfma + softmax =============================================
             __builtin_amdgcn_s_barrier();
-            run_gemm0(xdl_SP_p01_reg_idx, k_tile);
+            run_gemm0(xdl_SP_p01_reg_idx);
 
             // scale_s, mask, softmax
             run_fmha_mask(xdl_SP_p01_reg_idx, k_origin);
@@ -893,7 +900,7 @@ struct BlockFmhaPipelineQRKSVS
             // (3) load & store V =============================================
             global_load_v(v_lds_write_idx);
             __builtin_amdgcn_s_barrier();
-            auto v_tile = local_load_v(v_lds_read_idx);
+            local_load_v(v_lds_read_idx);
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -902,7 +909,7 @@ struct BlockFmhaPipelineQRKSVS
             run_fmha_alu1(xdl_SP_p23_reg_idx);
             run_fmha_alu_update_o_acc();
 
-            run_gemm1(xdl_SP_p23_reg_idx, v_tile);
+            run_gemm1(xdl_SP_p23_reg_idx);
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -917,14 +924,14 @@ struct BlockFmhaPipelineQRKSVS
             // (1) load & store K =============================================
             global_load_k(number<0>{});
             __builtin_amdgcn_s_barrier();
-            auto k_tile = local_load_k(number<0>{});
+            local_load_k(number<0>{});
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (2) mfma + softmax =============================================
             __builtin_amdgcn_s_barrier();
-            run_gemm0(number<0>{}, k_tile);
+            run_gemm0(number<0>{});
 
             // scale_s, mask, softmax
             run_fmha_mask(number<0>{}, k_origin);
@@ -937,7 +944,7 @@ struct BlockFmhaPipelineQRKSVS
             // (3) load & store V =============================================
             global_load_v(number<0>{});
             __builtin_amdgcn_s_barrier();
-            auto v_tile = local_load_v(number<0>{});
+            local_load_v(number<0>{});
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -946,7 +953,7 @@ struct BlockFmhaPipelineQRKSVS
             run_fmha_alu1(number<0>{});
             run_fmha_alu_update_o_acc();
 
-            run_gemm1(number<0>{}, v_tile);
+            run_gemm1(number<0>{});
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();

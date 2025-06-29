@@ -859,6 +859,58 @@ struct BlockFmhaPipelineQRKSVS
             }
         };
 
+        auto core_loop = [&] {
+            auto xdl_SP_p01_reg_idx = number<0>{};
+            auto xdl_SP_p23_reg_idx = number<0>{};
+
+            auto k_lds_write_idx = number<0>{};
+            auto k_lds_read_idx  = number<0>{};
+            auto v_lds_write_idx = number<0>{};
+            auto v_lds_read_idx  = number<0>{};
+
+            const auto k_origin = k_dram_block_window.get_window_origin();
+
+            // (1) load & store K =============================================
+            global_load_k(k_lds_write_idx);
+            __builtin_amdgcn_s_barrier();
+            auto k_tile = local_load_k(k_lds_read_idx);
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+            // (2) mfma + softmax =============================================
+            __builtin_amdgcn_s_barrier();
+            run_gemm0(xdl_SP_p01_reg_idx, k_tile);
+
+            // scale_s, mask, softmax
+            run_fmha_mask(xdl_SP_p01_reg_idx, k_origin);
+
+            run_fmha_alu0(xdl_SP_p23_reg_idx);
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+            // (3) load & store V =============================================
+            global_load_v(v_lds_write_idx);
+            __builtin_amdgcn_s_barrier();
+            auto v_tile = local_load_v(v_lds_read_idx);
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+            // (4) softmax + mfma =============================================
+            run_fmha_alu1(xdl_SP_p23_reg_idx);
+            run_fmha_alu_update_o_acc();
+
+            run_gemm1(xdl_SP_p23_reg_idx, v_tile);
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+
+            return ++i_total_loops < num_total_loop;
+        };
+
         {
             const auto k_origin = k_dram_block_window.get_window_origin();
 
@@ -914,56 +966,8 @@ struct BlockFmhaPipelineQRKSVS
 
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);
-        for(; i_total_loops < num_total_loop; ++i_total_loops)
-        {
-            auto xdl_SP_p01_reg_idx = number<0>{};
-            auto xdl_SP_p23_reg_idx = number<0>{};
-
-            auto k_lds_write_idx = number<0>{};
-            auto k_lds_read_idx  = number<0>{};
-            auto v_lds_write_idx = number<0>{};
-            auto v_lds_read_idx  = number<0>{};
-
-            const auto k_origin = k_dram_block_window.get_window_origin();
-
-            // (1) load & store K =============================================
-            global_load_k(k_lds_write_idx);
-            __builtin_amdgcn_s_barrier();
-            auto k_tile = local_load_k(k_lds_read_idx);
-
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-            // (2) mfma + softmax =============================================
-            __builtin_amdgcn_s_barrier();
-            run_gemm0(xdl_SP_p01_reg_idx, k_tile);
-
-            // scale_s, mask, softmax
-            run_fmha_mask(xdl_SP_p01_reg_idx, k_origin);
-
-            run_fmha_alu0(xdl_SP_p23_reg_idx);
-
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-            // (3) load & store V =============================================
-            global_load_v(v_lds_write_idx);
-            __builtin_amdgcn_s_barrier();
-            auto v_tile = local_load_v(v_lds_read_idx);
-
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-            // (4) softmax + mfma =============================================
-            run_fmha_alu1(xdl_SP_p23_reg_idx);
-            run_fmha_alu_update_o_acc();
-
-            run_gemm1(xdl_SP_p23_reg_idx, v_tile);
-
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-        }
+        while(core_loop())
+            ;
 
         if constexpr(NumWarpGroups == 2)
         {

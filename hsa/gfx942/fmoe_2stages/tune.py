@@ -332,6 +332,9 @@ def go(
                                 sorted_weights if doweight_stage1 else None,
                             ),
                             {},
+                            None,
+                            (),
+                            {},
                             (ref1),
                             0.01,
                             0.01,
@@ -380,6 +383,9 @@ def go(
                                 act_type,
                             ),
                             {},
+                            None,
+                            (),
+                            {},
                             (ref1),
                             0.01,
                             0.01,
@@ -412,6 +418,9 @@ def go(
                                 act_type,
                             ),
                             {},
+                            None,
+                            (),
+                            {},
                             (ref2),
                             0.01,
                             0.01,
@@ -422,9 +431,11 @@ def go(
         if tasks is None and tasks_ck is None:
             print("no moe solution can tune for ", line)
             continue
-        rets = mp_tuner(tasks + tasks_ck)
+        in_data = [(len(tasks) + len(tasks_ck), ())]
+        rets = mp_tuner(tasks + tasks_ck, in_data)
 
         profileDF = []
+        print("tuning moe solution for ", rets)
         for (stage, kernelName, block_m), us, err in rets:
             if us == float("inf"):
                 continue

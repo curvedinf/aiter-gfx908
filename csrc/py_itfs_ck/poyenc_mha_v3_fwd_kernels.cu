@@ -806,6 +806,19 @@ struct BlockFmhaPipelineQRKSVS
                 }();
 
                 metadata.l(i_idx) = tmp * metadata.l[i_idx] + rowsum_p[i_idx];
+            });
+        };
+
+        auto run_fmha_alu_update_o_acc = [&] {
+            // l{j}, Oacc{j}
+            constexpr auto o_spans = decltype(metadata.o_acc)::get_distributed_spans();
+            sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                const auto tmp       = [&]() {
+                    auto row_max = scale_s * get_validated_m(metadata.m[i_idx]);
+                    return ck_tile::exp2(scale_s * m_old[i_idx] - row_max);
+                }();
+
                 sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     // FIXME: this use different equation from FA v2 paper,
@@ -816,7 +829,7 @@ struct BlockFmhaPipelineQRKSVS
             });
         };
 
-        auto run_fmna_mask = [&] {
+        auto run_fmha_mask = [&] {
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 const auto k_origin      = k_dram_block_window.get_window_origin();
@@ -873,7 +886,7 @@ struct BlockFmhaPipelineQRKSVS
             metadata.s_acc(number<0>{}) =
                 tile_elementwise_in(s_acc_element_func, metadata.s_acc(number<0>{}));
 
-            run_fmna_mask();
+            run_fmha_mask();
 
             run_fmha_alu0();
 
@@ -890,6 +903,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_sched_barrier(0);
             // (4) softmax + mfma =============================================
             run_fmha_alu1();
+            run_fmha_alu_update_o_acc();
 
             run_gemm1(v_tile);
 

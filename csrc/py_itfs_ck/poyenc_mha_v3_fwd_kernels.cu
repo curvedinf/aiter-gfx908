@@ -721,11 +721,11 @@ struct BlockFmhaPipelineQRKSVS
             return load_tile(v_lds_window_for_load);
         };
 
-        auto run_gemm0 = [&](const auto& k_tile) {
+        auto run_gemm0 = [&](auto sp_reg_idx, const auto& k_tile) {
             InstructionScheduler<Problem> scheduler;
 
-            clear_tile(metadata.s_acc(number<0>{})); // initialize C
-            gemm_0(metadata.s_acc(number<0>{}),
+            clear_tile(metadata.s_acc(sp_reg_idx)); // initialize C
+            gemm_0(metadata.s_acc(sp_reg_idx),
                    get_slice_tile(metadata.q_tile,
                                   sequence<0, (k0_loops - 1) * kK0>{},
                                   sequence<kM0, k0_loops * kK0>{}),
@@ -735,9 +735,9 @@ struct BlockFmhaPipelineQRKSVS
             scheduler.schedule_gemm0();
         };
 
-        auto run_gemm1 = [&](const auto& v_tile) {
+        auto run_gemm1 = [&](auto sp_reg_idx, const auto& v_tile) {
             gemm_1(metadata.o_acc,
-                   get_slice_tile(metadata.p(number<0>{}),
+                   get_slice_tile(metadata.p(sp_reg_idx),
                                   sequence<0, (k1_loops - 1) * kK1>{},
                                   sequence<kM0, k1_loops * kK1>{}),
                    get_slice_tile(v_tile,
@@ -755,11 +755,11 @@ struct BlockFmhaPipelineQRKSVS
 
         decltype(metadata.m) m_old;
 
-        auto run_fmha_alu0 = [&] {
-            metadata.s(number<0>{}) =
-                cast_tile<SMPLComputeDataType>(metadata.s_acc(number<0>{})); // S{j}
+        auto run_fmha_alu0 = [&](auto sp_reg_idx) {
+            metadata.s(sp_reg_idx) =
+                cast_tile<SMPLComputeDataType>(metadata.s_acc(sp_reg_idx)); // S{j}
             metadata.m_local = block_tile_reduce<SMPLComputeDataType>(
-                metadata.s(number<0>{}),
+                metadata.s(sp_reg_idx),
                 sequence<1>{},
                 f_max,
                 -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
@@ -771,26 +771,26 @@ struct BlockFmhaPipelineQRKSVS
                                    m_old,
                                    metadata.m_local); // m{j}
             constexpr auto p_spans =
-                std::decay_t<decltype(metadata.p_compute(number<0>{}))>::get_distributed_spans();
+                std::decay_t<decltype(metadata.p_compute(sp_reg_idx))>::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
                 auto row_max         = scale_s * get_validated_m(metadata.m[i_idx]);
 
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    metadata.p_compute(number<0>{})(i_j_idx) =
-                        ck_tile::exp2(scale_s * metadata.s(number<0>{})[i_j_idx] - row_max);
+                    metadata.p_compute(sp_reg_idx)(i_j_idx) =
+                        ck_tile::exp2(scale_s * metadata.s(sp_reg_idx)[i_j_idx] - row_max);
                 });
             });
         };
 
-        auto run_fmha_alu1 = [&] {
-            metadata.p(number<0>{}) = cast_tile<PDataType>(
-                tile_elementwise_in(p_compute_element_func, metadata.p_compute(number<0>{})));
+        auto run_fmha_alu1 = [&](auto sp_reg_idx) {
+            metadata.p(sp_reg_idx) = cast_tile<PDataType>(
+                tile_elementwise_in(p_compute_element_func, metadata.p_compute(sp_reg_idx)));
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
-                metadata.p_compute(number<0>{}),
+                metadata.p_compute(sp_reg_idx),
                 sequence<1>{},
                 f_sum,
                 SMPLComputeDataType{0}); // rowsum(Pcompute{j})
@@ -829,7 +829,7 @@ struct BlockFmhaPipelineQRKSVS
             });
         };
 
-        auto run_fmha_mask = [&] {
+        auto run_fmha_mask = [&](auto sp_reg_idx) {
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 const auto k_origin      = k_dram_block_window.get_window_origin();
@@ -839,7 +839,7 @@ struct BlockFmhaPipelineQRKSVS
                                                            number<kN0>{});
                 if(need_perpixel_check)
                 {
-                    set_tile_if(metadata.s_acc(number<0>{}),
+                    set_tile_if(metadata.s_acc(sp_reg_idx),
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&](auto tile_idx) {
                                     const auto row =
@@ -865,6 +865,9 @@ struct BlockFmhaPipelineQRKSVS
         static_assert(1 == k1_loops);
         do
         {
+            auto xdl_SP_p01_reg_idx = number<0>{};
+            auto xdl_SP_p23_reg_idx = number<0>{};
+
             auto k_lds_write_idx = number<0>{};
             auto k_lds_read_idx  = number<0>{};
             auto v_lds_write_idx = number<0>{};
@@ -880,15 +883,15 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_sched_barrier(0);
             // (2) mfma + softmax =============================================
             __builtin_amdgcn_s_barrier();
-            run_gemm0(k_tile);
+            run_gemm0(xdl_SP_p01_reg_idx, k_tile);
 
             // scale_s, mask, softmax
             metadata.s_acc(number<0>{}) =
                 tile_elementwise_in(s_acc_element_func, metadata.s_acc(number<0>{}));
 
-            run_fmha_mask();
+            run_fmha_mask(xdl_SP_p01_reg_idx);
 
-            run_fmha_alu0();
+            run_fmha_alu0(xdl_SP_p23_reg_idx);
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -902,10 +905,10 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (4) softmax + mfma =============================================
-            run_fmha_alu1();
+            run_fmha_alu1(xdl_SP_p23_reg_idx);
             run_fmha_alu_update_o_acc();
 
-            run_gemm1(v_tile);
+            run_gemm1(xdl_SP_p23_reg_idx, v_tile);
 
             // move K tile windows
             move_tile_window(k_dram_block_window, {kN0, 0});

@@ -111,7 +111,8 @@ def flash_mla_fwd_prefill_with_kvcache(
 ) -> Tuple[Tensor, Tensor]:
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
-    out, softmax_lse = flash_mla_fwd_prefill_with_kvcache_impl(
+    # out, softmax_lse = flash_mla_fwd_prefill_with_kvcache_impl(
+    out = flash_mla_fwd_prefill_with_kvcache_impl(
         q,
         k_cache,
         k_cache,
@@ -120,4 +121,5 @@ def flash_mla_fwd_prefill_with_kvcache(
         block_table,
         softmax_scale,
         causal)
-    return out, softmax_lse
+    return out
+    # return out, softmax_lse

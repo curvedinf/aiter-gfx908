@@ -13,6 +13,7 @@
 // =====================================================================================================================
 // Utils
 //
+// #define ZZDebug
 
 CK_TILE_DEVICE bool IsDebugThreadBlock(const int x = 0, const int y = 0, const int z = 0)
 {
@@ -87,7 +88,7 @@ struct FlashMlaPrefillKernelTrait
     static constexpr bool    kEnableXQA                 = kEnableXQA_;
     static constexpr bool    kKVLoadOnce                = kKVLoadOnce_;
 
-    static constexpr int32_t kNumPrefetchK  = 1;
+    static constexpr int32_t kNumPrefetchK  = kKVLoadOnce_ ? 2 : 1;
     static constexpr int32_t kNumPrefetchV  = 1;
     static constexpr int32_t kNumPrefetchKV = ck_tile::max(kNumPrefetchK, kNumPrefetchV);
 
@@ -228,6 +229,220 @@ public:
         return k_lds_block_desc;
     }
 
+    template <bool IsLoadOnceRope = false>
+    CK_TILE_HOST_DEVICE static constexpr auto GetSingleKElementSpaceSize()
+    {
+        constexpr ck_tile::index_t kNPerBlock = Traits::kBlockN0;
+        constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? 64 : 128;
+        constexpr ck_tile::index_t kRepeatK = IsLoadOnceRope ? 1 : Traits::kSizeNope / kKPerBlock;
+        constexpr ck_tile::index_t NumWarps   = Traits::kNumWarps;
+        constexpr ck_tile::index_t warpSize   = ck_tile::get_warp_size();
+
+        constexpr ck_tile::index_t kKPack  = 16 / sizeof(scalar_t);
+        constexpr ck_tile::index_t KVector = 4  / sizeof(scalar_t);
+        constexpr ck_tile::index_t kPad    = kKPack;
+
+        static_assert(warpSize * KVector >= kKPerBlock &&
+                      warpSize * KVector % kKPerBlock == 0);
+        constexpr ck_tile::index_t LanesPerK  = kKPerBlock / KVector;
+        constexpr ck_tile::index_t LaneGroups = warpSize / LanesPerK;
+        constexpr ck_tile::index_t NumIssues  = kNPerBlock / (LaneGroups * NumWarps);
+
+        return NumIssues * NumWarps * kRepeatK * (warpSize * KVector + kPad);
+    }
+
+    template <bool IsLoadOnceRope = false,
+              ck_tile::index_t IBuf = 0>
+    CK_TILE_HOST_DEVICE static constexpr auto
+        MakeKLdsStoreBlockDescriptor(ck_tile::number<IBuf> = ck_tile::number<0>{})
+    {
+        // K is always k-major, we use async-copy to load into LDS
+        constexpr ck_tile::index_t kNPerBlock = Traits::kBlockN0;
+        constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? 64 : 128;
+        constexpr ck_tile::index_t kRepeatK = IsLoadOnceRope ? 1 : Traits::kSizeNope / kKPerBlock;
+        constexpr ck_tile::index_t kBlockSize = Traits::kNumThreads;
+        constexpr ck_tile::index_t NumWarps   = Traits::kNumWarps;
+        constexpr ck_tile::index_t warpSize   = ck_tile::get_warp_size();
+
+        constexpr ck_tile::index_t kKPack  = 16 / sizeof(scalar_t);
+        constexpr ck_tile::index_t KVector = 4  / sizeof(scalar_t);
+        constexpr ck_tile::index_t kPad = 
+            kKPack; // for async-copy, this pad is between warps. Optimize this for lds_read speed
+
+        static_assert(warpSize * KVector >= kKPerBlock && warpSize * KVector % kKPerBlock == 0);
+        constexpr ck_tile::index_t LanesPerK =
+            kKPerBlock / KVector; // 
+        constexpr ck_tile::index_t LaneGroups =
+            warpSize /
+            LanesPerK; // how many groups (within a wave), they may load different N, but same K
+        constexpr ck_tile::index_t NumIssues = kNPerBlock / (LaneGroups * NumWarps);
+        static_assert(NumIssues == kNPerBlock * kKPerBlock / (kBlockSize * KVector));
+
+        if constexpr(IsLoadOnceRope)
+        {
+            constexpr auto k_lds_block_desc_0 = make_naive_tensor_descriptor_with_offset(
+                ck_tile::make_tuple(ck_tile::number<NumIssues>{},  // n0
+                           ck_tile::number<LaneGroups>{}, // n1
+                           ck_tile::number<NumWarps>{},   // n2
+                           ck_tile::number<LanesPerK>{},  // k0
+                           ck_tile::number<KVector>{}),   // k1
+                ck_tile::make_tuple(ck_tile::number<NumWarps * (warpSize * KVector + kPad)>{},
+                           ck_tile::number<kKPerBlock>{},
+                           ck_tile::number<warpSize * KVector + kPad>{},
+                           ck_tile::number<KVector>{},
+                           ck_tile::number<1>{}),
+                ck_tile::number<IBuf * GetSingleKElementSpaceSize<true>()>{},
+                ck_tile::number<KVector>{},
+                ck_tile::number<1>{});
+
+            // TODO this layout is hard coded, and will be used in async copy buffer view load
+            // in LDS the real layout is (bufs, N0, N2, N1*K0*K1)
+            constexpr auto k_lds_block_desc_issues_warps_lanes = ck_tile::transform_tensor_descriptor(
+                k_lds_block_desc_0,
+                ck_tile::make_tuple(make_pass_through_transform(ck_tile::number<NumIssues>{}),
+                           ck_tile::make_pass_through_transform(ck_tile::number<NumWarps>{}),
+                           ck_tile::make_merge_transform(ck_tile::make_tuple(
+                               ck_tile::number<LaneGroups>{},
+                               ck_tile::number<LanesPerK>{}, 
+                               ck_tile::number<KVector>{}))),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<2>{}, ck_tile::sequence<1, 3, 4>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
+
+            return k_lds_block_desc_issues_warps_lanes;
+        }
+        else
+        {
+            constexpr auto k_lds_block_desc_0 = make_naive_tensor_descriptor_with_offset(
+                ck_tile::make_tuple(ck_tile::number<NumIssues>{},  // n0
+                           ck_tile::number<LaneGroups>{}, // n1
+                           ck_tile::number<NumWarps>{},   // n2
+                           ck_tile::number<kRepeatK>{},  // krepeatK
+                           ck_tile::number<LanesPerK>{},  // k0
+                           ck_tile::number<KVector>{}),   // k1
+                ck_tile::make_tuple(ck_tile::number<NumWarps* kRepeatK * (warpSize * KVector + kPad)>{},
+                           ck_tile::number<(warpSize * KVector + kPad) / LaneGroups>{},
+                           ck_tile::number<(warpSize * KVector + kPad) * kRepeatK>{},
+                           ck_tile::number<(warpSize * KVector + kPad) / LaneGroups>{},
+                           ck_tile::number<KVector>{},
+                           ck_tile::number<1>{}),
+                ck_tile::number<IBuf * GetSingleKElementSpaceSize<false>()>{},
+                ck_tile::number<KVector>{},
+                ck_tile::number<1>{});
+
+            // TODO this layout is hard coded, and will be used in async copy buffer view load
+            // in LDS the real layout is (bufs, N0, N2, N1*K0*K1)
+            constexpr auto k_lds_block_desc_issues_warps_lanes = ck_tile::transform_tensor_descriptor(
+                k_lds_block_desc_0,
+                ck_tile::make_tuple(make_pass_through_transform(ck_tile::number<NumIssues>{}),
+                           ck_tile::make_pass_through_transform(ck_tile::number<NumWarps>{}),
+                           ck_tile::make_merge_transform(ck_tile::make_tuple(
+                               ck_tile::number<LaneGroups>{},
+                               ck_tile::number<kRepeatK>{},
+                               ck_tile::number<LanesPerK>{}, 
+                               ck_tile::number<KVector>{}))),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<2>{}, ck_tile::sequence<1, 3, 4, 5>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}, ck_tile::sequence<2>{}));
+
+            return k_lds_block_desc_issues_warps_lanes;
+        }
+    }
+
+    template <bool IsLoadOnceRope = false>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeKLdsLoadBlockDescriptor()
+    {
+        // K is always k-major, we use async-copy to load into LDS
+        constexpr ck_tile::index_t kNPerBlock = Traits::kBlockN0;
+        constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? 64 : 128;
+        constexpr ck_tile::index_t kRepeatK = IsLoadOnceRope ? 1 : Traits::kSizeNope / kKPerBlock;
+        constexpr ck_tile::index_t kBlockSize = Traits::kNumThreads;
+        constexpr ck_tile::index_t NumWarps   = Traits::kNumWarps;
+        constexpr ck_tile::index_t warpSize   = ck_tile::get_warp_size();
+
+        constexpr ck_tile::index_t kKPack  = 16 / sizeof(scalar_t);
+        constexpr ck_tile::index_t KVector = 4 / sizeof(scalar_t);
+        constexpr ck_tile::index_t kPad    = kKPack; // for async-copy, this pad is between warps
+
+        static_assert(warpSize * KVector >= kKPerBlock && warpSize * KVector % kKPerBlock == 0);
+        constexpr ck_tile::index_t LanesPerK  = kKPerBlock / KVector; // within a wave
+        constexpr ck_tile::index_t LaneGroups = warpSize / LanesPerK; // within a wave
+        constexpr ck_tile::index_t NumIssues  = kNPerBlock / (LaneGroups * NumWarps);
+        static_assert(NumIssues == kNPerBlock * kKPerBlock / (kBlockSize * KVector));
+        // constexpr ck_tile::index_t SingleKSize = NumIssues * NumWarps * (warpSize * KVector + kPad);
+        // constexpr ck_tile::index_t SingleVSize =
+        // MakeVLdsBlockDescriptor<Problem>().get_element_space_size();
+        constexpr ck_tile::index_t BufferSize =
+            GetSingleKElementSpaceSize<IsLoadOnceRope>();
+
+        if constexpr(IsLoadOnceRope)
+        {
+            constexpr auto k_lds_block_desc_0 =
+                ck_tile::make_naive_tensor_descriptor(ck_tile::make_tuple(ck_tile::number<Traits::kNumPrefetchK>{},    // num_buffers
+                                                        ck_tile::number<NumIssues>{},          // n0
+                                                        ck_tile::number<NumWarps>{},           // n2
+                                                        ck_tile::number<LaneGroups>{},         // n1
+                                                        ck_tile::number<kKPerBlock / kKPack>{}, // k0
+                                                        ck_tile::number<kKPack>{}),             // k1
+                                             ck_tile::make_tuple(ck_tile::number<BufferSize>{},
+                                                        ck_tile::number<NumWarps*(warpSize * KVector + kPad)>{},
+                                                        ck_tile::number<(warpSize * KVector + kPad)>{},
+                                                        ck_tile::number<kKPerBlock>{},
+                                                        ck_tile::number<kKPack>{},
+                                                        ck_tile::number<1>{}),
+                                             ck_tile::number<kKPack>{},
+                                             ck_tile::number<1>{});
+
+            constexpr auto k_lds_block_desc = ck_tile::transform_tensor_descriptor(
+                k_lds_block_desc_0,
+                ck_tile::make_tuple(
+                    ck_tile::make_merge_transform(ck_tile::make_tuple(ck_tile::number<Traits::kNumPrefetchK>{},
+                                                    ck_tile::number<NumIssues>{},
+                                                    ck_tile::number<LaneGroups>{},
+                                                    ck_tile::number<NumWarps>{})),
+                    ck_tile::make_merge_transform(ck_tile::make_tuple(
+                                                  ck_tile::number<kKPerBlock / kKPack>{}, 
+                                                  ck_tile::number<kKPack>{}))),
+                ck_tile::make_tuple(ck_tile::sequence<0, 1, 3, 2>{}, ck_tile::sequence<4, 5>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
+            return k_lds_block_desc;
+        }
+        else
+        {
+            constexpr auto k_lds_block_desc_0 =
+                ck_tile::make_naive_tensor_descriptor(ck_tile::make_tuple(ck_tile::number<Traits::kNumPrefetchK>{},    // num_buffers
+                                                        ck_tile::number<NumIssues>{},          // n0
+                                                        ck_tile::number<NumWarps>{},           // n2
+                                                        ck_tile::number<LaneGroups>{},         // n1
+                                                        ck_tile::number<kRepeatK>{}, 
+                                                        ck_tile::number<kKPerBlock / kKPack>{}, // k0
+                                                        ck_tile::number<kKPack>{}),             // k1
+                                                     ck_tile::make_tuple(ck_tile::number<BufferSize>{},
+                                                        ck_tile::number<NumWarps*(warpSize * KVector + kPad) * kRepeatK>{},
+                                                        ck_tile::number<(warpSize * KVector + kPad) * kRepeatK>{},
+                                                        ck_tile::number<(warpSize * KVector + kPad) / LaneGroups>{},
+                                                        // ck_tile::number<Traits::kSizeD>{}, 
+                                                        ck_tile::number<(warpSize * KVector + kPad) / LaneGroups>{},
+                                                        ck_tile::number<kKPack>{},
+                                                        ck_tile::number<1>{}),
+                                             ck_tile::number<kKPack>{},
+                                             ck_tile::number<1>{});
+
+            constexpr auto k_lds_block_desc = ck_tile::transform_tensor_descriptor(
+                k_lds_block_desc_0,
+                ck_tile::make_tuple(
+                    ck_tile::make_merge_transform(ck_tile::make_tuple(ck_tile::number<Traits::kNumPrefetchK>{},
+                                                    ck_tile::number<NumIssues>{},
+                                                    ck_tile::number<LaneGroups>{},
+                                                    ck_tile::number<NumWarps>{})),
+                    ck_tile::make_merge_transform(ck_tile::make_tuple(
+                                                  ck_tile::number<kRepeatK>{}, 
+                                                  ck_tile::number<kKPerBlock / kKPack>{}, 
+                                                  ck_tile::number<kKPack>{}))),
+                ck_tile::make_tuple(ck_tile::sequence<0, 1, 3, 2>{}, ck_tile::sequence<4, 5, 6>{}),
+                ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
+            return k_lds_block_desc;
+        }
+    }
+
     CK_TILE_HOST_DEVICE static constexpr auto MakeVLdsBlockDescriptor()
     {
         constexpr int32_t Banks        = 32; /// TODO: need change based on arch
@@ -239,14 +454,15 @@ public:
         constexpr int32_t kKPerBlock = Traits::kBlockK1;
         static_assert(kNPerBlock % NPerRow == 0);
         static_assert(kKPerBlock % kKPack == 0);
+        constexpr int32_t BufferSize = Traits::kKVLoadOnce ? GetSmemSizeSingleV() : GetSmemSizeSingleKV();
 
         constexpr auto v_lds_block_desc_0 = ck_tile::make_naive_tensor_descriptor(
-            ck_tile::make_tuple(ck_tile::number<Traits::kNumPrefetchKV>{},
+            ck_tile::make_tuple(ck_tile::number<Traits::kNumPrefetchV>{},
                        ck_tile::number<kKPerBlock / kKPack>{},
                        ck_tile::number<kNPerBlock / NPerRow>{},
                        ck_tile::number<NPerRow>{},
                        ck_tile::number<kKPack>{}),
-            ck_tile::make_tuple(ck_tile::number<GetSmemSizeSingleKV()>{},
+            ck_tile::make_tuple(ck_tile::number<BufferSize>{},
                        ck_tile::number<(kNPerBlock / NPerRow) * (PixelsPerRow + kKPack)>{},
                        ck_tile::number<PixelsPerRow + kKPack>{},
                        ck_tile::number<kKPack>{},
@@ -258,7 +474,7 @@ public:
             v_lds_block_desc_0,
             ck_tile::make_tuple(
                 ck_tile::make_merge_transform(ck_tile::make_tuple(
-                    ck_tile::number<Traits::kNumPrefetchKV>{}, ck_tile::number<kNPerBlock / NPerRow>{}, ck_tile::number<NPerRow>{})),
+                    ck_tile::number<Traits::kNumPrefetchV>{}, ck_tile::number<kNPerBlock / NPerRow>{}, ck_tile::number<NPerRow>{})),
                 ck_tile::make_merge_transform(ck_tile::make_tuple(ck_tile::number<kKPerBlock / kKPack>{}, ck_tile::number<kKPack>{}))),
             ck_tile::make_tuple(ck_tile::sequence<0, 2, 3>{}, ck_tile::sequence<1, 4>{}),
             ck_tile::make_tuple(ck_tile::sequence<0>{}, ck_tile::sequence<1>{}));
@@ -286,9 +502,33 @@ public:
         return ck_tile::max(SingleKSize, SingleVSize) * sizeof(scalar_t);
     }
 
+    CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSizeSingleV()
+    {
+        constexpr int32_t Banks        = 32; /// TODO: need change based on arch
+        constexpr int32_t PixelsPerRow = Banks * 4 / sizeof(scalar_t);
+        constexpr int32_t kKPack       = 16 / sizeof(scalar_t);
+        static_assert(PixelsPerRow % kKPack == 0);
+        constexpr int32_t NPerRow    = PixelsPerRow / kKPack;
+        constexpr int32_t kNPerBlock = Traits::kBlockN1;
+        constexpr int32_t kKPerBlock = Traits::kBlockK1;
+        static_assert(kNPerBlock % NPerRow == 0);
+        static_assert(kKPerBlock % kKPack == 0);
+
+        return (kKPerBlock / kKPack) * (kNPerBlock / NPerRow) * (PixelsPerRow + kKPack) * sizeof(scalar_t);
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSizeK()
+    {
+        return Traits::kKVLoadOnce ?  
+            (GetSingleKElementSpaceSize<true>() + GetSingleKElementSpaceSize<false>()) * sizeof(scalar_t) :
+            Traits::kNumPrefetchKV * GetSmemSizeSingleKV();
+    }
+
     CK_TILE_HOST_DEVICE static constexpr int32_t GetSmemSize()
     {
-        return Traits::kNumPrefetchKV * GetSmemSizeSingleKV();
+        return Traits::kKVLoadOnce ?  
+            Traits::kNumPrefetchK * GetSmemSizeK() + Traits::kNumPrefetchV * GetSmemSizeSingleV() :
+            Traits::kNumPrefetchKV * GetSmemSizeSingleKV();
     }
 
     template<bool IsLoadOnceRope = false>
@@ -393,6 +633,7 @@ public:
             BlockTileK>();
     }
 
+    template<bool IsLoadOnceRope = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKDramTileDistribution()
     {
         if constexpr (!Traits::kKVLoadOnce)
@@ -421,18 +662,64 @@ public:
         else
         {
             // TODO: add distribution calculate
+            // return ck_tile::make_static_tile_distribution(
+            //     ck_tile::tile_distribution_encoding<
+            //         ck_tile::sequence<>,
+            //         ck_tile::tuple<ck_tile::sequence<1, 1, 8, 2>, ck_tile::sequence<9, 4, 8, 2>>,
+            //         ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<1, 2>>,
+            //         ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
+            //         ck_tile::sequence<1, 1, 2, 2>,
+            //         ck_tile::sequence<0, 3, 0, 3>>{});
+            constexpr int32_t kBlockSize = Traits::kNumThreads;
+            constexpr int32_t kNPerBlock = Traits::kBlockN0;
+            constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? 64 : 128;
+            constexpr ck_tile::index_t NumWarps   = Traits::kNumWarps;
+            constexpr ck_tile::index_t warpSize   = ck_tile::get_warp_size();
+
+            constexpr ck_tile::index_t KVector = 4 / sizeof(scalar_t);
+
+            static_assert(warpSize * KVector >= kKPerBlock && warpSize * KVector % kKPerBlock == 0);
+            constexpr ck_tile::index_t LanesPerK  = kKPerBlock / KVector; // within a wave
+            constexpr ck_tile::index_t LaneGroups = warpSize / LanesPerK; // within a wave
+            constexpr ck_tile::index_t NumIssues  = kNPerBlock / (LaneGroups * NumWarps);
+            static_assert(NumIssues == kNPerBlock * kKPerBlock / (kBlockSize * KVector));
+
+            constexpr ck_tile::index_t N0 = NumIssues;
+            constexpr ck_tile::index_t N1 = LaneGroups;
+            constexpr ck_tile::index_t N2 = NumWarps;
+            constexpr ck_tile::index_t K0 = LanesPerK;
+            constexpr ck_tile::index_t K1 = KVector;
+
             return ck_tile::make_static_tile_distribution(
-                ck_tile::tile_distribution_encoding<
-                    ck_tile::sequence<>,
-                    ck_tile::tuple<ck_tile::sequence<1, 1, 8, 2>, ck_tile::sequence<9, 4, 8, 2>>,
-                    ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<1, 2>>,
-                    ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
-                    ck_tile::sequence<1, 1, 2, 2>,
-                    ck_tile::sequence<0, 3, 0, 3>>{});
+                ck_tile::tile_distribution_encoding<ck_tile::sequence<1>,
+                                           ck_tile::tuple<ck_tile::sequence<N0, N1, N2>, ck_tile::sequence<K0, K1>>,
+                                           ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<1, 2>>,
+                                           ck_tile::tuple<ck_tile::sequence<2>, ck_tile::sequence<1, 0>>,
+                                           ck_tile::sequence<1, 2>,
+                                           ck_tile::sequence<0, 1>>{});
         }
     }
 
-    CK_TILE_HOST_DEVICE static constexpr auto MakeVTDramTileDistribution()
+    template<bool IsLoadOnceRope = false>
+    CK_TILE_HOST_DEVICE static constexpr auto GetNumRepeatOfKDramTileDistribution()
+    {
+        using KDstrEncode = typename decltype(MakeKDramTileDistribution<IsLoadOnceRope>())::DstrEncode;
+        return KDstrEncode::hs_lengthss_[ck_tile::number<0>{}][ck_tile::number<0>{}];
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVTileDistribution()
+    {
+        return ck_tile::make_static_tile_distribution(
+            ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<>,
+                ck_tile::tuple<ck_tile::sequence<1, 1, 8, 2>, ck_tile::sequence<8, 4, 8, 2>>,
+                ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<1, 2>>,
+                ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
+                ck_tile::sequence<1, 1, 2, 2>,
+                ck_tile::sequence<0, 3, 0, 3>>{});
+    }
+
+    CK_TILE_HOST_DEVICE static constexpr auto MakeVTTileDistribution()
     {
         return ck_tile::make_static_tile_distribution(
             ck_tile::tile_distribution_encoding<
@@ -444,12 +731,6 @@ public:
                 ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
                 ck_tile::sequence<2, 2, 1, 1>,
                 ck_tile::sequence<0, 3, 0, 3>>{});
-    }
-
-    CK_TILE_HOST_DEVICE static constexpr auto GetNumRepeatOfKDramTileDistribution()
-    {
-        using KDstrEncode = typename decltype(MakeKDramTileDistribution())::DstrEncode;
-        return KDstrEncode::hs_lengthss_[ck_tile::number<0>{}][ck_tile::number<0>{}];
     }
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeVDramTileDistribution()
@@ -549,6 +830,57 @@ public:
                                                     ck_tile::sequence<1, 3>>{});
         }
     }
+
+#ifdef ZZDebug
+    CK_TILE_DEVICE static auto MakeKRopeLdsDebugTileWindow(scalar_t* k_lds_ptr)
+    {
+        auto k_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+            k_lds_ptr, MakeKLdsLoadBlockDescriptor<true>());
+
+        return ck_tile::make_tile_window(k_lds,
+            ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{},
+                                ck_tile::number<64>{}), 
+            {0, 0},
+                                // ck_tile::number<Traits::kSizeD>{}), {0, 0},
+            MakeKDramTileDistribution<true>());
+            // debug_k_dis);
+    }
+    CK_TILE_DEVICE static auto MakeKLdsDebugTileWindow(scalar_t* k_lds_ptr)
+    {
+        auto k_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+            k_lds_ptr, MakeKLdsLoadBlockDescriptor<false>());
+
+        auto debug_k_dis = ck_tile::make_static_tile_distribution(
+            ck_tile::tile_distribution_encoding<
+                ck_tile::sequence<>,
+                ck_tile::tuple<ck_tile::sequence<1, 2, 8, 1>, ck_tile::sequence<8, 1, 8, 8>>,
+                ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<1, 2>>,
+                ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
+                ck_tile::sequence<1, 1, 2, 2>,
+                ck_tile::sequence<0, 3, 0, 3>>{});
+
+        return ck_tile::make_tile_window(k_lds,
+            ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{},
+                                ck_tile::number<512>{}), 
+            {0, 0},
+                                // ck_tile::number<Traits::kSizeD>{}), {0, 0},
+            // MakeKDramTileDistribution());
+            debug_k_dis);
+    }
+    CK_TILE_DEVICE static auto MakeVLdsDebugTileWindow(scalar_t* k_lds_ptr)
+    {
+        auto v_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+            k_lds_ptr, MakeVLdsBlockDescriptor());
+
+        return ck_tile::make_tile_window(v_lds,
+            ck_tile::make_tuple(ck_tile::number<Traits::kSizeDV>{},
+                                ck_tile::number<Traits::kBlockN0>{}), 
+            {0, 0},
+                                // ck_tile::number<Traits::kSizeD>{}), {0, 0},
+            MakeVTTileDistribution());
+            // debug_k_dis);
+    }
+#endif
 };
 
 template <typename Traits, typename scalar_t, typename acc_t>
@@ -649,6 +981,13 @@ struct FlashMlaPrefillFwdParams
     void* __restrict__ p_softmax_lse;
     void* __restrict__ p_softmax_lseaccum;
     void* __restrict__ p_output_accum;
+#ifdef ZZDebug
+    void* __restrict__ p_debug_m;
+    void* __restrict__ p_debug_value;
+    void* __restrict__ p_debug_p;
+    void* __restrict__ p_debug_output;
+    void* __restrict__ p_debug_q;
+#endif
 
     int32_t size_b;         // batch count
     int32_t size_s;         // seqlen of q
@@ -1496,16 +1835,14 @@ template<typename Traits,
          typename out_t,
          typename QNopeDramRegBlockWindow,
          typename QRopeDramRegBlockWindow,
-         typename KDramBlockWindow,
-         typename VDramBlockWindow,
+         typename KVDramTensorView,
          typename LseDramBlockWindow,
          typename OutDramBlockWindow,
          typename Mask>
 CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
     const QNopeDramRegBlockWindow&  q_nope_dram_window_,
     const QRopeDramRegBlockWindow&  q_rope_dram_window_,
-    const KDramBlockWindow&         k_dram_window_raw,
-    const VDramBlockWindow&         v_dram_window_raw,
+    const KVDramTensorView&         k_dram_tensor_view_,
     LseDramBlockWindow&             lse_dram_window_,
     OutDramBlockWindow&             out_dram_window_,
     const int32_t*                  p_block_table,
@@ -1515,32 +1852,75 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
     int32_t                         seqlen_k,
     int32_t                         num_splits,
     int32_t                         split_id,
-    Mask                            mask,
+    Mask&                           mask,
     float                           scale_s,
-    uint8_t*                        p_smem)
+    uint8_t*                        p_smem
+#ifdef ZZDebug
+    ,const FlashMlaPrefillFwdParams& params
+#endif
+    )
 {
     using Policy = FlashMlaPrefillPolicy<Traits, scalar_t, acc_t>;
 
 
     // 1. Allocate LDS
     //
-    auto k_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-        reinterpret_cast<scalar_t*>(p_smem), Policy::MakeKLdsBlockDescriptor());
-    auto v_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
-//         reinterpret_cast<scalar_t*>(p_smem + Policy::GetSmemSizeSingleKV()),
-        reinterpret_cast<scalar_t*>(p_smem),
+    constexpr auto k_rope_smem_offset = (Traits::kNumPrefetchK *
+            Policy::template GetSingleKElementSpaceSize<false>() * sizeof(scalar_t));
+
+    constexpr auto k_nope_repeat_smem_offset = ((64 * 2 + 8) * sizeof(scalar_t));
+	constexpr auto k_oob_ck = ck_tile::bool_constant<true>{};
+	constexpr auto k_pre_np = ck_tile::bool_constant<false>{};
+
+    auto k_nope_lds_ptr = reinterpret_cast<scalar_t*>(p_smem);
+	auto k_nope_st_lds_windows = ck_tile::generate_tuple(
+		[&](auto i_buf) {
+			return ck_tile::make_tile_window(
+				ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+					k_nope_lds_ptr, Policy::template MakeKLdsStoreBlockDescriptor<false>(i_buf)),
+				Policy::template MakeKLdsStoreBlockDescriptor<false>(i_buf).get_lengths(),
+				// ck_tile::make_tuple(ck_tile::number<4>{}, ck_tile::number<4>{}, ck_tile::number<128>{}),
+				{0, 0, 0});
+		},
+        ck_tile::number<Traits::kNumPrefetchK>{});
+    auto k_nope_ld_lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+        k_nope_lds_ptr, Policy::template MakeKLdsLoadBlockDescriptor<false>());
+    auto k_nope_ld_lds_window = ck_tile::make_tile_window(
+        k_nope_ld_lds_view,
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeNope>{}),
+        {0, 0});
+
+    auto k_rope_lds_ptr = reinterpret_cast<scalar_t*>(p_smem + k_rope_smem_offset);
+	auto k_rope_st_lds_windows = ck_tile::generate_tuple(
+		[&](auto i_buf) {
+			return ck_tile::make_tile_window(
+				ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+					k_rope_lds_ptr, Policy::template MakeKLdsStoreBlockDescriptor<true>(i_buf)),
+				Policy::template MakeKLdsStoreBlockDescriptor<true>(i_buf).get_lengths(),
+				// ck_tile::make_tuple(ck_tile::number<2>{}, ck_tile::number<4>{}, ck_tile::number<128>{}),
+				{0, 0, 0});
+		},
+        ck_tile::number<Traits::kNumPrefetchK>{});
+    auto k_rope_ld_lds_view = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+        k_rope_lds_ptr, Policy::template MakeKLdsLoadBlockDescriptor<true>());
+    auto k_rope_ld_lds_window = ck_tile::make_tile_window(
+        k_rope_ld_lds_view,
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeRope>{}),
+        {0, 0});
+
+    auto vt_lds_ptr = reinterpret_cast<scalar_t*>(p_smem + Traits::kNumPrefetchK *
+        Policy::GetSmemSizeK());
+    auto vt_lds = ck_tile::make_tensor_view<ck_tile::address_space_enum::lds>(
+        vt_lds_ptr,
         Policy::MakeVLdsBlockDescriptor()
         );
-
-    auto k_st_lds_window = ck_tile::make_tile_window(
-        k_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeD>{}), {0, 0});
-
-    auto k_nope_ld_lds_window = ck_tile::make_tile_window(
-        k_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeNope>{}), {0, 0});
-    auto k_rope_ld_lds_window = ck_tile::make_tile_window(
-        k_lds, ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeRope>{}), {0, Traits::kSizeNope});
-    auto v_lds_window = ck_tile::make_tile_window(
-        v_lds, Policy::MakeVLdsBlockDescriptor().get_lengths(), {0, 0});
+    auto v_ld_lds_window = ck_tile::make_tile_window(
+        k_nope_ld_lds_view,
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeNope>{}),
+        {0, 0},
+        Policy::MakeVTileDistribution());
+    auto vt_lds_window = ck_tile::make_tile_window(
+        vt_lds, Policy::MakeVLdsBlockDescriptor().get_lengths(), {0, 0});
 
 
     // 2. Misc. preparation
@@ -1632,15 +2012,14 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
 
     // 5. Prepare KV
     //
-    // auto k_dram_window_lengths =
-        // ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kBlockK0>{});
-    auto k_dram_window_origin = ck_tile::make_tile_window(
-        k_dram_window_raw.get_bottom_tensor_view(),
-        k_dram_window_raw.get_window_lengths(),
-        {seqlen_k_start, 0});
-    auto k_dist = Policy::MakeKDramTileDistribution();
+    constexpr auto k_nope_dram_window_lengths =
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeNope>{});
+    constexpr auto k_rope_dram_window_lengths =
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockN0>{}, ck_tile::number<Traits::kSizeRope>{});
+
+    auto k_dist = Policy::template MakeKDramTileDistribution<false>();
     auto k_coord = k_dist.calculate_index();
-    constexpr auto kKNumRepeat = Policy::GetNumRepeatOfKDramTileDistribution();
+    constexpr auto kKNumRepeat = Policy::template GetNumRepeatOfKDramTileDistribution<false>();
     constexpr auto kKPageIdxDim = ck_tile::number<0>{};
     const int32_t seqlen_k_base_idx = k_coord[kKPageIdxDim] + seqlen_k_start;
     ck_tile::statically_indexed_array<int32_t, kKNumRepeat> k_offsets;
@@ -1654,54 +2033,105 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
         k_valids[rid] = (seqlen_idx < seqlen_k_end);
     });
     auto k_dram_window = ck_tile::make_tile_scatter_gather(
-        k_dram_window_origin.get_bottom_tensor_view(),
-        k_dram_window_origin.get_window_lengths(),
-        k_dram_window_origin.get_window_origin(),
+        k_dram_tensor_view_,
+        k_nope_dram_window_lengths,
+        {seqlen_k_start, 0},
         k_dist,
         k_offsets,
         k_valids,
         kKPageIdxDim);
     k_dram_window.init_raw();
-    auto k_block_tile = ck_tile::load_tile(k_dram_window);
+
+    auto k_rope_dist = Policy::template MakeKDramTileDistribution<true>();
+    auto k_rope_coord = k_rope_dist.calculate_index();
+    constexpr auto kKRopeNumRepeat = Policy::template GetNumRepeatOfKDramTileDistribution<true>();
+    constexpr auto kKRopePageIdxDim = ck_tile::number<0>{};
+    const int32_t seqlen_k_rope_base_idx = k_rope_coord[kKRopePageIdxDim] + seqlen_k_start;
+    ck_tile::statically_indexed_array<int32_t, kKRopeNumRepeat> k_rope_offsets;
+    ck_tile::statically_indexed_array<bool, kKRopeNumRepeat> k_rope_valids;
+    ck_tile::static_for<0, kKRopeNumRepeat, 1>{}([&](auto rid)
+    {
+        const int32_t seqlen_idx = seqlen_k_rope_base_idx + Traits::kBlockN0 / kKRopeNumRepeat * rid.value;
+        const int32_t page_idx   = seqlen_idx / page_block_size;
+        const int32_t inside_idx = seqlen_idx % page_block_size;
+        k_rope_offsets[rid] = (p_block_table[page_idx] * page_block_size + inside_idx) * stride_s_k;
+        k_rope_valids[rid] = (seqlen_idx < seqlen_k_end);
+    });
+    auto k_rope_dram_window = ck_tile::make_tile_scatter_gather(
+        k_dram_tensor_view_,
+        k_rope_dram_window_lengths,
+        {seqlen_k_start, Traits::kSizeNope},
+        k_rope_dist,
+        k_rope_offsets,
+        k_rope_valids,
+        kKRopePageIdxDim);
+    k_rope_dram_window.init_raw();
+
+    auto k_st_lds_window = k_nope_st_lds_windows.at(ck_tile::number<0>{});
+    auto k_dram_nope_window = k_dram_window;
+    ck_tile::static_for<0, 4, 1>{}([&](auto rid)
+    {
+        ck_tile::async_load_tile_raw(
+            k_st_lds_window, k_dram_nope_window, ck_tile::number<-1>{}, k_oob_ck, k_pre_np, k_nope_repeat_smem_offset * rid);
+        __builtin_amdgcn_sched_barrier(0);
+        ck_tile::async_load_fence(k_dram_nope_window.get_num_of_access());
+        // ck_tile::buffer_load_fence(k_dram_window.get_num_of_access(), q_reg_nope.get_thread_buffer());
+        __builtin_amdgcn_s_barrier();
+        // ck_tile::move_tile_window(k_st_lds_window, {0, 0, 128});
+        ck_tile::move_tile_window(k_dram_nope_window, {0, 128});
+    });
+
+    ck_tile::async_load_tile_raw(
+        k_rope_st_lds_windows(ck_tile::number<0>{}), k_rope_dram_window, ck_tile::number<-1>{}, k_oob_ck, k_pre_np, k_rope_smem_offset);
+    __builtin_amdgcn_sched_barrier(0);
+	// ck_tile::buffer_load_fence(k_rope_dram_window.get_num_of_access(), q_reg_nope.get_thread_buffer());
+    ck_tile::async_load_fence(k_rope_dram_window.get_num_of_access());
+    __builtin_amdgcn_s_barrier();
 
     // 6. Main loop
     //
     // Define main loop
-    auto main_loop = [&]<bool IsTailLoop>(int32_t loop_idx)
+    auto main_loop = [&]<bool IsEvenLoop>(int32_t loop_idx)
     {
         ck_tile::clear_tile(s_acc);
         ck_tile::block_sync_lds();
-        ck_tile::store_tile(k_st_lds_window, k_block_tile);
 
+        using k_st_idx   = std::conditional_t<IsEvenLoop, ck_tile::number<1>, ck_tile::number<0>>;
+        constexpr auto k_ld_begin = IsEvenLoop ? ck_tile::number<0>{} : ck_tile::number<Traits::kBlockN0>{};
+        constexpr auto k_ld_end   = ck_tile::number<k_ld_begin + Traits::kBlockN0>{};
+        constexpr ck_tile::array<int32_t, 2> v_lds_direction = { IsEvenLoop ? Traits::kBlockN0 : -Traits::kBlockN0, 0 };
 
-        auto vt_tile = ck_tile::make_static_distributed_tensor<scalar_t>(Policy::MakeVTDramTileDistribution());
+        auto vt_tile = ck_tile::make_static_distributed_tensor<scalar_t>(Policy::MakeVTTileDistribution());
         {
+            auto v_tile  = ck_tile::load_tile(v_ld_lds_window);
+            ck_tile::move_tile_window(v_ld_lds_window, v_lds_direction);
             auto v_thread_buffer = vt_tile.get_thread_buffer().get();
+
             uint32_t s_perm0 = 0x07060504;
             uint32_t s_perm1 = 0x03020100;
 
-            auto k_thread_buffer = k_block_tile.get_thread_buffer().get();
+            auto k_thread_buffer = v_tile.get_thread_buffer().get();
 
             static constexpr auto I0    = ck_tile::number<0>{};
             static constexpr auto I1    = ck_tile::number<1>{};
 
-            constexpr auto k_dist       = Policy::MakeKDramTileDistribution();
-            constexpr auto vt_dist      = Policy::MakeVTDramTileDistribution();
-            using KDstrEncode           = typename decltype(k_dist)::DstrEncode;
+            constexpr auto v_dist       = Policy::MakeVTileDistribution();
+            constexpr auto vt_dist      = Policy::MakeVTTileDistribution();
+            using VDstrEncode           = typename decltype(v_dist)::DstrEncode;
             using VTDstrEncode          = typename decltype(vt_dist)::DstrEncode;
-            constexpr ck_tile::index_t KKRepeat  = KDstrEncode::hs_lengthss_[I1][I0];
+            constexpr ck_tile::index_t VNRepeat  = VDstrEncode::hs_lengthss_[I1][I0];
             constexpr ck_tile::index_t VTNRepeat = VTDstrEncode::hs_lengthss_[I0][I0];
 
             ck_tile::static_for<0, VTNRepeat, 1>{}([&, perm0 = s_perm0](auto buffer_id){
                 asm volatile("v_perm_b32 %[v_dest], %[v_src1], %[v_src2], %[s_perm]\n"
                             : [v_dest] "=v"(reinterpret_cast<uint32_t*>(v_thread_buffer )[buffer_id])
-                            : [v_src1] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + KKRepeat>{}])
+                            : [v_src1] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + VNRepeat>{}])
                             , [v_src2] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}])
                             , [s_perm] "s"(s_perm1));
 
                 asm volatile("v_perm_b32 %[v_dest], %[v_src1], %[v_src2], %[s_perm]\n"
                             : [v_dest] "=v"(reinterpret_cast<uint32_t*>(v_thread_buffer )[buffer_id + VTNRepeat])
-                            : [v_src1] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + KKRepeat>{}])
+                            : [v_src1] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + VNRepeat>{}])
                             , [v_src2] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}])
                             , [s_perm] "s"(perm0));
             });
@@ -1710,6 +2140,9 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
         // I. QK GEMM
 
         // Main part of QK GEMM_0: conduct GEMM and load K tiles 
+        ck_tile::clear_tile(s_acc);
+        // ck_tile::clear_tile(q_reg_nope);
+        // ck_tile::clear_tile(q_reg_rope);
         if constexpr (k0_loops > 1)
         {
             constexpr ck_tile::array<int32_t, 2> qk_direction = {0, Traits::kBlockK0};
@@ -1730,14 +2163,23 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
         if constexpr (k0_loops == 1)
         {
             ck_tile::block_sync_lds();
-            gemm_0(s_acc, q_reg_nope, k_nope_ld_lds_window);
-            // gemm_0(s_acc, q_reg_nope, k_st_lds_window);
+            __builtin_amdgcn_s_waitcnt(3952);
+            gemm_0(s_acc,
+                   q_reg_nope,
+                   ck_tile::get_slice_tile(k_nope_ld_lds_window,
+                        ck_tile::sequence<k_ld_begin, 0>{},
+                        ck_tile::sequence<k_ld_end, Traits::kSizeNope>{}));
             ck_tile::block_sync_lds();
         }
 
         // QK rope tail
         ck_tile::block_sync_lds();
-        gemm_0_rope(s_acc, q_reg_rope, k_rope_ld_lds_window);
+        // __builtin_amdgcn_s_waitcnt(3952);
+		gemm_0_rope(s_acc,
+					q_reg_rope,
+					ck_tile::get_slice_tile(k_rope_ld_lds_window,
+						ck_tile::sequence<k_ld_begin, 0>{},
+						ck_tile::sequence<k_ld_end, Traits::kSizeRope>{}));
 
 
         // Tailing 2 tiles of QK GEMM_0
@@ -1830,9 +2272,10 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
 
         // III. GEMM for PV and load next k block
         //
-        if constexpr(!IsTailLoop) {
+        if (loop_idx != num_total_loop - 1) {
             // Load next K
             ck_tile::move_tile_window(k_dram_window, {Traits::kBlockN0, 0});
+            ck_tile::move_tile_window(k_rope_dram_window, {Traits::kBlockN0, 0});
 
             // Recalculate offsets
             ck_tile::static_for<0, kKNumRepeat, 1>{}([&](auto rid)
@@ -1845,20 +2288,48 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
                 k_valids[rid] = (seqlen_idx < seqlen_k_end);
             });
             k_dram_window.update_page_idx_and_valids(k_offsets, k_valids);
-            ck_tile::load_tile(k_dram_window, k_block_tile);
+
+            ck_tile::static_for<0, kKRopeNumRepeat, 1>{}([&](auto rid)
+            {
+                const int32_t seqlen_idx = seqlen_k_rope_base_idx + (loop_idx + 1) * Traits::kBlockN0 +
+                                           Traits::kBlockN0 / kKRopeNumRepeat * rid.value;
+                const int32_t page_idx   = seqlen_idx / page_block_size;
+                const int32_t inside_idx = seqlen_idx % page_block_size;
+                k_rope_offsets[rid] = (p_block_table[page_idx] * page_block_size + inside_idx) * stride_s_k;
+                k_rope_valids[rid] = (seqlen_idx < seqlen_k_end);
+            });
+            k_rope_dram_window.update_page_idx_and_valids(k_rope_offsets, k_rope_valids);
+
+			auto k_st_lds_window = k_nope_st_lds_windows.at(k_st_idx{});
+            auto k_dram_nope_window = k_dram_window;
+			ck_tile::static_for<0, 4, 1>{}([&](auto rid)
+			{
+				ck_tile::async_load_tile_raw(
+					k_st_lds_window, k_dram_nope_window, ck_tile::number<-1>{}, k_oob_ck, k_pre_np, k_nope_repeat_smem_offset * rid);
+				__builtin_amdgcn_sched_barrier(0);
+				ck_tile::async_load_fence(k_dram_nope_window.get_num_of_access());
+				__builtin_amdgcn_s_barrier();
+				ck_tile::move_tile_window(k_dram_nope_window, {0, 128});
+			});
+
+			ck_tile::async_load_tile_raw(
+				k_rope_st_lds_windows.at(k_st_idx{}), k_rope_dram_window, ck_tile::number<-1>{}, k_oob_ck, k_pre_np, k_rope_smem_offset);
+			__builtin_amdgcn_sched_barrier(0);
+			ck_tile::async_load_fence(k_rope_dram_window.get_num_of_access());
+			__builtin_amdgcn_s_barrier();
         }
 
         const auto p = ck_tile::cast_tile<scalar_t>(p_intermedia);
         if constexpr (k1_loops == 1)
         {
             ck_tile::block_sync_lds();
-            ck_tile::store_tile(v_lds_window, vt_tile);
+            ck_tile::store_tile(vt_lds_window, vt_tile);
 
             ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id) {
                 ck_tile::block_sync_lds();
                 gemm_1(o_acc[n1_id],
                        p,
-                       v_lds_window);
+                       vt_lds_window);
             });
         }
         else
@@ -1871,23 +2342,136 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
                                p,
                                ck_tile::sequence<0, k1_id * Traits::kBlockK1>{},
                                ck_tile::sequence<Traits::kBlockM, (k1_id + 1) * Traits::kBlockK1>{}),
-                           v_lds_window);
+                           vt_lds_window);
                     ck_tile::block_sync_lds();
-                    ck_tile::move_tile_window(v_lds_window, {0, Traits::kBlockK1});
+                    ck_tile::move_tile_window(vt_lds_window, {0, Traits::kBlockK1});
                 });
-                v_lds_window.set_window_origin({(n1_id + 1) * Traits::kBlockN1, 0});
+                vt_lds_window.set_window_origin({(n1_id + 1) * Traits::kBlockN1, 0});
             });
         }
+#ifdef ZZDebug
+        __builtin_amdgcn_sched_barrier(0);
+        // if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && )
+        if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && loop_idx == 1)
+        {
+   //          auto debug_k_dram = ck_tile::make_naive_tensor_view(
+   //              reinterpret_cast<scalar_t*>(params.p_debug_value),
+   //              ck_tile::make_tuple(Traits::kBlockN0, Traits::kSizeD),
+   //              ck_tile::make_tuple(Traits::kSizeD, 1),  // strides
+   //              ck_tile::number<8>{},
+   //              ck_tile::number<1>{});
+   //          auto debug_k_window = ck_tile::make_tile_window(
+   //              debug_k_dram,
+   //              ck_tile::make_tuple(Traits::kBlockN0, 512),
+   //              {0, 0});
+			//
+   //          auto debug_k_rope_window = ck_tile::make_tile_window(
+   //              debug_k_dram,
+   //              ck_tile::make_tuple(Traits::kBlockN0, 64),
+   //              {0, Traits::kSizeNope});
+			//
+   //          auto debug_k_rope_lds_window  = Policy::MakeKRopeLdsDebugTileWindow(k_rope_lds_ptr);
+   //          ck_tile::move_tile_window(debug_k_rope_lds_window, {16, 0});
+			//
+   //          auto debug_k_lds_window  = Policy::MakeKLdsDebugTileWindow(k_nope_lds_ptr);
+   //          ck_tile::move_tile_window(debug_k_lds_window, {16, 0});
+   //      
+   //          ck_tile::block_sync_lds();
+   //          // ck_tile::move_tile_window(debug_k_lds_window, {Traits::kBlockN0, 0});
+   //          auto k_block_tile_debug = ck_tile::load_tile(debug_k_lds_window);
+   //          auto k_rope_block_tile_debug = ck_tile::load_tile(debug_k_rope_lds_window);
+   //          // auto k_block_tile_debug = ck_tile::load_tile(k_rope_dram_window);
+   //          ck_tile::block_sync_lds();
+			//
+   //          ck_tile::store_tile(debug_k_window, k_block_tile_debug);
+			// __builtin_amdgcn_sched_barrier(0);
+   //          ck_tile::store_tile(debug_k_rope_window, k_rope_block_tile_debug);
+
+            auto debug_v_dram = ck_tile::make_naive_tensor_view(
+                reinterpret_cast<scalar_t*>(params.p_debug_value),
+                ck_tile::make_tuple(Traits::kSizeDV, Traits::kBlockN0),
+                ck_tile::make_tuple(Traits::kBlockN0, 1),  // strides
+                ck_tile::number<8>{},
+                ck_tile::number<1>{});
+            auto debug_v_window = ck_tile::make_tile_window(
+                debug_v_dram,
+                ck_tile::make_tuple(512, Traits::kBlockN0),
+                {0, 0},
+                Policy::MakeVTTileDistribution());
+
+            auto debug_v_lds_window  = Policy::MakeVLdsDebugTileWindow(vt_lds_ptr);
+        
+            ck_tile::block_sync_lds();
+            // ck_tile::move_tile_window(debug_k_lds_window, {Traits::kBlockN0, 0});
+            auto v_block_tile_debug = ck_tile::load_tile(debug_v_lds_window);
+            // auto k_block_tile_debug = ck_tile::load_tile(k_rope_dram_window);
+            ck_tile::block_sync_lds();
+
+            ck_tile::store_tile(debug_v_window, v_block_tile_debug);
+			__builtin_amdgcn_sched_barrier(0);
+
+            auto debug_s_dram = ck_tile::make_naive_tensor_view(
+            	reinterpret_cast<scalar_t*>(params.p_debug_p),
+            	ck_tile::make_tuple(Traits::kBlockM, Traits::kBlockN0),
+            	ck_tile::make_tuple(Traits::kBlockN0, 1),  // strides
+                ck_tile::number<8>{},
+                ck_tile::number<1>{});
+            auto debug_s_window = ck_tile::make_tile_window(
+            	debug_s_dram,
+            	ck_tile::make_tuple(Traits::kBlockM, Traits::kBlockN0),
+            	{0, 0});
+            ck_tile::store_tile(debug_s_window, ck_tile::cast_tile<scalar_t>(p));
+
+
+            // auto debug_q_dram = ck_tile::make_naive_tensor_view(
+            // 	reinterpret_cast<scalar_t*>(params.p_debug_q),
+            // 	ck_tile::make_tuple(Traits::kBlockM, Traits::kSizeD),
+            // 	ck_tile::make_tuple(Traits::kSizeD, 1),  // strides
+            //     ck_tile::number<8>{},
+            //     ck_tile::number<1>{});
+            // auto debug_q_window = ck_tile::make_tile_window(
+            // 	debug_q_dram,
+            // 	ck_tile::make_tuple(Traits::kBlockM, Traits::kSizeDV),
+            // 	{0, 0});
+            // ck_tile::store_tile(debug_q_window, ck_tile::cast_tile<scalar_t>(o_acc[0]));
+        }
+        __builtin_amdgcn_sched_barrier(0);
+#endif
+
     };
 
+
     // Execute the loop
-    for (int32_t loop_idx = 0; loop_idx < num_total_loop - 1; ++loop_idx)
+    main_loop.template operator()<true>(0);
+    for (int32_t loop_idx = 1; (loop_idx + 1) < num_total_loop; (loop_idx += 2))
     {
         main_loop.template operator()<false>(loop_idx);
-        // main_loop.template operator()<true>(loop_idx + 1);
+        main_loop.template operator()<true>(loop_idx + 1);
     }
-    main_loop.template operator()<true>(num_total_loop - 1);
+    if ((num_total_loop % 2) == 0)
+    {
+        main_loop.template operator()<false>(num_total_loop - 1);
+    }
 
+#ifdef ZZDebug
+    __builtin_amdgcn_sched_barrier(0);
+    // if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && )
+    if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0)
+    {
+        auto debug_q_dram = ck_tile::make_naive_tensor_view(
+            reinterpret_cast<scalar_t*>(params.p_debug_q),
+            ck_tile::make_tuple(Traits::kBlockM, Traits::kSizeD),
+            ck_tile::make_tuple(Traits::kSizeD, 1),  // strides
+            ck_tile::number<8>{},
+            ck_tile::number<1>{});
+        auto debug_q_window = ck_tile::make_tile_window(
+            debug_q_dram,
+            ck_tile::make_tuple(Traits::kBlockM, Traits::kSizeDV),
+            {0, 0});
+        ck_tile::store_tile(debug_q_window, ck_tile::cast_tile<scalar_t>(o_acc[0]));
+    }
+    __builtin_amdgcn_sched_barrier(0);
+#endif
 
     // 7. tile epilogue: store LSE, Adjust and output
     kn_fmla_fwd_splitkv_prefill_tile_epilogue<Traits, scalar_t, acc_t, out_t>(
@@ -2015,8 +2599,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             kn_fmla_fwd_splitkv_prefill_load_once_tile<Traits, scalar_t, acc_t, out_t>(
                 q_nope_dram_window,
                 q_rope_dram_window,
-                k_dram_window,
-                v_dram_window,
+                k_dram,
                 lse_acc_dram_window,
                 out_acc_dram_window,
                 p_block_table,
@@ -2028,7 +2611,11 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                 split_id,
                 mask,
                 params.scale_softmax,
-                p_smem);
+                p_smem
+#ifdef ZZDebug
+                ,params
+#endif
+                );
         }
     }
     else
@@ -2085,8 +2672,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
             kn_fmla_fwd_splitkv_prefill_load_once_tile<Traits, scalar_t, acc_t, out_t>(
                 q_nope_dram_window,
                 q_rope_dram_window,
-                k_dram_window,
-                v_dram_window,
+                k_dram,
                 lse_dram_window,
                 out_dram_window,
                 p_block_table,
@@ -2098,7 +2684,11 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                 split_id,
                 mask,
                 params.scale_softmax,
-                p_smem);
+                p_smem
+#ifdef ZZDebug
+                ,params
+#endif
+                );
         }
     }    
 }
@@ -2391,10 +2981,11 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const bool           is_causal)
 {
     constexpr bool kEnablePackQkRatio = true;
-    constexpr bool kKVLoadOnce        = false;
+    constexpr bool kKVLoadOnce        = true;
     //                                        dqk  dv   m0  n0  n1  #warp
-    using Traits = std::conditional_t<kKVLoadOnce, FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 4, kEnablePackQkRatio, true>,
-                                                   FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4, kEnablePackQkRatio, false>>;
+    // using Traits = std::conditional_t<kKVLoadOnce, FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 4, kEnablePackQkRatio, true>,
+    //                                                FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4, kEnablePackQkRatio, false>>;
+    using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 4, kEnablePackQkRatio, true>;
 
     constexpr bool kForceOutAcc = false;
     using acc_t                 = float;
@@ -2461,6 +3052,21 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     params.p_value            = vcache.data_ptr();
     params.p_output           = output.data_ptr();
     params.p_softmax_lse      = softmax_lse.data_ptr();
+
+#ifdef ZZDebug
+    auto debug_m_inner = torch::zeros({2, Traits::kBlockM}, opts);
+    auto debug_v_inner = torch::zeros({Traits::kBlockN0, Traits::kSizeD}, opts);
+    // auto debug_v_inner = torch::zeros({Traits::kBlockN, head_size_v}, opts);
+    auto debug_p_inner = torch::zeros({Traits::kBlockM, Traits::kBlockN0}, opts);
+    auto debug_o_inner = torch::zeros({Traits::kBlockM, Traits::kSizeD}, opts);
+    auto debug_q_inner = torch::zeros({Traits::kBlockM, Traits::kSizeD}, opts);
+
+    params.p_debug_m          = debug_m_inner.data_ptr();
+    params.p_debug_value      = debug_v_inner.data_ptr();
+    params.p_debug_p          = debug_p_inner.data_ptr();
+    params.p_debug_output     = debug_o_inner.data_ptr();
+    params.p_debug_q          = debug_q_inner.data_ptr();
+#endif
 
     params.size_b                   = batch_size;
     params.size_s                   = seqlen_q;
@@ -2536,5 +3142,9 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
                           .reshape({batch_size, num_heads_q_ori, seqlen_q_ori});
     }
 
+#ifdef ZZDebug
+    return {output.to(opts), softmax_lse, debug_m_inner, debug_p_inner, debug_v_inner, debug_o_inner, debug_q_inner};
+#else
     return {output.to(opts), softmax_lse};
+#endif
 }

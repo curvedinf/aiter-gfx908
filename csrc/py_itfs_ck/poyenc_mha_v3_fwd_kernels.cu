@@ -854,6 +854,53 @@ struct BlockFmhaPipelineQRKSVS
             }
         };
 
+        {
+            const auto k_origin = k_dram_block_window.get_window_origin();
+
+            // (1) load & store K =============================================
+            global_load_k(number<0>{});
+            __builtin_amdgcn_s_barrier();
+            auto k_tile = local_load_k(number<0>{});
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+            // (2) mfma + softmax =============================================
+            __builtin_amdgcn_s_barrier();
+            run_gemm0(number<0>{}, k_tile);
+
+            // scale_s, mask, softmax
+            metadata.s_acc(number<0>{}) =
+                tile_elementwise_in(s_acc_element_func, metadata.s_acc(number<0>{}));
+
+            run_fmha_mask(number<0>{}, k_origin);
+
+            run_fmha_alu0(number<0>{});
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+            // (3) load & store V =============================================
+            global_load_v(number<0>{});
+            __builtin_amdgcn_s_barrier();
+            auto v_tile = local_load_v(number<0>{});
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+            // (4) softmax + mfma =============================================
+            run_fmha_alu1(number<0>{});
+            run_fmha_alu_update_o_acc();
+
+            run_gemm1(number<0>{}, v_tile);
+
+            __builtin_amdgcn_sched_barrier(0);
+            __builtin_amdgcn_s_barrier();
+            __builtin_amdgcn_sched_barrier(0);
+
+            ++i_total_loops;
+        }
+
         if constexpr(NumWarpGroups == 2)
         {
             if(warp_group_id == 1)
@@ -865,7 +912,7 @@ struct BlockFmhaPipelineQRKSVS
 
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);
-        do
+        for(; i_total_loops < num_total_loop; ++i_total_loops)
         {
             auto xdl_SP_p01_reg_idx = number<0>{};
             auto xdl_SP_p23_reg_idx = number<0>{};
@@ -917,7 +964,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
-        } while(++i_total_loops < num_total_loop);
+        }
 
         if constexpr(NumWarpGroups == 2)
         {

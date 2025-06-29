@@ -668,7 +668,6 @@ struct BlockFmhaPipelineQRKSVS
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
-        // part of cl_load(memK) in .sp3
         auto global_load_k = [&](auto k_lds_write_idx) {
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
@@ -681,7 +680,6 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
-        // part of cl_load(memV) in .sp3
         auto local_load_k = [&](auto k_lds_read_idx) {
             auto k_lds_window_for_load =
                 make_tile_window(metadata.k_lds_window(k_lds_read_idx),
@@ -690,7 +688,6 @@ struct BlockFmhaPipelineQRKSVS
             return load_tile(k_lds_window_for_load);
         };
 
-        // part of cl_load(memV) in .sp3
         auto global_load_v = [&](auto v_lds_write_idx) {
             const auto v_tile = load_tile(v_dram_window);
             __builtin_amdgcn_sched_barrier(0);
@@ -716,7 +713,6 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
-        // part of cl_load(memK) in .sp3
         auto local_load_v = [&](auto v_lds_read_idx) {
             auto v_lds_window_for_load =
                 make_tile_window(metadata.v_lds_window(v_lds_read_idx),
@@ -725,7 +721,6 @@ struct BlockFmhaPipelineQRKSVS
             return load_tile(v_lds_window_for_load);
         };
 
-        // part of cl_calc(gemm1) in .sp3
         auto run_gemm0 = [&](const auto& k_tile) {
             InstructionScheduler<Problem> scheduler;
 
@@ -740,7 +735,6 @@ struct BlockFmhaPipelineQRKSVS
             scheduler.schedule_gemm0();
         };
 
-        // part of cl_calc(gemm2) in .sp3
         auto run_gemm1 = [&](const auto& v_tile) {
             gemm_1(metadata.o_acc,
                    get_slice_tile(metadata.p(number<0>{}),
@@ -761,7 +755,6 @@ struct BlockFmhaPipelineQRKSVS
 
         decltype(metadata.m) m_old;
 
-        // part of fmha_alu() in .sp3
         auto run_fmha_alu0 = [&] {
             metadata.s(number<0>{}) =
                 cast_tile<SMPLComputeDataType>(metadata.s_acc(number<0>{})); // S{j}
@@ -791,7 +784,6 @@ struct BlockFmhaPipelineQRKSVS
             });
         };
 
-        // part of fmha_alu() in .sp3
         auto run_fmha_alu1 = [&] {
             metadata.p(number<0>{}) = cast_tile<PDataType>(
                 tile_elementwise_in(p_compute_element_func, metadata.p_compute(number<0>{})));
@@ -824,7 +816,6 @@ struct BlockFmhaPipelineQRKSVS
             });
         };
 
-        // part of fmha_mask() in .sp3
         auto run_fmna_mask = [&] {
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {

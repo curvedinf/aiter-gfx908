@@ -759,8 +759,13 @@ struct BlockFmhaPipelineQRKSVS
         decltype(metadata.m) m_old;
 
         auto run_fmha_alu0 = [&](auto sp_reg_idx) {
-            metadata.s(sp_reg_idx) =
-                cast_tile<SMPLComputeDataType>(metadata.s_acc(sp_reg_idx)); // S{j}
+            // S{j} = S_acc{j} * scale_s
+            metadata.s(sp_reg_idx) = tile_elementwise_in(
+                [&](auto logits) {
+                    return ck_tile::type_convert<SMPLComputeDataType>(logits * scale_s);
+                },
+                metadata.s_acc(sp_reg_idx));
+
             metadata.m_local = block_tile_reduce<SMPLComputeDataType>(
                 metadata.s(sp_reg_idx),
                 sequence<1>{},
@@ -777,12 +782,12 @@ struct BlockFmhaPipelineQRKSVS
                 std::decay_t<decltype(metadata.p_compute(sp_reg_idx))>::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                auto row_max         = scale_s * get_validated_m(metadata.m[i_idx]);
+                auto row_max         = get_validated_m(metadata.m[i_idx]);
 
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     metadata.p_compute(sp_reg_idx)(i_j_idx) =
-                        ck_tile::exp2(scale_s * metadata.s(sp_reg_idx)[i_j_idx] - row_max);
+                        ck_tile::exp2(metadata.s(sp_reg_idx)[i_j_idx] - row_max);
                 });
             });
         };
@@ -804,8 +809,8 @@ struct BlockFmhaPipelineQRKSVS
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
                 const auto tmp       = [&]() {
-                    auto row_max = scale_s * get_validated_m(metadata.m[i_idx]);
-                    return ck_tile::exp2(scale_s * m_old[i_idx] - row_max);
+                    auto row_max = get_validated_m(metadata.m[i_idx]);
+                    return ck_tile::exp2(m_old[i_idx] - row_max);
                 }();
 
                 metadata.l(i_idx) = tmp * metadata.l[i_idx] + rowsum_p[i_idx];
@@ -818,8 +823,8 @@ struct BlockFmhaPipelineQRKSVS
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
                 const auto tmp       = [&]() {
-                    auto row_max = scale_s * get_validated_m(metadata.m[i_idx]);
-                    return ck_tile::exp2(scale_s * m_old[i_idx] - row_max);
+                    auto row_max = get_validated_m(metadata.m[i_idx]);
+                    return ck_tile::exp2(m_old[i_idx] - row_max);
                 }();
 
                 sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
@@ -870,9 +875,6 @@ struct BlockFmhaPipelineQRKSVS
             run_gemm0(number<0>{}, k_tile);
 
             // scale_s, mask, softmax
-            metadata.s_acc(number<0>{}) =
-                tile_elementwise_in(s_acc_element_func, metadata.s_acc(number<0>{}));
-
             run_fmha_mask(number<0>{}, k_origin);
 
             run_fmha_alu0(number<0>{});
@@ -937,9 +939,6 @@ struct BlockFmhaPipelineQRKSVS
             run_gemm0(xdl_SP_p01_reg_idx, k_tile);
 
             // scale_s, mask, softmax
-            metadata.s_acc(number<0>{}) =
-                tile_elementwise_in(s_acc_element_func, metadata.s_acc(number<0>{}));
-
             run_fmha_mask(xdl_SP_p01_reg_idx, k_origin);
 
             run_fmha_alu0(xdl_SP_p23_reg_idx);
@@ -984,7 +983,7 @@ struct BlockFmhaPipelineQRKSVS
             constexpr auto lse_spans = decltype(lse)::get_distributed_spans();
             sweep_tile_span(lse_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                lse(i_idx) = metadata.m[i_idx] * scale_s / C_LOG2E + log(metadata.l[i_idx]);
+                lse(i_idx)           = metadata.m[i_idx] / C_LOG2E + log(metadata.l[i_idx]);
             });
 
             store_tile(lse_dram_window_tmp, tile_elementwise_in(lse_element_func, lse));

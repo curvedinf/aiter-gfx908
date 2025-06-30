@@ -273,7 +273,7 @@ class PagedAttention:
             if fp8_out_scale is not None:
                 output = torch.empty_like(output, dtype=dtypes.fp8)
                 cpa_fp8_out = True
-            ops.paged_attention_rocm(
+            torch.ops.aiter.paged_attention_rocm(
                 output,
                 exp_sums,
                 max_logits,

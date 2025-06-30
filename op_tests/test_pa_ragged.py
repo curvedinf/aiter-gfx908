@@ -372,7 +372,7 @@ def run_aiter(
     if fp8_out_scale is not None:
         output = torch.empty_like(output, dtype=dtypes.fp8)
         cpa_fp8_out = True
-    aiter.paged_attention_ragged(
+    torch.ops.aiter.paged_attention_ragged(
         output,
         workspace_buffer,
         query,

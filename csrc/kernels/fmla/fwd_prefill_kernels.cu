@@ -13,7 +13,7 @@
 // =====================================================================================================================
 // Utils
 //
-#define ZZDebug
+// #define ZZDebug
 
 CK_TILE_DEVICE bool IsDebugThreadBlock(const int x = 0, const int y = 0, const int z = 0)
 {

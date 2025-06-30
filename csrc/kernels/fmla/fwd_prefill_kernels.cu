@@ -13,7 +13,7 @@
 // =====================================================================================================================
 // Utils
 //
-// #define ZZDebug
+#define ZZDebug
 
 CK_TILE_DEVICE bool IsDebugThreadBlock(const int x = 0, const int y = 0, const int z = 0)
 {
@@ -81,6 +81,7 @@ struct FlashMlaPrefillKernelTrait
     static constexpr int32_t kMaxBatchSize              = 4096;
     static constexpr int32_t kCuReuse                   = 2;
     static constexpr int32_t kMaxSplits                 = 128;
+    static constexpr int32_t kKNumRepeat                = kSizeNope / kMaxSplits;
     static constexpr bool    kPadHeadDimQ               = false;
     static constexpr bool    kPadHeadDimV               = false;
     static constexpr bool    kPadSeqLenQ                = true;
@@ -229,12 +230,17 @@ public:
         return k_lds_block_desc;
     }
 
+    CK_TILE_HOST_DEVICE static constexpr auto GetKNopeSingleRepeatSize()
+    {
+        return (Traits::kSizeRope * 2 + 8) * sizeof(scalar_t); // 2 = lane group 8 = padsize
+    }
+
     template <bool IsLoadOnceRope = false>
     CK_TILE_HOST_DEVICE static constexpr auto GetSingleKElementSpaceSize()
     {
         constexpr ck_tile::index_t kNPerBlock = Traits::kBlockN0;
-        constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? 64 : 128;
-        constexpr ck_tile::index_t kRepeatK = IsLoadOnceRope ? 1 : Traits::kSizeNope / kKPerBlock;
+        constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? Traits::kSizeRope : Traits::kMaxSplits;
+        constexpr ck_tile::index_t kRepeatK = IsLoadOnceRope ? 1 : Traits::kKNumRepeat;
         constexpr ck_tile::index_t NumWarps   = Traits::kNumWarps;
         constexpr ck_tile::index_t warpSize   = ck_tile::get_warp_size();
 
@@ -251,6 +257,12 @@ public:
         return NumIssues * NumWarps * kRepeatK * (warpSize * KVector + kPad);
     }
 
+    template <bool IsLoadOnceRope = false>
+    CK_TILE_HOST_DEVICE static constexpr auto GetSingleKSpaceSize()
+    {
+        return GetSingleKElementSpaceSize<IsLoadOnceRope>() * sizeof(scalar_t);
+    }
+
     template <bool IsLoadOnceRope = false,
               ck_tile::index_t IBuf = 0>
     CK_TILE_HOST_DEVICE static constexpr auto
@@ -258,8 +270,8 @@ public:
     {
         // K is always k-major, we use async-copy to load into LDS
         constexpr ck_tile::index_t kNPerBlock = Traits::kBlockN0;
-        constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? 64 : 128;
-        constexpr ck_tile::index_t kRepeatK = IsLoadOnceRope ? 1 : Traits::kSizeNope / kKPerBlock;
+        constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? Traits::kSizeRope : Traits::kMaxSplits;
+        constexpr ck_tile::index_t kRepeatK = IsLoadOnceRope ? 1 : Traits::kKNumRepeat;
         constexpr ck_tile::index_t kBlockSize = Traits::kNumThreads;
         constexpr ck_tile::index_t NumWarps   = Traits::kNumWarps;
         constexpr ck_tile::index_t warpSize   = ck_tile::get_warp_size();
@@ -352,8 +364,8 @@ public:
     {
         // K is always k-major, we use async-copy to load into LDS
         constexpr ck_tile::index_t kNPerBlock = Traits::kBlockN0;
-        constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? 64 : 128;
-        constexpr ck_tile::index_t kRepeatK = IsLoadOnceRope ? 1 : Traits::kSizeNope / kKPerBlock;
+        constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? Traits::kSizeRope : Traits::kMaxSplits;
+        constexpr ck_tile::index_t kRepeatK = IsLoadOnceRope ? 1 : Traits::kKNumRepeat;
         constexpr ck_tile::index_t kBlockSize = Traits::kNumThreads;
         constexpr ck_tile::index_t NumWarps   = Traits::kNumWarps;
         constexpr ck_tile::index_t warpSize   = ck_tile::get_warp_size();
@@ -541,8 +553,8 @@ public:
         constexpr int32_t RowWarps = Traits::kNumWarps / ColWarps;
         static_assert((Traits::kNumWarps >= ColWarps) && ((Traits::kNumWarps % ColWarps) == 0));
 
-        constexpr int32_t BlockTileK = IsLoadOnceRope ? Traits::kSizeRope :
-                                       Traits::kKVLoadOnce ? Traits::kSizeNope : Traits::kBlockK0;
+        constexpr int32_t BlockTileK = !Traits::kKVLoadOnce ? Traits::kBlockK0 :
+                                       IsLoadOnceRope ? Traits::kSizeRope : Traits::kSizeNope;
         using BlockTile     = ck_tile::sequence<Traits::kBlockM, Traits::kBlockN0, BlockTileK>;
         using BlockWarps    = ck_tile::sequence<ColWarps, RowWarps, 1>;
         using TileGemmShape = ck_tile::TileGemmShape<BlockTile, BlockWarps, typename Traits::QKWarpTile>;
@@ -626,8 +638,8 @@ public:
     {
         using BlockGemm = ck_tile::remove_cvref_t<decltype(GetQKBlockGemm<IsLoadOnceRope>())>;
 
-        constexpr int32_t BlockTileK = IsLoadOnceRope ? Traits::kSizeRope :
-                                       Traits::kKVLoadOnce ? Traits::kSizeNope : Traits::kBlockK0;
+        constexpr int32_t BlockTileK = !Traits::kKVLoadOnce ? Traits::kBlockK0 :
+                                       IsLoadOnceRope ? Traits::kSizeRope : Traits::kSizeNope;
         return BlockGemm::template MakeABlockTileDistribution<
             Traits::kBlockM,
             BlockTileK>();
@@ -672,7 +684,7 @@ public:
             //         ck_tile::sequence<0, 3, 0, 3>>{});
             constexpr int32_t kBlockSize = Traits::kNumThreads;
             constexpr int32_t kNPerBlock = Traits::kBlockN0;
-            constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? 64 : 128;
+            constexpr ck_tile::index_t kKPerBlock = IsLoadOnceRope ? Traits::kSizeRope : Traits::kMaxSplits;
             constexpr ck_tile::index_t NumWarps   = Traits::kNumWarps;
             constexpr ck_tile::index_t warpSize   = ck_tile::get_warp_size();
 
@@ -712,7 +724,9 @@ public:
         return ck_tile::make_static_tile_distribution(
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<>,
-                ck_tile::tuple<ck_tile::sequence<1, 1, 8, 2>, ck_tile::sequence<8, 4, 8, 2>>,
+                    // ck_tile::sequence<1, 1, 8, 2>,
+                    // ck_tile::sequence<8, 4, 8, 2>,
+                ck_tile::tuple<ck_tile::sequence<1, 1, 8, 2>, ck_tile::sequence<1, 4, 8, 4>>,
                 ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<1, 2>>,
                 ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
                 ck_tile::sequence<1, 1, 2, 2>,
@@ -725,7 +739,9 @@ public:
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<>,
                 ck_tile::tuple<
-                    ck_tile::sequence<8, 4, 8, 2>,
+                    // ck_tile::sequence<8, 4, 8, 2>,
+                    // ck_tile::sequence<1, 1, 8, 2>>,
+                    ck_tile::sequence<1, 4, 8, 4>,
                     ck_tile::sequence<1, 1, 8, 2>>,
                 ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<2, 1>>,
                 ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
@@ -1852,7 +1868,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
     int32_t                         seqlen_k,
     int32_t                         num_splits,
     int32_t                         split_id,
-    Mask&                           mask,
+    Mask                            mask,
     float                           scale_s,
     uint8_t*                        p_smem
 #ifdef ZZDebug
@@ -1865,10 +1881,9 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
 
     // 1. Allocate LDS
     //
-    constexpr auto k_rope_smem_offset = (Traits::kNumPrefetchK *
-            Policy::template GetSingleKElementSpaceSize<false>() * sizeof(scalar_t));
+    const auto k_rope_smem_offset = (Traits::kNumPrefetchK * Policy::template GetSingleKSpaceSize<false>());
 
-    constexpr auto k_nope_repeat_smem_offset = ((64 * 2 + 8) * sizeof(scalar_t));
+    const auto k_nope_repeat_smem_offset = Policy::GetKNopeSingleRepeatSize();
 	constexpr auto k_oob_ck = ck_tile::bool_constant<true>{};
 	constexpr auto k_pre_np = ck_tile::bool_constant<false>{};
 
@@ -2042,6 +2057,17 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
         kKPageIdxDim);
     k_dram_window.init_raw();
 
+    ck_tile::static_for<0, Traits::kKNumRepeat, 1>{}([&](auto rid)
+    {
+        ck_tile::async_load_tile_raw(
+            k_nope_st_lds_windows.at(ck_tile::number<0>{}), k_dram_window, ck_tile::number<-1>{}, k_oob_ck, k_pre_np, k_nope_repeat_smem_offset * rid);
+        __builtin_amdgcn_sched_barrier(0);
+        ck_tile::async_load_fence(k_dram_window.get_num_of_access());
+        __builtin_amdgcn_s_barrier();
+        ck_tile::move_tile_window(k_dram_window, {0, Traits::kMaxSplits});
+    });
+	ck_tile::move_tile_window(k_dram_window, {0, -Traits::kSizeNope});
+
     auto k_rope_dist = Policy::template MakeKDramTileDistribution<true>();
     auto k_rope_coord = k_rope_dist.calculate_index();
     constexpr auto kKRopeNumRepeat = Policy::template GetNumRepeatOfKDramTileDistribution<true>();
@@ -2067,27 +2093,15 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
         kKRopePageIdxDim);
     k_rope_dram_window.init_raw();
 
-    auto k_st_lds_window = k_nope_st_lds_windows.at(ck_tile::number<0>{});
-    auto k_dram_nope_window = k_dram_window;
-    ck_tile::static_for<0, 4, 1>{}([&](auto rid)
-    {
-        ck_tile::async_load_tile_raw(
-            k_st_lds_window, k_dram_nope_window, ck_tile::number<-1>{}, k_oob_ck, k_pre_np, k_nope_repeat_smem_offset * rid);
-        __builtin_amdgcn_sched_barrier(0);
-        ck_tile::async_load_fence(k_dram_nope_window.get_num_of_access());
-        // ck_tile::buffer_load_fence(k_dram_window.get_num_of_access(), q_reg_nope.get_thread_buffer());
-        __builtin_amdgcn_s_barrier();
-        // ck_tile::move_tile_window(k_st_lds_window, {0, 0, 128});
-        ck_tile::move_tile_window(k_dram_nope_window, {0, 128});
-    });
-
     ck_tile::async_load_tile_raw(
         k_rope_st_lds_windows(ck_tile::number<0>{}), k_rope_dram_window, ck_tile::number<-1>{}, k_oob_ck, k_pre_np, k_rope_smem_offset);
     __builtin_amdgcn_sched_barrier(0);
-	// ck_tile::buffer_load_fence(k_rope_dram_window.get_num_of_access(), q_reg_nope.get_thread_buffer());
     ck_tile::async_load_fence(k_rope_dram_window.get_num_of_access());
     __builtin_amdgcn_s_barrier();
 
+    static constexpr auto I0    = ck_tile::number<0>{};
+    static constexpr auto I1    = ck_tile::number<1>{};
+    static constexpr auto I3    = ck_tile::number<3>{};
     // 6. Main loop
     //
     // Define main loop
@@ -2099,44 +2113,49 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
         using k_st_idx   = std::conditional_t<IsEvenLoop, ck_tile::number<1>, ck_tile::number<0>>;
         constexpr auto k_ld_begin = IsEvenLoop ? ck_tile::number<0>{} : ck_tile::number<Traits::kBlockN0>{};
         constexpr auto k_ld_end   = ck_tile::number<k_ld_begin + Traits::kBlockN0>{};
-        constexpr ck_tile::array<int32_t, 2> v_lds_direction = { IsEvenLoop ? Traits::kBlockN0 : -Traits::kBlockN0, 0 };
+        constexpr ck_tile::array<int32_t, 2> v_lds_direction = { IsEvenLoop ? Traits::kBlockN0 : -Traits::kBlockN0, -Traits::kSizeNope };
 
-        auto vt_tile = ck_tile::make_static_distributed_tensor<scalar_t>(Policy::MakeVTTileDistribution());
+#pragma unroll 2
+        for (int32_t vidx = 0; vidx < Traits::kKNumRepeat; ++vidx)
         {
+			auto vt_tile = ck_tile::make_static_distributed_tensor<scalar_t>(Policy::MakeVTTileDistribution());
             auto v_tile  = ck_tile::load_tile(v_ld_lds_window);
-            ck_tile::move_tile_window(v_ld_lds_window, v_lds_direction);
-            auto v_thread_buffer = vt_tile.get_thread_buffer().get();
+            ck_tile::move_tile_window(v_ld_lds_window, {0, Traits::kMaxSplits});
+            auto vt_thread_buffer = vt_tile.get_thread_buffer().get();
 
             uint32_t s_perm0 = 0x07060504;
             uint32_t s_perm1 = 0x03020100;
 
             auto k_thread_buffer = v_tile.get_thread_buffer().get();
 
-            static constexpr auto I0    = ck_tile::number<0>{};
-            static constexpr auto I1    = ck_tile::number<1>{};
-
             constexpr auto v_dist       = Policy::MakeVTileDistribution();
             constexpr auto vt_dist      = Policy::MakeVTTileDistribution();
             using VDstrEncode           = typename decltype(v_dist)::DstrEncode;
             using VTDstrEncode          = typename decltype(vt_dist)::DstrEncode;
-            constexpr ck_tile::index_t VNRepeat  = VDstrEncode::hs_lengthss_[I1][I0];
-            constexpr ck_tile::index_t VTNRepeat = VTDstrEncode::hs_lengthss_[I0][I0];
 
-            ck_tile::static_for<0, VTNRepeat, 1>{}([&, perm0 = s_perm0](auto buffer_id){
-                asm volatile("v_perm_b32 %[v_dest], %[v_src1], %[v_src2], %[s_perm]\n"
-                            : [v_dest] "=v"(reinterpret_cast<uint32_t*>(v_thread_buffer )[buffer_id])
-                            : [v_src1] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + VNRepeat>{}])
-                            , [v_src2] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}])
-                            , [s_perm] "s"(s_perm1));
+            constexpr ck_tile::index_t VNVectors = VDstrEncode::hs_lengthss_[I1][I3];
+            constexpr ck_tile::index_t VNRepeats = VNVectors / 2;
+            constexpr ck_tile::index_t VKVectors = VDstrEncode::hs_lengthss_[I0][I3];
 
-                asm volatile("v_perm_b32 %[v_dest], %[v_src1], %[v_src2], %[s_perm]\n"
-                            : [v_dest] "=v"(reinterpret_cast<uint32_t*>(v_thread_buffer )[buffer_id + VTNRepeat])
-                            : [v_src1] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + VNRepeat>{}])
-                            , [v_src2] "v"(reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}])
-                            , [s_perm] "s"(perm0));
+            ck_tile::static_for<0, VNRepeats, 1>{}([&](auto buffer_id){
+                reinterpret_cast<uint32_t*>(vt_thread_buffer)[buffer_id * VKVectors] = __builtin_amdgcn_perm(
+                    reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + VNRepeats>{}],
+                    reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}],
+                    s_perm1
+                );
+                reinterpret_cast<uint32_t*>(vt_thread_buffer)[buffer_id * VKVectors + 1] = __builtin_amdgcn_perm(
+                    reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + VNRepeats>{}],
+                    reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}],
+                    s_perm0
+                );
             });
+            ck_tile::block_sync_lds();
+            ck_tile::store_tile(vt_lds_window, vt_tile);
+            ck_tile::move_tile_window(vt_lds_window, {Traits::kMaxSplits, 0});
+            ck_tile::block_sync_lds();
         }
-
+        ck_tile::move_tile_window(vt_lds_window, {-Traits::kSizeNope, 0});
+        ck_tile::move_tile_window(v_ld_lds_window, v_lds_direction);
         // I. QK GEMM
 
         // Main part of QK GEMM_0: conduct GEMM and load K tiles 
@@ -2301,16 +2320,16 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
             k_rope_dram_window.update_page_idx_and_valids(k_rope_offsets, k_rope_valids);
 
 			auto k_st_lds_window = k_nope_st_lds_windows.at(k_st_idx{});
-            auto k_dram_nope_window = k_dram_window;
 			ck_tile::static_for<0, 4, 1>{}([&](auto rid)
 			{
 				ck_tile::async_load_tile_raw(
-					k_st_lds_window, k_dram_nope_window, ck_tile::number<-1>{}, k_oob_ck, k_pre_np, k_nope_repeat_smem_offset * rid);
+					k_st_lds_window, k_dram_window, ck_tile::number<-1>{}, k_oob_ck, k_pre_np, k_nope_repeat_smem_offset * rid);
 				__builtin_amdgcn_sched_barrier(0);
-				ck_tile::async_load_fence(k_dram_nope_window.get_num_of_access());
+				ck_tile::async_load_fence(k_dram_window.get_num_of_access());
 				__builtin_amdgcn_s_barrier();
-				ck_tile::move_tile_window(k_dram_nope_window, {0, 128});
+				ck_tile::move_tile_window(k_dram_window, {0, Traits::kMaxSplits});
 			});
+            ck_tile::move_tile_window(k_dram_window, {0, -Traits::kSizeNope});
 
 			ck_tile::async_load_tile_raw(
 				k_rope_st_lds_windows.at(k_st_idx{}), k_rope_dram_window, ck_tile::number<-1>{}, k_oob_ck, k_pre_np, k_rope_smem_offset);
@@ -2322,8 +2341,6 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
         const auto p = ck_tile::cast_tile<scalar_t>(p_intermedia);
         if constexpr (k1_loops == 1)
         {
-            ck_tile::block_sync_lds();
-            ck_tile::store_tile(vt_lds_window, vt_tile);
 
             ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id) {
                 ck_tile::block_sync_lds();
@@ -2352,7 +2369,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
 #ifdef ZZDebug
         __builtin_amdgcn_sched_barrier(0);
         // if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && )
-        if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && loop_idx == 1)
+        if (blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && loop_idx == 0)
         {
    //          auto debug_k_dram = ck_tile::make_naive_tensor_view(
    //              reinterpret_cast<scalar_t*>(params.p_debug_value),
@@ -2831,18 +2848,18 @@ void dispatch_fmla_fwd_splictkv_prefill(
 
     if (params.num_splits > 1)
     {
-        // out_t is not take into consideration when doing splits because combine shader is always expected to do
-        // the final output type conversion.
-        auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, acc_t, kIsCausal, true>;
-        auto kn_comb =
-            (params.num_splits <= 32)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 32,  scalar_t, acc_t> :
-            // (params.num_splits <= 64)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 64,  scalar_t, acc_t> :
-            // (params.num_splits <= 96)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 96,  scalar_t, acc_t> :
-            // (params.num_splits <= 128) ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 128, scalar_t, acc_t> :
-            static_cast<decltype(kn_fmla_fwd_splictkv_prefill_combine<Traits, 32, scalar_t, acc_t>)*>(nullptr);
-        TORCH_CHECK(kn_comb != nullptr, "num_splits is larger than expected (<=128) !");
-        kn_attn<<<grid_attn, Traits::kNumThreads, 0, stream>>>(params);
-        kn_comb<<<grid_comb, Traits::kNumThreadsCombine, 0, stream>>>(params);
+        // // out_t is not take into consideration when doing splits because combine shader is always expected to do
+        // // the final output type conversion.
+        // auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, acc_t, kIsCausal, true>;
+        // auto kn_comb =
+        //     (params.num_splits <= 32)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 32,  scalar_t, acc_t> :
+        //     // (params.num_splits <= 64)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 64,  scalar_t, acc_t> :
+        //     // (params.num_splits <= 96)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 96,  scalar_t, acc_t> :
+        //     // (params.num_splits <= 128) ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 128, scalar_t, acc_t> :
+        //     static_cast<decltype(kn_fmla_fwd_splictkv_prefill_combine<Traits, 32, scalar_t, acc_t>)*>(nullptr);
+        // TORCH_CHECK(kn_comb != nullptr, "num_splits is larger than expected (<=128) !");
+        // kn_attn<<<grid_attn, Traits::kNumThreads, 0, stream>>>(params);
+        // kn_comb<<<grid_comb, Traits::kNumThreadsCombine, 0, stream>>>(params);
     }
     else
     {
@@ -3110,14 +3127,15 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
         params.stride_sp_lseacc   = softmax_lseaccum.stride(1);
     }
 
-    DISPATCH_FMLA_TYPES(
-        query.scalar_type(),
-        is_causal,
-        "fmla_fwd",
-        [&](){
-            dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal>(params);
-        }();
-    );
+    dispatch_fmla_fwd_splictkv_prefill<Traits, ck_tile::bf16_t, float, ck_tile::bf16_t, true>(params);
+    // DISPATCH_FMLA_TYPES(
+    //     query.scalar_type(),
+    //     is_causal,
+    //     "fmla_fwd",
+    //     [&](){
+    //         dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal>(params);
+    //     }();
+    // );
     // assert(is_causal == true);
     // assert(query.scalar_type() == at::ScalarType::BFloat16);
     // using scalar_t = ck_tile::bf16_t;

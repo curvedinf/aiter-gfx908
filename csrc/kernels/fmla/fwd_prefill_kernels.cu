@@ -16,6 +16,7 @@
 // #define ZZDebug
 #define FMLA_FWD_FAST_EXP2 1
 #define DEBUG_ONE_KERNEL 0
+#define HEADV 512
 
 CK_TILE_DEVICE bool IsDebugThreadBlock(const int x = 0, const int y = 0, const int z = 0)
 {
@@ -65,7 +66,7 @@ struct FlashMlaPrefillKernelTrait
 {
     static constexpr int32_t kSizeD                     = kSizeD_;    // hidden dimension size of query and key
     static constexpr int32_t kSizeDV                    = kSizeDV_;   // hidden dimension size of value
-    static constexpr int32_t kSizeNope                  = kSizeDV;
+    static constexpr int32_t kSizeNope                  = 512;  //tmp force 512
     static constexpr int32_t kSizeRope                  = kSizeD - kSizeNope;
     static constexpr int32_t kNumWarps                  = kNumWarps_;
     static constexpr int32_t kPageBlockSize             = 16;
@@ -1317,7 +1318,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile_epilogue(
             constexpr auto ij = ck_tile::make_tuple(id0, id1);
             ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id)
             {
-#if 1
+#if 0
                 acc_t o_acc_v = o_acc[n1_id](ij);
                 asm volatile("v_mul_f32 %[v_o_acc], %[v_tmp], %[v_o_acc]\n"
                              : [v_o_acc] "+v"(o_acc_v)
@@ -2409,7 +2410,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
                 ck_tile::number<1>{});
             auto debug_v_window = ck_tile::make_tile_window(
                 debug_v_dram,
-                ck_tile::make_tuple(512, Traits::kBlockN0),
+                ck_tile::make_tuple(HEADV, Traits::kBlockN0),
                 {0, 0},
                 Policy::MakeVTTileDistribution());
 
@@ -3030,11 +3031,11 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     const bool           is_causal)
 {
     constexpr bool kEnablePackQkRatio = true;
-    constexpr bool kKVLoadOnce        = true;
+    constexpr bool kKVLoadOnce        = false;
     //                                        dqk  dv   m0  n0  n1  #warp
     // using Traits = std::conditional_t<kKVLoadOnce, FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 4, kEnablePackQkRatio, true>,
     //                                                FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4, kEnablePackQkRatio, false>>;
-    using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 4, kEnablePackQkRatio, true>;
+    using Traits = FlashMlaPrefillKernelTrait<576, HEADV, 64, 16, HEADV, 4, kEnablePackQkRatio, true>;
 
     constexpr bool kForceOutAcc = false;
     using acc_t                 = float;
@@ -3052,7 +3053,7 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     int32_t num_heads_q = num_heads_q_ori;
 
     const int32_t head_size = query.size(3);
-    TORCH_CHECK((head_size == 576) && (head_size_v == 512), "Only support QK head dim 576 and V head dim 512!");
+    TORCH_CHECK((head_size == 576) && (head_size_v == HEADV), "Only support QK head dim 576 and V head dim HEADV!");
 
     const int32_t num_blocks = key_cache.size(0);
     const int32_t page_block_size = key_cache.size(1);

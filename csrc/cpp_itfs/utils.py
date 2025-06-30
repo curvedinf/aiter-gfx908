@@ -11,10 +11,10 @@ import hashlib
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 AITER_CORE_DIR = os.path.abspath(f"{this_dir}/../../")
-GPU_ARCH = subprocess.run(
+DEFAULT_GPU_ARCH = subprocess.run(
     "/opt/rocm/bin/offload-arch", shell=True, capture_output=True, text=True
 ).stdout.strip()
-GPU_ARCH = os.environ.get("GPU_ARCHS", GPU_ARCH)
+GPU_ARCH = os.environ.get("GPU_ARCHS", DEFAULT_GPU_ARCH)
 AITER_REBUILD = int(os.environ.get("AITER_REBUILD", 0))
 
 HOME_PATH = os.environ.get("HOME")
@@ -66,6 +66,10 @@ def validate_and_update_archs():
     assert all(
         arch in allowed_archs for arch in archs
     ), f"One of GPU archs of {archs} is invalid or not supported"
+    for i in range(len(archs)):
+        if archs[i] == "native":
+            archs[i] = DEFAULT_GPU_ARCH
+
     return archs
 
 

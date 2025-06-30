@@ -186,7 +186,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, causal, varlen, tes
         lse_flash = out[1]
         debug_m = out[2]
         debug_p = out[3]
-        debug_v = out[4].reshape(576, 16)
+        debug_v = out[4].reshape(d, 16)
         debug_o = out[5]
         debug_q = out[6]
         # import pdb; pdb.set_trace()
@@ -235,4 +235,4 @@ if __name__ == "__main__":
     #     test_flash_mla(dtype, b, s, s, h_q, h_kv, d, dv, causal, varlen, True, True)
     
     # 873us
-    test_flash_mla(torch.float16, 32, 3, 6001, 16, 1, 576, dv, False, False, True, True)
+    test_flash_mla(torch.float16, 32, 3, 6001, 16, 1, d, dv, False, False, True, True)

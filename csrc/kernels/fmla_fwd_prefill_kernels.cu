@@ -502,6 +502,17 @@ public:
 
     CK_TILE_HOST_DEVICE static constexpr auto MakeVTDramTileDistribution()
     {
+        // return ck_tile::make_static_tile_distribution(
+        //     ck_tile::tile_distribution_encoding<
+        //         ck_tile::sequence<>,
+        //         ck_tile::tuple<
+        //             ck_tile::sequence<1, 1, 8, 2>,
+        //             ck_tile::sequence<8, 4, 8, 2>>,
+        //         ck_tile::tuple<ck_tile::sequence<1, 2>, ck_tile::sequence<1, 2>>,
+        //         ck_tile::tuple<ck_tile::sequence<1, 1>, ck_tile::sequence<2, 2>>,
+        //         ck_tile::sequence<1, 1, 2, 2>,
+        //         ck_tile::sequence<0, 3, 0, 3>>{});
+        
         return ck_tile::make_static_tile_distribution(
             ck_tile::tile_distribution_encoding<
                 ck_tile::sequence<>,
@@ -1222,8 +1233,8 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             page_block_k_id, k_dram_block_window.get_window_origin());
 
         auto vt_tile = ck_tile::make_static_distributed_tensor<scalar_t>(Policy::MakeVTDramTileDistribution());
-        auto v_thread_buffer = vt_tile.get_thread_buffer().get();
         {
+            auto v_thread_buffer = vt_tile.get_thread_buffer().get();
             uint32_t s_perm0 = 0x07060504;
             uint32_t s_perm1 = 0x03020100;
 
@@ -1417,7 +1428,6 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
         const auto p = ck_tile::cast_tile<scalar_t>(p_intermedia);
         ck_tile::block_sync_lds();
         ck_tile::store_tile(v_lds_window, vt_tile);
-
         ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id) {
             ck_tile::block_sync_lds();
             gemm_1(o_acc[n1_id],

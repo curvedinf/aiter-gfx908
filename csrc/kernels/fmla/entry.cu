@@ -28,21 +28,21 @@ std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
 {
     const int32_t seqlen_q = query.size(1);
 
-    if (seqlen_q < 32)
-    {
-        return flash_mla_fwd_decode_with_kvcache_impl(
-            query, key_cache, value_cache,
-            head_size_v, 
-            seqlens_k, block_table,
-            softmax_scale, is_causal,
-            tile_scheduler_metadata, num_splits);
-    }
-    else
-    {
+    // if (seqlen_q < 32)
+    // {
+    //     return flash_mla_fwd_decode_with_kvcache_impl(
+    //         query, key_cache, value_cache,
+    //         head_size_v, 
+    //         seqlens_k, block_table,
+    //         softmax_scale, is_causal,
+    //         tile_scheduler_metadata, num_splits);
+    // }
+    // else
+    // {
         return flash_mla_fwd_prefill_with_kvcache_impl(
             query, key_cache, value_cache,
             head_size_v, 
             seqlens_k, block_table,
             softmax_scale, is_causal);
-    }
+    // }
 }

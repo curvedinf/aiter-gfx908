@@ -211,8 +211,8 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, page_block_size, ca
 
 if __name__ == "__main__":
     h_kv = 1
-    # d, dv = 576, 256
-    d, dv = 576, 512
+    d, dv = 576, 256
+    # d, dv = 576, 512
 
     # for (dtype, b, s, h_q, s_q, page_block_size, varlen, causal) in itertools.product(
     #     (torch.bfloat16,)[:],

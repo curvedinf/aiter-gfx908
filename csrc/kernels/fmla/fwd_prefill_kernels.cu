@@ -2137,15 +2137,16 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
             constexpr ck_tile::index_t VNRepeats = VNVectors / 2;
             constexpr ck_tile::index_t VKVectors = VDstrEncode::hs_lengthss_[I0][I3];
 
-            ck_tile::static_for<0, VNRepeats, 1>{}([&](auto buffer_id){
-                reinterpret_cast<uint32_t*>(vt_thread_buffer)[buffer_id * VKVectors] = __builtin_amdgcn_perm(
-                    reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + VNRepeats>{}],
-                    reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}],
+            ck_tile::static_for<0, VNRepeats, 1>{}([&](auto rid){
+                constexpr auto dw_offset = ck_tile::number<rid * VKVectors>{};
+                reinterpret_cast<uint32_t*>(vt_thread_buffer)[dw_offset] = __builtin_amdgcn_perm(
+                    reinterpret_cast<uint32_t*>(k_thread_buffer)[dw_offset + 1],
+                    reinterpret_cast<uint32_t*>(k_thread_buffer)[dw_offset],
                     s_perm1
                 );
-                reinterpret_cast<uint32_t*>(vt_thread_buffer)[buffer_id * VKVectors + 1] = __builtin_amdgcn_perm(
-                    reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id + VNRepeats>{}],
-                    reinterpret_cast<uint32_t*>(k_thread_buffer)[ck_tile::number<buffer_id>{}],
+                reinterpret_cast<uint32_t*>(vt_thread_buffer)[dw_offset + 1] = __builtin_amdgcn_perm(
+                    reinterpret_cast<uint32_t*>(k_thread_buffer)[dw_offset + 1],
+                    reinterpret_cast<uint32_t*>(k_thread_buffer)[dw_offset],
                     s_perm0
                 );
             });
@@ -3127,15 +3128,15 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
         params.stride_sp_lseacc   = softmax_lseaccum.stride(1);
     }
 
-    dispatch_fmla_fwd_splictkv_prefill<Traits, ck_tile::bf16_t, float, ck_tile::bf16_t, true>(params);
-    // DISPATCH_FMLA_TYPES(
-    //     query.scalar_type(),
-    //     is_causal,
-    //     "fmla_fwd",
-    //     [&](){
-    //         dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal>(params);
-    //     }();
-    // );
+    // dispatch_fmla_fwd_splictkv_prefill<Traits, ck_tile::bf16_t, float, ck_tile::bf16_t, true>(params);
+    DISPATCH_FMLA_TYPES(
+        query.scalar_type(),
+        is_causal,
+        "fmla_fwd",
+        [&](){
+            dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal>(params);
+        }();
+    );
     // assert(is_causal == true);
     // assert(query.scalar_type() == at::ScalarType::BFloat16);
     // using scalar_t = ck_tile::bf16_t;

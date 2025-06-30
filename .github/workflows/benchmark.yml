@@ -7,7 +7,7 @@ on:
 jobs:
   build_and_benchmark:
     name: Build and Run Benchmark
-    runs-on: [self-hosted, linux, gpu, rocm]
+    runs-on: [aiter]
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:

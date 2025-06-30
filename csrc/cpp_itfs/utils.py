@@ -11,9 +11,13 @@ import hashlib
 
 this_dir = os.path.dirname(os.path.abspath(__file__))
 AITER_CORE_DIR = os.path.abspath(f"{this_dir}/../../")
-DEFAULT_GPU_ARCH = subprocess.run(
-    "/opt/rocm/bin/offload-arch", shell=True, capture_output=True, text=True
-).stdout.strip()
+DEFAULT_GPU_ARCH = (
+    subprocess.run(
+        "/opt/rocm/llvm/bin/amdgpu-arch", shell=True, capture_output=True, text=True
+    )
+    .stdout.strip()
+    .split("\n")[0]
+)
 GPU_ARCH = os.environ.get("GPU_ARCHS", DEFAULT_GPU_ARCH)
 AITER_REBUILD = int(os.environ.get("AITER_REBUILD", 0))
 
@@ -60,7 +64,15 @@ def validate_and_update_archs():
     archs = GPU_ARCH.split(";")
     archs = [arch.strip() for arch in archs]
     # List of allowed architectures
-    allowed_archs = ["native", "gfx90a", "gfx940", "gfx941", "gfx942", "gfx1100"]
+    allowed_archs = [
+        "native",
+        "gfx90a",
+        "gfx940",
+        "gfx941",
+        "gfx942",
+        "gfx950",
+        "gfx1100",
+    ]
 
     # Validate if each element in archs is in allowed_archs
     assert all(

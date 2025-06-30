@@ -7,7 +7,7 @@ on:
 jobs:
   sglang:
     name: sglnag integration
-    runs-on: [rocm]
+    runs-on: [mi300x-8gpu]
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:

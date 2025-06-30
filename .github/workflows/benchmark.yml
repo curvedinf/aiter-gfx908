@@ -5,28 +5,18 @@ on:
     branches: [main]  # Triggers on PRs targeting `main`
 
 jobs:
-  build_image:
-    name: Build Docker Image
-    runs-on: [self-hosted, aiter-k8s-build]
-    outputs:
-      image_tag: ${{ steps.set-tag.outputs.image_tag }}
+  build_and_benchmark:
+    name: Build and Run Benchmark
+    runs-on: [self-hosted, linux, gpu, rocm]
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
     steps:
       - name: Checkout aiter repo
         uses: actions/checkout@v4
 
       - name: Clone vLLM repo
         run: |
-          git clone  https://github.com/ROCm/vllm.git
-
-      - name: Set Image Tag
-        id: set-tag
-        run: echo "image_tag=rocm/aiter-ci:${{ github.run_id }}" >> "$GITHUB_OUTPUT"
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+          git clone https://github.com/ROCm/vllm.git
 
       - name: Build vllm_aiter_base Image
         run: |
@@ -37,30 +27,19 @@ jobs:
             --build-arg PYTORCH_ROCM_ARCH=gfx942 \
             -t vllm_aiter_base .
 
-      - name: Build Final Benchmark Image and Push
+      - name: Build Final Benchmark Image
         run: |
           cd vllm
           docker build --no-cache -f docker/Dockerfile.rocm \
             --build-arg BASE_IMAGE=vllm_aiter_base \
-            -t ${{ steps.set-tag.outputs.image_tag }} .
-          docker push ${{ steps.set-tag.outputs.image_tag }}
-
-  run_benchmark:
-    name: Run Benchmark
-    needs: build_image
-    runs-on: [self-hosted, linux, gpu, rocm]
-    env:
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
-    steps:
-      - name: Pull Benchmark Image
-        run: docker pull ${{ needs.build_image.outputs.image_tag }}
+            -t vllm_aiter_benchmark .
 
       - name: Run Benchmark and Save Result
         run: |
           docker run --rm --device=/dev/kfd --device=/dev/dri --group-add video \
             --ulimit core=0:0 --ulimit memlock=-1:-1 --cap-add=SYS_PTRACE \
             -e HF_TOKEN=$HF_TOKEN -e VLLM_ROCM_USE_AITER=1 \
-            ${{ needs.build_image.outputs.image_tag }} \
+            vllm_aiter_benchmark \
             python3 /app/vllm/benchmarks/benchmark_latency.py \
               --model mistralai/Mixtral-8x7B-Instruct-v0.1 \
               --batch-size 1 --input-len 128 --output-len 128 \
@@ -69,4 +48,8 @@ jobs:
       - name: Extract and Print Average Latency
         run: |
           LATENCY=$(grep "Avg latency:" result.log | awk '{print $3}')
+          if [ -z "$LATENCY" ]; then
+            echo "Error: Latency value not found!" >&2
+            exit 1
+          fi
           echo "Average Latency: $LATENCY"

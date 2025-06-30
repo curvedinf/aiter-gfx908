@@ -117,9 +117,10 @@ def run_model_benchmark(args):
             # Divide N by tensor parallel
             N = math.ceil(N / args.tp)
         elif layer == "fc2":
-            N, K = intermediate_dim, hidden_dim
+            N, K = hidden_dim, intermediate_dim
             # Divide K by tensor parallel
             K = math.ceil(K / args.tp)
+        # print(f"Layer: {layer}, M: {M}, N: {N}, K: {K}, hidden_dim: {hidden_dim}, intermediate_dim: {intermediate_dim}")
 
         x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
             M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, output=True
@@ -225,7 +226,7 @@ def run_shape_benchmark(args):
     bench_gemm_a8w8.run(save_path=".", print_data=True)
 
 
-def run_benchmark(args):
+def run_benchmark(args, defaults):
     assert not (args.shape and args.model) or not (
         args.shape and args.M
     ), "User can specify --shape or --model MODEL -M VAL exclusively"
@@ -234,7 +235,7 @@ def run_benchmark(args):
             "layout",
         ]
         for arg in unsupported_args:
-            if getattr(args, arg, None) is not None:
+            if getattr(args, arg, None) != getattr(defaults, arg, None):
                 raise Exception(
                     f"Argument '{arg}' is not supported for benchmarking with the --model flag."
                 )
@@ -246,7 +247,7 @@ def run_benchmark(args):
             "no_glu",
         ]
         for arg in unsupported_args:
-            if getattr(args, arg, None) is not None:
+            if getattr(args, arg, None) != getattr(defaults, arg, None):
                 raise Exception(
                     f"Argument '{arg}' is not supported for benchmarking without the --model flag."
                 )
@@ -257,12 +258,13 @@ def parse_args():
     parser = get_parser(kernel_name="A8W8 GEMM")
     parser = add_argparse_ff(parser)
     args = parser.parse_args()
-    return args
+    defaults = parser.parse_args([])  # get default arguments
+    return args, defaults
 
 
 def main():
-    args = parse_args()
-    run_benchmark(args)
+    args, defaults = parse_args()
+    run_benchmark(args, defaults)
 
 
 if __name__ == "__main__":

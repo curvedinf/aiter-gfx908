@@ -53,7 +53,7 @@ def get_parser(kernel_name: str) -> argparse.ArgumentParser:
         "-tp",
         type=int,
         default=1,
-        help="Tensor parallel (divides M dimension)",
+        help="Tensor parallel (divides intermediate_size)",
     )
     return parser
 
@@ -81,7 +81,7 @@ def add_argparse_ff(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-no_glu",
-        action="store_false",
+        action="store_true",
         help="Benchmark the feed-forward layer without GLU activation (default is with GLU)",
     )
     return parser

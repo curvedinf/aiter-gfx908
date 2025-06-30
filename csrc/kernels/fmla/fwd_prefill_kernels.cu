@@ -14,6 +14,8 @@
 // Utils
 //
 // #define ZZDebug
+#define FMLA_FWD_FAST_EXP2 1
+#define DEBUG_ONE_KERNEL 0
 
 CK_TILE_DEVICE bool IsDebugThreadBlock(const int x = 0, const int y = 0, const int z = 0)
 {
@@ -1285,7 +1287,14 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile_epilogue(
     constexpr auto lse_acc_spans = decltype(lse_acc)::get_distributed_spans();
     ck_tile::sweep_tile_span(lse_acc_spans[ck_tile::number<0>{}], [&, m_ = m, l_ = l](auto id0) {
         constexpr auto i = make_tuple(id0);
+#if FMLA_FWD_FAST_EXP2
+#ifndef C_LOG2E
+#define C_LOG2E 1.44269504088896340736 // log2(e)
+#endif
+        lse_acc(i) = m_[i] / C_LOG2E  + log(l_[i]);
+#else
         lse_acc(i) = m_[i] + log(l_[i]);
+#endif
     });
     ck_tile::store_tile(lse_dram_window_, lse_acc);
 
@@ -1644,7 +1653,11 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
                     [&](auto id1)
                     {
                         constexpr auto ij = ck_tile::make_tuple(id0, id1);
+#if FMLA_FWD_FAST_EXP2
+                        p_intermedia(ij) = ck_tile::exp2(s_acc[ij] - row_max);
+#else
                         p_intermedia(ij) = ck_tile::exp(s_acc[ij] - row_max);
+#endif
                     });
             });
 
@@ -1660,7 +1673,11 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             {
                 constexpr auto i = ck_tile::make_tuple(id0);
                 const auto row_max = GetValidatedMax<Mask::IsMasking>(m[i]);
+#if FMLA_FWD_FAST_EXP2
+                const auto temp_i  = ck_tile::exp2(m_old[i] - row_max);
+#else
                 const auto temp_i  = ck_tile::exp(m_old[i] - row_max);
+#endif
                 l(i) = temp_i * l[i] + rowsum_p[i];
                 ck_tile::sweep_tile_span(
                     o_spans[ck_tile::number<1>{}],
@@ -2222,7 +2239,11 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
                     [&](auto id1)
                     {
                         constexpr auto ij = ck_tile::make_tuple(id0, id1);
+#if FMLA_FWD_FAST_EXP2
+                        p_intermedia(ij) = ck_tile::exp2(s_acc[ij] - row_max);
+#else
                         p_intermedia(ij) = ck_tile::exp(s_acc[ij] - row_max);
+#endif
                     });
             });
 
@@ -2238,7 +2259,11 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
             {
                 constexpr auto i = ck_tile::make_tuple(id0);
                 const auto row_max = GetValidatedMax<Mask::IsMasking>(m[i]);
+#if FMLA_FWD_FAST_EXP2
+                const auto temp_i  = ck_tile::exp2(m_old[i] - row_max);
+#else
                 const auto temp_i  = ck_tile::exp(m_old[i] - row_max);
+#endif
                 l(i) = temp_i * l[i] + rowsum_p[i];
                 ck_tile::sweep_tile_span(
                     o_spans[ck_tile::number<1>{}],
@@ -2247,7 +2272,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
                         constexpr auto ij = ck_tile::make_tuple(id0, id1);
                         ck_tile::static_for<0, n1_loops, 1>{}([&](auto n1_id)
                         {
-#if 1
+#if 0
                             acc_t o_acc_v = o_acc[n1_id](ij);
                             asm volatile("v_mul_f32 %[v_o_acc], %[v_tmp], %[v_o_acc]\n"
                                         : [v_o_acc] "+v"(o_acc_v)
@@ -2572,7 +2597,11 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                 params.num_splits,
                 split_id,
                 mask,
-                params.scale_softmax,
+#if FMLA_FWD_FAST_EXP2
+            static_cast<float>(params.scale_softmax * ck_tile::log2e_v<>),
+#else
+            params.scale_softmax,
+#endif
                 p_smem);
         }
         else
@@ -2598,7 +2627,11 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                 params.num_splits,
                 split_id,
                 mask,
-                params.scale_softmax,
+#if FMLA_FWD_FAST_EXP2
+            static_cast<float>(params.scale_softmax * ck_tile::log2e_v<>),
+#else
+            params.scale_softmax,
+#endif
                 p_smem
 #ifdef ZZDebug
                 ,params
@@ -2644,7 +2677,11 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                 1, // num_splits
                 0, // split_id
                 mask,
-                params.scale_softmax,
+#if FMLA_FWD_FAST_EXP2
+            static_cast<float>(params.scale_softmax * ck_tile::log2e_v<>),
+#else
+            params.scale_softmax,
+#endif
                 p_smem);
         }
         else
@@ -2670,7 +2707,11 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                 params.num_splits,
                 split_id,
                 mask,
-                params.scale_softmax,
+#if FMLA_FWD_FAST_EXP2
+            static_cast<float>(params.scale_softmax * ck_tile::log2e_v<>),
+#else
+            params.scale_softmax,
+#endif
                 p_smem
 #ifdef ZZDebug
                 ,params
@@ -2736,6 +2777,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
         #pragma unroll
         for (int32_t i = 0; i < kNumLsePerThr; ++i)
         {
+            static_assert(0, "have not figured out if need exp2 here");
             sum_lse += ck_tile::exp(local_lse[i] - max_lse);
         }
         #pragma unroll
@@ -2841,7 +2883,26 @@ void dispatch_fmla_fwd_splictkv_prefill(
 // =====================================================================================================================
 // Interfaces
 //
-
+#if DEBUG_ONE_KERNEL
+#define DISPATCH_FMLA_TYPES(TYPE, IS_CAUSAL, NAME, ...)                      \
+    switch ((TYPE))                                                          \
+    {                                                                        \
+        case at::ScalarType::Half:                                           \
+        {                                                                    \
+            using scalar_t = ck_tile::fp16_t;                                \
+            using out_t = std::conditional_t<kForceOutAcc, acc_t, scalar_t>; \
+            if ((IS_CAUSAL))                                                 \
+            {                                                                \
+                constexpr bool Is_causal = true;                             \
+                __VA_ARGS__;                                                 \
+            }                                                                \
+            break;                                                           \
+        }                                                                    \
+        default:                                                             \
+            TORCH_CHECK(false, NAME " does't support ",                      \
+                        toString((TYPE)), ".");                              \
+    }
+#else
 #define DISPATCH_FMLA_TYPES(TYPE, IS_CAUSAL, NAME, ...)                      \
     switch ((TYPE))                                                          \
     {                                                                        \
@@ -2881,6 +2942,7 @@ void dispatch_fmla_fwd_splictkv_prefill(
             TORCH_CHECK(false, NAME " does't support ",                      \
                         toString((TYPE)), ".");                              \
     }
+#endif
 
 int num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int num_n_blocks, int max_splits)
 {

@@ -49,6 +49,12 @@ def get_parser(kernel_name: str) -> argparse.ArgumentParser:
         default="throughput",
         help="metric to plot",
     )
+    parser.add_argument(
+        "-tp",
+        type=int,
+        default=1,
+        help="Tensor parallel (divides M dimension)",
+    )
     return parser
 
 

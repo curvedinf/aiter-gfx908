@@ -1,5 +1,6 @@
 import sys
 import triton
+import math
 from aiter.ops.triton.gemm_a8w8 import gemm_a8w8
 from aiter.ops.triton.utils.types import str_to_torch_dtype
 from op_tests.triton_tests.test_gemm_a8w8 import (
@@ -50,6 +51,9 @@ def get_x_vals():
 
 
 def run_model_benchmark(args):
+    """
+    Runs benchmark given a --model argument.
+    """
     x_names = ["M", "hidden_dim", "intermediate_dim"]
     if not args.fc1 and not args.fc2:
         # by default, benchmark both
@@ -100,6 +104,8 @@ def run_model_benchmark(args):
             N, K = hidden_dim, intermediate_dim
         else:
             N, K = intermediate_dim, hidden_dim
+        # Divide N by tensor parallel
+        N = math.ceil(N / args.tp)
 
         x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
             M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, output=True
@@ -134,7 +140,10 @@ def run_model_benchmark(args):
     bench_gemm_a8w8.run(save_path=".", print_data=True)
 
 
-def run_size_benchmark(args):
+def run_shape_benchmark(args):
+    """
+    Runs a benchmark with given tensor shapes.
+    """
     x_names = ["M", "N", "K"]
     if args.shape:
         x_vals_list = [args.shape]
@@ -169,6 +178,9 @@ def run_size_benchmark(args):
         x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
             M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, output=True
         )
+        # Divide N by tensor parallel
+        N = math.ceil(N / args.tp)
+
         # flops
         flops = 2.0 * M * N * K
         # memory transfer
@@ -206,7 +218,7 @@ def run_benchmark(args):
     if args.model:
         run_model_benchmark(args)
     else:
-        run_size_benchmark(args)
+        run_shape_benchmark(args)
 
 
 def parse_args():

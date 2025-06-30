@@ -1,12 +1,12 @@
-name: vLLM Benchmark
+name: sglang workflow
 
 on:
   pull_request:
     branches: [main]  # Triggers on PRs targeting `main`
 
 jobs:
-  build_and_benchmark:
-    name: Build and Run Benchmark
+  sglang:
+    name: sglnag integration
     runs-on: [rocm]
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}

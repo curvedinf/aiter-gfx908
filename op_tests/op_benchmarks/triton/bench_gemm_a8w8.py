@@ -21,9 +21,7 @@ def model_benchmark_shapes(args):
     shapes = []
     for M in M_list:
         for _, config in configs.items():
-            N = config["hidden_size"]
-            K = config["intermediate_size"]
-            shapes.append((M, N, K))
+            shapes.append((M, config["hidden_size"], config["intermediate_size"]))
 
     return shapes
 
@@ -100,12 +98,28 @@ def run_model_benchmark(args):
         # NOTE: Assume bias and output has the same dtype
         c_dtype = str_to_torch_dtype["bf16"]
 
+        """
+        Fc1:
+             M      K                  K           N          M       N
+        A = (B, hidden_dim) @ W = (hidden_dim, 2*int_dim) -> (B, 2*int_dim) -> gating -> (B, int_dim)
+
+        Fc2:
+             M     K               K          N          M       N
+        A = (B, int_dim) @ W = (int_dim, hidden_dim) -> (B, hidden_dim)
+
+        Tensor parallel splits across int_dim (N for fc1, K for fc2)
+        """
         if layer == "fc1":
-            N, K = hidden_dim, intermediate_dim
-        else:
+            if args.no_glu:
+                N, K = intermediate_dim, hidden_dim
+            else:
+                N, K = intermediate_dim * 2, hidden_dim
+            # Divide N by tensor parallel
+            N = math.ceil(N / args.tp)
+        elif layer == "fc2":
             N, K = intermediate_dim, hidden_dim
-        # Divide N by tensor parallel
-        N = math.ceil(N / args.tp)
+            # Divide K by tensor parallel
+            K = math.ceil(K / args.tp)
 
         x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
             M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, output=True
@@ -216,8 +230,26 @@ def run_benchmark(args):
         args.shape and args.M
     ), "User can specify --shape or --model MODEL -M VAL exclusively"
     if args.model:
+        unsupported_args = [
+            "layout",
+        ]
+        for arg in unsupported_args:
+            if getattr(args, arg, None) is not None:
+                raise Exception(
+                    f"Argument '{arg}' is not supported for benchmarking with the --model flag."
+                )
         run_model_benchmark(args)
     else:
+        unsupported_args = [
+            "fc1",
+            "fc2",
+            "no_glu",
+        ]
+        for arg in unsupported_args:
+            if getattr(args, arg, None) is not None:
+                raise Exception(
+                    f"Argument '{arg}' is not supported for benchmarking without the --model flag."
+                )
         run_shape_benchmark(args)
 
 

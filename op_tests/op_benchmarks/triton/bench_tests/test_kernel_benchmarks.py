@@ -11,7 +11,7 @@ To get the mock argparse arguments for the kernel, import get_parser and add_arg
 
 
 def get_benchmark_output(bench_filename: str, mock_args: argparse.Namespace):
-    kernel_benchmark_dir = os.path.join(__file__, "../../", "kernels")
+    kernel_benchmark_dir = os.path.join(__file__, "../../")
     kernel_benchmark_dir = os.path.abspath(kernel_benchmark_dir)
     kernel_benchmark_path = os.path.join(kernel_benchmark_dir, bench_filename)
     print(f"Loading kernel from {kernel_benchmark_path}")

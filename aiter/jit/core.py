@@ -69,11 +69,15 @@ if find_aiter is not None:
     elif find_aiter.origin:
         package_path = find_aiter.origin
     package_path = os.path.dirname(package_path)
+    package_parent_path = os.path.dirname(package_path)
     import site
 
     site_packages_dirs = site.getsitepackages()
     # develop mode
-    if package_path not in site_packages_dirs:
+    isDevelopMode = (package_path not in site_packages_dirs) and (
+        package_parent_path not in site_packages_dirs
+    )
+    if isDevelopMode:
         AITER_META_DIR = AITER_ROOT_DIR
     # install mode
     else:
@@ -84,7 +88,8 @@ else:
 
 AITER_CSRC_DIR = f"{AITER_META_DIR}/csrc"
 AITER_GRADLIB_DIR = f"{AITER_META_DIR}/gradlib"
-AITER_ASM_DIR = f"{AITER_META_DIR}/hsa/"
+gfx = get_gfx()
+AITER_ASM_DIR = f"{AITER_META_DIR}/hsa/{gfx}/"
 os.environ["AITER_ASM_DIR"] = AITER_ASM_DIR
 CK_3RDPARTY_DIR = os.environ.get(
     "CK_DIR", f"{AITER_META_DIR}/3rdparty/composable_kernel"
@@ -93,10 +98,6 @@ CK_3RDPARTY_DIR = os.environ.get(
 
 @functools.lru_cache(maxsize=1)
 def get_asm_dir():
-    gfx = get_gfx()
-    global AITER_ASM_DIR
-    AITER_ASM_DIR = f"{AITER_META_DIR}/hsa/{gfx}/"
-    os.environ["AITER_ASM_DIR"] = AITER_ASM_DIR
     return AITER_ASM_DIR
 
 
@@ -409,6 +410,7 @@ def get_args_of_build(ops_name: str, exclude=[]):
         "is_python_module": True,
         "is_standalone": False,
         "torch_exclude": False,
+        "hip_clang_path": None,
         "blob_gen_cmd": "",
     }
 
@@ -515,6 +517,12 @@ def compile_ops(_md_name: str, fc_name: Optional[str] = None):
                 is_standalone = d_args["is_standalone"]
                 torch_exclude = d_args["torch_exclude"]
                 hipify = d_args.get("hipify", True)
+                hip_clang_path = d_args.get("hip_clang_path", None)
+                prev_hip_clang_path = None
+                if hip_clang_path is not None and os.path.exists(hip_clang_path):
+                    prev_hip_clang_path = os.environ.get("HIP_CLANG_PATH", None)
+                    os.environ["HIP_CLANG_PATH"] = hip_clang_path
+
                 build_module(
                     md_name,
                     srcs,
@@ -529,6 +537,13 @@ def compile_ops(_md_name: str, fc_name: Optional[str] = None):
                     torch_exclude,
                     hipify,
                 )
+
+                if hip_clang_path is not None:
+                    if prev_hip_clang_path is not None:
+                        os.environ["HIP_CLANG_PATH"] = prev_hip_clang_path
+                    else:
+                        os.environ.pop("HIP_CLANG_PATH", None)
+
                 if is_python_module:
                     module = get_module(md_name)
                 if md_name not in __mds:

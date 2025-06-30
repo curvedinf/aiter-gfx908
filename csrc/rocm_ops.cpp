@@ -16,6 +16,7 @@
 #include "communication_asm.h"
 #include "custom.h"
 #include "custom_all_reduce.h"
+#include "gemm_a4w4_blockscale.h"
 #include "gemm_a8w8.h"
 #include "gemm_a8w8_blockscale.h"
 #include "gemm_a8w8_bpreshuffle.h"
@@ -32,14 +33,14 @@
 #include "smoothquant.h"
 #include <torch/extension.h>
 
-#include "torch/mha_batch_prefill.h"
-#include "torch/mha_bwd.h"
-#include "torch/mha_fwd.h"
-#include "torch/mha_v3_bwd.h"
-#include "torch/mha_v3_fwd.h"
-#include "torch/mha_v3_varlen_bwd.h"
-#include "torch/mha_varlen_bwd.h"
-#include "torch/mha_varlen_fwd.h"
+// #include "torch/mha_batch_prefill.h"
+// #include "torch/mha_bwd.h"
+// #include "torch/mha_fwd.h"
+// #include "torch/mha_v3_bwd.h"
+// #include "torch/mha_v3_fwd.h"
+// #include "torch/mha_v3_varlen_bwd.h"
+// #include "torch/mha_varlen_bwd.h"
+// #include "torch/mha_varlen_fwd.h"
 
 #include "rocm_ops.hpp"
 
@@ -50,14 +51,14 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     // GEMM_A8W8_TUNE_PYBIND;
     AITER_ENUM_PYBIND;
     RMSNORM_PYBIND;
-    MHA_VARLEN_FWD_PYBIND;
-    MHA_VARLEN_BWD_PYBIND;
-    MHA_FWD_PYBIND;
-    MHA_BWD_PYBIND;
-    MHA_BATCH_PREFILL_PYBIND;
-    MHA_FWD_ASM_PYBIND
-    MHA_BWD_ASM_PYBIND;
-    MHA_VARLEN_BWD_ASM_PYBIND;
+    // MHA_VARLEN_FWD_PYBIND;
+    // MHA_VARLEN_BWD_PYBIND;
+    // MHA_FWD_PYBIND;
+    // MHA_BWD_PYBIND;
+    // MHA_BATCH_PREFILL_PYBIND;
+    // MHA_FWD_ASM_PYBIND
+    // MHA_BWD_ASM_PYBIND;
+    // MHA_VARLEN_BWD_ASM_PYBIND;
     GEMM_A8W8_PYBIND;
     CUSTOM_PYBIND;
     SMOOTHQUANT_PYBIND;
@@ -73,7 +74,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     NORM_PYBIND;
     POS_ENCODING_PYBIND;
     ATTENTION_PYBIND;
-    MOE_CK_2STAGES_PYBIND;
+    // MOE_CK_2STAGES_PYBIND;
     QUANT_PYBIND;
     ATTENTION_ASM_PYBIND;
     ATTENTION_RAGGED_PYBIND;
@@ -83,6 +84,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     ROPE_GENERAL_BWD_PYBIND;
     ROPE_POS_FWD_PYBIND;
     // GEMM_A8W8_BLOCKSCALE_TUNE_PYBIND;
+    GEMM_A4W4_BLOCKSCALE_PYBIND;
     GEMM_A8W8_BLOCKSCALE_PYBIND;
     AITER_OPERATOR_PYBIND;
     CUSTOM_ALL_REDUCE_PYBIND;

@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import os
 
 import torch
 import torch.distributed as dist
+import argparse
+from aiter import dtypes
 
 from aiter.dist.parallel_state import (
     ensure_model_parallel_initialized,
@@ -22,7 +24,6 @@ from aiter.test_common import (
     perftest,
     benchmark,
 )
-from aiter import dtypes
 from multiprocessing import set_start_method, Pool, freeze_support
 import logging
 
@@ -101,9 +102,42 @@ def test_allreduce_custom(tp_size, pp_size, shape, dtype, withGraph=False):
         checkAllclose(ref, out.to(ref), msg=msg)
 
 
+l_dtype = ["fp16", "bf16"]
+l_shape = [(128, 8192)]
+
+parser = argparse.ArgumentParser(description="config input of test")
+parser.add_argument(
+    "-d",
+    "--dtype",
+    type=str,
+    choices=l_dtype,
+    nargs="?",
+    const=None,
+    default=None,
+    help="data type",
+)
+parser.add_argument(
+    "-s",
+    "--shape",
+    type=dtypes.str2tuple,
+    choices=l_shape,
+    nargs="?",
+    const=None,
+    default=None,
+    help="shape",
+)
+
+
 if __name__ == "__main__":
     freeze_support()
-    for dtype in [dtypes.bf16, dtypes.fp16]:
-        for shape in [(128, 8192)]:
+    args = parser.parse_args()
+    if args.dtype is None:
+        l_dtype = [dtypes.d_dtypes[key] for key in l_dtype]
+    else:
+        l_dtype = [dtypes.d_dtypes[args.dtype]]
+    if args.shape is not None:
+        l_shape = [args.shape]
+    for dtype in l_dtype:
+        for shape in l_shape:
             test_allreduce_custom(8, 1, shape, dtype, withGraph=True)
             # test_allreduce_custom(8, 1, shape, dtype, withGraph=False)

@@ -987,7 +987,6 @@ struct BlockFmhaPipelineQRKSVS
             auto xdl_SP_p23_reg_idx = ps_pi;
 
             V_lds_load(V_lds_rd_idx);
-            fmha_alu1(xdl_SP_p23_reg_idx);
 
             cl_calc(xdl_SP_p23_reg_idx, /*gemm_idx=*/number<1>{});
         };
@@ -1022,8 +1021,6 @@ struct BlockFmhaPipelineQRKSVS
 
             fmha_alu1(number<0>{});
             fmha_alu_D_upd();
-
-            K_mem_load(number<0>{}); // mem_K2
 
             ++i_total_loops;
             if(num_total_loop <= i_total_loops)

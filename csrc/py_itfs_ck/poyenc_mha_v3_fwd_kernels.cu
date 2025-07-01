@@ -893,17 +893,17 @@ struct BlockFmhaPipelineQRKSVS
             auto memK = number<1>{};
 
             auto iteration = [&](auto pi) {
-                auto xdl_SP_p01_reg_idx = 1 - pi;
+                auto xdl_SP_p01_reg_idx = number<1>{} - pi;
                 auto xdl_SP_p23_reg_idx = pi;
 
-                auto K_w0_lds_wr_idx = 1 - pi;
+                auto K_w0_lds_wr_idx = number<1>{} - pi;
                 auto V_w0_lds_wr_idx = pi;
                 auto K_w0_lds_rd_idx = pi;
                 auto V_w0_lds_rd_idx = pi;
 
-                auto K_w4_lds_wr_idx = 1 - pi;
-                auto V_w4_lds_wr_idx = 1 - pi;
-                auto K_w4_lds_rd_idx = 1 - pi;
+                auto K_w4_lds_wr_idx = number<1>{} - pi;
+                auto V_w4_lds_wr_idx = number<1>{} - pi;
+                auto K_w4_lds_rd_idx = number<1>{} - pi;
                 auto V_w4_lds_rd_idx = pi;
 
                 if constexpr(cl_p == 0)
@@ -981,12 +981,14 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_post_process = [&](auto d) {
-            auto ps_pi        = 1 - d;
+            auto ps_pi        = number<1>{} - d;
             auto V_lds_rd_idx = ps_pi;
 
-            V_lds_load(V_lds_rd_idx) fmha_alu1(xdl_SP_p23_reg_idx);
-
             auto xdl_SP_p23_reg_idx = ps_pi;
+
+            V_lds_load(V_lds_rd_idx);
+            fmha_alu1(xdl_SP_p23_reg_idx);
+
             cl_calc(xdl_SP_p23_reg_idx, /*gemm_idx=*/number<1>{});
         };
 

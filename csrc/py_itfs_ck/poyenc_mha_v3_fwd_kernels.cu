@@ -677,7 +677,7 @@ struct BlockFmhaPipelineQRKSVS
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
-        auto global_load_k = [&](auto k_lds_write_idx) {
+        auto K_mem_load = [&](auto k_lds_write_idx) {
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
@@ -692,7 +692,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
-        auto local_load_k = [&](auto k_lds_read_idx) {
+        auto K_lds_load = [&](auto k_lds_read_idx) {
             auto k_lds_window_for_load =
                 make_tile_window(metadata.k_lds_window(k_lds_read_idx),
                                  Policy::template MakeKRegTileDistribution<Problem>());
@@ -700,7 +700,7 @@ struct BlockFmhaPipelineQRKSVS
             metadata.k_tile = load_tile(k_lds_window_for_load);
         };
 
-        auto global_load_v = [&](auto v_lds_write_idx) {
+        auto V_mem_load = [&](auto v_lds_write_idx) {
             const auto v_tile = load_tile(v_dram_window);
             __builtin_amdgcn_sched_barrier(0);
 
@@ -725,7 +725,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
 
-        auto local_load_v = [&](auto v_lds_read_idx) {
+        auto V_lds_load = [&](auto v_lds_read_idx) {
             auto v_lds_window_for_load =
                 make_tile_window(metadata.v_lds_window(v_lds_read_idx),
                                  Policy::template MakeVRegTileDistribution<Problem>());
@@ -767,7 +767,7 @@ struct BlockFmhaPipelineQRKSVS
 
         decltype(metadata.m) m_old;
 
-        auto run_fmha_alu0 = [&](auto sp_reg_idx) {
+        auto fmha_alu0 = [&](auto sp_reg_idx) {
             // S{j} = S_acc{j} * scale_s
             metadata.s(sp_reg_idx) = tile_elementwise_in(
                 [&](auto logits) {
@@ -801,7 +801,7 @@ struct BlockFmhaPipelineQRKSVS
             });
         };
 
-        auto run_fmha_alu1 = [&](auto sp_reg_idx) {
+        auto fmha_alu1 = [&](auto sp_reg_idx) {
             metadata.p(sp_reg_idx) = cast_tile<PDataType>(
                 tile_elementwise_in(p_compute_element_func, metadata.p_compute(sp_reg_idx)));
             __builtin_amdgcn_sched_barrier(0);
@@ -826,7 +826,7 @@ struct BlockFmhaPipelineQRKSVS
             });
         };
 
-        auto run_fmha_alu_update_o_acc = [&] {
+        auto fmha_alu_D_upd = [&] {
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(metadata.o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
@@ -846,7 +846,7 @@ struct BlockFmhaPipelineQRKSVS
             });
         };
 
-        auto run_fmha_mask = [&](auto sp_reg_idx, auto k_origin) {
+        auto fmha_mask = [&](auto sp_reg_idx, auto k_origin) {
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 bool need_perpixel_check = mask.IsEdgeTile(q_origin.at(number<0>{}),
@@ -880,9 +880,9 @@ struct BlockFmhaPipelineQRKSVS
             const auto k_origin = k_dram_block_window.get_window_origin();
 
             // (1) load & store K =============================================
-            global_load_k(k_lds_write_idx);
+            K_mem_load(k_lds_write_idx);
             __builtin_amdgcn_s_barrier();
-            local_load_k(k_lds_read_idx);
+            K_lds_load(k_lds_read_idx);
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -891,23 +891,23 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             run_gemm0(xdl_SP_p01_reg_idx);
 
-            run_fmha_mask(xdl_SP_p01_reg_idx, k_origin);
-            run_fmha_alu0(xdl_SP_p23_reg_idx);
+            fmha_mask(xdl_SP_p01_reg_idx, k_origin);
+            fmha_alu0(xdl_SP_p23_reg_idx);
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (3) load & store V =============================================
-            global_load_v(v_lds_write_idx);
+            V_mem_load(v_lds_write_idx);
             __builtin_amdgcn_s_barrier();
-            local_load_v(v_lds_read_idx);
+            V_lds_load(v_lds_read_idx);
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (4) softmax + mfma =============================================
-            run_fmha_alu1(xdl_SP_p23_reg_idx);
-            run_fmha_alu_update_o_acc();
+            fmha_alu1(xdl_SP_p23_reg_idx);
+            fmha_alu_D_upd();
 
             __builtin_amdgcn_s_barrier();
             run_gemm1(xdl_SP_p23_reg_idx);
@@ -924,25 +924,25 @@ struct BlockFmhaPipelineQRKSVS
             const auto k_origin = k_dram_block_window.get_window_origin();
 
             // (1) load & store K =============================================
-            global_load_k(number<0>{});
+            K_mem_load(number<0>{});
             __builtin_amdgcn_s_barrier();
-            local_load_k(number<0>{});
+            K_lds_load(number<0>{});
 
             // (2) mfma + softmax =============================================
             __builtin_amdgcn_s_barrier();
             run_gemm0(number<0>{});
 
-            run_fmha_mask(number<0>{}, k_origin);
-            run_fmha_alu0(number<0>{});
+            fmha_mask(number<0>{}, k_origin);
+            fmha_alu0(number<0>{});
 
             // (3) load & store V =============================================
-            global_load_v(number<0>{});
+            V_mem_load(number<0>{});
             __builtin_amdgcn_s_barrier();
-            local_load_v(number<0>{});
+            V_lds_load(number<0>{});
 
             // (4) softmax + mfma =============================================
-            run_fmha_alu1(number<0>{});
-            run_fmha_alu_update_o_acc();
+            fmha_alu1(number<0>{});
+            fmha_alu_D_upd();
 
             __builtin_amdgcn_s_barrier();
             run_gemm1(number<0>{});

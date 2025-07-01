@@ -677,7 +677,7 @@ struct BlockFmhaPipelineQRKSVS
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
-        auto K_mem_load = [&](auto k_lds_write_idx) {
+        auto K_mem_load = [&](auto k_lds_write_idx, bool move_tile = true) {
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
@@ -686,8 +686,12 @@ struct BlockFmhaPipelineQRKSVS
 
             store_tile(metadata.k_lds_window(k_lds_write_idx),
                        tile_elementwise_in(k_element_func, k_block_tile));
-            // move K tile windows
-            move_tile_window(k_dram_block_window, {kN0, 0});
+
+            if(move_tile)
+            {
+                // move K tile windows
+                move_tile_window(k_dram_block_window, {kN0, 0});
+            }
 
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
@@ -926,28 +930,33 @@ struct BlockFmhaPipelineQRKSVS
         {
             const auto k_origin = k_dram_block_window.get_window_origin();
 
-            // (1) load & store K =============================================
+            // (1) load K0 to LDS & VGPR
             K_mem_load(number<0>{});
             __builtin_amdgcn_s_barrier();
             K_lds_load(number<0>{});
 
-            // (2) mfma + softmax =============================================
+            // (2) prefetch K1 and V0 to LDS in parallel with GEMM0
+            if(1 < num_total_loop)
+            {
+                K_mem_load(number<1>{}, /*move_tile=*/false);
+                V_mem_load(number<0>{});
+            }
+
+            // (3) mfma (Q*K0) + softmax
             __builtin_amdgcn_s_barrier();
             cl_calc(number<0>{}, /*gemm_idx=*/number<0>{});
 
             fmha_mask(number<0>{}, k_origin);
             fmha_alu0(number<0>{});
 
-            // (3) load & store V =============================================
-            V_mem_load(number<0>{});
-            __builtin_amdgcn_s_barrier();
+            // (4) load V0 from LDS and compute GEMM1 (P0*V0)
+            __builtin_amdgcn_s_barrier(); // Wait for V0 prefetch to complete
             V_lds_load(number<0>{});
+            __builtin_amdgcn_s_barrier();
 
-            // (4) softmax + mfma =============================================
             fmha_alu1(number<0>{});
             fmha_alu_D_upd();
 
-            __builtin_amdgcn_s_barrier();
             cl_calc(number<0>{}, /*gemm_idx=*/number<1>{});
 
             ++i_total_loops;

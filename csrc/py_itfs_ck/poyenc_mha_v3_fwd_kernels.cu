@@ -672,6 +672,8 @@ struct BlockFmhaPipelineQRKSVS
         index_t i_total_loops      = 0;
         constexpr index_t k0_loops = kQKHeaddim / kK0;
         constexpr index_t k1_loops = kN0 / kK1;
+        static_assert(1 == k0_loops);
+        static_assert(1 == k1_loops);
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
@@ -889,9 +891,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             run_gemm0(xdl_SP_p01_reg_idx);
 
-            // scale_s, mask, softmax
             run_fmha_mask(xdl_SP_p01_reg_idx, k_origin);
-
             run_fmha_alu0(xdl_SP_p23_reg_idx);
 
             __builtin_amdgcn_sched_barrier(0);
@@ -909,6 +909,7 @@ struct BlockFmhaPipelineQRKSVS
             run_fmha_alu1(xdl_SP_p23_reg_idx);
             run_fmha_alu_update_o_acc();
 
+            __builtin_amdgcn_s_barrier();
             run_gemm1(xdl_SP_p23_reg_idx);
 
             __builtin_amdgcn_sched_barrier(0);
@@ -918,6 +919,7 @@ struct BlockFmhaPipelineQRKSVS
             return ++i_total_loops < num_total_loop;
         };
 
+        // pre-stage
         {
             const auto k_origin = k_dram_block_window.get_window_origin();
 
@@ -926,73 +928,59 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             local_load_k(number<0>{});
 
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
             // (2) mfma + softmax =============================================
             __builtin_amdgcn_s_barrier();
             run_gemm0(number<0>{});
 
-            // scale_s, mask, softmax
             run_fmha_mask(number<0>{}, k_origin);
-
             run_fmha_alu0(number<0>{});
 
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
             // (3) load & store V =============================================
             global_load_v(number<0>{});
             __builtin_amdgcn_s_barrier();
             local_load_v(number<0>{});
 
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
             // (4) softmax + mfma =============================================
             run_fmha_alu1(number<0>{});
             run_fmha_alu_update_o_acc();
 
-            run_gemm1(number<0>{});
-
-            __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
+            run_gemm1(number<0>{});
 
             ++i_total_loops;
         }
 
-        if constexpr(NumWarpGroups == 2)
+        if(1 < num_total_loop)
         {
-            if(warp_group_id == 1)
+            if constexpr(NumWarpGroups == 2)
             {
-                __builtin_amdgcn_s_barrier();
-                __builtin_amdgcn_s_barrier();
+                if(warp_group_id == 1)
+                {
+                    __builtin_amdgcn_s_barrier();
+                    __builtin_amdgcn_s_barrier();
+                }
             }
-        }
 
-        static_assert(1 == k0_loops);
-        static_assert(1 == k1_loops);
-
-        if(warp_group_id == 0)
-        {
-            asm volatile("s_setprio 0");
-            while(core_loop(number<0>{}))
-                ;
-        }
-        else
-        {
-            asm volatile("s_setprio 1");
-            while(core_loop(number<1>{}))
-                ;
-        }
-
-        if constexpr(NumWarpGroups == 2)
-        {
             if(warp_group_id == 0)
             {
-                __builtin_amdgcn_s_barrier();
-                __builtin_amdgcn_s_barrier();
+                asm volatile("s_setprio 0");
+                while(core_loop(number<0>{}))
+                    ;
+            }
+            else
+            {
+                asm volatile("s_setprio 1");
+                while(core_loop(number<1>{}))
+                    ;
+            }
+
+            if constexpr(NumWarpGroups == 2)
+            {
+                if(warp_group_id == 0)
+                {
+                    __builtin_amdgcn_s_barrier();
+                    __builtin_amdgcn_s_barrier();
+                }
             }
         }
 

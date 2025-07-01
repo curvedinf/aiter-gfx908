@@ -733,28 +733,31 @@ struct BlockFmhaPipelineQRKSVS
             metadata.v_tile = load_tile(v_lds_window_for_load);
         };
 
-        auto run_gemm0 = [&](auto sp_reg_idx) {
-            InstructionScheduler<Problem> scheduler;
+        auto cl_calc = [&](auto sp_reg_idx, auto gemm_idx) {
+            if constexpr(gemm_idx == 0)
+            {
+                InstructionScheduler<Problem> scheduler;
 
-            clear_tile(metadata.s_acc(sp_reg_idx)); // initialize C
-            gemm_0(metadata.s_acc(sp_reg_idx),
-                   get_slice_tile(metadata.q_tile,
-                                  sequence<0, (k0_loops - 1) * kK0>{},
-                                  sequence<kM0, k0_loops * kK0>{}),
-                   get_slice_tile(metadata.k_tile,
-                                  sequence<0, (k0_loops - 1) * kK0>{},
-                                  sequence<kN0, k0_loops * kK0>{}));
-            scheduler.schedule_gemm0();
-        };
-
-        auto run_gemm1 = [&](auto sp_reg_idx) {
-            gemm_1(metadata.o_acc,
-                   get_slice_tile(metadata.p(sp_reg_idx),
-                                  sequence<0, (k1_loops - 1) * kK1>{},
-                                  sequence<kM0, k1_loops * kK1>{}),
-                   get_slice_tile(metadata.v_tile,
-                                  sequence<0, (k1_loops - 1) * kK1>{},
-                                  sequence<kN1, k1_loops * kK1>{}));
+                clear_tile(metadata.s_acc(sp_reg_idx)); // initialize C
+                gemm_0(metadata.s_acc(sp_reg_idx),
+                       get_slice_tile(metadata.q_tile,
+                                      sequence<0, (k0_loops - 1) * kK0>{},
+                                      sequence<kM0, k0_loops * kK0>{}),
+                       get_slice_tile(metadata.k_tile,
+                                      sequence<0, (k0_loops - 1) * kK0>{},
+                                      sequence<kN0, k0_loops * kK0>{}));
+                scheduler.schedule_gemm0();
+            }
+            else
+            {
+                gemm_1(metadata.o_acc,
+                       get_slice_tile(metadata.p(sp_reg_idx),
+                                      sequence<0, (k1_loops - 1) * kK1>{},
+                                      sequence<kM0, k1_loops * kK1>{}),
+                       get_slice_tile(metadata.v_tile,
+                                      sequence<0, (k1_loops - 1) * kK1>{},
+                                      sequence<kN1, k1_loops * kK1>{}));
+            }
         };
 
         static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
@@ -889,7 +892,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_sched_barrier(0);
             // (2) mfma + softmax =============================================
             __builtin_amdgcn_s_barrier();
-            run_gemm0(xdl_SP_p01_reg_idx);
+            cl_calc(xdl_SP_p01_reg_idx, /*gemm_idx=*/number<0>{});
 
             fmha_mask(xdl_SP_p01_reg_idx, k_origin);
             fmha_alu0(xdl_SP_p23_reg_idx);
@@ -910,7 +913,7 @@ struct BlockFmhaPipelineQRKSVS
             fmha_alu_D_upd();
 
             __builtin_amdgcn_s_barrier();
-            run_gemm1(xdl_SP_p23_reg_idx);
+            cl_calc(xdl_SP_p23_reg_idx, /*gemm_idx=*/number<1>{});
 
             __builtin_amdgcn_sched_barrier(0);
             __builtin_amdgcn_s_barrier();
@@ -930,7 +933,7 @@ struct BlockFmhaPipelineQRKSVS
 
             // (2) mfma + softmax =============================================
             __builtin_amdgcn_s_barrier();
-            run_gemm0(number<0>{});
+            cl_calc(number<0>{}, /*gemm_idx=*/number<0>{});
 
             fmha_mask(number<0>{}, k_origin);
             fmha_alu0(number<0>{});
@@ -945,7 +948,7 @@ struct BlockFmhaPipelineQRKSVS
             fmha_alu_D_upd();
 
             __builtin_amdgcn_s_barrier();
-            run_gemm1(number<0>{});
+            cl_calc(number<0>{}, /*gemm_idx=*/number<1>{});
 
             ++i_total_loops;
         }

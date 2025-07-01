@@ -677,7 +677,7 @@ struct BlockFmhaPipelineQRKSVS
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
-        auto K_mem_load = [&](auto k_lds_write_idx, bool move_tile = true) {
+        auto K_mem_load = [&](auto k_lds_write_idx) {
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
@@ -687,11 +687,8 @@ struct BlockFmhaPipelineQRKSVS
             store_tile(metadata.k_lds_window(k_lds_write_idx),
                        tile_elementwise_in(k_element_func, k_block_tile));
 
-            if(move_tile)
-            {
-                // move K tile windows
-                move_tile_window(k_dram_block_window, {kN0, 0});
-            }
+            // move K tile windows
+            move_tile_window(k_dram_block_window, {kN0, 0});
 
             __builtin_amdgcn_s_waitcnt(0xc07f);
         };
@@ -875,55 +872,122 @@ struct BlockFmhaPipelineQRKSVS
             }
         };
 
-        auto core_loop = [&]([[maybe_unused]] auto cl_p) {
-            auto xdl_SP_p01_reg_idx = number<0>{};
-            auto xdl_SP_p23_reg_idx = number<0>{};
+        auto cl_load = [&](auto load_type, auto mem_wr_idx, auto lds_rd_idx) {
+            if constexpr(load_type == 0)
+            {
+                V_mem_load(mem_wr_idx);
+                K_lds_load(lds_rd_idx);
+            }
+            else
+            {
+                K_mem_load(mem_wr_idx);
+                V_lds_load(lds_rd_idx);
+            }
+        };
 
-            auto k_lds_write_idx = number<0>{};
-            auto k_lds_read_idx  = number<0>{};
-            auto v_lds_write_idx = number<0>{};
-            auto v_lds_read_idx  = number<0>{};
+        auto core_loop = [&](auto cl_p) {
+            auto gemm0 = number<0>{};
+            auto gemm1 = number<1>{};
 
-            const auto k_origin = k_dram_block_window.get_window_origin();
+            auto memV = number<0>{};
+            auto memK = number<1>{};
 
-            // (1) load & store K =============================================
-            K_mem_load(k_lds_write_idx);
-            __builtin_amdgcn_s_barrier();
-            K_lds_load(k_lds_read_idx);
+            auto iteration = [&](auto pi) {
+                auto xdl_SP_p01_reg_idx = 1 - pi;
+                auto xdl_SP_p23_reg_idx = pi;
 
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-            // (2) mfma + softmax =============================================
-            __builtin_amdgcn_s_barrier();
-            cl_calc(xdl_SP_p01_reg_idx, /*gemm_idx=*/number<0>{});
+                auto K_w0_lds_wr_idx = 1 - pi;
+                auto V_w0_lds_wr_idx = pi;
+                auto K_w0_lds_rd_idx = pi;
+                auto V_w0_lds_rd_idx = pi;
 
-            fmha_mask(xdl_SP_p01_reg_idx, k_origin);
-            fmha_alu0(xdl_SP_p23_reg_idx);
+                auto K_w4_lds_wr_idx = 1 - pi;
+                auto V_w4_lds_wr_idx = 1 - pi;
+                auto K_w4_lds_rd_idx = 1 - pi;
+                auto V_w4_lds_rd_idx = pi;
 
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-            // (3) load & store V =============================================
-            V_mem_load(v_lds_write_idx);
-            __builtin_amdgcn_s_barrier();
-            V_lds_load(v_lds_read_idx);
+                if constexpr(cl_p == 0)
+                {
+                    // phase0
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("s_waitcnt lgkmcnt(0)");
+                    cl_calc(xdl_SP_p01_reg_idx, gemm0);
+                    fmha_alu0(xdl_SP_p23_reg_idx);
+                    fmha_alu1(xdl_SP_p23_reg_idx);
 
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-            // (4) softmax + mfma =============================================
-            fmha_alu1(xdl_SP_p23_reg_idx);
-            fmha_alu_D_upd();
+                    // phase1
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("s_waitcnt vmcnt(0)");
+                    __builtin_amdgcn_s_barrier();
+                    const auto k_origin = k_dram_block_window.get_window_origin();
+                    cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
+                    fmha_mask(xdl_SP_p01_reg_idx, k_origin);
 
-            __builtin_amdgcn_s_barrier();
+                    // phase2
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("s_waitcnt lgkmcnt(0)");
+                    __builtin_amdgcn_s_barrier();
+                    cl_calc(xdl_SP_p23_reg_idx, gemm1);
+                    fmha_alu_D_upd();
+
+                    // phase3
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("s_waitcnt vmcnt(0)");
+                    __builtin_amdgcn_s_barrier();
+                    cl_load(memV, V_w0_lds_wr_idx, K_w0_lds_rd_idx);
+
+                    if(num_total_loop <= ++i_total_loops)
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    // phase0
+                    __builtin_amdgcn_sched_barrier(0);
+                    cl_load(memV, V_w4_lds_wr_idx, K_w4_lds_rd_idx);
+
+                    // phase1
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
+                    __builtin_amdgcn_s_barrier();
+                    cl_calc(xdl_SP_p01_reg_idx, gemm0);
+                    fmha_alu0(xdl_SP_p23_reg_idx);
+                    fmha_alu1(xdl_SP_p23_reg_idx);
+
+                    // phase2
+                    __builtin_amdgcn_sched_barrier(0);
+                    __builtin_amdgcn_s_barrier();
+                    const auto k_origin = k_dram_block_window.get_window_origin();
+                    fmha_mask(xdl_SP_p01_reg_idx, k_origin);
+                    cl_load(memK, K_w4_lds_wr_idx, V_w4_lds_rd_idx);
+
+                    if(num_total_loop <= ++i_total_loops)
+                    {
+                        return false;
+                    }
+
+                    // phase3
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
+                    __builtin_amdgcn_s_barrier();
+                    cl_calc(xdl_SP_p23_reg_idx, gemm1);
+                    fmha_alu_D_upd();
+                }
+                return true;
+            };
+
+            return iteration(number<0>{}) && iteration(number<1>{});
+        };
+
+        auto fmha_post_process = [&](auto d) {
+            auto ps_pi        = 1 - d;
+            auto V_lds_rd_idx = ps_pi;
+
+            V_lds_load(V_lds_rd_idx) fmha_alu1(xdl_SP_p23_reg_idx);
+
+            auto xdl_SP_p23_reg_idx = ps_pi;
             cl_calc(xdl_SP_p23_reg_idx, /*gemm_idx=*/number<1>{});
-
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
-            __builtin_amdgcn_sched_barrier(0);
-
-            return ++i_total_loops < num_total_loop;
         };
 
         // pre-stage
@@ -931,15 +995,15 @@ struct BlockFmhaPipelineQRKSVS
             const auto k_origin = k_dram_block_window.get_window_origin();
 
             // (1) load K0 to LDS & VGPR
-            K_mem_load(number<0>{});
+            K_mem_load(number<0>{}); // mem_K0
             __builtin_amdgcn_s_barrier();
-            K_lds_load(number<0>{});
+            K_lds_load(number<0>{}); // lds_K0
 
             // (2) prefetch K1 and V0 to LDS in parallel with GEMM0
             if(1 < num_total_loop)
             {
-                K_mem_load(number<1>{}, /*move_tile=*/false);
-                V_mem_load(number<0>{});
+                K_mem_load(number<1>{}); // mem_K1
+                V_mem_load(number<0>{}); // mem_V0
             }
 
             // (3) mfma (Q*K0) + softmax
@@ -951,51 +1015,54 @@ struct BlockFmhaPipelineQRKSVS
 
             // (4) load V0 from LDS and compute GEMM1 (P0*V0)
             __builtin_amdgcn_s_barrier(); // Wait for V0 prefetch to complete
-            V_lds_load(number<0>{});
+            V_lds_load(number<0>{});      // lds_V0
             __builtin_amdgcn_s_barrier();
 
             fmha_alu1(number<0>{});
             fmha_alu_D_upd();
 
-            cl_calc(number<0>{}, /*gemm_idx=*/number<1>{});
+            K_mem_load(number<0>{}); // mem_K2
 
             ++i_total_loops;
+            if(num_total_loop <= i_total_loops)
+            {
+                goto label_main_loops_exit;
+            }
         }
 
         if(1 < num_total_loop)
         {
-            if constexpr(NumWarpGroups == 2)
-            {
-                if(warp_group_id == 1)
-                {
-                    __builtin_amdgcn_s_barrier();
-                    __builtin_amdgcn_s_barrier();
-                }
-            }
-
             if(warp_group_id == 0)
             {
+                V_mem_load(number<1>{}); // V1
+                K_lds_load(number<1>{}); // K1
+
                 asm volatile("s_setprio 0");
+                __builtin_amdgcn_s_barrier();
                 while(core_loop(number<0>{}))
                     ;
             }
             else
             {
                 asm volatile("s_setprio 1");
+                __builtin_amdgcn_s_barrier();
                 while(core_loop(number<1>{}))
                     ;
             }
-
-            if constexpr(NumWarpGroups == 2)
-            {
-                if(warp_group_id == 0)
-                {
-                    __builtin_amdgcn_s_barrier();
-                    __builtin_amdgcn_s_barrier();
-                }
-            }
+        }
+    label_main_loops_exit:
+        if(num_total_loop & 1)
+        {
+            goto label_odd64_tail;
         }
 
+        fmha_post_process(number<0>{});
+        goto label_write_out;
+
+    label_odd64_tail:
+        fmha_post_process(number<1>{});
+
+    label_write_out:
         // store lse
         if constexpr(kStoreLSE)
         {

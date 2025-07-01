@@ -1005,8 +1005,8 @@ struct BlockFmhaPipelineQRKSVS
             if(1 < num_total_loop)
             {
                 K_mem_load(number<1>{}); // mem_K1
-                V_mem_load(number<0>{}); // mem_V0
             }
+            V_mem_load(number<0>{}); // mem_V0
 
             // (3) mfma (Q*K0) + softmax
             __builtin_amdgcn_s_barrier();

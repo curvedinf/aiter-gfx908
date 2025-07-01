@@ -208,8 +208,8 @@ class PagedAttention:
         value_cache: torch.Tensor,
         slot_mapping: torch.Tensor,
         kv_cache_dtype: str,
-        k_scale: float,
-        v_scale: float,
+        k_scale: torch.Tensor,
+        v_scale: torch.Tensor,
         asm_layout=False,
     ) -> None:
         ops.reshape_and_cache(
@@ -236,8 +236,8 @@ class PagedAttention:
         num_kv_heads: int,
         scale: float,
         alibi_slopes: Optional[torch.Tensor],
-        k_scale: float,
-        v_scale: float,
+        k_scale: torch.Tensor,
+        v_scale: torch.Tensor,
         tp_rank: int = 0,
         blocksparse_local_blocks: int = 0,
         blocksparse_vert_stride: int = 0,
@@ -289,8 +289,8 @@ class PagedAttention:
                 max_seq_len,
                 alibi_slopes,
                 kv_cache_dtype,
-                torch.tensor(k_scale, device=output.device, dtype=torch.float32),
-                torch.tensor(v_scale, device=output.device, dtype=torch.float32),
+                k_scale,
+                v_scale,
                 fp8_out_scale if cpa_fp8_out else None,
                 _PARTITION_SIZE_ROCM,
             )

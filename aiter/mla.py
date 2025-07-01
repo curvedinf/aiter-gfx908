@@ -53,15 +53,8 @@ def _fwd_kernel_stage2_asm(
     e_max = -float("inf")
     acc = tl.zeros([BLOCK_DV], dtype=tl.float32)
 
-    # offs_v = (cur_qo * stride_mid_ob + cur_head * stride_mid_oh) * Lv + offs_d
-    # offs_logic = cur_qo * stride_mid_ob + cur_head * stride_mid_oh
-
-    # TODO: this is tmp solution, will remove later
-    max_num_split = cur_split_end - cur_split_start
-    offs_v = (
-        cur_qo * stride_mid_os * max_num_split + cur_head * stride_mid_oh
-    ) * Lv + offs_d
-    offs_logic = cur_qo * stride_mid_os * max_num_split + cur_head * stride_mid_oh
+    offs_v = (cur_qo * stride_mid_ob + cur_head * stride_mid_oh) * Lv + offs_d
+    offs_logic = cur_qo * stride_mid_ob + cur_head * stride_mid_oh
 
     num_valid_kv_splits = tl.minimum(
         cur_split_end - cur_split_start, tl.cdiv(cur_kv_seq_len, mgc)

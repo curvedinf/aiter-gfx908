@@ -69,9 +69,10 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
         }
         else if constexpr(NumWarpGroups == 2)
         {
-            using KDataType = remove_cvref_t<typename Problem::KDataType>;
+            ㄋusing KDataType = remove_cvref_t<typename Problem::KDataType>;
 
-            constexpr index_t kBlockSize = Problem::kBlockSize;
+            // make distribution for a single warp-group and duplicate content in all groups
+            constexpr index_t kBlockSize = Problem::kBlockSize / NumWarpGroups;
             constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
             constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
 
@@ -85,14 +86,15 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
 
             constexpr index_t NPerThread = kNPerBlock / (NumWarps * NThreadPerWarp);
 
+            // 2 warp-groups share the same data
             return make_static_tile_distribution(
-                tile_distribution_encoding<sequence<>,
-                                           tuple<sequence<NumWarps, NPerThread, NThreadPerWarp>,
+                tile_distribution_encoding<sequence<NumWarpGroups>,
+                                           tuple<sequence<NPerThread, NumWarps, NThreadPerWarp>,
                                                  sequence<KThreads, KPerThread>>,
-                                           tuple<sequence<1>, sequence<1, 2>>,
-                                           tuple<sequence<0>, sequence<2, 0>>,
+                                           tuple<sequence<0, 1>, sequence<1, 2>>,
+                                           tuple<sequence<0, 1>, sequence<2, 0>>,
                                            sequence<1, 2>,
-                                           sequence<1, 1>>{});
+                                           sequence<0, 1>>{});
         }
     }
 
@@ -685,13 +687,15 @@ struct BlockFmhaPipelineQRKSVS
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
         auto K_mem_load = [&](auto k_lds_write_idx) {
+#if 1
             DEBUG_STMTS
             {
                 auto origin = k_dram_block_window.get_window_origin();
-                printf("[POYENC] K_mem_load, write_idx = %d, origin = %d\n",
+                printf("[POYENC] \tK_mem_load, write_idx = %d, origin = %d\n",
                        k_lds_write_idx.value,
                        origin.at(number<0>{}));
             }
+#endif
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
@@ -708,7 +712,9 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto K_lds_load = [&](auto k_lds_read_idx) {
-            DEBUG_STMTS { printf("[POYENC] K_lds_load, read_idx = %d\n", k_lds_read_idx.value); }
+#if 1
+            DEBUG_STMTS { printf("[POYENC] \tK_lds_load, read_idx = %d\n", k_lds_read_idx.value); }
+#endif
             auto k_lds_window_for_load =
                 make_tile_window(metadata.k_lds_window(k_lds_read_idx),
                                  Policy::template MakeKRegTileDistribution<Problem>());
@@ -717,13 +723,15 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto V_mem_load = [&](auto v_lds_write_idx) {
+#if 1
             DEBUG_STMTS
             {
                 auto origin = v_dram_window.get_window_origin();
-                printf("[POYENC] V_mem_load, write_idx: %d, origin = %d\n",
+                printf("[POYENC] \tV_mem_load, write_idx: %d, origin = %d\n",
                        v_lds_write_idx.value,
                        origin.at(number<1>{}));
             }
+#endif
             const auto v_tile = load_tile(v_dram_window);
             __builtin_amdgcn_sched_barrier(0);
 
@@ -749,7 +757,9 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto V_lds_load = [&](auto v_lds_read_idx) {
-            DEBUG_STMTS { printf("[POYENC] V_lds_load, read_idx = %d\n", v_lds_read_idx.value); }
+#if 1
+            DEBUG_STMTS { printf("[POYENC] \tV_lds_load, read_idx = %d\n", v_lds_read_idx.value); }
+#endif
             auto v_lds_window_for_load =
                 make_tile_window(metadata.v_lds_window(v_lds_read_idx),
                                  Policy::template MakeVRegTileDistribution<Problem>());
@@ -758,12 +768,14 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto cl_calc = [&](auto sp_reg_idx, auto gemm_idx) {
+#if 1
             DEBUG_STMTS
             {
-                printf("[POYENC] cl_calc, gemm_idx = %d, sp_reg_idx = %d\n",
+                printf("[POYENC] \tcl_calc, gemm_idx = %d, sp_reg_idx = %d\n",
                        gemm_idx.value,
                        sp_reg_idx.value);
             }
+#endif
             if constexpr(gemm_idx == 0)
             {
                 InstructionScheduler<Problem> scheduler;
@@ -801,7 +813,9 @@ struct BlockFmhaPipelineQRKSVS
         decltype(metadata.m) m_old;
 
         auto fmha_alu0 = [&](auto sp_reg_idx) {
-            DEBUG_STMTS { printf("[POYENC] fmha_alu0, sp_reg_idx = %d\n", sp_reg_idx.value); }
+#if 1
+            DEBUG_STMTS { printf("[POYENC] \tfmha_alu0, sp_reg_idx = %d\n", sp_reg_idx.value); }
+#endif
             // S{j} = S_acc{j} * scale_s
             metadata.s(sp_reg_idx) = tile_elementwise_in(
                 [&](auto logits) {
@@ -836,7 +850,9 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_alu1 = [&](auto sp_reg_idx) {
-            DEBUG_STMTS { printf("[POYENC] fmha_alu1, sp_reg_idx = %d\n", sp_reg_idx.value); }
+#if 1
+            DEBUG_STMTS { printf("[POYENC] \tfmha_alu1, sp_reg_idx = %d\n", sp_reg_idx.value); }
+#endif
             metadata.p(sp_reg_idx) = cast_tile<PDataType>(
                 tile_elementwise_in(p_compute_element_func, metadata.p_compute(sp_reg_idx)));
             __builtin_amdgcn_sched_barrier(0);
@@ -862,7 +878,9 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_alu_D_upd = [&] {
-            DEBUG_STMTS { printf("[POYENC] fmha_alu_D_upd\n"); }
+#if 1
+            DEBUG_STMTS { printf("[POYENC] \tfmha_alu_D_upd\n"); }
+#endif
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(metadata.o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
@@ -883,7 +901,9 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_mask = [&](auto sp_reg_idx, auto k_origin) {
-            DEBUG_STMTS { printf("[POYENC] fmha_mask, sp_reg_idx = %d\n", sp_reg_idx.value); }
+#if 1
+            DEBUG_STMTS { printf("[POYENC] \tfmha_mask, sp_reg_idx = %d\n", sp_reg_idx.value); }
+#endif
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 bool need_perpixel_check = mask.IsEdgeTile(q_origin.at(number<0>{}),
@@ -912,20 +932,41 @@ struct BlockFmhaPipelineQRKSVS
             auto desc = lds_tile_window.get_bottom_tensor_view().desc_;
             auto data = lds_tile_window.get_bottom_tensor_view().buf_.p_data_;
 
-            for(int row = 0; row < num_rows; ++row)
+            if constexpr(num_rows < num_cols)
             {
-                int offset = desc.calculate_offset(make_tuple(row, 0));
-                printf("[DEVICE] %s[%3d] = %5.2f",
-                       name,
-                       row,
-                       ck_tile::type_convert<float>(data[offset]));
-                for(int col = 1; col < num_cols; ++col)
+                for(int row = 0; row < num_rows; ++row)
                 {
-                    printf(", ");
-                    offset = desc.calculate_offset(make_tuple(row, col));
-                    printf("%5.2f", ck_tile::type_convert<float>(data[offset]));
+                    int offset = desc.calculate_offset(make_tuple(row, 0));
+                    printf("[DEVICE] %s[%3d] = %5.2f",
+                           name,
+                           row,
+                           ck_tile::type_convert<float>(data[offset]));
+                    for(int col = 1; col < num_cols; ++col)
+                    {
+                        printf(", ");
+                        offset = desc.calculate_offset(make_tuple(row, col));
+                        printf("%5.2f", ck_tile::type_convert<float>(data[offset]));
+                    }
+                    printf("\n");
                 }
-                printf("\n");
+            }
+            else
+            {
+                for(int col = 0; col < num_cols; ++col)
+                {
+                    int offset = desc.calculate_offset(make_tuple(0, col));
+                    printf("[DEVICE] %s[%3d] = %5.2f",
+                           name,
+                           col,
+                           ck_tile::type_convert<float>(data[offset]));
+                    for(int row = 1; row < num_rows; ++row)
+                    {
+                        printf(", ");
+                        offset = desc.calculate_offset(make_tuple(row, col));
+                        printf("%5.2f", ck_tile::type_convert<float>(data[offset]));
+                    }
+                    printf("\n");
+                }
             }
         };
 
@@ -968,6 +1009,7 @@ struct BlockFmhaPipelineQRKSVS
                 if constexpr(cl_p == 0)
                 {
                     // phase0
+                    DEBUG_STMTS { printf("[POYENC] phase0\n"); }
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt lgkmcnt(0)");
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
@@ -975,6 +1017,7 @@ struct BlockFmhaPipelineQRKSVS
                     fmha_alu1(xdl_SP_p23_reg_idx);
 
                     // phase1
+                    DEBUG_STMTS { printf("[POYENC] phase1\n"); }
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -984,6 +1027,7 @@ struct BlockFmhaPipelineQRKSVS
                     fmha_mask(xdl_SP_p01_reg_idx, k_origin_prev);
 
                     // phase2
+                    DEBUG_STMTS { printf("[POYENC] phase2\n"); }
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -991,6 +1035,7 @@ struct BlockFmhaPipelineQRKSVS
                     fmha_alu_D_upd();
 
                     // phase3
+                    DEBUG_STMTS { printf("[POYENC] phase3\n"); }
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1004,10 +1049,12 @@ struct BlockFmhaPipelineQRKSVS
                 else
                 {
                     // phase0
+                    DEBUG_STMTS { printf("[POYENC] phase0\n"); }
                     __builtin_amdgcn_sched_barrier(0);
                     cl_load(memV, V_w4_lds_wr_idx, K_w4_lds_rd_idx);
 
                     // phase1
+                    DEBUG_STMTS { printf("[POYENC] phase1\n"); }
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1016,6 +1063,7 @@ struct BlockFmhaPipelineQRKSVS
                     fmha_alu1(xdl_SP_p23_reg_idx);
 
                     // phase2
+                    DEBUG_STMTS { printf("[POYENC] phase2\n"); }
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     const auto k_origin = k_dram_block_window.get_window_origin();
@@ -1028,6 +1076,7 @@ struct BlockFmhaPipelineQRKSVS
                     }
 
                     // phase3
+                    DEBUG_STMTS { printf("[POYENC] phase3\n"); }
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1041,18 +1090,20 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_post_process = [&](auto d) {
+            DEBUG_STMTS { printf("[POYENC] fmha_post_process, d = %d\n", d.value); }
             auto ps_pi        = number<1>{} - d;
             auto V_lds_rd_idx = ps_pi;
 
             auto xdl_SP_p23_reg_idx = ps_pi;
 
             V_lds_load(V_lds_rd_idx);
-
+            // DEBUG_STMTS { print_lds(metadata.v_lds_window(number<1>{}), "V1"); }
             cl_calc(xdl_SP_p23_reg_idx, /*gemm_idx=*/number<1>{});
         };
 
         // pre-stage
         {
+            DEBUG_STMTS { printf("[POYENC] pre-stage\n"); }
             const auto k_origin = k_dram_block_window.get_window_origin();
 
             // (1) load K0 to LDS & VGPR
@@ -1060,7 +1111,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             K_lds_load(number<0>{}); // lds_K0
 
-            DEBUG_STMTS { print_lds(metadata.k_lds_window(number<0>{}), "K0"); }
+            // DEBUG_STMTS { print_lds(metadata.k_lds_window(number<0>{}), "K0"); }
 
             // (2) prefetch K1 and V0 to LDS in parallel with GEMM0
             if(1 < num_total_loop)
@@ -1080,6 +1131,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier(); // Wait for V0 prefetch to complete
             V_lds_load(number<0>{});      // lds_V0
             __builtin_amdgcn_s_barrier();
+            // DEBUG_STMTS { print_lds(metadata.v_lds_window(number<0>{}), "V0"); }
 
             fmha_alu1(number<0>{});
             fmha_alu_D_upd();
@@ -1103,7 +1155,7 @@ struct BlockFmhaPipelineQRKSVS
                 V_mem_load(number<1>{}); // V1
                 K_lds_load(number<1>{}); // K1
 
-                DEBUG_STMTS { print_lds(metadata.k_lds_window(number<1>{}), "K1"); }
+                // DEBUG_STMTS { print_lds(metadata.k_lds_window(number<1>{}), "K1"); }
 
                 asm volatile("s_setprio 0");
                 __builtin_amdgcn_s_barrier();

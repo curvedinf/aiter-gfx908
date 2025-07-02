@@ -1006,6 +1006,8 @@ struct BlockFmhaPipelineQRKSVS
                 auto K_w4_lds_rd_idx = number<1>{} - pi;
                 auto V_w4_lds_rd_idx = pi;
 
+                bool result = true;
+
                 if constexpr(cl_p == 0)
                 {
                     // phase0
@@ -1043,7 +1045,7 @@ struct BlockFmhaPipelineQRKSVS
 
                     if(num_total_loop <= ++i_total_loops)
                     {
-                        return false;
+                        result = false;
                     }
                 }
                 else
@@ -1072,7 +1074,7 @@ struct BlockFmhaPipelineQRKSVS
 
                     if(num_total_loop <= ++i_total_loops)
                     {
-                        return false;
+                        result = false;
                     }
 
                     // phase3
@@ -1083,7 +1085,7 @@ struct BlockFmhaPipelineQRKSVS
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
                     fmha_alu_D_upd();
                 }
-                return true;
+                return result;
             };
 
             return iteration(number<0>{}) && iteration(number<1>{});

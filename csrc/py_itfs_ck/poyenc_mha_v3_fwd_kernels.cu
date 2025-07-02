@@ -69,7 +69,7 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
         }
         else if constexpr(NumWarpGroups == 2)
         {
-            ㄋusing KDataType = remove_cvref_t<typename Problem::KDataType>;
+            using KDataType = remove_cvref_t<typename Problem::KDataType>;
 
             // make distribution for a single warp-group and duplicate content in all groups
             constexpr index_t kBlockSize = Problem::kBlockSize / NumWarpGroups;
@@ -2960,7 +2960,7 @@ std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
     }
     else if(q_dtype == at::ScalarType::BFloat16)
     {
-        // launch<get_kernel_t<FmhaFwdBf16>>(args);
+        launch<get_kernel_t<FmhaFwdBf16>>(args);
     }
 
     return {out};

@@ -71,7 +71,7 @@ struct FlashMlaPrefillKernelTrait
     static constexpr int32_t kNumWarps                  = kNumWarps_;
     static constexpr int32_t kPageBlockSize             = 16;
     static constexpr int32_t kNumThreads                = kNumWarps * ck_tile::get_warp_size();
-    static constexpr int32_t kWaveOccupancy             = 2;
+    static constexpr int32_t kWaveOccupancy             = 1;
     static constexpr int32_t kNumWarpsSoftmax           = 4;
     static constexpr int32_t kNumThreadsSoftmax         = kNumWarpsSoftmax * ck_tile::get_warp_size();
     static constexpr int32_t kNumWarpsCombine           = 4;
@@ -3269,15 +3269,15 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
         params.stride_sp_lseacc   = softmax_lseaccum.stride(1);
     }
 
-    // dispatch_fmla_fwd_splictkv_prefill<Traits, ck_tile::bf16_t, float, ck_tile::bf16_t, true>(params);
-    DISPATCH_FMLA_TYPES(
-        query.scalar_type(),
-        is_causal,
-        "fmla_fwd",
-        [&](){
-            dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal>(params);
-        }();
-    );
+    dispatch_fmla_fwd_splictkv_prefill<Traits, ck_tile::bf16_t, float, ck_tile::bf16_t, true>(params);
+    // DISPATCH_FMLA_TYPES(
+    //     query.scalar_type(),
+    //     is_causal,
+    //     "fmla_fwd",
+    //     [&](){
+    //         dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal>(params);
+    //     }();
+    // );
     // assert(is_causal == true);
     // assert(query.scalar_type() == at::ScalarType::BFloat16);
     // using scalar_t = ck_tile::bf16_t;

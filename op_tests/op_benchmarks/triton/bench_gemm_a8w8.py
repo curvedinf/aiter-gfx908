@@ -13,6 +13,39 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
 )
 
 
+def bench_gemm_fn(M, N, K, metric, **kwargs):
+    # NOTE: Assume bias and output has the same dtype
+    c_dtype = str_to_torch_dtype["bf16"]
+    x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
+        M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, output=True
+    )
+
+    # flops
+    flops = 2.0 * M * N * K
+    # memory transfer
+    mem_read = (M * K) * x.element_size() + (N * K) * weight.element_size()
+    mem_write = (M * N) * bias.element_size()
+    mem = mem_read + mem_write
+
+    ms = triton.testing.do_bench(
+        lambda: gemm_a8w8(x, weight, x_scale, w_scale, bias, c_dtype, y),  # noqa: E731
+        warmup=25,
+        rep=100,
+    )
+
+    # Return exactly one scalar depending on which metric is active
+    if metric == "time":
+        return ms
+    elif metric == "throughput":
+        tflops = flops / ms * 1e-9
+        return tflops
+    elif metric == "bandwidth":
+        bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
+        return bandwidth
+    else:
+        raise ValueError("Unknown metric: " + metric)
+
+
 def run_model_benchmark(args):
     """
     Runs benchmark given a --model argument.
@@ -21,9 +54,6 @@ def run_model_benchmark(args):
 
     @triton.testing.perf_report([benchmark])
     def bench_gemm_a8w8(M, hidden_dim, intermediate_dim, metric, layer, **kwargs):
-        # NOTE: Assume bias and output has the same dtype
-        c_dtype = str_to_torch_dtype["bf16"]
-
         """
         Fc1:
              M      K                  K           N          M       N
@@ -48,35 +78,7 @@ def run_model_benchmark(args):
             K = math.ceil(K / args.tp)
         # print(f"Layer: {layer}, M: {M}, N: {N}, K: {K}, hidden_dim: {hidden_dim}, intermediate_dim: {intermediate_dim}")
 
-        x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
-            M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, output=True
-        )
-        # flops
-        flops = 2.0 * M * N * K
-        # memory transfer
-        mem_read = (M * K) * x.element_size() + (N * K) * weight.element_size()
-        mem_write = (M * N) * bias.element_size()
-        mem = mem_read + mem_write
-
-        ms = triton.testing.do_bench(
-            lambda: gemm_a8w8(
-                x, weight, x_scale, w_scale, bias, c_dtype, y
-            ),  # noqa: E731
-            warmup=25,
-            rep=100,
-        )
-
-        # Return exactly one scalar depending on which metric is active
-        if metric == "time":
-            return ms
-        elif metric == "throughput":
-            tflops = flops / ms * 1e-9
-            return tflops
-        elif metric == "bandwidth":
-            bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
-            return bandwidth
-        else:
-            raise ValueError("Unknown metric: " + metric)
+        return bench_gemm_fn(M, N, K, metric, **kwargs)
 
     bench_gemm_a8w8.run(save_path=".", print_data=True)
 
@@ -89,40 +91,9 @@ def run_shape_benchmark(args):
 
     @triton.testing.perf_report([benchmark])
     def bench_gemm_a8w8(M, N, K, metric, **kwargs):
-        # NOTE: Assume bias and output has the same dtype
-        c_dtype = str_to_torch_dtype["bf16"]
-        x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
-            M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, output=True
-        )
         # Divide N by tensor parallel
         N = math.ceil(N / args.tp)
-
-        # flops
-        flops = 2.0 * M * N * K
-        # memory transfer
-        mem_read = (M * K) * x.element_size() + (N * K) * weight.element_size()
-        mem_write = (M * N) * bias.element_size()
-        mem = mem_read + mem_write
-
-        ms = triton.testing.do_bench(
-            lambda: gemm_a8w8(
-                x, weight, x_scale, w_scale, bias, c_dtype, y
-            ),  # noqa: E731
-            warmup=25,
-            rep=100,
-        )
-
-        # Return exactly one scalar depending on which metric is active
-        if metric == "time":
-            return ms
-        elif metric == "throughput":
-            tflops = flops / ms * 1e-9
-            return tflops
-        elif metric == "bandwidth":
-            bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
-            return bandwidth
-        else:
-            raise ValueError("Unknown metric: " + metric)
+        return bench_gemm_fn(M, N, K, metric, **kwargs)
 
     bench_gemm_a8w8.run(save_path=".", print_data=True)
 

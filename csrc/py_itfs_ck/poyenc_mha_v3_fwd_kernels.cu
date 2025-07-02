@@ -30,6 +30,15 @@
     asm volatile("; [POYENC] " #marker); \
     __builtin_amdgcn_sched_barrier(0);
 
+#define WARP_ID 0
+
+#define ENABLE_DEBUG_STMTS 0
+#if ENABLE_DEBUG_STMTS
+#define DEBUG_STMTS if(get_block_1d_id() == 0 && get_warp_id() == WARP_ID && get_lane_id() == 0)
+#else
+#define DEBUG_STMTS if constexpr(false)
+#endif
+
 namespace aiter {
 
 struct BlockFmhaPipelineQRKSVSDefaultPolicy
@@ -62,8 +71,7 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
         {
             using KDataType = remove_cvref_t<typename Problem::KDataType>;
 
-            // make distribution for a single warp-group and duplicate content in all groups
-            constexpr index_t kBlockSize = Problem::kBlockSize / NumWarpGroups;
+            constexpr index_t kBlockSize = Problem::kBlockSize;
             constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
             constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
 
@@ -77,15 +85,14 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
 
             constexpr index_t NPerThread = kNPerBlock / (NumWarps * NThreadPerWarp);
 
-            // 2 warp-groups share the same data
             return make_static_tile_distribution(
-                tile_distribution_encoding<sequence<NumWarpGroups>,
-                                           tuple<sequence<NPerThread, NumWarps, NThreadPerWarp>,
+                tile_distribution_encoding<sequence<>,
+                                           tuple<sequence<NumWarps, NPerThread, NThreadPerWarp>,
                                                  sequence<KThreads, KPerThread>>,
-                                           tuple<sequence<0, 1>, sequence<1, 2>>,
-                                           tuple<sequence<0, 1>, sequence<2, 0>>,
+                                           tuple<sequence<1>, sequence<1, 2>>,
+                                           tuple<sequence<0>, sequence<2, 0>>,
                                            sequence<1, 2>,
-                                           sequence<0, 1>>{});
+                                           sequence<1, 1>>{});
         }
     }
 
@@ -678,6 +685,13 @@ struct BlockFmhaPipelineQRKSVS
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
         auto K_mem_load = [&](auto k_lds_write_idx) {
+            DEBUG_STMTS
+            {
+                auto origin = k_dram_block_window.get_window_origin();
+                printf("[POYENC] K_mem_load, write_idx = %d, origin = %d\n",
+                       k_lds_write_idx.value,
+                       origin.at(number<0>{}));
+            }
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
@@ -694,6 +708,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto K_lds_load = [&](auto k_lds_read_idx) {
+            DEBUG_STMTS { printf("[POYENC] K_lds_load, read_idx = %d\n", k_lds_read_idx.value); }
             auto k_lds_window_for_load =
                 make_tile_window(metadata.k_lds_window(k_lds_read_idx),
                                  Policy::template MakeKRegTileDistribution<Problem>());
@@ -702,6 +717,13 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto V_mem_load = [&](auto v_lds_write_idx) {
+            DEBUG_STMTS
+            {
+                auto origin = v_dram_window.get_window_origin();
+                printf("[POYENC] V_mem_load, write_idx: %d, origin = %d\n",
+                       v_lds_write_idx.value,
+                       origin.at(number<1>{}));
+            }
             const auto v_tile = load_tile(v_dram_window);
             __builtin_amdgcn_sched_barrier(0);
 
@@ -727,6 +749,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto V_lds_load = [&](auto v_lds_read_idx) {
+            DEBUG_STMTS { printf("[POYENC] V_lds_load, read_idx = %d\n", v_lds_read_idx.value); }
             auto v_lds_window_for_load =
                 make_tile_window(metadata.v_lds_window(v_lds_read_idx),
                                  Policy::template MakeVRegTileDistribution<Problem>());
@@ -735,6 +758,12 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto cl_calc = [&](auto sp_reg_idx, auto gemm_idx) {
+            DEBUG_STMTS
+            {
+                printf("[POYENC] cl_calc, gemm_idx = %d, sp_reg_idx = %d\n",
+                       gemm_idx.value,
+                       sp_reg_idx.value);
+            }
             if constexpr(gemm_idx == 0)
             {
                 InstructionScheduler<Problem> scheduler;
@@ -772,6 +801,7 @@ struct BlockFmhaPipelineQRKSVS
         decltype(metadata.m) m_old;
 
         auto fmha_alu0 = [&](auto sp_reg_idx) {
+            DEBUG_STMTS { printf("[POYENC] fmha_alu0, sp_reg_idx = %d\n", sp_reg_idx.value); }
             // S{j} = S_acc{j} * scale_s
             metadata.s(sp_reg_idx) = tile_elementwise_in(
                 [&](auto logits) {
@@ -806,6 +836,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_alu1 = [&](auto sp_reg_idx) {
+            DEBUG_STMTS { printf("[POYENC] fmha_alu1, sp_reg_idx = %d\n", sp_reg_idx.value); }
             metadata.p(sp_reg_idx) = cast_tile<PDataType>(
                 tile_elementwise_in(p_compute_element_func, metadata.p_compute(sp_reg_idx)));
             __builtin_amdgcn_sched_barrier(0);
@@ -831,6 +862,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_alu_D_upd = [&] {
+            DEBUG_STMTS { printf("[POYENC] fmha_alu_D_upd\n"); }
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(metadata.o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
@@ -851,6 +883,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_mask = [&](auto sp_reg_idx, auto k_origin) {
+            DEBUG_STMTS { printf("[POYENC] fmha_mask, sp_reg_idx = %d\n", sp_reg_idx.value); }
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 bool need_perpixel_check = mask.IsEdgeTile(q_origin.at(number<0>{}),
@@ -872,6 +905,30 @@ struct BlockFmhaPipelineQRKSVS
             }
         };
 
+        [[maybe_unused]] auto print_lds = [&](auto lds_tile_window, const char* name) {
+            const auto num_rows = lds_tile_window.get_window_lengths().at(number<0>{});
+            const auto num_cols = lds_tile_window.get_window_lengths().at(number<1>{});
+
+            auto desc = lds_tile_window.get_bottom_tensor_view().desc_;
+            auto data = lds_tile_window.get_bottom_tensor_view().buf_.p_data_;
+
+            for(int row = 0; row < num_rows; ++row)
+            {
+                int offset = desc.calculate_offset(make_tuple(row, 0));
+                printf("[DEVICE] %s[%3d] = %5.2f",
+                       name,
+                       row,
+                       ck_tile::type_convert<float>(data[offset]));
+                for(int col = 1; col < num_cols; ++col)
+                {
+                    printf(", ");
+                    offset = desc.calculate_offset(make_tuple(row, col));
+                    printf("%5.2f", ck_tile::type_convert<float>(data[offset]));
+                }
+                printf("\n");
+            }
+        };
+
         auto cl_load = [&](auto load_type, auto mem_wr_idx, auto lds_rd_idx) {
             if constexpr(load_type == 0)
             {
@@ -886,6 +943,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto core_loop = [&](auto cl_p) {
+            DEBUG_STMTS { printf("[POYENC] core_loop, cl_p = %d\n", cl_p.value); }
             auto gemm0 = number<0>{};
             auto gemm1 = number<1>{};
 
@@ -893,6 +951,7 @@ struct BlockFmhaPipelineQRKSVS
             auto memK = number<1>{};
 
             auto iteration = [&](auto pi) {
+                DEBUG_STMTS { printf("[POYENC] \titeration, pi = %d\n", pi.value); }
                 auto xdl_SP_p01_reg_idx = number<1>{} - pi;
                 auto xdl_SP_p23_reg_idx = pi;
 
@@ -919,9 +978,10 @@ struct BlockFmhaPipelineQRKSVS
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
-                    const auto k_origin = k_dram_block_window.get_window_origin();
+                    const auto k_origin      = k_dram_block_window.get_window_origin();
+                    const auto k_origin_prev = make_tuple(k_origin.at(number<0>{}) - kN0, 0);
                     cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
-                    fmha_mask(xdl_SP_p01_reg_idx, k_origin);
+                    fmha_mask(xdl_SP_p01_reg_idx, k_origin_prev);
 
                     // phase2
                     __builtin_amdgcn_sched_barrier(0);
@@ -1000,6 +1060,8 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             K_lds_load(number<0>{}); // lds_K0
 
+            DEBUG_STMTS { print_lds(metadata.k_lds_window(number<0>{}), "K0"); }
+
             // (2) prefetch K1 and V0 to LDS in parallel with GEMM0
             if(1 < num_total_loop)
             {
@@ -1027,6 +1089,11 @@ struct BlockFmhaPipelineQRKSVS
             {
                 goto label_main_loops_exit;
             }
+
+            if(2 < num_total_loop)
+            {
+                K_mem_load(number<0>{}); // mem_K2
+            }
         }
 
         if(1 < num_total_loop)
@@ -1035,6 +1102,8 @@ struct BlockFmhaPipelineQRKSVS
             {
                 V_mem_load(number<1>{}); // V1
                 K_lds_load(number<1>{}); // K1
+
+                DEBUG_STMTS { print_lds(metadata.k_lds_window(number<1>{}), "K1"); }
 
                 asm volatile("s_setprio 0");
                 __builtin_amdgcn_s_barrier();
@@ -2839,7 +2908,7 @@ std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
     }
     else if(q_dtype == at::ScalarType::BFloat16)
     {
-        launch<get_kernel_t<FmhaFwdBf16>>(args);
+        // launch<get_kernel_t<FmhaFwdBf16>>(args);
     }
 
     return {out};

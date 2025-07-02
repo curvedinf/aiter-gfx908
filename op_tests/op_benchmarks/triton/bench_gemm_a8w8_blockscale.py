@@ -15,6 +15,41 @@ import math
 block_shape = (128, 128)
 
 
+def bench_gemm_fn(M, N, K, metric):
+    block_shape_n, block_shape_k = block_shape
+    c_dtype = torch.bfloat16
+
+    x, weight, x_scale, w_scale, y = generate_gemm_a8w8_blockscale_inputs(
+        M, N, K, block_shape_n, block_shape_k, output=True
+    )
+    # flops
+    flops = 2.0 * M * N * K
+    # memory transfer
+    mem_read = (M * K) * x.element_size() + (N * K) * weight.element_size()
+    mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
+    mem = mem_read + mem_write
+
+    ms = triton.testing.do_bench(
+        lambda: gemm_a8w8_blockscale(
+            x, weight, x_scale, w_scale, c_dtype, y
+        ),  # noqa: E731
+        warmup=25,
+        rep=100,
+    )
+
+    # Return exactly one scalar depending on which metric is active
+    if metric == "time":
+        return ms
+    elif metric == "throughput":
+        tflops = flops / ms * 1e-9
+        return tflops
+    elif metric == "bandwidth":
+        bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
+        return bandwidth
+    else:
+        raise ValueError("Unknown metric: " + metric)
+
+
 def run_model_benchmark(args):
     """
     Runs benchmark given a --model argument.
@@ -25,9 +60,6 @@ def run_model_benchmark(args):
     def bench_gemm_a8w8_blockscale(
         M, hidden_dim, intermediate_dim, metric, layer, **kwargs
     ):
-        block_shape_n, block_shape_k = block_shape
-        c_dtype = torch.bfloat16
-
         """
         Fc1:
              M      K                  K           N          M       N
@@ -52,35 +84,7 @@ def run_model_benchmark(args):
             K = math.ceil(K / args.tp)
         # print(f"Layer: {layer}, M: {M}, N: {N}, K: {K}, hidden_dim: {hidden_dim}, intermediate_dim: {intermediate_dim}")
 
-        x, weight, x_scale, w_scale, y = generate_gemm_a8w8_blockscale_inputs(
-            M, N, K, block_shape_n, block_shape_k, output=True
-        )
-        # flops
-        flops = 2.0 * M * N * K
-        # memory transfer
-        mem_read = (M * K) * x.element_size() + (N * K) * weight.element_size()
-        mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
-        mem = mem_read + mem_write
-
-        ms = triton.testing.do_bench(
-            lambda: gemm_a8w8_blockscale(
-                x, weight, x_scale, w_scale, c_dtype, y
-            ),  # noqa: E731
-            warmup=25,
-            rep=100,
-        )
-
-        # Return exactly one scalar depending on which metric is active
-        if metric == "time":
-            return ms
-        elif metric == "throughput":
-            tflops = flops / ms * 1e-9
-            return tflops
-        elif metric == "bandwidth":
-            bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
-            return bandwidth
-        else:
-            raise ValueError("Unknown metric: " + metric)
+        return bench_gemm_fn(M, N, K, metric)
 
     bench_gemm_a8w8_blockscale.run(save_path=".", print_data=True)
 
@@ -90,38 +94,9 @@ def run_shape_benchmark(args):
 
     @triton.testing.perf_report([benchmark])
     def bench_gemm_a8w8_blockscale(M, N, K, metric, **kwargs):
-        block_shape_n, block_shape_k = block_shape
-
-        c_dtype = torch.bfloat16
-        x, weight, x_scale, w_scale, y = generate_gemm_a8w8_blockscale_inputs(
-            M, N, K, block_shape_n, block_shape_k, output=True
-        )
-        # flops
-        flops = 2.0 * M * N * K
-        # memory transfer
-        mem_read = (M * K) * x.element_size() + (N * K) * weight.element_size()
-        mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
-        mem = mem_read + mem_write
-
-        ms = triton.testing.do_bench(
-            lambda: gemm_a8w8_blockscale(
-                x, weight, x_scale, w_scale, c_dtype, y
-            ),  # noqa: E731
-            warmup=25,
-            rep=100,
-        )
-
-        # Return exactly one scalar depending on which metric is active
-        if metric == "time":
-            return ms
-        elif metric == "throughput":
-            tflops = flops / ms * 1e-9
-            return tflops
-        elif metric == "bandwidth":
-            bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
-            return bandwidth
-        else:
-            raise ValueError("Unknown metric: " + metric)
+        # Divide N by tensor parallel
+        N = math.ceil(N / args.tp)
+        return bench_gemm_fn(M, N, K, metric)
 
     bench_gemm_a8w8_blockscale.run(save_path=".", print_data=True)
 

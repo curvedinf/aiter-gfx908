@@ -13,7 +13,7 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
 )
 
 
-def bench_gemm_fn(M, N, K, metric, **kwargs):
+def bench_gemm_fn(M, N, K, metric):
     # NOTE: Assume bias and output has the same dtype
     c_dtype = str_to_torch_dtype["bf16"]
     x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
@@ -78,7 +78,7 @@ def run_model_benchmark(args):
             K = math.ceil(K / args.tp)
         # print(f"Layer: {layer}, M: {M}, N: {N}, K: {K}, hidden_dim: {hidden_dim}, intermediate_dim: {intermediate_dim}")
 
-        return bench_gemm_fn(M, N, K, metric, **kwargs)
+        return bench_gemm_fn(M, N, K, metric)
 
     bench_gemm_a8w8.run(save_path=".", print_data=True)
 
@@ -93,7 +93,7 @@ def run_shape_benchmark(args):
     def bench_gemm_a8w8(M, N, K, metric, **kwargs):
         # Divide N by tensor parallel
         N = math.ceil(N / args.tp)
-        return bench_gemm_fn(M, N, K, metric, **kwargs)
+        return bench_gemm_fn(M, N, K, metric)
 
     bench_gemm_a8w8.run(save_path=".", print_data=True)
 

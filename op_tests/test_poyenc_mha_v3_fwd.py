@@ -116,9 +116,9 @@ def test_flash_attn_output(
     save_tensor(k.squeeze(0).squeeze(1), "k_32x128.bin")
     save_tensor(v.squeeze(0).squeeze(1), "v_32x128.bin")
 
-    print_tensor(q.squeeze(0).squeeze(1), 'Q')
-    print_tensor(k.squeeze(0).squeeze(1), 'K')
-    print_tensor(v.squeeze(0).squeeze(1), 'V')
+    # print_tensor(q.squeeze(0).squeeze(1), 'Q')
+    # print_tensor(k.squeeze(0).squeeze(1), 'K')
+    # print_tensor(v.squeeze(0).squeeze(1), 'V')
 
     attention = aiter.poyenc_mha_v3_fwd_func
     if profile:

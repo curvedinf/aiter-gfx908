@@ -30,15 +30,6 @@
     asm volatile("; [POYENC] " #marker); \
     __builtin_amdgcn_sched_barrier(0);
 
-#define WARP_ID 0
-
-#define ENABLE_DEBUG_STMTS 0
-#if ENABLE_DEBUG_STMTS
-#define DEBUG_STMTS if(get_block_1d_id() == 0 && get_warp_id() == WARP_ID && get_lane_id() == 0)
-#else
-#define DEBUG_STMTS if constexpr(false)
-#endif
-
 namespace aiter {
 
 struct BlockFmhaPipelineQRKSVSDefaultPolicy
@@ -463,7 +454,7 @@ struct BlockFmhaPipelineQRKSVS
                 if constexpr(BiasEnum == ck_tile::BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
                     return 1;
                 else
-                    return 2;
+                    return 1;
             }
             else if constexpr(kQKHeaddim <= 256)
             {
@@ -483,7 +474,21 @@ struct BlockFmhaPipelineQRKSVS
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return Policy::template GetSmemSize<Problem>();
+        // create another LDS buffer for p
+        return Policy::template GetSmemSize<Problem>() + (kM0 * kN0 * sizeof(PDataType));
+    }
+
+    template <ck_tile::index_t MPerBlock, ck_tile::index_t NPerBlock>
+    CK_TILE_DEVICE static constexpr auto MakeSimpleLdsDesc()
+    {
+        using namespace ck_tile;
+        constexpr auto k_lds_block_desc_0 =
+            make_naive_tensor_descriptor(make_tuple(number<MPerBlock>{}, number<NPerBlock>{}),
+                                         make_tuple(number<NPerBlock>{}, number<1>{}),
+                                         number<1>{},
+                                         number<1>{});
+
+        return k_lds_block_desc_0;
     }
 
     template <typename DataType, typename Descriptor>
@@ -495,6 +500,15 @@ struct BlockFmhaPipelineQRKSVS
             make_tensor_view<address_space_enum::lds>(reinterpret_cast<DataType*>(base), desc);
         return make_tile_window(tensor_view, desc.get_lengths(), {0, 0});
     }
+
+#define WARP_ID 0
+
+#define ENABLE_DEBUG_STMTS 1
+#if ENABLE_DEBUG_STMTS
+#define DEBUG_STMTS if(get_block_1d_id() == 0 && get_warp_id() == WARP_ID && get_lane_id() == 0)
+#else
+#define DEBUG_STMTS if constexpr(false)
+#endif
 
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
@@ -548,6 +562,21 @@ struct BlockFmhaPipelineQRKSVS
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<0>{}] &&
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                       "wrong!");
+
+#if 0
+        auto s_lds = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_ptr) +
+                                            Policy::template GetSmemSize<Problem>()),
+            MakeSimpleLdsDesc<kM0, kN0>());
+        [[maybe_unused]] auto s_lds_window =
+            make_tile_window(s_lds, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
+#endif
+        auto p_lds = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<PDataType*>(static_cast<char*>(smem_ptr) +
+                                         Policy::template GetSmemSize<Problem>()),
+            MakeSimpleLdsDesc<kM0, kN0>());
+        [[maybe_unused]] auto p_lds_window =
+            make_tile_window(p_lds, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
 
         const index_t warp_group_id = get_warp_id() / 4;
 
@@ -902,7 +931,12 @@ struct BlockFmhaPipelineQRKSVS
 
         auto fmha_mask = [&](auto sp_reg_idx, auto k_origin) {
 #if 1
-            DEBUG_STMTS { printf("[POYENC] \tfmha_mask, sp_reg_idx = %d\n", sp_reg_idx.value); }
+            DEBUG_STMTS
+            {
+                printf("[POYENC] \tfmha_mask, sp_reg_idx = %d, origin: %d\n",
+                       sp_reg_idx.value,
+                       k_origin.at(number<1>{}));
+            }
 #endif
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
@@ -1125,7 +1159,12 @@ struct BlockFmhaPipelineQRKSVS
             // (3) mfma (Q*K0) + softmax
             __builtin_amdgcn_s_barrier();
             cl_calc(number<0>{}, /*gemm_idx=*/number<0>{});
-
+#if 0
+            block_sync_lds();
+            store_tile(s_lds_window, metadata.s_acc(number<0>{}));
+            block_sync_lds();
+            DEBUG_STMTS { print_lds(s_lds_window, "S"); }
+#endif
             fmha_mask(number<0>{}, k_origin);
             fmha_alu0(number<0>{});
 
@@ -1173,6 +1212,17 @@ struct BlockFmhaPipelineQRKSVS
             }
         }
     label_main_loops_exit:
+#if 0
+        block_sync_lds();
+        store_tile(s_lds_window, metadata.p_compute(number<0>{}));
+        block_sync_lds();
+        DEBUG_STMTS { print_lds(s_lds_window, "P_COMPUTE"); }
+#endif
+        block_sync_lds();
+        store_tile(p_lds_window, metadata.p(number<0>{}));
+        block_sync_lds();
+        DEBUG_STMTS { print_lds(p_lds_window, "P"); }
+
         if(num_total_loop & 1)
         {
             goto label_odd64_tail;
@@ -2962,7 +3012,7 @@ std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
     }
     else if(q_dtype == at::ScalarType::BFloat16)
     {
-        launch<get_kernel_t<FmhaFwdBf16>>(args);
+        // launch<get_kernel_t<FmhaFwdBf16>>(args);
     }
 
     return {out};

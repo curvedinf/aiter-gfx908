@@ -104,17 +104,17 @@ def test_flash_attn_output(
         dtype=dtype,
         requires_grad=False,
     )
-    print(f'{q.shape=}')
-    print(f'{k.shape=}')
-    print(f'{v.shape=}')
+    # print(f'{q.shape=}')
+    # print(f'{k.shape=}')
+    # print(f'{v.shape=}')
 
     def save_tensor(tensor, fname):
         tensor_np = tensor.cpu().numpy()
         tensor_np.tofile(fname)
 
-    save_tensor(q.squeeze(0).squeeze(1), "q_256x128.bin")
-    save_tensor(k.squeeze(0).squeeze(1), "k_32x128.bin")
-    save_tensor(v.squeeze(0).squeeze(1), "v_32x128.bin")
+    save_tensor(q.squeeze(0).squeeze(1), f"q_{q.size(1)}x{q.size(3)}.bin")
+    save_tensor(k.squeeze(0).squeeze(1), f"k_{k.size(1)}x{k.size(3)}.bin")
+    save_tensor(v.squeeze(0).squeeze(1), f"v_{v.size(1)}x{v.size(3)}.bin")
 
     # print_tensor(q.squeeze(0).squeeze(1), 'Q')
     # print_tensor(k.squeeze(0).squeeze(1), 'K')
@@ -140,8 +140,6 @@ def test_flash_attn_output(
         upcast=False,
         reorder_ops=True,
     )
-
-    # torch.testing.assert_allclose(out[:, :128, :, :], out_ref[:, :128, :, :], rtol=1e-3, atol=1e-3)
 
     if not profile:
         print(f"Output max diff: {(out - out_ref).abs().max().item()}")

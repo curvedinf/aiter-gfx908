@@ -501,7 +501,7 @@ struct BlockFmhaPipelineQRKSVS
         return make_tile_window(tensor_view, desc.get_lengths(), {0, 0});
     }
 
-#define WARP_ID 0
+#define WARP_ID 4
 
 #define ENABLE_DEBUG_STMTS 1
 #if ENABLE_DEBUG_STMTS
@@ -511,6 +511,7 @@ struct BlockFmhaPipelineQRKSVS
 #endif
 
 #define ENABLE_TRACE 0
+#define ENABLE_TENSOR_DUMP 0
 
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
@@ -565,14 +566,12 @@ struct BlockFmhaPipelineQRKSVS
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                       "wrong!");
 
-#if 0
         auto s_lds = make_tensor_view<address_space_enum::lds>(
-            reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_ptr) +
-                                            Policy::template GetSmemSize<Problem>()),
+            reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_ptr)),
             MakeSimpleLdsDesc<kM0, kN0>());
         [[maybe_unused]] auto s_lds_window =
             make_tile_window(s_lds, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
-#endif
+
         auto p_lds = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<PDataType*>(static_cast<char*>(smem_ptr) +
                                          Policy::template GetSmemSize<Problem>()),
@@ -639,13 +638,14 @@ struct BlockFmhaPipelineQRKSVS
         // initialize k_lds_window and v_lds_window
         static_for<0, 2, 1>{}([&](auto idx) {
             metadata.k_lds_window(idx) = make_lds_tile_window<KDataType>(
-                static_cast<char*>(smem_ptr) + idx * Policy::template GetSmemSizeKV<Problem>(),
+                static_cast<char*>(smem_ptr) +
+                    (2 * idx) * Policy::template GetSmemSizeKV<Problem>(),
                 Policy::template MakeKLdsBlockDescriptor<Problem>());
         });
         static_for<0, 2, 1>{}([&](auto idx) {
             metadata.v_lds_window(idx) = make_lds_tile_window<VDataType>(
                 static_cast<char*>(smem_ptr) +
-                    (2 + idx) * Policy::template GetSmemSizeKV<Problem>(),
+                    (2 * idx + 1) * Policy::template GetSmemSizeKV<Problem>(),
                 Policy::template MakeVLdsBlockDescriptor<Problem>());
         });
 
@@ -961,6 +961,17 @@ struct BlockFmhaPipelineQRKSVS
             }
         };
 
+        [[maybe_unused]] auto print_dist_tensor = [&](const auto& dist_tensor, const char* name) {
+            printf("[POYENC] %s (size=%d): %5.2f",
+                   name,
+                   decltype(dist_tensor.thread_buf_)::size(),
+                   ck_tile::type_convert<float>(dist_tensor.thread_buf_[0]));
+            static_for<1, decltype(dist_tensor.thread_buf_)::size(), 1>{}([&](auto i) {
+                printf(", %5.2f", ck_tile::type_convert<float>(dist_tensor.thread_buf_[i]));
+            });
+            printf("\n");
+        };
+
         [[maybe_unused]] auto print_lds = [&](auto lds_tile_window, const char* name) {
             const auto num_rows = lds_tile_window.get_window_lengths().at(number<0>{});
             const auto num_cols = lds_tile_window.get_window_lengths().at(number<1>{});
@@ -968,7 +979,7 @@ struct BlockFmhaPipelineQRKSVS
             auto desc = lds_tile_window.get_bottom_tensor_view().desc_;
             auto data = lds_tile_window.get_bottom_tensor_view().buf_.p_data_;
 
-            if constexpr(num_rows < num_cols)
+            if constexpr(true || num_rows < num_cols)
             {
                 for(int row = 0; row < num_rows; ++row)
                 {
@@ -1020,6 +1031,9 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto core_loop = [&](auto cl_p) {
+            __builtin_amdgcn_sched_barrier(0);
+            asm volatile("; [POYENC] before core_loop");
+            __builtin_amdgcn_sched_barrier(0);
 #if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] core_loop, cl_p = %d\n", cl_p.value); }
 #endif
@@ -1052,18 +1066,41 @@ struct BlockFmhaPipelineQRKSVS
                 {
 // phase0
 #if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase0\n"); }
+                    DEBUG_STMTS { printf("[POYENC] Wave0-3 phase0\n"); }
 #endif
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("; [POYENC] Wave0-3 phase0");
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt lgkmcnt(0)");
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
                     fmha_alu0(xdl_SP_p23_reg_idx);
                     fmha_alu1(xdl_SP_p23_reg_idx);
 
+#if 0 && ENABLE_TENSOR_DUMP
+                    // print K1
+                    block_sync_lds();
+                    DEBUG_STMTS { print_lds(metadata.k_lds_window(xdl_SP_p01_reg_idx), "K"); }
+#endif
+#if 0
+                    // print K1 tile
+                    DEBUG_STMTS
+                    {
+                        print_dist_tensor(metadata.k_tile, "K1");
+                    }
+#endif
+#if ENABLE_TENSOR_DUMP
+                    // print S1
+                    block_sync_lds();
+                    store_tile(s_lds_window, metadata.s_acc(xdl_SP_p01_reg_idx));
+                    block_sync_lds();
+                    DEBUG_STMTS { print_lds(s_lds_window, "S"); }
+#endif
 // phase1
 #if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase1\n"); }
+                    DEBUG_STMTS { printf("[POYENC] Wave0-3 phase1\n"); }
 #endif
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("; [POYENC] Wave0-3 phase1");
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1071,11 +1108,16 @@ struct BlockFmhaPipelineQRKSVS
                     const auto k_origin_prev = make_tuple(k_origin.at(number<0>{}) - kN0, 0);
                     cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
                     fmha_mask(xdl_SP_p01_reg_idx, k_origin_prev);
-
+#if 0
+                    __builtin_amdgcn_sched_barrier(0);
+                    __builtin_amdgcn_sched_barrier(0);
+#endif
 // phase2
 #if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase2\n"); }
+                    DEBUG_STMTS { printf("[POYENC] Wave0-3 phase2\n"); }
 #endif
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("; [POYENC] Wave0-3 phase2");
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1084,8 +1126,10 @@ struct BlockFmhaPipelineQRKSVS
 
 // phase3
 #if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase3\n"); }
+                    DEBUG_STMTS { printf("[POYENC] Wave0-3 phase3\n"); }
 #endif
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("; [POYENC] Wave0-3 phase3");
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1100,32 +1144,63 @@ struct BlockFmhaPipelineQRKSVS
                 {
 // phase0
 #if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase0\n"); }
+                    DEBUG_STMTS { printf("[POYENC] Wave4-7 phase0\n"); }
 #endif
                     __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("; [POYENC] Wave4-7 phase0");
+                    __builtin_amdgcn_sched_barrier(0);
                     cl_load(memV, V_w4_lds_wr_idx, K_w4_lds_rd_idx);
-
+#if 0
+                    __builtin_amdgcn_sched_barrier(0);
+                    __builtin_amdgcn_sched_barrier(0);
+#endif
 // phase1
 #if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase1\n"); }
+                    DEBUG_STMTS { printf("[POYENC] Wave4-7 phase1\n"); }
 #endif
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("; [POYENC] Wave4-7 phase1");
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
                     fmha_alu0(xdl_SP_p23_reg_idx);
                     fmha_alu1(xdl_SP_p23_reg_idx);
-
+#if 0
+                    // print K1 tile
+                    DEBUG_STMTS
+                    {
+                        printf("[POYENC] K1 tile (size=%d): %5.2f",
+                               decltype(metadata.k_tile.thread_buf_)::size(),
+                               ck_tile::type_convert<float>(metadata.k_tile.thread_buf_[0]));
+                        static_for<1, decltype(metadata.k_tile.thread_buf_)::size(), 1>{}(
+                            [&](auto i) {
+                                printf(
+                                    ", %5.2f",
+                                    ck_tile::type_convert<float>(metadata.k_tile.thread_buf_[i]));
+                            });
+                        printf("\n");
+                    }
+#endif
+#if 0 && ENABLE_TENSOR_DUMP
+                    // print S1
+                    block_sync_lds();
+                    store_tile(s_lds_window, metadata.s_acc(xdl_SP_p01_reg_idx));
+                    block_sync_lds();
+                    DEBUG_STMTS { print_lds(s_lds_window, "S"); }
+#endif
 // phase2
 #if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase2\n"); }
+                    DEBUG_STMTS { printf("[POYENC] Wave4-7 phase2\n"); }
 #endif
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("; [POYENC] Wave4-7 phase2");
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     const auto k_origin = k_dram_block_window.get_window_origin();
-                    fmha_mask(xdl_SP_p01_reg_idx, k_origin);
                     cl_load(memK, K_w4_lds_wr_idx, V_w4_lds_rd_idx);
-
+                    // FIXME: add following fmha_mask() call back after fixing origin
+                    // fmha_mask(xdl_SP_p01_reg_idx, k_origin);
                     if(num_total_loop <= ++i_total_loops)
                     {
                         result = false;
@@ -1133,8 +1208,10 @@ struct BlockFmhaPipelineQRKSVS
 
 // phase3
 #if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase3\n"); }
+                    DEBUG_STMTS { printf("[POYENC] Wave4-7 phase3\n"); }
 #endif
+                    __builtin_amdgcn_sched_barrier(0);
+                    asm volatile("; [POYENC] Wave4-7 phase3");
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1143,7 +1220,9 @@ struct BlockFmhaPipelineQRKSVS
                 }
                 return result;
             };
-
+            __builtin_amdgcn_sched_barrier(0);
+            asm volatile("; [POYENC] end core_loop");
+            __builtin_amdgcn_sched_barrier(0);
             return iteration(number<0>{}) && iteration(number<1>{});
         };
 
@@ -1154,15 +1233,42 @@ struct BlockFmhaPipelineQRKSVS
             auto ps_pi        = number<1>{} - d;
             auto V_lds_rd_idx = ps_pi;
 
-            auto xdl_SP_p23_reg_idx = ps_pi;
-
             V_lds_load(V_lds_rd_idx);
-            // DEBUG_STMTS { print_lds(metadata.v_lds_window(number<1>{}), "V1"); }
+            fmha_alu0(ps_pi);
+            fmha_alu1(ps_pi);
+
+            auto xdl_SP_p23_reg_idx = ps_pi;
             cl_calc(xdl_SP_p23_reg_idx, /*gemm_idx=*/number<1>{});
         };
 
+        set_tile(metadata.s(number<0>{}),
+                 ck_tile::type_convert<
+                     typename std::decay_t<decltype(metadata.s(number<0>{}))>::DataType>(-1.0));
+        set_tile(metadata.s(number<1>{}),
+                 ck_tile::type_convert<
+                     typename std::decay_t<decltype(metadata.s(number<0>{}))>::DataType>(-1.0));
+
+        set_tile(
+            metadata.p_compute(number<0>{}),
+            ck_tile::type_convert<
+                typename std::decay_t<decltype(metadata.p_compute(number<0>{}))>::DataType>(-1.0));
+        set_tile(
+            metadata.p_compute(number<1>{}),
+            ck_tile::type_convert<
+                typename std::decay_t<decltype(metadata.p_compute(number<0>{}))>::DataType>(-1.0));
+
+        set_tile(metadata.p(number<0>{}),
+                 ck_tile::type_convert<
+                     typename std::decay_t<decltype(metadata.p(number<0>{}))>::DataType>(-1.0));
+        set_tile(metadata.p(number<1>{}),
+                 ck_tile::type_convert<
+                     typename std::decay_t<decltype(metadata.p(number<0>{}))>::DataType>(-1.0));
+
         // pre-stage
         {
+            __builtin_amdgcn_sched_barrier(0);
+            asm volatile("; [POYENC] before pre-stage");
+            __builtin_amdgcn_sched_barrier(0);
 #if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] pre-stage\n"); }
 #endif
@@ -1171,9 +1277,15 @@ struct BlockFmhaPipelineQRKSVS
             // (1) load K0 to LDS & VGPR
             K_mem_load(number<0>{}); // mem_K0
             __builtin_amdgcn_s_barrier();
-            K_lds_load(number<0>{}); // lds_K0
 
-            // DEBUG_STMTS { print_lds(metadata.k_lds_window(number<0>{}), "K0"); }
+#if 0 && ENABLE_TENSOR_DUMP
+            // print K0
+            block_sync_lds();
+            DEBUG_STMTS { print_lds(metadata.k_lds_window(number<0>{}), "K"); }
+            block_sync_lds();
+#endif
+
+            K_lds_load(number<0>{}); // lds_K0
 
             // (2) prefetch K1 and V0 to LDS in parallel with GEMM0
             if(1 < num_total_loop)
@@ -1182,10 +1294,36 @@ struct BlockFmhaPipelineQRKSVS
             }
             V_mem_load(number<0>{}); // mem_V0
 
+// print K0 tile
+#if 0
+            block_sync_lds();
+            DEBUG_STMTS
+            {
+                printf("[POYENC] K0 tile (size=%d): %5.2f",
+                       decltype(metadata.k_tile.thread_buf_)::size(),
+                       ck_tile::type_convert<float>(metadata.k_tile.thread_buf_[0]));
+                static_for<1, decltype(metadata.k_tile.thread_buf_)::size(), 1>{}([&](auto i) {
+                    printf(", %5.2f", ck_tile::type_convert<float>(metadata.k_tile.thread_buf_[i]));
+                });
+                printf("\n");
+            }
+#endif
+
             // (3) mfma (Q*K0) + softmax
             __builtin_amdgcn_s_barrier();
             cl_calc(number<0>{}, /*gemm_idx=*/number<0>{});
+
 #if 0
+            // clear s_lds_window
+            std::decay_t<decltype(metadata.s_acc(number<0>{}))> dummy;
+            clear_tile(dummy);
+            block_sync_lds();
+            store_tile(s_lds_window, dummy);
+            block_sync_lds();
+#endif
+
+#if 0 && ENABLE_TENSOR_DUMP
+            // print S0
             block_sync_lds();
             store_tile(s_lds_window, metadata.s_acc(number<0>{}));
             block_sync_lds();
@@ -1213,6 +1351,10 @@ struct BlockFmhaPipelineQRKSVS
             {
                 K_mem_load(number<0>{}); // mem_K2
             }
+
+            __builtin_amdgcn_sched_barrier(0);
+            asm volatile("; [POYENC] end pre-stage");
+            __builtin_amdgcn_sched_barrier(0);
         }
 
         if(1 < num_total_loop)
@@ -1244,11 +1386,47 @@ struct BlockFmhaPipelineQRKSVS
         block_sync_lds();
         DEBUG_STMTS { print_lds(s_lds_window, "P_COMPUTE"); }
 #endif
+#if 0
+        DEBUG_STMTS
+        {
+            print_dist_tensor(metadata.s_acc(number<0>{}), "S_ACC0");
+        }
+        DEBUG_STMTS
+        {
+            print_dist_tensor(metadata.s_acc(number<1>{}), "S_ACC1");
+        }
+#endif
+#if 0
+        DEBUG_STMTS
+        {
+            print_dist_tensor(metadata.s(number<0>{}), "S0");
+        }
+        DEBUG_STMTS
+        {
+            print_dist_tensor(metadata.s(number<1>{}), "S1");
+        }
+#endif
+#if 0
+        DEBUG_STMTS
+        {
+            print_dist_tensor(metadata.p_compute(number<0>{}), "P_COMPUTE0");
+        }
+        DEBUG_STMTS
+        {
+            print_dist_tensor(metadata.p_compute(number<1>{}), "P_COMPUTE1");
+        }
+#endif
+#if 0
         block_sync_lds();
         store_tile(p_lds_window, metadata.p(number<0>{}));
         block_sync_lds();
-        DEBUG_STMTS { print_lds(p_lds_window, "P"); }
+        DEBUG_STMTS { print_lds(p_lds_window, "P0"); }
 
+        block_sync_lds();
+        store_tile(p_lds_window, metadata.p(number<1>{}));
+        block_sync_lds();
+        DEBUG_STMTS { print_lds(p_lds_window, "P1"); }
+#endif
         if(num_total_loop & 1)
         {
             goto label_odd64_tail;

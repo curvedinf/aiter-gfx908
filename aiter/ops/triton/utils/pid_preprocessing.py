@@ -6,6 +6,7 @@ import triton
 import triton.language as tl
 
 
+@triton.jit
 def remap_xcd_chunked(
     pid, GRID_MN, NUM_XCDS: tl.constexpr = 8, CHUNK_SIZE: tl.constexpr = 2
 ):

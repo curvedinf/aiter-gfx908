@@ -510,6 +510,8 @@ struct BlockFmhaPipelineQRKSVS
 #define DEBUG_STMTS if constexpr(false)
 #endif
 
+#define ENABLE_TRACE 0
+
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -716,7 +718,7 @@ struct BlockFmhaPipelineQRKSVS
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
         auto K_mem_load = [&](auto k_lds_write_idx) {
-#if 1
+#if ENABLE_TRACE
             DEBUG_STMTS
             {
                 auto origin = k_dram_block_window.get_window_origin();
@@ -741,7 +743,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto K_lds_load = [&](auto k_lds_read_idx) {
-#if 1
+#if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] \tK_lds_load, read_idx = %d\n", k_lds_read_idx.value); }
 #endif
             auto k_lds_window_for_load =
@@ -752,7 +754,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto V_mem_load = [&](auto v_lds_write_idx) {
-#if 1
+#if ENABLE_TRACE
             DEBUG_STMTS
             {
                 auto origin = v_dram_window.get_window_origin();
@@ -786,7 +788,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto V_lds_load = [&](auto v_lds_read_idx) {
-#if 1
+#if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] \tV_lds_load, read_idx = %d\n", v_lds_read_idx.value); }
 #endif
             auto v_lds_window_for_load =
@@ -797,7 +799,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto cl_calc = [&](auto sp_reg_idx, auto gemm_idx) {
-#if 1
+#if ENABLE_TRACE
             DEBUG_STMTS
             {
                 printf("[POYENC] \tcl_calc, gemm_idx = %d, sp_reg_idx = %d\n",
@@ -842,7 +844,7 @@ struct BlockFmhaPipelineQRKSVS
         decltype(metadata.m) m_old;
 
         auto fmha_alu0 = [&](auto sp_reg_idx) {
-#if 1
+#if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] \tfmha_alu0, sp_reg_idx = %d\n", sp_reg_idx.value); }
 #endif
             // S{j} = S_acc{j} * scale_s
@@ -879,7 +881,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_alu1 = [&](auto sp_reg_idx) {
-#if 1
+#if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] \tfmha_alu1, sp_reg_idx = %d\n", sp_reg_idx.value); }
 #endif
             metadata.p(sp_reg_idx) = cast_tile<PDataType>(
@@ -907,7 +909,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_alu_D_upd = [&] {
-#if 1
+#if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] \tfmha_alu_D_upd\n"); }
 #endif
             // l{j}, Oacc{j}
@@ -930,7 +932,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_mask = [&](auto sp_reg_idx, auto k_origin) {
-#if 1
+#if ENABLE_TRACE
             DEBUG_STMTS
             {
                 printf("[POYENC] \tfmha_mask, sp_reg_idx = %d, origin: %d\n",
@@ -1018,7 +1020,9 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto core_loop = [&](auto cl_p) {
+#if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] core_loop, cl_p = %d\n", cl_p.value); }
+#endif
             auto gemm0 = number<0>{};
             auto gemm1 = number<1>{};
 
@@ -1026,7 +1030,9 @@ struct BlockFmhaPipelineQRKSVS
             auto memK = number<1>{};
 
             auto iteration = [&](auto pi) {
+#if ENABLE_TRACE
                 DEBUG_STMTS { printf("[POYENC] \titeration, pi = %d\n", pi.value); }
+#endif
                 auto xdl_SP_p01_reg_idx = number<1>{} - pi;
                 auto xdl_SP_p23_reg_idx = pi;
 
@@ -1044,16 +1050,20 @@ struct BlockFmhaPipelineQRKSVS
 
                 if constexpr(cl_p == 0)
                 {
-                    // phase0
+// phase0
+#if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase0\n"); }
+#endif
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt lgkmcnt(0)");
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
                     fmha_alu0(xdl_SP_p23_reg_idx);
                     fmha_alu1(xdl_SP_p23_reg_idx);
 
-                    // phase1
+// phase1
+#if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase1\n"); }
+#endif
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1062,16 +1072,20 @@ struct BlockFmhaPipelineQRKSVS
                     cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
                     fmha_mask(xdl_SP_p01_reg_idx, k_origin_prev);
 
-                    // phase2
+// phase2
+#if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase2\n"); }
+#endif
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
                     fmha_alu_D_upd();
 
-                    // phase3
+// phase3
+#if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase3\n"); }
+#endif
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1084,13 +1098,17 @@ struct BlockFmhaPipelineQRKSVS
                 }
                 else
                 {
-                    // phase0
+// phase0
+#if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase0\n"); }
+#endif
                     __builtin_amdgcn_sched_barrier(0);
                     cl_load(memV, V_w4_lds_wr_idx, K_w4_lds_rd_idx);
 
-                    // phase1
+// phase1
+#if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase1\n"); }
+#endif
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1098,8 +1116,10 @@ struct BlockFmhaPipelineQRKSVS
                     fmha_alu0(xdl_SP_p23_reg_idx);
                     fmha_alu1(xdl_SP_p23_reg_idx);
 
-                    // phase2
+// phase2
+#if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase2\n"); }
+#endif
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     const auto k_origin = k_dram_block_window.get_window_origin();
@@ -1111,8 +1131,10 @@ struct BlockFmhaPipelineQRKSVS
                         result = false;
                     }
 
-                    // phase3
+// phase3
+#if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase3\n"); }
+#endif
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
@@ -1126,7 +1148,9 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_post_process = [&](auto d) {
+#if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] fmha_post_process, d = %d\n", d.value); }
+#endif
             auto ps_pi        = number<1>{} - d;
             auto V_lds_rd_idx = ps_pi;
 
@@ -1139,7 +1163,9 @@ struct BlockFmhaPipelineQRKSVS
 
         // pre-stage
         {
+#if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] pre-stage\n"); }
+#endif
             const auto k_origin = k_dram_block_window.get_window_origin();
 
             // (1) load K0 to LDS & VGPR

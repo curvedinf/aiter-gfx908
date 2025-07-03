@@ -595,7 +595,7 @@ def _fused_moe_kernel(
     # GRID_MN = max_num_tokens_padded // BLOCK_M * num_pid_n, we dont want to use this in the remapping, but rather the num_tokens_post_padded * num_pid_n
     # pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
 
-    last_token_remapped = num_pid_n * num_tokens_post_padded
+    last_token_remapped = num_pid_n * ((num_tokens_post_padded + BLOCK_SIZE_M - 1) // BLOCK_SIZE_M)
     pid = remap_xcd(pid, last_token_remapped, NUM_XCDS)
 
     

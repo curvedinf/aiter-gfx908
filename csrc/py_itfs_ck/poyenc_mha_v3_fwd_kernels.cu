@@ -1164,8 +1164,8 @@ struct BlockFmhaPipelineQRKSVS
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
-                    /// TODO: find better way to map fmha_alu(0,96) call
                     fmha_alu0(xdl_SP_p23_reg_idx);
+                    fmha_alu1(xdl_SP_p23_reg_idx);
 #if 0
                     // print K1 tile
                     DEBUG_STMTS
@@ -1329,8 +1329,8 @@ struct BlockFmhaPipelineQRKSVS
             DEBUG_STMTS { print_lds(s_lds_window, "S"); }
 #endif
             fmha_mask(number<0>{}, k_origin);
+            /// TODO: find better way to map fmha_alu(0,96) call
             fmha_alu0(number<0>{});
-            fmha_alu1(number<0>{});
             fmha_alu_D_upd();
 
             ++i_total_loops;

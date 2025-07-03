@@ -9,15 +9,17 @@ import triton.language as tl
 def remap_xcd(pid, total_pid, NUM_XCDS: tl.constexpr = 8):
     """
     Parameters:
-        last_k: the last index of the set, i.e. len(set) - 1
-        k: the index to be remapped
+        pid: the program index to be remapped
+        total_pid: the last program index to be remapped
         NUM_XCD: number of XCDs in the GPU, e.g. 8 for MI300x and MI350
     Function maps indices pid = 0, ..., total_pid - 1 so that [multiples of NUM_XCD] come first (those present in the set),
     then [multiples of NUM_XCD] + 1, ..., until [multiples of NUM_XCD] + NUM_XCD - 1
     As indices are distributed to the XCDs in a round robin fashion, this remaps the indices at the XCDs back to consecutive indices.
     """
-
-    ## pid remapping on xcds
+    # If pid is larger than the last pid, return it as is (we might want to leave some pids at the end not remapped)
+    if pid > total_pid - 1:
+        return pid
+    # pid remapping on xcds
     # Number of pids per XCD in the new arrangement
     pids_per_xcd = (total_pid + NUM_XCDS - 1) // NUM_XCDS
     # When GRID_MN cannot divide NUM_XCDS, some xcds will have

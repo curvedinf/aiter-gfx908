@@ -587,8 +587,18 @@ def _fused_moe_kernel(
     num_pid_m = tl.cdiv(EM, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
+    num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
+
     NUM_XCDS: tl.constexpr = 8
-    pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
+    
+    # Old
+    # GRID_MN = max_num_tokens_padded // BLOCK_M * num_pid_n, we dont want to use this in the remapping, but rather the num_tokens_post_padded * num_pid_n
+    # pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
+
+    last_token_remapped = num_pid_n * num_tokens_post_padded
+    pid = remap_xcd(pid, last_token_remapped, NUM_XCDS)
+
+    
     pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
     # ----------------------------------------------------------
@@ -597,7 +607,7 @@ def _fused_moe_kernel(
     # and accumulate
     # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
     # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
-    num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
+    
     if pid_m * BLOCK_SIZE_M >= num_tokens_post_padded:
         return
     offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
@@ -959,7 +969,11 @@ def fused_moe(
         assert A_scale is None
         assert B_scale is None
 
-    EM = sorted_token_ids.shape[0]
+    EM = sorted_token_ids.shape[0] # This is fucking large
+    # EM = num_tokens_post_padded # but cant because its a runtime var
+
+
+
     if A.shape[0] < config["BLOCK_SIZE_M"]:
         # optimize for small batch_size.
         # We assume that top_ids of each token is unique, so

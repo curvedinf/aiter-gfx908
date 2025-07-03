@@ -878,16 +878,15 @@ struct BlockFmhaPipelineQRKSVS
                         ck_tile::exp2(metadata.s(sp_reg_idx)[i_j_idx] - row_max);
                 });
             });
+
+            metadata.p(sp_reg_idx) = cast_tile<PDataType>(
+                tile_elementwise_in(p_compute_element_func, metadata.p_compute(sp_reg_idx)));
         };
 
         auto fmha_alu1 = [&](auto sp_reg_idx) {
 #if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] \tfmha_alu1, sp_reg_idx = %d\n", sp_reg_idx.value); }
 #endif
-            metadata.p(sp_reg_idx) = cast_tile<PDataType>(
-                tile_elementwise_in(p_compute_element_func, metadata.p_compute(sp_reg_idx)));
-            __builtin_amdgcn_sched_barrier(0);
-            __builtin_amdgcn_s_barrier();
             auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                 metadata.p_compute(sp_reg_idx),
                 sequence<1>{},

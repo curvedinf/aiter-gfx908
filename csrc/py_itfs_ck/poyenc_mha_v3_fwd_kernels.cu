@@ -501,7 +501,7 @@ struct BlockFmhaPipelineQRKSVS
         return make_tile_window(tensor_view, desc.get_lengths(), {0, 0});
     }
 
-#define WARP_ID 4
+#define WARP_ID 0
 
 #define ENABLE_DEBUG_STMTS 1
 #if ENABLE_DEBUG_STMTS
@@ -1164,8 +1164,8 @@ struct BlockFmhaPipelineQRKSVS
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
+                    /// TODO: find better way to map fmha_alu(0,96) call
                     fmha_alu0(xdl_SP_p23_reg_idx);
-                    fmha_alu1(xdl_SP_p23_reg_idx);
 #if 0
                     // print K1 tile
                     DEBUG_STMTS
@@ -1234,7 +1234,6 @@ struct BlockFmhaPipelineQRKSVS
             auto V_lds_rd_idx = ps_pi;
 
             V_lds_load(V_lds_rd_idx);
-            fmha_alu0(ps_pi);
             fmha_alu1(ps_pi);
 
             auto xdl_SP_p23_reg_idx = ps_pi;
@@ -1331,13 +1330,6 @@ struct BlockFmhaPipelineQRKSVS
 #endif
             fmha_mask(number<0>{}, k_origin);
             fmha_alu0(number<0>{});
-
-            // (4) load V0 from LDS and compute GEMM1 (P0*V0)
-            __builtin_amdgcn_s_barrier(); // Wait for V0 prefetch to complete
-            V_lds_load(number<0>{});      // lds_V0
-            __builtin_amdgcn_s_barrier();
-            // DEBUG_STMTS { print_lds(metadata.v_lds_window(number<0>{}), "V0"); }
-
             fmha_alu1(number<0>{});
             fmha_alu_D_upd();
 
@@ -1416,6 +1408,12 @@ struct BlockFmhaPipelineQRKSVS
             print_dist_tensor(metadata.p_compute(number<1>{}), "P_COMPUTE1");
         }
 #endif
+        if(num_total_loop % 2)
+        {
+            goto label_odd64_tail;
+        }
+
+        fmha_post_process(number<0>{});
 #if 0
         block_sync_lds();
         store_tile(p_lds_window, metadata.p(number<0>{}));
@@ -1427,12 +1425,7 @@ struct BlockFmhaPipelineQRKSVS
         block_sync_lds();
         DEBUG_STMTS { print_lds(p_lds_window, "P1"); }
 #endif
-        if(num_total_loop & 1)
-        {
-            goto label_odd64_tail;
-        }
 
-        fmha_post_process(number<0>{});
         goto label_write_out;
 
     label_odd64_tail:

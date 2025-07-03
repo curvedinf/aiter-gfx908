@@ -16,9 +16,6 @@ def remap_xcd(pid, total_pid, NUM_XCDS: tl.constexpr = 8):
     then [multiples of NUM_XCD] + 1, ..., until [multiples of NUM_XCD] + NUM_XCD - 1
     As indices are distributed to the XCDs in a round robin fashion, this remaps the indices at the XCDs back to consecutive indices.
     """
-    # If pid is larger than the last pid, return it as is (we might want to leave some pids at the end not remapped)
-    if pid >= total_pid:
-        return pid
     # pid remapping on xcds
     # Number of pids per XCD in the new arrangement
     pids_per_xcd = (total_pid + NUM_XCDS - 1) // NUM_XCDS

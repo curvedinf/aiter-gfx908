@@ -120,24 +120,19 @@ def _fused_moe_kernel_gptq_awq(
     # Map program ids `pid` to the block of C it should compute.
     # This is done in a grouped ordering to promote L2 data reuse.
     pid = tl.program_id(axis=0)
-    num_pid_m = tl.cdiv(EM, BLOCK_SIZE_M)
-    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+    num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
 
+    num_pid_m = tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M)
+    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
     NUM_XCDS: tl.constexpr = 8
 
-    # ----------------------------------------------------------
-    # Create pointers for the first blocks of A and B.
-    # We will advance this pointer as we move in the K direction
-    # and accumulate
-    # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
-    # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
-    num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
-    GRID_MN = num_pid_n * tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M)
-    pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
+    GRID_MN = num_pid_n * num_pid_m
+    if pid < GRID_MN:
+        pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
+    else:
+        return
     pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
-    if pid_m * BLOCK_SIZE_M >= num_tokens_post_padded:
-        return
     offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
     offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
     token_mask = offs_token < num_valid_tokens
@@ -572,26 +567,19 @@ def _fused_moe_kernel(
     # Map program ids `pid` to the block of C it should compute.
     # This is done in a grouped ordering to promote L2 data reuse.
     pid = tl.program_id(axis=0)
-    num_pid_m = tl.cdiv(EM, BLOCK_SIZE_M)
-    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
 
+    num_pid_m = tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M)
+    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
     NUM_XCDS: tl.constexpr = 8
 
-    GRID_MN = num_pid_n * tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M)
-    pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
+    GRID_MN = num_pid_n * num_pid_m
+    if pid < GRID_MN:
+        pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
+    else:
+        return
     pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
-    # ----------------------------------------------------------
-    # Create pointers for the first blocks of A and B.
-    # We will advance this pointer as we move in the K direction
-    # and accumulate
-    # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
-    # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
-
-    if pid_m * BLOCK_SIZE_M >= num_tokens_post_padded:
-        return
     offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
     offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
     token_mask = offs_token < num_valid_tokens

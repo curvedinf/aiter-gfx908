@@ -11,6 +11,7 @@ from aiter.test_mha_common import (
     attention_ref,
 )
 import pytest
+import sys
 
 
 def run_torch(
@@ -74,8 +75,16 @@ def test_flash_attn_output(
     nheads_k = nheads if mha_type == "mha" else (1 if mha_type == "mqa" else 3)
     assert nheads % nheads_k == 0
 
+    def print_tensor(tensor, tensor_name):
+        tensor_list = tensor.tolist()
+
+        for i, row in enumerate(tensor_list):
+            formatted_row = ", ".join("{:5.2f}".format(x) for x in row)
+            print("[HOST] {0}[{1:3}] = {2}".format(tensor_name, i, formatted_row))
+        sys.stdout.flush()
+
     q = torch.randn(
-        batch_size, seqlen_q, nheads, d, device="cuda", dtype=dtype, requires_grad=True
+        batch_size, seqlen_q, nheads, d, device="cuda", dtype=dtype, requires_grad=False
     )
     k = torch.randn(
         batch_size,
@@ -84,7 +93,7 @@ def test_flash_attn_output(
         d,
         device="cuda",
         dtype=dtype,
-        requires_grad=True,
+        requires_grad=False,
     )
     v = torch.randn(
         batch_size,
@@ -93,8 +102,23 @@ def test_flash_attn_output(
         d_v,
         device="cuda",
         dtype=dtype,
-        requires_grad=True,
+        requires_grad=False,
     )
+    print(f'{q.shape=}')
+    print(f'{k.shape=}')
+    print(f'{v.shape=}')
+
+    def save_tensor(tensor, fname):
+        tensor_np = tensor.cpu().numpy()
+        tensor_np.tofile(fname)
+
+    save_tensor(q.squeeze(0).squeeze(1), "q_256x128.bin")
+    save_tensor(k.squeeze(0).squeeze(1), "k_32x128.bin")
+    save_tensor(v.squeeze(0).squeeze(1), "v_32x128.bin")
+
+    print_tensor(q.squeeze(0).squeeze(1), 'Q')
+    print_tensor(k.squeeze(0).squeeze(1), 'K')
+    print_tensor(v.squeeze(0).squeeze(1), 'V')
 
     attention = aiter.poyenc_mha_v3_fwd_func
     if profile:
@@ -117,6 +141,8 @@ def test_flash_attn_output(
         reorder_ops=True,
     )
 
+    # torch.testing.assert_allclose(out[:, :128, :, :], out_ref[:, :128, :, :], rtol=1e-3, atol=1e-3)
+
     if not profile:
         print(f"Output max diff: {(out - out_ref).abs().max().item()}")
         print(f"Output Pytorch max diff: {(out_pt - out_ref).abs().max().item()}")
@@ -125,14 +151,14 @@ def test_flash_attn_output(
 
 
 if __name__ == "__main__":
-    batch_size = 2
-    nheads = 5
-    (seqlen_q, seqlen_k) = (512, 512)
+    batch_size = 1
+    nheads = 1
+    (seqlen_q, seqlen_k) = (256, 32)
     d = 128
     d_v = 128
     mha_type = "mha"
-    dtype = dtypes.bf16
-    seed = None
+    dtype = dtypes.fp16
+    seed = 0
 
     test_flash_attn_output(
         batch_size, nheads, seqlen_q, seqlen_k, d, d_v, mha_type, dtype, seed

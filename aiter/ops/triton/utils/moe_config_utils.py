@@ -35,6 +35,7 @@ def get_config_dtype_str(
         return "float32"
     return None
 
+
 @functools.lru_cache
 def get_moe_configs(dtype: Optional[str]) -> Optional[Dict[int, Any]]:
     """
@@ -49,9 +50,7 @@ def get_moe_configs(dtype: Optional[str]) -> Optional[Dict[int, Any]]:
     # directory
     dtype_str = "DEFAULT" if dtype == None else dtype
     dev = arch_info.get_device()
-    config_file_path = (
-        f"{AITER_TRITON_CONFIGS_PATH}/moe/{dev}-MOE-{dtype_str}.json"
-    )
+    config_file_path = f"{AITER_TRITON_CONFIGS_PATH}/moe/{dev}-MOE-{dtype_str}.json"
 
     if os.path.exists(config_file_path):
         with open(config_file_path) as f:
@@ -60,7 +59,9 @@ def get_moe_configs(dtype: Optional[str]) -> Optional[Dict[int, Any]]:
 
     # If no optimized configuration is available, we will use the default
     # configuration
-    warnings.warn(f"No MoE configuration found for device '{dev}' with dtype '{dtype_str}'. Using default configuration.")
+    warnings.warn(
+        f"No MoE configuration found for device '{dev}' with dtype '{dtype_str}'. Using default configuration."
+    )
     return None
 
 

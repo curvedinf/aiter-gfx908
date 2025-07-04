@@ -475,9 +475,9 @@ struct BlockFmhaPipelineQRKSVS
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         // create another LDS buffer for p
-        return
-            ck_tile::max(kM0 * kN1 * sizeof(PDataType),
-                         Policy::template GetSmemSize<Problem>() + kM0 * kN0 * sizeof(PDataType));
+        return ck_tile::max(kM0 * kN1 * sizeof(PDataType),
+                            Policy::template GetSmemSize<Problem>() +
+                                kM0 * kN0 * sizeof(PDataType));
     }
 
     template <ck_tile::index_t MPerBlock, ck_tile::index_t NPerBlock>
@@ -489,6 +489,16 @@ struct BlockFmhaPipelineQRKSVS
                                          make_tuple(number<NPerBlock>{}, number<1>{}),
                                          number<1>{},
                                          number<1>{});
+
+        return k_lds_block_desc_0;
+    }
+
+    template <ck_tile::index_t MPerBlock>
+    CK_TILE_DEVICE static constexpr auto MakeSimpleLdsDesc1D()
+    {
+        using namespace ck_tile;
+        constexpr auto k_lds_block_desc_0 = make_naive_tensor_descriptor(
+            make_tuple(number<MPerBlock>{}), make_tuple(number<1>{}), number<1>{}, number<1>{});
 
         return k_lds_block_desc_0;
     }
@@ -589,6 +599,13 @@ struct BlockFmhaPipelineQRKSVS
             MakeSimpleLdsDesc<kM0, kN1>());
         [[maybe_unused]] auto o_lds_window =
             make_tile_window(o_lds, make_tuple(number<kM0>{}, number<kN1>{}), {0, 0});
+
+        auto m_lds = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<SMPLComputeDataType*>(static_cast<char*>(smem_ptr) +
+                                                   Policy::template GetSmemSize<Problem>()),
+            MakeSimpleLdsDesc1D<kM0>());
+        [[maybe_unused]] auto m_lds_window =
+            make_tile_window(m_lds, make_tuple(number<kM0>{}), {0});
 
         const index_t warp_group_id = get_warp_id() / 4;
 
@@ -784,6 +801,23 @@ struct BlockFmhaPipelineQRKSVS
             }
         };
 
+        [[maybe_unused]] auto print_lds_1d = [&](auto lds_tile_window, const char* name) {
+            const auto num_elems = lds_tile_window.get_window_lengths().at(number<0>{});
+
+            auto desc = lds_tile_window.get_bottom_tensor_view().desc_;
+            auto data = lds_tile_window.get_bottom_tensor_view().buf_.p_data_;
+
+            int offset = desc.calculate_offset(make_tuple(0));
+            printf("[DEVICE] %s = %5.2f", name, ck_tile::type_convert<float>(data[offset]));
+            for(int e = 1; e < num_elems; ++e)
+            {
+                printf(", ");
+                offset = desc.calculate_offset(make_tuple(e));
+                printf("%5.2f", ck_tile::type_convert<float>(data[offset]));
+            }
+            printf("\n");
+        };
+
         auto K_mem_load = [&](auto k_lds_write_idx) {
 #if ENABLE_TRACE
             DEBUG_STMTS
@@ -915,11 +949,17 @@ struct BlockFmhaPipelineQRKSVS
                 tile_elementwise_in(p_compute_element_func, metadata.p_compute(sp_reg_idx)));
         };
 
+        decltype(block_tile_reduce<SMPLComputeDataType>(metadata.p_compute(number<0>{}),
+                                                        sequence<1>{},
+                                                        f_sum,
+                                                        SMPLComputeDataType{0})) rowsum_p;
+        clear_tile(rowsum_p);
+
         auto fmha_alu1 = [&](auto sp_reg_idx) {
 #if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] \tfmha_alu1, sp_reg_idx = %d\n", sp_reg_idx.value); }
 #endif
-            auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
+            rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                 metadata.p_compute(sp_reg_idx),
                 sequence<1>{},
                 f_sum,
@@ -1129,13 +1169,6 @@ struct BlockFmhaPipelineQRKSVS
                     block_sync_lds();
                     DEBUG_STMTS { print_lds(metadata.k_lds_window(xdl_SP_p01_reg_idx), "K"); }
 #endif
-#if 0
-                    // print K1 tile
-                    DEBUG_STMTS
-                    {
-                        print_dist_tensor(metadata.k_tile, "K1");
-                    }
-#endif
 #if 0 && ENABLE_TENSOR_DUMP
                     // print S1
                     block_sync_lds();
@@ -1173,6 +1206,7 @@ struct BlockFmhaPipelineQRKSVS
                     /// TODO: move some fmha_alu_D_upd() instructions after gemm1
                     fmha_alu_D_upd();
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
+                    fmha_alu1(xdl_SP_p01_reg_idx); // maybe need this?
 
 // phase3
 #if ENABLE_TRACE
@@ -1267,6 +1301,7 @@ struct BlockFmhaPipelineQRKSVS
                     /// TODO: move some fmha_alu_D_upd() instructions after gemm1
                     fmha_alu_D_upd();
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
+                    fmha_alu1(xdl_SP_p01_reg_idx); // maybe need this?
                 }
                 return result;
             };
@@ -1427,6 +1462,57 @@ struct BlockFmhaPipelineQRKSVS
     label_main_loops_exit:
 #if 0
         block_sync_lds();
+        store_tile(m_lds_window, m_old);
+        block_sync_lds();
+        DEBUG_STMTS { print_lds_1d(m_lds_window, "M_OLD"); }
+
+        block_sync_lds();
+        store_tile(m_lds_window, metadata.m);
+        block_sync_lds();
+        DEBUG_STMTS { print_lds_1d(m_lds_window, "M"); }
+
+#if 0
+        // add for experiment
+        fmha_alu1(number<1>{});
+#endif
+
+        block_sync_lds();
+        store_tile(m_lds_window, rowsum_p);
+        block_sync_lds();
+        DEBUG_STMTS { print_lds_1d(m_lds_window, "R"); }
+
+        block_sync_lds();
+        store_tile(m_lds_window, metadata.l);
+        block_sync_lds();
+        DEBUG_STMTS { print_lds_1d(m_lds_window, "L"); }
+
+// if num_tool_loops is odd, use SP[0]
+// otherwise, use SP[1]
+#if 0
+        block_sync_lds();
+        store_tile(s_lds_window, metadata.s(number<1>{}));
+        block_sync_lds();
+        DEBUG_STMTS { print_lds(s_lds_window, "S"); }
+#endif
+
+#if 1
+        block_sync_lds();
+        store_tile(s_lds_window, metadata.p_compute(number<1>{}));
+        block_sync_lds();
+        DEBUG_STMTS { print_lds(s_lds_window, "P_COMPUTE"); }
+#endif
+
+#if 1
+        auto o_acc_fp16 = cast_tile<PDataType>(metadata.o_acc);
+        block_sync_lds();
+        store_tile(o_lds_window, o_acc_fp16);
+        block_sync_lds();
+
+        DEBUG_STMTS { print_lds(o_lds_window, "O_ACC(rescaled)"); }
+#endif
+#endif
+#if 0
+        block_sync_lds();
         store_tile(p_lds_window, metadata.p(number<1>{}));
         block_sync_lds();
         DEBUG_STMTS { print_lds(p_lds_window, "P1"); }
@@ -1448,6 +1534,14 @@ struct BlockFmhaPipelineQRKSVS
         fmha_post_process(number<1>{});
 
     label_write_out:
+#if 0
+        auto o_acc_fp16 = cast_tile<PDataType>(metadata.o_acc);
+        block_sync_lds();
+        store_tile(o_lds_window, o_acc_fp16);
+        block_sync_lds();
+
+        DEBUG_STMTS { print_lds(o_lds_window, "O_ACC"); }
+#endif
         // store lse
         if constexpr(kStoreLSE)
         {

@@ -566,6 +566,7 @@ struct BlockFmhaPipelineQRKSVS
                           kN0 == BiasDramBlockWindowTmp{}.get_window_lengths()[number<1>{}],
                       "wrong!");
 
+        static_assert(sizeof(SaccDataType) * kM0 * kN0 <= GetSmemSize());
         auto s_lds = make_tensor_view<address_space_enum::lds>(
             reinterpret_cast<SaccDataType*>(static_cast<char*>(smem_ptr)),
             MakeSimpleLdsDesc<kM0, kN0>());
@@ -1125,7 +1126,7 @@ struct BlockFmhaPipelineQRKSVS
                         print_dist_tensor(metadata.k_tile, "K1");
                     }
 #endif
-#if ENABLE_TENSOR_DUMP
+#if 0 && ENABLE_TENSOR_DUMP
                     // print S1
                     block_sync_lds();
                     store_tile(s_lds_window, metadata.s_acc(xdl_SP_p01_reg_idx));
@@ -1144,7 +1145,8 @@ struct BlockFmhaPipelineQRKSVS
                     const auto k_origin      = k_dram_block_window.get_window_origin();
                     const auto k_origin_prev = make_tuple(k_origin.at(number<0>{}) - kN0, 0);
                     cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
-                    fmha_mask(xdl_SP_p01_reg_idx, k_origin_prev);
+                    // FIXME: add following fmha_mask() call back after fixing origin
+                    // fmha_mask(xdl_SP_p01_reg_idx, k_origin_prev);
 #if 0
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_sched_barrier(0);
@@ -1158,8 +1160,9 @@ struct BlockFmhaPipelineQRKSVS
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
-                    cl_calc(xdl_SP_p23_reg_idx, gemm1);
+                    /// TODO: move some fmha_alu_D_upd() instructions after gemm1
                     fmha_alu_D_upd();
+                    cl_calc(xdl_SP_p23_reg_idx, gemm1);
 
 // phase3
 #if ENABLE_TRACE
@@ -1251,8 +1254,9 @@ struct BlockFmhaPipelineQRKSVS
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
-                    cl_calc(xdl_SP_p23_reg_idx, gemm1);
+                    /// TODO: move some fmha_alu_D_upd() instructions after gemm1
                     fmha_alu_D_upd();
+                    cl_calc(xdl_SP_p23_reg_idx, gemm1);
                 }
                 return result;
             };
@@ -1271,6 +1275,8 @@ struct BlockFmhaPipelineQRKSVS
 
             V_lds_load(V_lds_rd_idx);
             fmha_alu1(ps_pi);
+            /// TODO: move some fmha_alu_D_upd() instructions after gemm1
+            fmha_alu_D_upd();
 
             auto xdl_SP_p23_reg_idx = ps_pi;
             gemm(xdl_SP_p23_reg_idx, /*gemm_idx=*/number<1>{});
@@ -1364,7 +1370,8 @@ struct BlockFmhaPipelineQRKSVS
             block_sync_lds();
             DEBUG_STMTS { print_lds(s_lds_window, "S"); }
 #endif
-            fmha_mask(number<0>{}, k_origin);
+            // FIXME: add following fmha_mask() call back after fixing origin
+            // fmha_mask(number<0>{}, k_origin);
             /// TODO: find better way to map fmha_alu(0,96) call
             fmha_alu0(number<0>{});
             fmha_alu_D_upd();
@@ -1410,39 +1417,14 @@ struct BlockFmhaPipelineQRKSVS
     label_main_loops_exit:
 #if 0
         block_sync_lds();
-        store_tile(s_lds_window, metadata.p_compute(number<0>{}));
+        store_tile(p_lds_window, metadata.p(number<1>{}));
         block_sync_lds();
-        DEBUG_STMTS { print_lds(s_lds_window, "P_COMPUTE"); }
-#endif
-#if 0
-        DEBUG_STMTS
-        {
-            print_dist_tensor(metadata.s_acc(number<0>{}), "S_ACC0");
-        }
-        DEBUG_STMTS
-        {
-            print_dist_tensor(metadata.s_acc(number<1>{}), "S_ACC1");
-        }
-#endif
-#if 0
-        DEBUG_STMTS
-        {
-            print_dist_tensor(metadata.s(number<0>{}), "S0");
-        }
-        DEBUG_STMTS
-        {
-            print_dist_tensor(metadata.s(number<1>{}), "S1");
-        }
-#endif
-#if 0
-        DEBUG_STMTS
-        {
-            print_dist_tensor(metadata.p_compute(number<0>{}), "P_COMPUTE0");
-        }
-        DEBUG_STMTS
-        {
-            print_dist_tensor(metadata.p_compute(number<1>{}), "P_COMPUTE1");
-        }
+        DEBUG_STMTS { print_lds(p_lds_window, "P1"); }
+
+        block_sync_lds();
+        store_tile(p_lds_window, metadata.p(number<0>{}));
+        block_sync_lds();
+        DEBUG_STMTS { print_lds(p_lds_window, "P0"); }
 #endif
         if(num_total_loop % 2)
         {
@@ -1450,18 +1432,6 @@ struct BlockFmhaPipelineQRKSVS
         }
 
         fmha_post_process(number<0>{});
-#if 0
-        block_sync_lds();
-        store_tile(p_lds_window, metadata.p(number<0>{}));
-        block_sync_lds();
-        DEBUG_STMTS { print_lds(p_lds_window, "P0"); }
-
-        block_sync_lds();
-        store_tile(p_lds_window, metadata.p(number<1>{}));
-        block_sync_lds();
-        DEBUG_STMTS { print_lds(p_lds_window, "P1"); }
-#endif
-
         goto label_write_out;
 
     label_odd64_tail:

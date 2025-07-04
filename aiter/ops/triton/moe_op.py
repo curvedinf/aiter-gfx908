@@ -939,8 +939,8 @@ def fused_moe(
         assert A_scale is None
         assert B_scale is None
 
-    EM = sorted_token_ids.shape[0]  # This is large
-    # EM = num_tokens_post_padded # but cant use it because its a runtime var
+    EM = sorted_token_ids.shape[0] #  EM > num_tokens_post_padded
+    # EM = num_tokens_post_padded # we would want this but cant use it because its a runtime var
 
     if A.shape[0] < config["BLOCK_SIZE_M"]:
         # optimize for small batch_size.

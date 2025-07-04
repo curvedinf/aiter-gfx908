@@ -475,7 +475,9 @@ struct BlockFmhaPipelineQRKSVS
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
         // create another LDS buffer for p
-        return Policy::template GetSmemSize<Problem>() + (kM0 * kN0 * sizeof(PDataType));
+        return
+            ck_tile::max(kM0 * kN1 * sizeof(PDataType),
+                         Policy::template GetSmemSize<Problem>() + kM0 * kN0 * sizeof(PDataType));
     }
 
     template <ck_tile::index_t MPerBlock, ck_tile::index_t NPerBlock>
@@ -502,10 +504,12 @@ struct BlockFmhaPipelineQRKSVS
     }
 
 #define WARP_ID 0
+#define LANE_ID 0
 
 #define ENABLE_DEBUG_STMTS 1
 #if ENABLE_DEBUG_STMTS
-#define DEBUG_STMTS if(get_block_1d_id() == 0 && get_warp_id() == WARP_ID && get_lane_id() == 0)
+#define DEBUG_STMTS \
+    if(get_block_1d_id() == 0 && get_warp_id() == WARP_ID && get_lane_id() == LANE_ID)
 #else
 #define DEBUG_STMTS if constexpr(false)
 #endif
@@ -579,6 +583,12 @@ struct BlockFmhaPipelineQRKSVS
             MakeSimpleLdsDesc<kM0, kN0>());
         [[maybe_unused]] auto p_lds_window =
             make_tile_window(p_lds, make_tuple(number<kM0>{}, number<kN0>{}), {0, 0});
+
+        auto o_lds = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<PDataType*>(static_cast<char*>(smem_ptr)),
+            MakeSimpleLdsDesc<kM0, kN1>());
+        [[maybe_unused]] auto o_lds_window =
+            make_tile_window(o_lds, make_tuple(number<kM0>{}, number<kN1>{}), {0, 0});
 
         const index_t warp_group_id = get_warp_id() / 4;
 
@@ -717,6 +727,62 @@ struct BlockFmhaPipelineQRKSVS
         static_assert(1 == k1_loops);
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
+
+        [[maybe_unused]] auto print_dist_tensor = [&](const auto& dist_tensor, const char* name) {
+            printf("[POYENC] %s (size=%d): %5.2f",
+                   name,
+                   decltype(dist_tensor.thread_buf_)::size(),
+                   ck_tile::type_convert<float>(dist_tensor.thread_buf_[0]));
+            static_for<1, decltype(dist_tensor.thread_buf_)::size(), 1>{}([&](auto i) {
+                printf(", %5.2f", ck_tile::type_convert<float>(dist_tensor.thread_buf_[i]));
+            });
+            printf("\n");
+        };
+
+        [[maybe_unused]] auto print_lds = [&](auto lds_tile_window, const char* name) {
+            const auto num_rows = lds_tile_window.get_window_lengths().at(number<0>{});
+            const auto num_cols = lds_tile_window.get_window_lengths().at(number<1>{});
+
+            auto desc = lds_tile_window.get_bottom_tensor_view().desc_;
+            auto data = lds_tile_window.get_bottom_tensor_view().buf_.p_data_;
+
+            if constexpr(true || num_rows < num_cols)
+            {
+                for(int row = 0; row < num_rows; ++row)
+                {
+                    int offset = desc.calculate_offset(make_tuple(row, 0));
+                    printf("[DEVICE] %s[%3d] = %5.2f",
+                           name,
+                           row,
+                           ck_tile::type_convert<float>(data[offset]));
+                    for(int col = 1; col < num_cols; ++col)
+                    {
+                        printf(", ");
+                        offset = desc.calculate_offset(make_tuple(row, col));
+                        printf("%5.2f", ck_tile::type_convert<float>(data[offset]));
+                    }
+                    printf("\n");
+                }
+            }
+            else
+            {
+                for(int col = 0; col < num_cols; ++col)
+                {
+                    int offset = desc.calculate_offset(make_tuple(0, col));
+                    printf("[DEVICE] %s[%3d] = %5.2f",
+                           name,
+                           col,
+                           ck_tile::type_convert<float>(data[offset]));
+                    for(int row = 1; row < num_rows; ++row)
+                    {
+                        printf(", ");
+                        offset = desc.calculate_offset(make_tuple(row, col));
+                        printf("%5.2f", ck_tile::type_convert<float>(data[offset]));
+                    }
+                    printf("\n");
+                }
+            }
+        };
 
         auto K_mem_load = [&](auto k_lds_write_idx) {
 #if ENABLE_TRACE
@@ -996,62 +1062,6 @@ struct BlockFmhaPipelineQRKSVS
                                         k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
                                     return mask.IsOutOfBound(row, col);
                                 });
-                }
-            }
-        };
-
-        [[maybe_unused]] auto print_dist_tensor = [&](const auto& dist_tensor, const char* name) {
-            printf("[POYENC] %s (size=%d): %5.2f",
-                   name,
-                   decltype(dist_tensor.thread_buf_)::size(),
-                   ck_tile::type_convert<float>(dist_tensor.thread_buf_[0]));
-            static_for<1, decltype(dist_tensor.thread_buf_)::size(), 1>{}([&](auto i) {
-                printf(", %5.2f", ck_tile::type_convert<float>(dist_tensor.thread_buf_[i]));
-            });
-            printf("\n");
-        };
-
-        [[maybe_unused]] auto print_lds = [&](auto lds_tile_window, const char* name) {
-            const auto num_rows = lds_tile_window.get_window_lengths().at(number<0>{});
-            const auto num_cols = lds_tile_window.get_window_lengths().at(number<1>{});
-
-            auto desc = lds_tile_window.get_bottom_tensor_view().desc_;
-            auto data = lds_tile_window.get_bottom_tensor_view().buf_.p_data_;
-
-            if constexpr(true || num_rows < num_cols)
-            {
-                for(int row = 0; row < num_rows; ++row)
-                {
-                    int offset = desc.calculate_offset(make_tuple(row, 0));
-                    printf("[DEVICE] %s[%3d] = %5.2f",
-                           name,
-                           row,
-                           ck_tile::type_convert<float>(data[offset]));
-                    for(int col = 1; col < num_cols; ++col)
-                    {
-                        printf(", ");
-                        offset = desc.calculate_offset(make_tuple(row, col));
-                        printf("%5.2f", ck_tile::type_convert<float>(data[offset]));
-                    }
-                    printf("\n");
-                }
-            }
-            else
-            {
-                for(int col = 0; col < num_cols; ++col)
-                {
-                    int offset = desc.calculate_offset(make_tuple(0, col));
-                    printf("[DEVICE] %s[%3d] = %5.2f",
-                           name,
-                           col,
-                           ck_tile::type_convert<float>(data[offset]));
-                    for(int row = 1; row < num_rows; ++row)
-                    {
-                        printf(", ");
-                        offset = desc.calculate_offset(make_tuple(row, col));
-                        printf("%5.2f", ck_tile::type_convert<float>(data[offset]));
-                    }
-                    printf("\n");
                 }
             }
         };

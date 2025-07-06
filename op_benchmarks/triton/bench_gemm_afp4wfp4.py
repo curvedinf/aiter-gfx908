@@ -3,6 +3,10 @@ import sys
 import torch
 import triton
 from aiter.ops.triton.gemm_afp4wfp4 import gemm_afp4wfp4
+import sys
+
+sys.path.append('/workspace/projects/aiter/')
+
 from op_tests.triton_tests.test_gemm_afp4wfp4 import generate_gemm_afp4wfp4_inputs
 from utils.benchmark_utils import get_model_configs, get_available_models
 

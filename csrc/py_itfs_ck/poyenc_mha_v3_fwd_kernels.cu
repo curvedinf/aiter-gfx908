@@ -1056,7 +1056,7 @@ struct BlockFmhaPipelineQRKSVS
             {
                 printf("[POYENC] \tfmha_mask, sp_reg_idx = %d, origin: %d\n",
                        sp_reg_idx.value,
-                       k_origin.at(number<1>{}));
+                       k_origin.at(number<0>{}));
             }
 #endif
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
@@ -1160,7 +1160,7 @@ struct BlockFmhaPipelineQRKSVS
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
                     const auto k_origin      = k_dram_block_window.get_window_origin();
-                    const auto k_origin_prev = make_tuple(k_origin.at(number<0>{}) - kN0, 0);
+                    const auto k_origin_prev = make_tuple(k_origin.at(number<0>{}) - 2 * kN0, 0);
                     cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
                     // FIXME: add following fmha_mask() call back after fixing origin
                     fmha_mask(xdl_SP_p01_reg_idx, k_origin_prev);
@@ -1253,7 +1253,7 @@ struct BlockFmhaPipelineQRKSVS
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     const auto k_origin      = k_dram_block_window.get_window_origin();
-                    const auto k_origin_prev = make_tuple(k_origin.at(number<0>{}) - kN0, 0);
+                    const auto k_origin_prev = make_tuple(k_origin.at(number<0>{}) - 2 * kN0, 0);
                     cl_load(memK, K_w4_lds_wr_idx, V_w4_lds_rd_idx);
                     // FIXME: add following fmha_mask() call back after fixing origin
                     fmha_mask(xdl_SP_p01_reg_idx, k_origin_prev);

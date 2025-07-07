@@ -51,13 +51,14 @@ def get_shape_benchmark_object(plot_name, args):
     return benchmark
 
 
-def get_model_benchmark_object(plot_name, args, model_benchmark_shapes_fn=None):
+def get_model_benchmark_object(plot_name, args, x_names = None, model_benchmark_shapes_fn=None):
     """
     Utility function for returning a triton.testing.Benchmark object to populate.
 
     Note: This is for benchmarking models (e.g with the --model arg).
     """
-    x_names = ["M", "hidden_dim", "intermediate_dim"]
+    if x_names is None:
+        x_names = ["M", "hidden_dim", "intermediate_dim"]
     if model_benchmark_shapes_fn is None:
         model_benchmark_shapes_fn = model_benchmark_shapes
     if not args.fc1 and not args.fc2:

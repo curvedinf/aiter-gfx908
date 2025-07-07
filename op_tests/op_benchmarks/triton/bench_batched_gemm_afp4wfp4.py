@@ -1,6 +1,7 @@
 import sys
 import torch
 import triton
+import math
 from op_tests.triton_tests.test_batched_gemm_afp4wfp4 import (
     generate_batched_gemm_afp4wfp4_inputs,
 )
@@ -70,11 +71,25 @@ def run_model_benchmark(args):
     benchmark = get_model_benchmark_object(
         plot_name="GEMM MXFP4 x MXFP4 Benchmark",
         args=args,
+        x_names=["batch", "M", "hidden_dim", "intermediate_dim"],
         model_benchmark_shapes_fn=model_benchmark_shapes,
     )
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_afp4wfp4_blockscale(batch, M, N, K, metric, provider):
+    def bench_gemm_afp4wfp4_blockscale(batch, M, hidden_dim, intermediate_dim, metric, layer, **kwargs):
+        if layer == "fc1":
+            if args.no_glu:
+                N, K = intermediate_dim, hidden_dim
+            else:
+                N, K = intermediate_dim * 2, hidden_dim
+            # Divide N by tensor parallel
+            N = math.ceil(N / args.tp)
+        elif layer == "fc2":
+            N, K = hidden_dim, intermediate_dim
+            # Divide K by tensor parallel
+            K = math.ceil(K / args.tp)
+        # print(f"Layer: {layer}, M: {M}, N: {N}, K: {K}, hidden_dim: {hidden_dim}, intermediate_dim: {intermediate_dim}")
+
         return bench_gemm_fn(batch, M, N, K, metric)
 
     bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)

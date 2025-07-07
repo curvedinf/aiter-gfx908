@@ -1,5 +1,5 @@
-# Ported from vllm/vllm/attention/ops/triton_unified_attention.py
-
+# The kernel in this file is adapted from vLLM:
+# https://github.com/vllm-project/vllm/blob/main/vllm/attention/ops/triton_unified_attention.py
 import triton
 import triton.language as tl
 import torch

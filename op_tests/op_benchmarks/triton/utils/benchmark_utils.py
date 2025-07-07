@@ -51,13 +51,15 @@ def get_shape_benchmark_object(plot_name, args):
     return benchmark
 
 
-def get_model_benchmark_object(plot_name, args):
+def get_model_benchmark_object(plot_name, args, model_benchmark_shapes_fn=None):
     """
     Utility function for returning a triton.testing.Benchmark object to populate.
 
     Note: This is for benchmarking models (e.g with the --model arg).
     """
     x_names = ["M", "hidden_dim", "intermediate_dim"]
+    if model_benchmark_shapes_fn is None:
+        model_benchmark_shapes_fn = model_benchmark_shapes
     if not args.fc1 and not args.fc2:
         # by default, benchmark both
         warnings.warn(
@@ -65,7 +67,7 @@ def get_model_benchmark_object(plot_name, args):
         )
         args.fc1 = True
         args.fc2 = True
-    x_vals_list = model_benchmark_shapes(args)
+    x_vals_list = model_benchmark_shapes_fn(args)
 
     if args.metric == "time":
         ylabel = "Time (ms)"

@@ -30,19 +30,6 @@ def get_parser(kernel_name: str) -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", type=str, help=model_help)
     parser.add_argument(
-        "-M",
-        type=int,
-        default=4096,
-        help="M dim of model benchmark if only one model is under test",
-    )
-    parser.add_argument(
-        "--shape",
-        type=int,
-        nargs=3,
-        metavar=("M", "N", "K"),
-        help="user-defined shape to benchmark",
-    )
-    parser.add_argument(
         "--metric",
         type=str,
         choices=["time", "throughput", "bandwidth"],
@@ -83,5 +70,18 @@ def add_argparse_ff(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         "-no_glu",
         action="store_true",
         help="Benchmark the feed-forward layer without GLU activation (default is with GLU)",
+    )
+    parser.add_argument(
+        "-M",
+        type=int,
+        default=4096,
+        help="M dim of model benchmark if only one model is under test",
+    )
+    parser.add_argument(
+        "--shape",
+        type=int,
+        nargs=3,
+        metavar=("M", "N", "K"),
+        help="user-defined shape to benchmark",
     )
     return parser

@@ -1,7 +1,6 @@
 import triton
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_model_configs,
-    get_available_models,
     print_vgpr,
 )
 import torch
@@ -20,6 +19,7 @@ from aiter.test_mha_common import (
     generate_random_padding_mask,
     generate_qkv,
 )
+from op_tests.op_benchmarks.triton.utils.argparse import get_parser
 
 
 def nonvarlen_benchmark_configs():
@@ -148,12 +148,14 @@ def create_benchmark_configs(custom, args):
             plot_name = f"fused-attention-{mode}-layout-{args.layout}-fp8-{args.fp8}-causal-{causal}"
             extra_args = {"dtype": dtype, "causal": causal, "mode": mode}
 
-    unit = "TFLOPS"
-    if args.return_time:
+    if args.metric == "time":
         unit = "ms"
-    if args.return_bandwidth:
+    elif args.metric == "throughput":
+        unit = "TFLOPS"
+    elif args.metric == "bandwidth":
         unit = "GB/s"
-    # unit = "ms"
+    else:
+        raise ValueError("Unknown metric: " + args.metric)
 
     if mode == "bwd":
         if args.fused_bwd:
@@ -475,7 +477,7 @@ def run_benchmark(custom, args):
         else:  # GB/s
             return mem / ms * 1e-3
 
-    bench_mha.run(save_path=None, print_data=True, show_plots=False)
+    bench_mha.run(save_path=None, print_data=True)
 
 
 def supported_layouts():
@@ -499,24 +501,7 @@ def str2bool(v):
 
 
 def parse_args():
-
-    parser = argparse.ArgumentParser(
-        prog="Benchmark FlashAttention",
-        allow_abbrev=False,
-    )
-    parser.add_argument(
-        "-model_configs",
-        type=str,
-        default="utils/model_configs.json",
-        help="Model config json file.",
-    )
-    available_models = get_available_models()  # Dynamically load model names
-    model_help = (
-        "Model name to benchmark. Select from: ["
-        + ", ".join(available_models)
-        + "]. Use 'all' to benchmark all models. Provide model family (the part before -) to benchmark all models in that family. One can provide multiple as -model \"llama3,mistral_7B\""
-    )
-    parser.add_argument("-model", type=str, default="", help=model_help)
+    parser = get_parser(kernel_name="FlashAttention")
     parser.add_argument(
         "-mode", type=str, default="fwd", help="fwd:forward kernel, bwd:backward kernel"
     )
@@ -535,7 +520,7 @@ def parse_args():
     parser.add_argument("-causal", type=str2bool, default=None)
     parser.add_argument("-fp8", action="store_true", default=False)
     parser.add_argument("-quantize_p", action="store_true", default=False)
-    parser.add_argument("-dtype", default="fp16")
+    parser.add_argument("--dtype", default="fp16")
     parser.add_argument("-bench_torch", action="store_true", default=False)
     parser.add_argument("-fused_bwd", action="store_true", default=False)
     parser.add_argument("-print_vgpr", action="store_true", default=False)
@@ -551,18 +536,8 @@ def parse_args():
         default=False,
         help="Tests correctness of the Triton provider comparing the output to the Torch sdpa.",
     )
-    # prints TFLOPS without setting the following
-    parser.add_argument(
-        "-return_time", action="store_true", default=False, help="Prints only walltime."
-    )
-    parser.add_argument(
-        "-return_bandwidth",
-        action="store_true",
-        default=False,
-        help="Prints only memory bandwidth.",
-    )
 
-    parser.add_argument("-layout", type=str, default=None, help=supported_layouts())
+    parser.add_argument("--layout", type=str, default=None, help=supported_layouts())
 
     parser.add_argument(
         "-persistent",

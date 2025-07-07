@@ -155,6 +155,7 @@ def run_benchmark(args):
     int4_w4a16 = args.int4_w4a16
     group_size = args.group_size
     has_zp = args.has_zp
+    print_time = args.print_time
     dtype = str_to_torch_dtype[args.dtype]
     fp8_type = str_to_torch_dtype[args.fp8_type]
 
@@ -168,8 +169,12 @@ def run_benchmark(args):
     x_vals_list = model_benchmark_configs(args)
     x_names = ["model", "M", "N", "K", "E", "top_k"]
 
-    line_names = ["Time (ms)", "TFLOPS", "Bandwidth (GB/s)"]
-    line_vals = ["time", "tflops", "bandwidth"]
+    if print_time:
+        line_names = ["Time (ms)"]
+        line_vals = ["time"]
+    else:
+        line_names = ["Time (ms)", "TFLOPS", "Bandwidth (GB/s)"]
+        line_vals = ["time", "tflops", "bandwidth"]
 
     benchmark = triton.testing.Benchmark(
         x_names=x_names,
@@ -269,6 +274,7 @@ def parse_args():
     parser.add_argument("-fp8_w8a8", action="store_true", default=False)
     parser.add_argument("-int4_w4a16", action="store_true", default=False)
     parser.add_argument("-has_zp", action="store_true", default=False)
+    parser.add_argument("-print_time", action="store_true", default=False)
     parser.add_argument("-no_bench_stage2", action="store_false", default=True)
     parser.add_argument("-dtype", default="fp16")
     parser.add_argument("-fp8_type", default="e5m2fnuz")

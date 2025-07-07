@@ -154,6 +154,8 @@ def test_fmoe(
     BLOCK_SIZE_M = get_block_size_M(M, topk, E, inter_dim)
     if qType == aiter.QuantType.per_128x128:
         BLOCK_SIZE_M = 64
+
+    BLOCK_SIZE_M = 64
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
         topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M
     )
@@ -396,6 +398,7 @@ def test_fmoe(
             quant_type=qType,
             activation=actType,
             doweight_stage1=doweight_stage1,
+            block_size_M=BLOCK_SIZE_M
         )
 
         err = checkAllclose(
@@ -416,6 +419,7 @@ l_tokenNum = [
     16,
     32,
     64,
+    96,
     128,
     256,
     1024,

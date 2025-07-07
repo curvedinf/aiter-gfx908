@@ -527,7 +527,7 @@ def fused_moe_2stages(
         num_valid_ids,
         a2,
         topk,
-        block_m=block_m,
+        block_m=block_size_M,
         a1_scale=a1_scale,
         w1_scale=w1_scale,
         sorted_weights=sorted_weights if doweight_stage1 else None,

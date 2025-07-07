@@ -288,7 +288,20 @@ def test_fmoe(
 
 
 l_dtype = ["bf16"]
-l_m = [1, 2, 5, 16, 32, 163840]
+l_m = [
+    1,
+    3,
+    5,
+    16,
+    32,
+    64,
+    96,
+    128,
+    256,
+    1024,
+    4096,
+    163840,
+]
 
 parser = argparse.ArgumentParser(description="config input of test")
 parser.add_argument(

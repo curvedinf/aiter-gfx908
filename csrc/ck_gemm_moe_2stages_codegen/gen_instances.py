@@ -125,7 +125,7 @@ MoeKernel moe_stage1_heuristic_dispatch(int block_m)
 A16W16_A8W8_gemm2_heuristic_dispatch = """
 MoeKernel moe_stage2_heuristic_dispatch(int block_m, int inter_dim)
 {{
-    if (inter_dim <= 256)
+    if (inter_dim < 256)
     {{
         if (block_m == 32)
         {{

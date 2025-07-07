@@ -677,6 +677,7 @@ struct BlockFmhaPipelineQRKSVS
             mask.GetTileRangeAlongX(q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
 
         const auto num_total_loop = integer_divide_ceil(seqlen_k_end - seqlen_k_start, kN0);
+        index_t kv_token_start    = seqlen_k_start;
 
         // check early exit if no work to do
         if constexpr(FmhaMask::IsMasking || kPadSeqLenK)
@@ -726,6 +727,7 @@ struct BlockFmhaPipelineQRKSVS
         constexpr index_t k1_loops = kN0 / kK1;
         static_assert(1 == k0_loops);
         static_assert(1 == k1_loops);
+        static_assert(kN0 == kK1);
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
 
@@ -821,6 +823,7 @@ struct BlockFmhaPipelineQRKSVS
             store_tile(metadata.k_lds_window(k_lds_write_idx),
                        tile_elementwise_in(k_element_func, k_block_tile));
 
+            /// FIXME: use the future-predicting method to move the window
             // move K tile windows
             move_tile_window(k_dram_block_window, {kN0, 0});
 
@@ -867,6 +870,8 @@ struct BlockFmhaPipelineQRKSVS
                 store_tile(metadata.v_lds_window(v_lds_write_idx),
                            tile_elementwise_in(v_element_func, v_tile)); // store the prefetch
             }
+
+            /// FIXME: use the future-predicting method to move the window
             move_tile_window(v_dram_window, {0, kK1});
 
             __builtin_amdgcn_s_waitcnt(0xc07f);
@@ -1050,21 +1055,19 @@ struct BlockFmhaPipelineQRKSVS
             });
         };
 
-        auto fmha_mask = [&](auto sp_reg_idx, auto k_origin) {
+        auto fmha_mask = [&](auto sp_reg_idx) {
 #if ENABLE_TRACE
             DEBUG_STMTS
             {
-                printf("[POYENC] \tfmha_mask, sp_reg_idx = %d, origin: %d\n",
+                printf("[POYENC] \tfmha_mask, sp_reg_idx = %d, kv_token_start: %d\n",
                        sp_reg_idx.value,
-                       k_origin.at(number<0>{}));
+                       kv_token_start);
             }
 #endif
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
-                bool need_perpixel_check = mask.IsEdgeTile(q_origin.at(number<0>{}),
-                                                           k_origin.at(number<0>{}),
-                                                           number<kM0>{},
-                                                           number<kN0>{});
+                bool need_perpixel_check = mask.IsEdgeTile(
+                    q_origin.at(number<0>{}), kv_token_start, number<kM0>{}, number<kN0>{});
                 if(need_perpixel_check)
                 {
                     set_tile_if(metadata.s_acc(sp_reg_idx),
@@ -1072,8 +1075,7 @@ struct BlockFmhaPipelineQRKSVS
                                 [&](auto tile_idx) {
                                     const auto row =
                                         q_origin.at(number<0>{}) + tile_idx.at(number<0>{});
-                                    const auto col =
-                                        k_origin.at(number<0>{}) + tile_idx.at(number<1>{});
+                                    const auto col = kv_token_start + tile_idx.at(number<1>{});
                                     return mask.IsOutOfBound(row, col);
                                 });
                 }
@@ -1159,11 +1161,8 @@ struct BlockFmhaPipelineQRKSVS
                     __builtin_amdgcn_sched_barrier(0);
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
-                    const auto k_origin      = k_dram_block_window.get_window_origin();
-                    const auto k_origin_prev = make_tuple(k_origin.at(number<0>{}) - 2 * kN0, 0);
                     cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
-                    // FIXME: add following fmha_mask() call back after fixing origin
-                    fmha_mask(xdl_SP_p01_reg_idx, k_origin_prev);
+                    fmha_mask(xdl_SP_p01_reg_idx);
 #if 0
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_sched_barrier(0);
@@ -1191,6 +1190,7 @@ struct BlockFmhaPipelineQRKSVS
                     __builtin_amdgcn_s_barrier();
                     cl_load(memV, V_w0_lds_wr_idx, K_w0_lds_rd_idx);
 
+                    kv_token_start += kN0;
                     if(num_total_loop <= ++i_total_loops)
                     {
                         result = false;
@@ -1252,11 +1252,10 @@ struct BlockFmhaPipelineQRKSVS
                     asm volatile("; [POYENC] phase2 Wave4-7");
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
-                    const auto k_origin      = k_dram_block_window.get_window_origin();
-                    const auto k_origin_prev = make_tuple(k_origin.at(number<0>{}) - 2 * kN0, 0);
                     cl_load(memK, K_w4_lds_wr_idx, V_w4_lds_rd_idx);
-                    // FIXME: add following fmha_mask() call back after fixing origin
-                    fmha_mask(xdl_SP_p01_reg_idx, k_origin_prev);
+                    fmha_mask(xdl_SP_p01_reg_idx);
+
+                    kv_token_start += kN0;
                     if(num_total_loop <= ++i_total_loops)
                     {
                         result = false;
@@ -1444,12 +1443,12 @@ struct BlockFmhaPipelineQRKSVS
             block_sync_lds();
             DEBUG_STMTS { print_lds(s_lds_window, "S"); }
 #endif
-            // FIXME: add following fmha_mask() call back after fixing origin
-            // fmha_mask(number<0>{}, k_origin);
+            fmha_mask(number<0>{});
             /// TODO: find better way to map fmha_alu(0,96) call
             fmha_alu0(number<0>{});
             fmha_alu_D_upd();
 
+            kv_token_start += kN0;
             ++i_total_loops;
             if(num_total_loop <= i_total_loops)
             {

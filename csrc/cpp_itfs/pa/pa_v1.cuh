@@ -69,7 +69,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_
         query_loc = cu_query_lens[seq_idx];
         query_len = cu_query_lens[seq_idx + 1] - query_loc;
     }
-    if(query_len > 1) {
+    if(query_len > MTP) {
         return;
     }
     const int partition_idx = blockIdx.y;
@@ -114,7 +114,7 @@ __global__ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kern
         query_loc = cu_query_lens[seq_idx];
         query_len = cu_query_lens[seq_idx + 1] - query_loc;
     }
-    if(query_len > 1) {
+    if(query_len > MTP) {
         return;
     }
     const int context_len = context_lens[seq_idx];

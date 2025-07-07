@@ -88,7 +88,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   // NOTE queries with sequence len > 1 are prefills and taken care by another
   // kernel.
   if (query_start_loc_ptr != nullptr &&
-      (query_start_loc_ptr[seq_idx + 1] - query_start_loc_ptr[seq_idx]) != 1) {
+      (query_start_loc_ptr[seq_idx + 1] - query_start_loc_ptr[seq_idx]) > MTP) {
     return;
   }
 
@@ -706,7 +706,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_reduce_kernel(
   // NOTE queries with sequence len > 1 are prefills and taken care by another
   // kernel.
   if (query_start_loc_ptr != nullptr &&
-      (query_start_loc_ptr[seq_idx + 1] - query_start_loc_ptr[seq_idx] != 1)) {
+      (query_start_loc_ptr[seq_idx + 1] - query_start_loc_ptr[seq_idx] > MTP)) {
     return;
   }
 

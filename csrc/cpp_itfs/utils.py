@@ -201,7 +201,8 @@ def compile_template_op(
         func_name = get_default_func_name(md_name, tuple(kwargs.values()))
     if folder is None:
         folder = func_name
-
+    if AITER_LOG_MORE:
+        print(f"Compiling {func_name} in {BUILD_DIR}/{folder}")
     if not_built(folder):
         if includes is None:
             includes = []

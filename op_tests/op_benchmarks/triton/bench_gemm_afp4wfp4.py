@@ -12,6 +12,7 @@ from op_tests.op_benchmarks.triton.utils.argparse import get_parser, add_argpars
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_model_benchmark_object,
     get_shape_benchmark_object,
+    print_vgpr,
 )
 
 TRITON_HIP_PRESHUFFLE_SCALES = (
@@ -184,6 +185,12 @@ def run_shape_benchmark(args):
 def parse_args():
     parser = get_parser("MXFP4 x MXFP4 GEMM")
     parser = add_argparse_ff(parser)
+
+    parser.add_argument(
+        "--print_vgpr",
+        action="store_true",
+        help="Print VGPR usage for Triton kernels.",
+    )
     args = parser.parse_args()
     defaults = parser.parse_args([])
     return args, defaults
@@ -191,6 +198,11 @@ def parse_args():
 
 def main():
     args, defaults = parse_args()
+    if args.print_vgpr:
+        print("Retrieving VGPR usage for Triton kernels...")
+        fun = lambda: run_benchmark(args)  # noqa: E731
+        print_vgpr(fun, "GEMM")
+        return 0
     run_benchmark(args, defaults)
 
 

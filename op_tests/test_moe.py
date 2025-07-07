@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
 from aiter.test_common import checkAllclose, perftest
@@ -310,7 +310,10 @@ def test_fmoe(
         checkAllclose(ref2, out_b, rtol=0.01, atol=100, msg=msg)
 
 
-parser = argparse.ArgumentParser(description="select test")
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.RawTextHelpFormatter,
+    description="select test",
+)
 l_test = [
     "test_fmoe_16_bit",
     "g1u1_no_quant",
@@ -327,7 +330,8 @@ parser.add_argument(
     type=str,
     choices=l_test,
     default=None,
-    help="select test to run",
+    help="""Select test to run.
+    e.g.: -t test_fmoe_16_bit""",
 )
 args = parser.parse_args()
 if args.test is not None:

@@ -7,6 +7,7 @@ import torch
 import sys
 import warnings
 import argparse
+import itertools
 
 from aiter.ops.triton.mha import (
     flash_attn_func,
@@ -23,47 +24,27 @@ from op_tests.op_benchmarks.triton.utils.argparse import get_parser
 
 
 def nonvarlen_benchmark_configs():
+    batch_sizes = [1, 4, 16]
+    N_HEADS = [16, 48]
+    seq_len_q = [1, 1024, 4096]
+    seq_len_k = [163, 8192]
+    configs = list(itertools.product(batch_sizes, N_HEADS, seq_len_q, seq_len_k))
     configs = [
-        (16, 16, 16, 1024, 1024),
-        (8, 16, 16, 2048, 2048),
-        (4, 16, 16, 4096, 4096),
-        (2, 16, 16, 8192, 8192),
-        (8, 16, 16, 1024, 4096),
-        (1, 16, 16, 4096, 16384),
-        (2, 48, 48, 1024, 1024),
-        (2, 48, 48, 2048, 1024),
-        (2, 48, 48, 4096, 8192),
-        (2, 48, 48, 8192, 4096),
-        (2, 48, 48, 16384, 8192),
-        (8, 16, 16, 1989, 15344),
-        (4, 16, 16, 4097, 163),
-        (2, 16, 16, 8122, 2159),
-        (1, 16, 16, 16281, 7),
-        (2, 48, 48, 1021, 1020),
-        (2, 48, 48, 2001, 2048),
-        (2, 48, 48, 3996, 9639),
-        (2, 48, 48, 8181, 1021),
+        (batch_size, N_HEAD, N_HEAD, seq_len_q, seq_len_k)
+        for batch_size, N_HEAD, seq_len_q, seq_len_k in configs
     ]
     return configs
 
 
 def varlen_benchmark_configs():
+    batch_sizes = [1, 4, 8]
+    N_HEADS = [16, 48]
+    seq_len_q = [1, 1024, 4096]
+    seq_len_k = [163, 8192]
+    configs = list(itertools.product(batch_sizes, N_HEADS, seq_len_q, seq_len_k))
     configs = [
-        (2, 16, 4, 1024, 1024),
-        (8, 16, 2, 2048, 2048),
-        (4, 16, 8, 4096, 4096),
-        (2, 16, 4, 8192, 8192),
-        (2, 16, 8, 16384, 16384),
-        (2, 48, 12, 1024, 1024),
-        (2, 48, 24, 2048, 2048),
-        (2, 48, 8, 4096, 4096),
-        (2, 48, 4, 8192, 8192),
-        (2, 48, 2, 16384, 16384),
-        (2, 64, 32, 1024, 1024),
-        (4, 64, 16, 2048, 2048),
-        (4, 64, 8, 4096, 4096),
-        (4, 64, 32, 8192, 8192),
-        (4, 128, 16, 16384, 16384),
+        (batch_size, N_HEAD, N_HEAD, seq_len_q, seq_len_k)
+        for batch_size, N_HEAD, seq_len_q, seq_len_k in configs
     ]
     return configs
 
@@ -81,10 +62,18 @@ def model_benchmark_configs(args):
             if config["num_key_value_heads"] is None
             else config["num_key_value_heads"]
         )
-        N_CTX_Q = args.sq if args.sq else 8192
+        N_CTX_Q = args.sq if args.sq else [2**i for i in range(1, 14)]
         N_CTX_K = args.sk if args.sk else N_CTX_Q
         HEAD_DIM = config["hidden_size"] // HQ
-        fa_configs.append((model_name, batch_size, HQ, HK, N_CTX_Q, N_CTX_K, HEAD_DIM))
+        if isinstance(N_CTX_Q, list):
+            for seq_len in N_CTX_Q:
+                fa_configs.append(
+                    (model_name, batch_size, HQ, HK, seq_len, seq_len, HEAD_DIM)
+                )
+        else:
+            fa_configs.append(
+                (model_name, batch_size, HQ, HK, N_CTX_Q, N_CTX_K, HEAD_DIM)
+            )
 
     return fa_configs
 
@@ -477,7 +466,7 @@ def run_benchmark(custom, args):
         else:  # GB/s
             return mem / ms * 1e-3
 
-    bench_mha.run(save_path=None, print_data=True)
+    bench_mha.run(save_path=".", print_data=True, show_plots=False)
 
 
 def supported_layouts():

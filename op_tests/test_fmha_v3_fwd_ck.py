@@ -57,7 +57,7 @@ def profile_func(target_func, *args, **kwargs):
     ],
 )
 @pytest.mark.parametrize("seed", [None])
-def test_flash_attn_output(
+def test_fmha_v3_fwd_ck(
     batch_size,
     nheads,
     seqlen_q,
@@ -164,6 +164,6 @@ if __name__ == "__main__":
     dtype = dtypes.fp16
     seed = 0
 
-    test_flash_attn_output(
+    test_fmha_v3_fwd_ck(
         batch_size, nheads, seqlen_q, seqlen_k, d, d_v, mha_type, dtype, seed
     )

@@ -5,7 +5,11 @@ import math
 from op_tests.triton_tests.test_batched_gemm_afp4wfp4 import (
     generate_batched_gemm_afp4wfp4_inputs,
 )
-from op_tests.op_benchmarks.triton.utils.argparse import get_parser, add_argparse_ff
+from op_tests.op_benchmarks.triton.utils.argparse import (
+    get_parser, 
+    add_argparse_ff,
+    get_ff_args,
+)
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_model_benchmark_object,
     get_shape_benchmark_object,
@@ -77,7 +81,7 @@ def run_model_benchmark(args):
     )
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_afp4wfp4_blockscale(batch, M, hidden_dim, intermediate_dim, metric, layer, **kwargs):
+    def bench_batched_gemm_afp4wfp4(batch, M, hidden_dim, intermediate_dim, metric, layer, **kwargs):
         if layer == "fc1":
             if args.no_glu:
                 N, K = intermediate_dim, hidden_dim
@@ -93,7 +97,7 @@ def run_model_benchmark(args):
 
         return bench_gemm_fn(batch, M, N, K, metric)
 
-    bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
+    bench_batched_gemm_afp4wfp4.run(save_path=".", print_data=True)
 
 
 def run_shape_benchmark(args):
@@ -104,10 +108,10 @@ def run_shape_benchmark(args):
     )
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_afp4wfp4_blockscale(batch, M, N, K, metric, provider):
+    def bench_batched_gemm_afp4wfp4(batch, M, N, K, metric, provider):
         return bench_gemm_fn(batch, M, N, K, metric)
 
-    bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
+    bench_batched_gemm_afp4wfp4.run(save_path=".", print_data=True)
 
 
 def run_benchmark(args, defaults):
@@ -142,15 +146,7 @@ def run_benchmark(args, defaults):
 def parse_args():
     parser = get_parser("MXFP4 x MXFP4 GEMM")
     parser = add_argparse_ff(parser)
-    args = parser.parse_args()
-    if args.shape is not None:
-        if len(args.shape) == 3:
-            args.M, args.N, args.K = args.shape
-        elif len(args.shape) == 4:
-            args.B, args.M, args.N, args.K = args.shape
-    defaults = parser.parse_args([])  # get default arguments
-    return args, defaults
-
+    return get_ff_args(parser)
 
 def main():
     args, defaults = parse_args()

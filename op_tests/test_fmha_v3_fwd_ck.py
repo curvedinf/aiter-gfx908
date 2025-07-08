@@ -88,7 +88,9 @@ def test_fmha_v3_fwd_ck(
     torch.cuda.empty_cache()
     nheads_k = nheads if mha_type == "mha" else (1 if mha_type == "mqa" else 3)
     assert nheads % nheads_k == 0
-    window_size = (-1, -1) if not local else torch.randint(0, seqlen_q, (2,))
+    window_size = (
+        (-1, -1) if not local else tuple(torch.randint(0, seqlen_q, (2,)).tolist())
+    )
 
     if causal and seqlen_k < seqlen_q:
         pytest.skip("Causal attention not supported for seqlen_k < seqlen_q")

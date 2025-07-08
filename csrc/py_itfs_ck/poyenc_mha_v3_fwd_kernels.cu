@@ -3306,7 +3306,7 @@ std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
     }
     else if(q_dtype == at::ScalarType::BFloat16)
     {
-        // launch<get_kernel_t<FmhaFwdBf16>>(args);
+        launch<get_kernel_t<FmhaFwdBf16>>(args);
     }
 
     return {out};

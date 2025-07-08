@@ -94,6 +94,13 @@ static CFG *get_cfg(torch::Tensor &inp, torch::Tensor &out, torch::Tensor &w1, Q
     {
         return &cfg_fmoe_stage1_bf16_pertokenFp8_blockscale_g1u1;
     }
+    else if ((inp.scalar_type() == torch::kFloat4_e2m1fn_x2) ||
+             (inp.scalar_type() == torch::kUInt8) &&
+             (out.scalar_type() == at::ScalarType::BFloat16) &&
+             quant_type == QuantType::per_1x32)
+    {
+        return &cfg_fmoe_stage1_bf16_pertokenFp4_blockscale_g1u1;
+    }
     else
     {
         TORCH_CHECK(false, __func__, " Unsupported input_type:", inp.scalar_type(), ", weight_type:", w1.scalar_type(),

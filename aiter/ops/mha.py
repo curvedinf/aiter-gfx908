@@ -80,6 +80,10 @@ def poyenc_mha_v3_fwd(
     k: Tensor,
     v: Tensor,
     softmax_scale: float,
+    is_causal: bool,
+    window_size_left: int,
+    window_size_right: int,
+    return_softmax_lse: bool,
 ): ...
 
 
@@ -1663,6 +1667,10 @@ def poyenc_mha_v3_fwd_func(
     k,
     v,
     softmax_scale=None,
+    causal: bool = False,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
+    return_lse: bool = False,
 ):
     if softmax_scale is None:
         softmax_scale = q.shape[-1] ** (-0.5)
@@ -1680,6 +1688,10 @@ def poyenc_mha_v3_fwd_func(
         k,
         v,
         softmax_scale,
+        is_causal=causal,
+        window_size_left=window_size_left,
+        window_size_right=window_size_right,
+        return_softmax_lse=return_lse,
     )[0]
     out = out_padded[..., :head_size_v_og]
 

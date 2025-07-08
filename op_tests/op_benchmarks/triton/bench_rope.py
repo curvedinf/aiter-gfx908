@@ -26,7 +26,10 @@ from aiter.ops.triton.rope import (
     # rope_fwd_2d,
     # rope_fwd_2d_inplace,
 )
-
+from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
+    get_model_configs,
+    get_available_models,
+)
 
 def str_to_bool(v, vstr):
     if v.lower() in ["true", "yes"]:
@@ -119,6 +122,15 @@ def run_benchmark(args):
         args.inplace,
         args.dtype,
     )
+    if args.model:
+        config_file = args.model_configs
+        configs = get_model_configs(config_path = config_file, models = args.model)
+        config = configs[args.model]
+        num_q_heads = config["num_attention_heads"]
+        num_kv_heads = config["num_key_value_heads"]
+        H = num_kv_heads
+        Q = num_q_heads // num_kv_heads # num Q heads per K head
+        D = config["hidden_size"] // num_q_heads # head_dimension = hidden_size / num_heads
 
     cached = str_to_bool(cached, "cached")
     reuse_freqs_front_part = str_to_bool(
@@ -458,17 +470,30 @@ def run_benchmark(args):
     # bench_rope.run(save_path=".", print_data=False)
     print("")
     print(
-        "This script will not print out runtime as short running kernels cannot be measured accuratly throught triton.testing.do_bench function, please use rocprof to measure accurate runtime, use -h/--help for more information"
+        "This script will not print out runtime as short running kernels cannot be measured accurately through triton.testing.do_bench function, please use rocprof to measure accurate runtime, use -h/--help for more information"
     )
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         prog="Benchmark RoPE",
-        description="This script will not print out runtime as short running kernels cannot be measured accuratly throught triton.testing.do_bench function, please use rocprof to measure accurate runtime. For instance, try \"rocprofv2 --kernel-trace python bench_rope.py -l 'thd' -T 1 -H 128 -D 64 --two_inputs=true\"",
+        description="This script will not print out runtime as short running kernels cannot be measured accurately through triton.testing.do_bench function, please use rocprof to measure accurate runtime. For instance, try \"rocprofv2 --kernel-trace python bench_rope.py -l 'thd' -T 1 -H 128 -D 64 --two_inputs=true\"",
         allow_abbrev=False,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    available_models = get_available_models()  # Dynamically load model names
+    model_help = (
+        "Model name to benchmark. Select from: ["
+        + ", ".join(available_models)
+        + "]. Use 'all' to benchmark all models or leave blank for the default benchmark script."
+    )
+    parser.add_argument(
+        "--model-configs",
+        type=str,
+        default="utils/model_configs.json",
+        help="Model config json file.",
+    )
+    parser.add_argument("--model", type=str, help=model_help)
     parser.add_argument(
         "-l", type=str, help="'thd' or 'sbhd' the layout of the input.", default="thd"
     )

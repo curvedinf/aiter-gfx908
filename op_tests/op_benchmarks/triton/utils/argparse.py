@@ -37,12 +37,6 @@ def get_parser(kernel_name: str) -> argparse.ArgumentParser:
         default="throughput",
         help="metric to plot",
     )
-    parser.add_argument(
-        "-tp",
-        type=int,
-        default=1,
-        help="Tensor parallel (divides intermediate_size)",
-    )
     return parser
 
 def get_ff_args(parser: argparse.ArgumentParser) -> Tuple[dict, dict]:
@@ -63,6 +57,12 @@ def add_argparse_ff(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     """
     Adds argparse flags for benchmarking Triton kernels for feed-forward layers.
     """
+    parser.add_argument(
+        "-tp",
+        type=int,
+        default=1,
+        help="Tensor parallel (divides intermediate_size)",
+    )
     parser.add_argument(
         "--layout",
         type=str,

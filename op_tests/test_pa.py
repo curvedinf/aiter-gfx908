@@ -645,6 +645,90 @@ def test_paged_attention(
     )
     # tensor_dump(out_aiter, 'out_aiter')
 
+    print(
+        f"query: {query}\n"
+        f"k_cache: {k_cache}\n"
+        f"v_cache: {v_cache}\n"
+        f"block_tables: {block_tables}\n"
+        f"seq_lens: {seq_lens}\n"
+        f"max_seq_len: {max_seq_len}\n"
+        f"kv_cache_dtype: {kv_cache_dtype}\n"
+        f"num_kv_heads: {num_kv_heads}\n"
+        f"scale: {scale}\n"
+        f"alibi_slopes: {alibi_slopes}\n"
+        f"k_scale: {k_scale}\n"
+        f"v_scale: {v_scale}\n"
+        f"num_queries_per_kv: {num_queries_per_kv}\n"
+        f"dtype: {dtype}\n"
+    )
+    # import sys
+
+    # sys.exit(0)
+
+    out_golden, xxx = run_native(
+        query,
+        k_cache,
+        v_cache,
+        block_tables,
+        seq_lens,
+        max_seq_len,
+        kv_cache_dtype,
+        num_kv_heads,
+        scale,
+        alibi_slopes,
+        k_scale,
+        v_scale,
+        num_queries_per_kv,
+        dtype,
+    )
+
+    print(f"out_golden: {out_golden}\n")
+    # import sys
+
+    # sys.exit(0)
+
+    print(
+        f"query: {query}\n"
+        f"k_cache: {k_cache}\n"
+        f"v_cache: {v_cache}\n"
+        f"block_tables: {block_tables}\n"
+        f"seq_lens: {seq_lens}\n"
+        f"max_seq_len: {max_seq_len}\n"
+        f"kv_cache_dtype: {kv_cache_dtype}\n"
+        f"num_kv_heads: {num_kv_heads}\n"
+        f"scale: {scale}\n"
+        f"alibi_slopes: {alibi_slopes}\n"
+        f"k_scale: {k_scale}\n"
+        f"v_scale: {v_scale}\n"
+        f"num_queries_per_kv: {num_queries_per_kv}\n"
+        f"dtype: {dtype}\n"
+    )
+    # import sys
+
+    # sys.exit(0)
+
+    out_golden, xxx = run_native(
+        query,
+        k_cache,
+        v_cache,
+        block_tables,
+        seq_lens,
+        max_seq_len,
+        kv_cache_dtype,
+        num_kv_heads,
+        scale,
+        alibi_slopes,
+        k_scale,
+        v_scale,
+        num_queries_per_kv,
+        dtype,
+    )
+
+    print(f"out_golden: {out_golden}\n")
+    # import sys
+
+    # sys.exit(0)
+
     # time_aiter_asm = None
     # if dtype == dtypes.bf16:
     #     out_aiter_asm, time_aiter_asm = run_aiter_asm(

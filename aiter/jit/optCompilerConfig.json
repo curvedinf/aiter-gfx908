@@ -620,8 +620,8 @@
     },
     "module_fmha_v3_fwd_ck": {
         "srcs": [
-            "f'{AITER_CSRC_DIR}/py_itfs_ck/poyenc_mha_v3_fwd_kernels.cu'",
-            "f'{AITER_CSRC_DIR}/pybind/poyenc_mha_v3_fwd_pybind.cu'"
+            "f'{AITER_CSRC_DIR}/py_itfs_ck/fmha_v3_fwd_ck_kernels.cu'",
+            "f'{AITER_CSRC_DIR}/pybind/fmha_v3_fwd_ck_pybind.cu'"
         ],
         "flags_extra_cc": [],
         "flags_extra_hip": [

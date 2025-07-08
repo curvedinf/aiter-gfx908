@@ -5,13 +5,13 @@
 
 namespace aiter {
 namespace torch_itfs {
-std::vector<at::Tensor> poyenc_mha_v3_fwd(const at::Tensor& q, // [b, sq, hq, d]
-                                          const at::Tensor& k, // [b, sk, hk, d]
-                                          const at::Tensor& v, // [b, sk, hk, d_v]
-                                          float softmax_scale,
-                                          bool is_causal,
-                                          int window_size_left,
-                                          int window_size_right,
-                                          bool return_softmax_lse);
+std::vector<at::Tensor> fmha_v3_fwd_ck(const at::Tensor& q, // [b, sq, hq, d]
+                                       const at::Tensor& k, // [b, sk, hk, d]
+                                       const at::Tensor& v, // [b, sk, hk, d_v]
+                                       float softmax_scale,
+                                       bool is_causal,
+                                       int window_size_left,
+                                       int window_size_right,
+                                       bool return_softmax_lse);
 } // namespace torch_itfs
 } // namespace aiter

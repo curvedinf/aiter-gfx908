@@ -112,26 +112,30 @@ def test_flash_attn_output(
         tensor_np = tensor.cpu().numpy()
         tensor_np.tofile(fname)
 
-    save_tensor(q.squeeze(0).squeeze(1), f"q_{q.size(1)}x{q.size(3)}.bin")
-    save_tensor(k.squeeze(0).squeeze(1), f"k_{k.size(1)}x{k.size(3)}.bin")
-    save_tensor(v.squeeze(0).squeeze(1), f"v_{v.size(1)}x{v.size(3)}.bin")
+    # save_tensor(q.squeeze(0).squeeze(1), f"q_{q.size(1)}x{q.size(3)}.bin")
+    # save_tensor(k.squeeze(0).squeeze(1), f"k_{k.size(1)}x{k.size(3)}.bin")
+    # save_tensor(v.squeeze(0).squeeze(1), f"v_{v.size(1)}x{v.size(3)}.bin")
 
     # print_tensor(q.squeeze(0).squeeze(1), 'Q')
     # print_tensor(k.squeeze(0).squeeze(1), 'K')
     # print_tensor(v.squeeze(0).squeeze(1), 'V')
 
-    attention = aiter.poyenc_mha_v3_fwd_func
+    attention = aiter.fmha_v3_fwd_ck_func
     if profile:
         out, time = profile_func(attention, q, k, v)
         print(f"time: {time}")
     else:
         out = attention(q, k, v)
 
+    # print_tensor(out.squeeze(0).squeeze(1), 'O')
+
     out_ref = run_torch(
         q,
         k,
         v,
     )
+
+    # print_tensor(out_ref.squeeze(0).squeeze(1), 'out_ref')
 
     out_pt = run_torch(
         q,
@@ -140,6 +144,8 @@ def test_flash_attn_output(
         upcast=False,
         reorder_ops=True,
     )
+
+    # print_tensor(out_pt.squeeze(0).squeeze(1), 'out_pt')
 
     if not profile:
         print(f"Output max diff: {(out - out_ref).abs().max().item()}")

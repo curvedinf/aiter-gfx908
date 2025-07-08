@@ -618,7 +618,7 @@
             "f'{AITER_CSRC_DIR}/cpp_itfs/mha_fwd_generate.py --receipt 3 --output_dir {{}}'"
         ]
     },
-    "module_poyenc_mha_v3_fwd": {
+    "module_fmha_v3_fwd_ck": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/py_itfs_ck/poyenc_mha_v3_fwd_kernels.cu'",
             "f'{AITER_CSRC_DIR}/pybind/poyenc_mha_v3_fwd_pybind.cu'"

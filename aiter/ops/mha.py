@@ -74,8 +74,8 @@ def mha_varlen_fwd(
 ) -> list[torch.Tensor]: ...
 
 
-@compile_ops("module_poyenc_mha_v3_fwd", fc_name="poyenc_mha_v3_fwd")
-def poyenc_mha_v3_fwd(
+@compile_ops("module_fmha_v3_fwd_ck", fc_name="fmha_v3_fwd_ck")
+def fmha_v3_fwd_ck(
     q: Tensor,
     k: Tensor,
     v: Tensor,
@@ -1662,7 +1662,7 @@ def mha_batch_prefill_func(
     return result[0] if len(result) == 1 else tuple(result)
 
 
-def poyenc_mha_v3_fwd_func(
+def fmha_v3_fwd_ck_func(
     q,
     k,
     v,
@@ -1683,7 +1683,7 @@ def poyenc_mha_v3_fwd_func(
     if head_size_v_og % 8 != 0:
         v = torch.nn.functional.pad(v, [0, 8 - head_size_v_og % 8])
 
-    out_padded = poyenc_mha_v3_fwd(
+    out_padded = fmha_v3_fwd_ck(
         q,
         k,
         v,

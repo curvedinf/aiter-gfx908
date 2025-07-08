@@ -9,6 +9,8 @@ from aiter.test_common import checkAllclose, benchmark, run_perftest
 from aiter.int4_utils import *
 from aiter.utility import fp4_utils
 from aiter.jit.utils.chip_info import get_gfx
+import argparse
+import pandas as pd
 
 from aiter.fused_moe import (
     fused_topk,
@@ -198,8 +200,13 @@ def test_fmoe(
         w1_qt, w1_scale = torch_quant(w1, quant_dtype=WQDType)
         w2_qt, w2_scale = torch_quant(w2, quant_dtype=WQDType)
 
-    w1_qt_aiter = w1_qt
-    w2_qt_aiter = w2_qt
+    if qType != aiter.QuantType.per_1x32:
+        w1_qt = w1_qt_aiter = w1_qt.view(w1.shape)
+        w2_qt = w2_qt_aiter = w2_qt.view(w2.shape)
+
+    else:
+        w1_qt = w1_qt_aiter = w1_qt.view(w1.shape[0], w1.shape[1], w1.shape[2] // 2)
+        w2_qt = w2_qt_aiter = w2_qt.view(w2.shape[0], w2.shape[1], w2.shape[2] // 2)
 
     if qType == aiter.QuantType.per_128x128:
         a1_qt, a1_scale = aiter.pertoken_quant(
@@ -237,10 +244,9 @@ def test_fmoe(
                 shuffle_weight(w2_qt_aiter, (16, 16), use_int4=True)
             )
         )
-    else:
+    elif WQDType != dtypes.fp4x2:
         w1_qt_aiter = shuffle_weight(w1_qt_aiter, layout=(16, 16))
         w2_qt_aiter = shuffle_weight(w2_qt_aiter, layout=(16, 16))
-
     # # ######################## ck stage 1 start ###########
     # # a1_qt, a1_scale = torch_quant(input, quant_dtype=AQDType)
     # # out1_ck = torch.empty((token, topk, inter_dim), dtype=dtype)
@@ -301,8 +307,6 @@ def test_fmoe(
     #     )
 
     # ######################## stage 2 start ###########
-    if qType == aiter.QuantType.per_Token:
-        out1_ref = out1_ref.view(token, -1)
     if qType == aiter.QuantType.per_128x128:
         a2_qt, a2_scale = aiter.pertoken_quant(
             out1_ref.view(token, -1, 128), quant_dtype=AQDType
@@ -407,9 +411,9 @@ def test_fmoe(
         return {"us": us_fuse, "err": err}
 
 
-list_dtype = [dtypes.bf16, dtypes.fp16][:1]
-list_dim = [(6144, 4096)]
-list_tokenNum = [
+l_dtype = ["bf16", "fp16"][:1]
+l_dim = [(6144, 4096)]
+l_tokenNum = [
     1,
     3,
     5,
@@ -421,8 +425,8 @@ list_tokenNum = [
     1024,
     4096,
     163840,
-][:]
-list_quant = [
+]
+l_quant = [
     (aiter.QuantType.No, None, None),  # a16w16
     (aiter.QuantType.per_Tensor, dtypes.fp8, dtypes.fp8),  # a8w8
     (aiter.QuantType.per_Token, dtypes.fp8, dtypes.fp8),  # a8w8
@@ -430,11 +434,119 @@ list_quant = [
     (aiter.QuantType.per_1x32, dtypes.fp4x2, dtypes.fp4x2),  # a4w4
     # (aiter.QuantType.per_128x128, dtypes.fp8, dtypes.fp8),  # a8w8 TODO add test
 ]
-list_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][:1]
-list_doweight_stage1 = [False, True][:1]
-expert, topk = 8, 2
+l_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][:1]
+l_doweight_stage1 = [False, True]
 
-import pandas as pd
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.RawTextHelpFormatter,
+    description="config input of test",
+)
+parser.add_argument(
+    "-d",
+    "--dtype",
+    type=str,
+    choices=l_dtype,
+    nargs="?",
+    const=None,
+    default=None,
+    help="""Data type.
+    e.g.: -d bf16""",
+)
+
+parser.add_argument(
+    "-dim",
+    type=dtypes.str2tuple,
+    nargs="?",
+    const=None,
+    default=None,
+    help="""Model dimension.
+    e.g.: -dim 6144,4096""",
+)
+
+parser.add_argument(
+    "-t",
+    "--tokenNum",
+    type=int,
+    nargs="?",
+    const=None,
+    default=None,
+    help="""Number of tokens.
+    e.g.: -t 1024""",
+)
+
+parser.add_argument(
+    "-q",
+    "--quant",
+    type=int,
+    choices=range(len(l_quant)),
+    help="""select quantization type:
+    0 : aiter.QuantType.No, None, None),  # a16w16
+    1: aiter.QuantType.per_Tensor, dtypes.fp8, dtypes.fp8  # a8w8
+    2: aiter.QuantType.per_Token, dtypes.fp8, dtypes.fp8  # a8w8
+    3: aiter.QuantType.per_Token, dtypes.fp8, torch.int4  # a8w4
+    4: aiter.QuantType.per_1x32, dtypes.fp4x2, dtypes.fp4x2  # a4w4
+    # (aiter.QuantType.per_128x128, dtypes.fp8, dtypes.fp8),  # a8w8 TODO add test""",
+)
+
+parser.add_argument(
+    "-a",
+    "--act",
+    type=str,
+    choices=["silu", "gelu"],
+    default=None,
+    help="""Select activation type.
+    e.g.: -a silu""",
+)
+
+parser.add_argument(
+    "-s",
+    "--doweight_stage1",
+    type=dtypes.str2bool,
+    nargs="?",
+    const=None,
+    default=None,
+    help="""Whether to do weight in stage 1. Default is [False, True].
+    -s f    # False.
+    -s t    # True.""",
+)
+
+parser.add_argument(
+    "-e",
+    "--expert",
+    type=int,
+    default=8,
+    help="""Number of experts.
+    e.g.: -e 8""",
+)
+
+parser.add_argument(
+    "-k",
+    "--topk",
+    type=int,
+    default=2,
+    help="""Number of top experts.
+    e.g.: -k 2""",
+)
+
+args = parser.parse_args()
+if args.dtype is None:
+    l_dtype = [dtypes.d_dtypes[key] for key in l_dtype]
+else:
+    l_dtype = [dtypes.d_dtypes[args.dtype]]
+
+if args.dim is not None:
+    l_dim = [args.dim]
+
+if args.tokenNum is not None:
+    l_tokenNum = [args.tokenNum]
+
+l_quant = [l_quant[args.quant]] if args.quant is not None else l_quant
+
+if args.act is not None:
+    l_act = [getattr(aiter.ActivationType, args.act.capitalize())]
+
+if args.doweight_stage1 is not None:
+    l_doweight_stage1 = [args.doweight_stage1]
 
 for (
     dtype,
@@ -442,18 +554,16 @@ for (
     (quant_type, aq_dtype, wq_dtype),
     (model_dim, inter_dim),
     doweight_stage1,
-) in itertools.product(
-    list_dtype, list_act, list_quant, list_dim, list_doweight_stage1
-):
+) in itertools.product(l_dtype, l_act, l_quant, l_dim, l_doweight_stage1):
     df = []
-    for m in list_tokenNum:
+    for m in l_tokenNum:
         ret = test_fmoe(
             dtype,
             m,
             model_dim,
             inter_dim,
-            expert,
-            topk,
+            args.expert,
+            args.topk,
             act_type,
             quant_type,
             aq_dtype,

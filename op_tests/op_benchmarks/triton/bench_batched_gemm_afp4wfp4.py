@@ -40,7 +40,7 @@ def bench_gemm_fn(batch, M, N, K, metric):
     x, w, x_scale, w_scale = generate_batched_gemm_afp4wfp4_inputs(batch, M, N, K)
     # print(f"M: {M}, N: {N}, K: {K}, x.shape: {x.shape}, x.stride(): {x.stride()}, w.shape: {w.shape}, w.stride(): {w.stride()}")
     # flops
-    flops = 2.0 * M * N * K
+    flops = 2.0 * M * N * K * batch
     # memory transfer
     mem_read = x.numel() * x.element_size() + w.numel() * w.element_size()
     mem_read += (

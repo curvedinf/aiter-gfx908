@@ -6,7 +6,12 @@ from aiter.ops.triton.utils.types import str_to_torch_dtype
 from op_tests.triton_tests.test_gemm_a8w8 import (
     generate_gemm_a8w8_inputs,
 )
-from op_tests.op_benchmarks.triton.utils.argparse import get_parser, add_argparse_ff
+from op_tests.op_benchmarks.triton.utils.argparse import (
+    get_parser, 
+    add_argparse_ff,
+    get_ff_args,
+)
+
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_model_benchmark_object,
     get_shape_benchmark_object,
@@ -129,9 +134,7 @@ def run_benchmark(args, defaults):
 def parse_args():
     parser = get_parser(kernel_name="A8W8 GEMM")
     parser = add_argparse_ff(parser)
-    args = parser.parse_args()
-    defaults = parser.parse_args([])  # get default arguments
-    return args, defaults
+    return get_ff_args(parser)
 
 
 def main():

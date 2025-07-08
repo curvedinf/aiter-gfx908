@@ -3063,6 +3063,10 @@ struct host_args
 
     float scale_s;
 
+    ck_tile::index_t window_size_left;
+    ck_tile::index_t window_size_right;
+    ck_tile::index_t mask_type;
+
     const void* q_ptr;
     ck_tile::index_t stride_q;
     ck_tile::index_t nhead_stride_q;
@@ -3199,9 +3203,9 @@ void launch(const host_args& args)
                                        0, // batch_stride_randval
                                        0, // batch_stride_lse
                                        args.batch_stride_o,
-                                       0,                         // window_size_left
-                                       0,                         // window_size_right
-                                       0,                         // mask_type
+                                       args.window_size_left,     // window_size_left
+                                       args.window_size_right,    // window_size_right
+                                       args.mask_type,            // mask_type
                                        0.0f,                      // p_drop
                                        false,                     // s_randval
                                        std::make_pair(0UL, 0UL)); // drop_seed_offset
@@ -3268,6 +3272,35 @@ std::vector<at::Tensor> fmha_v3_fwd_ck(const at::Tensor& q, // [b, sq, hq, d]
     CHECK_SHAPE(k, batch_size, seqlen_k, num_heads_k, head_size_q);
     CHECK_SHAPE(v, batch_size, seqlen_k, num_heads_k, head_size_v);
 
+    if(window_size_left >= seqlen_k)
+    {
+        window_size_left = -1;
+    }
+    if(window_size_right >= seqlen_k)
+    {
+        window_size_right = -1;
+    }
+
+    mask_info mask;
+    if(is_causal)
+    {
+        // Causal is the special case where window_size_right == 0 and window_size_left < 0.
+        window_size_right         = 0;
+        std::string mask_identify = "b:" + std::to_string(window_size_left) + "," + "0";
+        mask                      = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // casual
+    }
+    else if(window_size_left == -1 && window_size_right == -1)
+    {
+        mask = mask_info::decode("0", seqlen_q, seqlen_k); // no mask
+    }
+    else
+    {
+        // Local is the more general case where window_size_right >= 0 or window_size_left >= 0.
+        std::string mask_identify =
+            "b:" + std::to_string(window_size_left) + "," + std::to_string(window_size_right);
+        mask = mask_info::decode(mask_identify, seqlen_q, seqlen_k); // local
+    }
+
     host_args args;
 
     args.batch    = batch_size;
@@ -3279,6 +3312,10 @@ std::vector<at::Tensor> fmha_v3_fwd_ck(const at::Tensor& q, // [b, sq, hq, d]
     args.nhead_k  = num_heads_k;
 
     args.scale_s = softmax_scale;
+
+    args.window_size_left  = mask.left;
+    args.window_size_right = mask.right;
+    args.mask_type         = static_cast<ck_tile::index_t>(mask.type);
 
     args.q_ptr          = q.data_ptr();
     args.batch_stride_q = q.stride(0);

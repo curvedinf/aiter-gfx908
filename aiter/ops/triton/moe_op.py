@@ -678,9 +678,7 @@ def _fused_moe_kernel(
                 mask=token_mask[:, None] & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
                 other=0.0,
             )
-            b = tl.load(
-                b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0
-            )
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
         # We accumulate along the K dimension.
         if use_int8_w8a16:
             accumulator = tl.dot(a, b.to(compute_type), acc=accumulator)
@@ -974,7 +972,7 @@ def fused_moe(
         assert A_scale is None
         assert B_scale is None
 
-    EM = sorted_token_ids.shape[0] #  EM > num_tokens_post_padded
+    EM = sorted_token_ids.shape[0]  #  EM > num_tokens_post_padded
     # EM = num_tokens_post_padded # we would want this but cant use it because its a runtime var
 
     if A.shape[0] < config["BLOCK_SIZE_M"]:

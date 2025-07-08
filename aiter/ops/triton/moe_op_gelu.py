@@ -131,7 +131,7 @@ def _fused_moe_kernel(
     if pid < GRID_MN:
         pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
     else:
-        return # rest of the tiles are dummy paddings
+        return  # rest of the tiles are dummy paddings
     pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
     # Create pointers for the first blocks of A and B.

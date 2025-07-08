@@ -42,6 +42,7 @@ def moe_set_quant_func(func):
     global _MOE_A_QUANT_FUNC
     _MOE_A_QUANT_FUNC = func
 
+
 @triton.heuristics(
     {
         "EVEN_K": lambda args: args["K"] % args["BLOCK_SIZE_K"] == 0,
@@ -136,7 +137,7 @@ def _fused_moe_silu_kernel_gptq_awq(
     if pid < GRID_MN:
         pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
     else:
-        return # rest of the tiles are dummy paddings
+        return  # rest of the tiles are dummy paddings
     pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
     # ----------------------------------------------------------
@@ -302,6 +303,7 @@ def _fused_moe_silu_kernel_gptq_awq(
     c_ptrs = c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
     c_mask = token_mask[:, None] & (offs_cn[None, :] < N // 2)
     tl.store(c_ptrs, accumulator, mask=c_mask)
+
 
 @triton.heuristics(
     {
@@ -643,7 +645,7 @@ def _fused_moe_silu_kernel(
     if pid < GRID_MN:
         pid = remap_xcd(pid, GRID_MN, NUM_XCDS)
     else:
-        return # rest of the tiles are dummy paddings
+        return  # rest of the tiles are dummy paddings
     pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
     # ----------------------------------------------------------
@@ -731,9 +733,7 @@ def _fused_moe_silu_kernel(
                 mask=token_mask[:, None] & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
                 other=0.0,
             )
-            b = tl.load(
-                b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0
-            )
+            b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
         # We accumulate along the K dimension.
         if use_int8_w8a16:
             accumulator = tl.dot(a, b.to(compute_type), acc=accumulator)

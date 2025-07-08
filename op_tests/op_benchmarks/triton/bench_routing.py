@@ -11,9 +11,7 @@ from aiter.ops.triton.routing import (
 from op_tests.op_benchmarks.triton.utils.argparse import (
     get_parser,
 )
-from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
-    get_model_configs
-)
+from op_tests.op_benchmarks.triton.utils.benchmark_utils import get_model_configs
 
 
 def _get_compiled(fn):
@@ -21,6 +19,7 @@ def _get_compiled(fn):
         fn, backend="inductor", fullgraph=True, options={"max_autotune": True}
     )
     return compiled_fn
+
 
 def run_benchmark(args, x_vals_list):
     """
@@ -44,9 +43,7 @@ def run_benchmark(args, x_vals_list):
         line_arg="provider",
         line_vals=line_vals,
         line_names=line_names,
-        styles=[
-            ("green", "-")
-        ],  # match line names to colors
+        styles=[("green", "-")],  # match line names to colors
         ylabel=ylabel,
         plot_name="Benchmark Routing Layer",
         args={"metric": args.metric},
@@ -66,9 +63,7 @@ def run_benchmark(args, x_vals_list):
         mem = mem_read + mem_write
 
         ms = triton.testing.do_bench(
-            lambda: routing_sigmoid_top1(x, w, TOPK),
-            warmup=25,
-            rep=100
+            lambda: routing_sigmoid_top1(x, w, TOPK), warmup=25, rep=100
         )
         if args.metric == "time":
             return ms
@@ -80,7 +75,9 @@ def run_benchmark(args, x_vals_list):
             return bandwidth
         else:
             raise ValueError("Unknown metric: " + args.metric)
-    bench_routing_layer.run(save_path = ".", print_data = True)
+
+    bench_routing_layer.run(save_path=".", print_data=True)
+
 
 def benchmark(M, N, K):
     TOPK = 1
@@ -129,7 +126,7 @@ def benchmark(M, N, K):
         f"{ms_eager_time=:.3f}, {ms_triton_time=:.3f}, {ms_compile_time=:.3f}, "
         f"speedup_vs_eager: {ms_eager_time / ms_triton_time:.3f}, "
         f"speedup_vs_compile: {ms_compile_time / ms_triton_time:.3f}\n"
-        f"best triton config: {getattr(_routing_sigmoid_top1_kernel, 'best_config', "")}"
+        f"best triton config: {getattr(_routing_sigmoid_top1_kernel, 'best_config', '')}"
     )
 
 
@@ -154,13 +151,14 @@ def benchmark_decode():
     benchmark(M=256, K=5120, N=128)
     benchmark(M=256, K=5120, N=16)
 
+
 def parse_args():
     parser = get_parser(kernel_name="Routing Sigmoid Top1")
     parser.add_argument("-M", type=int, default=1024)
     parser.add_argument("-K", type=int, default=5120)
     parser.add_argument("-N", type=int, default=128)
-    parser.add_argument("-benchmark_prefill", action = "store_true")
-    parser.add_argument("-benchmark_decode", action = "store_true")
+    parser.add_argument("-benchmark_prefill", action="store_true")
+    parser.add_argument("-benchmark_decode", action="store_true")
     parser.add_argument(
         "--shape",
         type=int,
@@ -170,12 +168,15 @@ def parse_args():
     )
     return parser.parse_args()
 
+
 def main():
     args = parse_args()
-    assert args.model is None or args.shape is None, "Specify one of --model or --shape."
+    assert (
+        args.model is None or args.shape is None
+    ), "Specify one of --model or --shape."
     if args.model is not None:
         config_file = args.model_configs
-        configs = get_model_configs(config_path = config_file, models = args.model)
+        configs = get_model_configs(config_path=config_file, models=args.model)
         x_vals = []
         for _, config in configs.items():
             # layer takes (M, K) as input and produces (M, N) -> N is the number of experts
@@ -197,6 +198,7 @@ def main():
     if args.benchmark_decode:
         # no gain for decode shape
         benchmark_decode()
+
 
 if __name__ == "__main__":
     main()

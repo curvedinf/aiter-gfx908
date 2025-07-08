@@ -366,8 +366,6 @@ def _fused_moe_persistent_kernel_gptq_awq(
     # This is done in a grouped ordering to promote L2 data reuse.
     start_pid = tl.program_id(axis=0)
     NUM_XCDS: tl.constexpr = 8
-    # TODO the xcd remapping didn't seem to boost the perf. tianxing/xcd_remapping_persistent_new_logic has experiments on the new pid logic
-    # The new pid logic has better affinity with the xcd remapping
     # Load tile-invariant runtime constant
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
 
@@ -805,8 +803,6 @@ def _fused_moe_persistent_kernel(
     # Simply compute how many iterations each persistent block needs to do
     start_pid = tl.program_id(axis=0)
     NUM_XCDS: tl.constexpr = 8
-    # TODO the xcd remapping didn't seem to boost the perf. tianxing/xcd_remapping_persistent_new_logic has experiments on the new pid logic
-    # The new pid logic has better affinity with the xcd remapping
 
     # Load tile-invariant runtime constant
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)

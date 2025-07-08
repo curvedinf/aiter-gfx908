@@ -162,18 +162,32 @@ def mla_decode_fwd(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
 
-    aiter.mla_decode_stage1_asm_fwd(
-        q,
+    # aiter.mla_decode_stage1_asm_fwd(
+    #     q,
+    #     kv_buffer,
+    #     qo_indptr,
+    #     kv_indptr,
+    #     kv_indices,
+    #     kv_last_page_lens,
+    #     max_seqlen_q,
+    #     sm_scale,
+    #     logits,
+    #     attn_lse,
+    # )
+
+    out = aiter.flash_mla_fwd_prefill_with_kvcache(
+        q.reshape(32, 3, 16, 576),
         kv_buffer,
+        kv_indices.reshape(32, -1),
         qo_indptr,
         kv_indptr,
-        kv_indices,
-        kv_last_page_lens,
-        max_seqlen_q,
-        sm_scale,
-        logits,
-        attn_lse,
-    )
+        512, 
+        causal=True
+        )
+    # import pdb; pdb.set_trace()
+    # logits    = out[0].reshape(total_s, num_kv_splits, nhead, v_head_dim)
+    # attn_lse  = out[1].reshape(total_s, num_kv_splits, nhead, 1)
+
 
     if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
         return logits.view(total_s, nhead, v_head_dim), attn_lse

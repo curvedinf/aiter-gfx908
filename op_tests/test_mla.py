@@ -183,8 +183,8 @@ def test_mla(
         return us_aiter
 
     us_aiter = None
-    if batch_size * ctx_lens * nhead < 256 * 8192 * 16:
-        us_aiter = test_normal_prefill()
+    # if batch_size * ctx_lens * nhead < 256 * 8192 * 16:
+    #     us_aiter = test_normal_prefill()
     torch.cuda.empty_cache()
     # absorb init
     qk_head_dim = kv_lora_rank + qk_rope_head_dim
@@ -374,14 +374,14 @@ def test_mla(
 
 
 kv_lora_rank = 512
-qk_nope_head_dim = 128
+qk_nope_head_dim = 512 
 qk_rope_head_dim = 64
-v_head_dim = 128
+v_head_dim = 512
 block_size = 1
 list_dtype = [(dtypes.bf16, dtypes.bf16)]
-list_ctx_len = [21, 64, 256, 512, 1200, 3200, 5200, 8192]
-list_batch_size = [1, 3, 5, 16, 32, 64, 128, 256]
-list_nhead = [(16, 1), (16, 2), (16, 4), (128, 2)]
+list_ctx_len = [6001, ]
+list_batch_size = [32, ]
+list_nhead = [(16, 3), (16, 2), (16, 4), (128, 2)]
 
 parser = argparse.ArgumentParser(description="config input of test")
 parser.add_argument(

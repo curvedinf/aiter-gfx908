@@ -123,21 +123,33 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, page_block_size, ca
     max_seqlen = cache_seqlens.max().item()
     # max_seqlen_pad = triton.cdiv(max_seqlen, 256) * 256
 
-    max_seqlen_pad = int(math.ceil(max_seqlen / 256) * 256)
+    # max_seqlen_pad = int(math.ceil(max_seqlen / 256) * 256)
+    max_seqlen_pad = max_seqlen
     print(f"{total_seqlens=}, {mean_seqlens=}, {max_seqlen=}")
 
-    q = torch.randn(b, s_q, h_q, d, device="cuda", dtype=dtype)
+    # q = torch.randn(b, s_q, h_q, d, device="cuda", dtype=dtype)
+    q = torch.ones(b, s_q, h_q, d, device="cuda", dtype=dtype)
 
     block_table = torch.arange(
         b * max_seqlen_pad // page_block_size, dtype=torch.int32, device="cuda"
     ).view(b, max_seqlen_pad // page_block_size)
     blocked_k = torch.randn(block_table.numel(), page_block_size, h_kv, d, device="cuda", dtype=dtype)
+    # blocked_k = torch.ones(block_table.numel(), page_block_size, h_kv, d, device="cuda", dtype=dtype)
     for i in range(b):
         blocked_k.view(b, max_seqlen_pad, h_kv, d)[i, cache_seqlens[i].item():] = (
             # float("nan")
             float("0")
         )
     blocked_v = blocked_k[..., :dv]
+
+    seq_lens_qo = torch.empty(b, dtype=torch.int, device="cuda")
+    kv_indptr = torch.zeros(b + 1, dtype=torch.int, device="cuda")
+    qo_indptr = torch.zeros(b + 1, dtype=torch.int, device="cuda")
+
+    seq_lens_qo.fill_(s_q)
+    max_seqlen_qo = seq_lens_qo.max().item()
+    qo_indptr[1 : b + 1] = torch.cumsum(seq_lens_qo, dim=0)
+    kv_indptr[1 : b + 1] = torch.cumsum(cache_seqlens, dim=0)
 
     # tile_scheduler_metadata, num_splits = aiter.get_mla_metadata(
     #     cache_seqlens, s_q * h_q // h_kv, h_kv
@@ -158,7 +170,8 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, page_block_size, ca
         #     num_splits,
         #     causal=causal,
         # )
-        return aiter.flash_mla_fwd_prefill_with_kvcache(q, blocked_k, block_table, cache_seqlens, dv, causal=causal)
+        # import pdb;pdb.set_trace()
+        return aiter.flash_mla_fwd_prefill_with_kvcache(q, blocked_k, block_table, qo_indptr, kv_indptr, dv, causal=causal)
 
     def ref_mla():
         out = torch.empty(b, s_q, h_q, dv, dtype=torch.float32, device="cuda")
@@ -190,7 +203,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, page_block_size, ca
         # debug_v = out[4].reshape(576, 16)
         # debug_o = out[5]
         # debug_q = out[6]
-        # import pdb; pdb.set_trace()
+        import pdb; pdb.set_trace()
         checkAllclose(lse_flash, lse_torch, msg="lse")
         checkAllclose(out_flash, out_torch.to(dtype=dtype), msg="out")
 
@@ -239,4 +252,4 @@ if __name__ == "__main__":
     #     test_flash_mla(dtype, b, s, s, h_q, h_kv, d, dv, page_block_size, causal, varlen, False, True)
 
     # test_flash_mla(dtype, b, s_q, s, h_q, h_kv, d, dv, page_block_size, causal, varlen, True, False)
-    test_flash_mla(torch.float16, 32, 3, 6001, 16, 1, 576, dv, 16, True, False, True, True)
+    test_flash_mla(torch.bfloat16, 32, 3, 6001, 16, 1, 576, dv, 1, True, False, True, True)

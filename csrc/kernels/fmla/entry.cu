@@ -19,6 +19,7 @@ std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
     const torch::Tensor& key_cache,                 // [block count, block size,  head count of kv, head dim of qk]
     const torch::Tensor& value_cache,               // [block count, block size,  head count of kv, head dim of v ]
     const int32_t        head_size_v,
+    const torch::Tensor& qo_indptr,
     const torch::Tensor& seqlens_k,                 // [batch size]
     const torch::Tensor& block_table,               // [batch size, max blocks per seq]
     const float          softmax_scale,
@@ -42,7 +43,8 @@ std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
         return flash_mla_fwd_prefill_with_kvcache_impl(
             query, key_cache, value_cache,
             head_size_v, 
-            seqlens_k, block_table,
+            qo_indptr, seqlens_k,
+            block_table,
             softmax_scale, is_causal);
     }
 }

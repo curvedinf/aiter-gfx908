@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
 
 
-def get_shape_benchmark_object(plot_name, args, x_names = None):
+def get_shape_benchmark_object(plot_name, args, x_names=None):
     """
     Utility function for returning a triton.testing.Benchmark object to populate.
 
@@ -53,7 +53,9 @@ def get_shape_benchmark_object(plot_name, args, x_names = None):
     return benchmark
 
 
-def get_model_benchmark_object(plot_name, args, x_names = None, model_benchmark_shapes_fn=None):
+def get_model_benchmark_object(
+    plot_name, args, x_names=None, model_benchmark_shapes_fn=None
+):
     """
     Utility function for returning a triton.testing.Benchmark object to populate.
 

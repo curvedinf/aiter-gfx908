@@ -7,7 +7,7 @@ from op_tests.triton_tests.test_gemm_a8w8 import (
     generate_gemm_a8w8_inputs,
 )
 from op_tests.op_benchmarks.triton.utils.argparse import (
-    get_parser, 
+    get_parser,
     add_argparse_ff,
     get_ff_args,
 )

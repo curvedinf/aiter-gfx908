@@ -34,6 +34,7 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_available_models,
 )
 
+
 def str_to_bool(v, vstr):
     if v.lower() in ["true", "yes"]:
         return True
@@ -83,13 +84,15 @@ def run_benchmark(args):
     )
     if args.model:
         config_file = args.model_configs
-        configs = get_model_configs(config_path = config_file, models = args.model)
+        configs = get_model_configs(config_path=config_file, models=args.model)
         config = configs[args.model]
         num_q_heads = config["num_attention_heads"]
         num_kv_heads = config["num_key_value_heads"]
         H = num_kv_heads
-        Q = num_q_heads // num_kv_heads # num Q heads per K head
-        D = config["hidden_size"] // num_q_heads # head_dimension = hidden_size / num_heads
+        Q = num_q_heads // num_kv_heads  # num Q heads per K head
+        D = (
+            config["hidden_size"] // num_q_heads
+        )  # head_dimension = hidden_size / num_heads
 
     cached = str_to_bool(cached, "cached")
     reuse_freqs_front_part = str_to_bool(

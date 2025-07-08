@@ -7,9 +7,9 @@ from op_tests.triton_tests.test_batched_gemm_afp4wfp4_pre_quant import (
     generate_batched_gemm_afp4wfp4_pre_quant_inputs,
 )
 from op_tests.op_benchmarks.triton.utils.argparse import (
-    get_parser, 
+    get_parser,
     add_argparse_ff,
-    get_ff_args
+    get_ff_args,
 )
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_model_benchmark_object,
@@ -19,6 +19,7 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
 from aiter.ops.triton.batched_gemm_afp4wfp4_pre_quant import (
     batched_gemm_afp4wfp4_pre_quant,
 )
+
 
 def model_benchmark_shapes(args):
     config_file = args.model_configs
@@ -30,9 +31,10 @@ def model_benchmark_shapes(args):
             N = config["intermediate_size"]
             K = config["hidden_size"]
 
-            shapes.append((M, N, K, 16)) # batch is last dim
+            shapes.append((M, N, K, 16))  # batch is last dim
 
     return shapes
+
 
 def bench_gemm_fn(batch, M, N, K, metric):
     c_dtype = torch.bfloat16
@@ -54,9 +56,7 @@ def bench_gemm_fn(batch, M, N, K, metric):
     )
 
     ms = triton.testing.do_bench(
-        lambda: batched_gemm_afp4wfp4_pre_quant(
-            x, w, x_scale, w_scale, c_dtype, out
-        ),
+        lambda: batched_gemm_afp4wfp4_pre_quant(x, w, x_scale, w_scale, c_dtype, out),
         warmup=25,
         rep=100,
     )
@@ -72,7 +72,8 @@ def bench_gemm_fn(batch, M, N, K, metric):
         return bandwidth
     else:
         raise ValueError("Unknown metric: " + metric)
-        
+
+
 def run_model_benchmark(args):
     benchmark = get_model_benchmark_object(
         plot_name="GEMM MXFP4 x MXFP4 Pre-quant Benchmark",
@@ -82,7 +83,9 @@ def run_model_benchmark(args):
     )
 
     @triton.testing.perf_report([benchmark])
-    def bench_batched_gemm_afp4wfp4_pre_quant(M, hidden_dim, intermediate_dim, batch, metric, layer, **kwargs):
+    def bench_batched_gemm_afp4wfp4_pre_quant(
+        M, hidden_dim, intermediate_dim, batch, metric, layer, **kwargs
+    ):
         if layer == "fc1":
             if args.no_glu:
                 N, K = intermediate_dim, hidden_dim
@@ -100,11 +103,12 @@ def run_model_benchmark(args):
 
     bench_batched_gemm_afp4wfp4_pre_quant.run(save_path=".", print_data=True)
 
+
 def run_shape_benchmark(args):
     benchmark = get_shape_benchmark_object(
-        plot_name="Batched GEMM MXFP4 x MXFP4 Pre-quant Benchmark", 
+        plot_name="Batched GEMM MXFP4 x MXFP4 Pre-quant Benchmark",
         args=args,
-        x_names = ["M", "N", "K", "batch"],
+        x_names=["M", "N", "K", "batch"],
     )
 
     @triton.testing.perf_report([benchmark])
@@ -112,6 +116,7 @@ def run_shape_benchmark(args):
         return bench_gemm_fn(batch, M, N, K, metric)
 
     bench_batched_gemm_afp4wfp4_pre_quant.run(save_path=".", print_data=True)
+
 
 def run_benchmark(args, defaults):
     assert not (args.shape and args.model) or not (
@@ -146,6 +151,7 @@ def parse_args():
     parser = get_parser("Batched MXFP4 x MXFP4 GEMM, Pre Quant")
     parser = add_argparse_ff(parser)
     return get_ff_args(parser)
+
 
 def main():
     args, defaults = parse_args()

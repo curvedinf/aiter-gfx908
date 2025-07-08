@@ -39,6 +39,7 @@ def get_parser(kernel_name: str) -> argparse.ArgumentParser:
     )
     return parser
 
+
 def get_ff_args(parser: argparse.ArgumentParser) -> Tuple[dict, dict]:
     """
     Does additional processing on parser args for feed-forward blocks.
@@ -52,6 +53,7 @@ def get_ff_args(parser: argparse.ArgumentParser) -> Tuple[dict, dict]:
     defaults = parser.parse_args([])  # get default arguments
 
     return args, defaults
+
 
 def add_argparse_ff(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     """
@@ -94,7 +96,7 @@ def add_argparse_ff(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--shape",
         type=int,
-        nargs='+',
+        nargs="+",
         metavar=("DIM"),
         help="user-defined shape to benchmark. Can be 3D (M, N, K) or 4D (B, M, N, K) for supporting kernels.",
     )

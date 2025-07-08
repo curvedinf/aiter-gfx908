@@ -10,7 +10,7 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_shape_benchmark_object,
 )
 from op_tests.op_benchmarks.triton.utils.argparse import (
-    get_parser, 
+    get_parser,
     add_argparse_ff,
     get_ff_args,
 )

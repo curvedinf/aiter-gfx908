@@ -9,7 +9,7 @@ from aiter.ops.triton.gemm_afp4wfp4 import (
 )
 from op_tests.triton_tests.test_gemm_afp4wfp4 import generate_gemm_afp4wfp4_inputs
 from op_tests.op_benchmarks.triton.utils.argparse import (
-    get_parser, 
+    get_parser,
     add_argparse_ff,
     get_ff_args,
 )
@@ -23,11 +23,10 @@ TRITON_HIP_PRESHUFFLE_SCALES = (
     os.environ.get("TRITON_HIP_PRESHUFFLE_SCALES", "0") == "1"
 )
 
+
 def bench_gemm_fn(M, N, K, metric):
     c_dtype = torch.bfloat16
-    x, w, _, _, x_scale, w_scale, _, _ = generate_gemm_afp4wfp4_inputs(
-        M, N, K, c_dtype
-    )
+    x, w, _, _, x_scale, w_scale, _, _ = generate_gemm_afp4wfp4_inputs(M, N, K, c_dtype)
     # flops
     flops = 2.0 * M * N * K
     # memory transfer
@@ -66,6 +65,7 @@ def bench_gemm_fn(M, N, K, metric):
         return bandwidth
     else:
         raise ValueError("Unknown metric: " + metric)
+
 
 def run_benchmark(args, defaults):
     assert not (args.shape and args.model) or not (
@@ -113,7 +113,7 @@ def run_model_benchmark(args):
             N, K = hidden_dim, intermediate_dim
             # Divide K by tensor parallel
             K = math.ceil(K / args.tp)
- 
+
         return bench_gemm_fn(M, N, K, metric)
 
     bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
@@ -139,6 +139,7 @@ def parse_args():
         help="Print VGPR usage for Triton kernels.",
     )
     return get_ff_args(parser)
+
 
 def main():
     args, defaults = parse_args()

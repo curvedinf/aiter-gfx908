@@ -340,7 +340,7 @@ def run_benchmark(args):
 
 
 def parse_args():
-    parser = get_parser(kernel_name = "Paged Attention Decode")
+    parser = get_parser(kernel_name="Paged Attention Decode")
 
     parser.add_argument("-b", type=int, default=0)
     parser.add_argument("-hq", type=int, default=0)

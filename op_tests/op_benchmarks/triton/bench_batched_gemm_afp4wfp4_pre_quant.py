@@ -30,7 +30,7 @@ def model_benchmark_shapes(args):
             N = config["intermediate_size"]
             K = config["hidden_size"]
 
-            shapes.append((16, M, N, K))
+            shapes.append((M, N, K, 16)) # batch is last dim
 
     return shapes
 
@@ -75,14 +75,14 @@ def bench_gemm_fn(batch, M, N, K, metric):
         
 def run_model_benchmark(args):
     benchmark = get_model_benchmark_object(
-        plot_name="GEMM MXFP4 x MXFP4 Pre Quant Benchmark",
+        plot_name="GEMM MXFP4 x MXFP4 Pre-quant Benchmark",
         args=args,
-        x_names=["batch", "M", "hidden_dim", "intermediate_dim"],
+        x_names=["M", "hidden_dim", "intermediate_dim", "batch"],
         model_benchmark_shapes_fn=model_benchmark_shapes,
     )
 
     @triton.testing.perf_report([benchmark])
-    def bench_batched_gemm_afp4wfp4_pre_quant(batch, M, hidden_dim, intermediate_dim, metric, layer, **kwargs):
+    def bench_batched_gemm_afp4wfp4_pre_quant(M, hidden_dim, intermediate_dim, batch, metric, layer, **kwargs):
         if layer == "fc1":
             if args.no_glu:
                 N, K = intermediate_dim, hidden_dim
@@ -102,13 +102,13 @@ def run_model_benchmark(args):
 
 def run_shape_benchmark(args):
     benchmark = get_shape_benchmark_object(
-        plot_name="GEMM MXFP4 x MXFP4 Benchmark", 
+        plot_name="Batched GEMM MXFP4 x MXFP4 Pre-quant Benchmark", 
         args=args,
-        x_names = ["batch", "M", "N", "K"],
+        x_names = ["M", "N", "K", "batch"],
     )
 
     @triton.testing.perf_report([benchmark])
-    def bench_batched_gemm_afp4wfp4_pre_quant(batch, M, N, K, metric, provider):
+    def bench_batched_gemm_afp4wfp4_pre_quant(M, N, K, batch, metric, provider):
         return bench_gemm_fn(batch, M, N, K, metric)
 
     bench_batched_gemm_afp4wfp4_pre_quant.run(save_path=".", print_data=True)
@@ -143,7 +143,7 @@ def run_benchmark(args, defaults):
 
 
 def parse_args():
-    parser = get_parser("MXFP4 x MXFP4 GEMM")
+    parser = get_parser("Batched MXFP4 x MXFP4 GEMM, Pre Quant")
     parser = add_argparse_ff(parser)
     return get_ff_args(parser)
 

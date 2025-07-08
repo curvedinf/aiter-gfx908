@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
 
 
-def get_shape_benchmark_object(plot_name, args):
+def get_shape_benchmark_object(plot_name, args, x_names = None):
     """
     Utility function for returning a triton.testing.Benchmark object to populate.
 
@@ -22,7 +22,9 @@ def get_shape_benchmark_object(plot_name, args):
     comes in the x_names and x_vals: For models, we use hidden_dim and intermediate_dim
     as args, but if we're just given a shape, we use M, N, K.
     """
-    x_names = ["M", "N", "K"]
+    if x_names is None:
+        x_names = ["M", "N", "K"]
+
     if args.shape:
         x_vals_list = [args.shape]
     else:

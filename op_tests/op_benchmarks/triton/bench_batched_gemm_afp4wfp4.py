@@ -34,6 +34,7 @@ def model_benchmark_shapes(args):
 def bench_gemm_fn(batch, M, N, K, metric):
     c_dtype = torch.bfloat16
     x, w, x_scale, w_scale = generate_batched_gemm_afp4wfp4_inputs(batch, M, N, K)
+    # print(f"M: {M}, N: {N}, K: {K}, x.shape: {x.shape}, x.stride(): {x.stride()}, w.shape: {w.shape}, w.stride(): {w.stride()}")
     # flops
     flops = 2.0 * M * N * K
     # memory transfer
@@ -88,7 +89,7 @@ def run_model_benchmark(args):
             N, K = hidden_dim, intermediate_dim
             # Divide K by tensor parallel
             K = math.ceil(K / args.tp)
-        # print(f"Layer: {layer}, M: {M}, N: {N}, K: {K}, hidden_dim: {hidden_dim}, intermediate_dim: {intermediate_dim}")
+        # print(f"Layer: {layer}, B: {batch}, M: {M}, N: {N}, K: {K}, hidden_dim: {hidden_dim}, intermediate_dim: {intermediate_dim}")
 
         return bench_gemm_fn(batch, M, N, K, metric)
 
@@ -97,7 +98,9 @@ def run_model_benchmark(args):
 
 def run_shape_benchmark(args):
     benchmark = get_shape_benchmark_object(
-        plot_name="GEMM MXFP4 x MXFP4 Benchmark", args=args
+        plot_name="GEMM MXFP4 x MXFP4 Benchmark", 
+        args=args,
+        x_names = ["batch", "M", "N", "K"],
     )
 
     @triton.testing.perf_report([benchmark])
@@ -140,6 +143,11 @@ def parse_args():
     parser = get_parser("MXFP4 x MXFP4 GEMM")
     parser = add_argparse_ff(parser)
     args = parser.parse_args()
+    if args.shape is not None:
+        if len(args.shape) == 3:
+            args.M, args.N, args.K = args.shape
+        elif len(args.shape) == 4:
+            args.B, args.M, args.N, args.K = args.shape
     defaults = parser.parse_args([])  # get default arguments
     return args, defaults
 

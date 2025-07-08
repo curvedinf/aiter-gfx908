@@ -80,8 +80,8 @@ def add_argparse_ff(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--shape",
         type=int,
-        nargs=3,
-        metavar=("M", "N", "K"),
-        help="user-defined shape to benchmark",
+        nargs='+',
+        metavar=("DIM"),
+        help="user-defined shape to benchmark. Can be 3D (M, N, K) or 4D (B, M, N, K) for supporting kernels.",
     )
     return parser

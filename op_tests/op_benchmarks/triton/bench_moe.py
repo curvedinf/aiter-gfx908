@@ -8,6 +8,7 @@ from op_tests.triton_tests.test_moe import input_helper, input_helper_int4_w4a16
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_model_configs,
     get_available_models,
+    print_vgpr,
 )
 
 
@@ -275,6 +276,7 @@ def parse_args():
     parser.add_argument("-int4_w4a16", action="store_true", default=False)
     parser.add_argument("-has_zp", action="store_true", default=False)
     parser.add_argument("-print_time", action="store_true", default=False)
+    parser.add_argument("-print_vgpr", action="store_true", default=False, help="Print VGPR usage for Triton kernels.")
     parser.add_argument("-no_bench_stage2", action="store_false", default=True)
     parser.add_argument("-dtype", default="fp16")
     parser.add_argument("-fp8_type", default="e5m2fnuz")
@@ -284,6 +286,15 @@ def parse_args():
 
 def main():
     args = parse_args()
+    
+    if args.print_vgpr:
+        print("Retrieving VGPR usage for Triton kernels...")
+
+        def fun():
+            return run_benchmark(args)
+
+        print_vgpr(fun, "_fused_moe_kernel-benchmark")
+        return 0
     run_benchmark(args)
 
 

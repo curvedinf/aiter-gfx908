@@ -3089,7 +3089,7 @@ struct host_args
 };
 
 //////////////////////////////////////////////////////////////////////////////////////
-template <typename DataType>
+template <typename DataType, bool IsMasking>
 struct get_kernel
 {
     using fmha_dtype = DataType;
@@ -3127,8 +3127,7 @@ struct get_kernel
                                    CK_TILE_FMHA_FWD_FAST_EXP2        // UseExp2
                                    >; // placeholder type, we are not using this
 
-    using fmha_mask = ck_tile::SimplifiedGenericAttentionMask<false // IsMasking
-                                                              >;
+    using fmha_mask = ck_tile::SimplifiedGenericAttentionMask<IsMasking>;
 
     using fmha_problem = ck_tile::BlockFmhaPipelineProblem<
         typename FmhaFwdTypeConfig<fmha_dtype>::QDataType,
@@ -3160,8 +3159,8 @@ struct get_kernel
     using type = aiter::FmhaFwdKernel<fmha_pipeline, fmha_epilogue>;
 };
 
-template <typename DataType>
-using get_kernel_t = typename get_kernel<DataType>::type;
+template <typename DataType, bool IsMasking>
+using get_kernel_t = typename get_kernel<DataType, IsMasking>::type;
 
 template <typename Kernel>
 void launch(const host_args& args)
@@ -3203,9 +3202,9 @@ void launch(const host_args& args)
                                        0, // batch_stride_randval
                                        0, // batch_stride_lse
                                        args.batch_stride_o,
-                                       args.window_size_left,     // window_size_left
-                                       args.window_size_right,    // window_size_right
-                                       args.mask_type,            // mask_type
+                                       args.window_size_left,
+                                       args.window_size_right,
+                                       args.mask_type,
                                        0.0f,                      // p_drop
                                        false,                     // s_randval
                                        std::make_pair(0UL, 0UL)); // drop_seed_offset
@@ -3341,13 +3340,28 @@ std::vector<at::Tensor> fmha_v3_fwd_ck(const at::Tensor& q, // [b, sq, hq, d]
     args.stride_o       = out.stride(1);
     args.nhead_stride_o = out.stride(2);
 
+    // TODO: compile fp16/bf16, masking=true/false kernels separately
     if(q_dtype == at::ScalarType::Half)
     {
-        launch<get_kernel_t<FmhaFwdFp16>>(args);
+        if(mask.type == mask_enum::no_mask)
+        {
+            launch<get_kernel_t<FmhaFwdFp16, false>>(args);
+        }
+        else
+        {
+            launch<get_kernel_t<FmhaFwdFp16, true>>(args);
+        }
     }
     else if(q_dtype == at::ScalarType::BFloat16)
     {
-        launch<get_kernel_t<FmhaFwdBf16>>(args);
+        if(mask.type == mask_enum::no_mask)
+        {
+            launch<get_kernel_t<FmhaFwdBf16, false>>(args);
+        }
+        else
+        {
+            launch<get_kernel_t<FmhaFwdBf16, true>>(args);
+        }
     }
 
     return {out};

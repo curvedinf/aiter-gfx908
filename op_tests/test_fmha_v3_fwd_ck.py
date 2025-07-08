@@ -18,10 +18,20 @@ def run_torch(
     q,
     k,
     v,
+    causal,
+    window_size,
     upcast=True,
     reorder_ops=False,
 ):
-    out, _ = attention_ref(q, k, v, upcast=upcast, reorder_ops=reorder_ops)
+    out, _ = attention_ref(
+        q,
+        k,
+        v,
+        causal=causal,
+        window_size=window_size,
+        upcast=upcast,
+        reorder_ops=reorder_ops,
+    )
 
     return out
 
@@ -31,8 +41,6 @@ def profile_func(target_func, *args, **kwargs):
     return target_func(*args, **kwargs)
 
 
-@pytest.mark.parametrize("dtype", [dtypes.fp16, dtypes.bf16])
-@pytest.mark.parametrize("mha_type", ["mha", "mqa", "gqa"])
 @pytest.mark.parametrize("batch_size", [5])
 @pytest.mark.parametrize("nheads", [6])
 @pytest.mark.parametrize(
@@ -56,6 +64,10 @@ def profile_func(target_func, *args, **kwargs):
         (2048, 2048),
     ],
 )
+@pytest.mark.parametrize("causal", [False, True])
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("dtype", [dtypes.fp16, dtypes.bf16])
+@pytest.mark.parametrize("mha_type", ["mha", "mqa", "gqa"])
 @pytest.mark.parametrize("seed", [None])
 def test_fmha_v3_fwd_ck(
     batch_size,
@@ -64,6 +76,8 @@ def test_fmha_v3_fwd_ck(
     seqlen_k,
     d,
     d_v,
+    causal,
+    local,
     mha_type,
     dtype,
     seed,
@@ -74,6 +88,10 @@ def test_fmha_v3_fwd_ck(
     torch.cuda.empty_cache()
     nheads_k = nheads if mha_type == "mha" else (1 if mha_type == "mqa" else 3)
     assert nheads % nheads_k == 0
+    window_size = (-1, -1) if not local else torch.randint(0, seqlen_q, (2,))
+
+    if causal and seqlen_k < seqlen_q:
+        pytest.skip("Causal attention not supported for seqlen_k < seqlen_q")
 
     def print_tensor(tensor, tensor_name):
         tensor_list = tensor.tolist()
@@ -122,10 +140,25 @@ def test_fmha_v3_fwd_ck(
 
     attention = aiter.fmha_v3_fwd_ck_func
     if profile:
-        out, time = profile_func(attention, q, k, v)
+        out, time = profile_func(
+            attention,
+            q,
+            k,
+            v,
+            causal=causal,
+            window_size_left=window_size[0],
+            window_size_right=window_size[1],
+        )
         print(f"time: {time}")
     else:
-        out = attention(q, k, v)
+        out = attention(
+            q,
+            k,
+            v,
+            causal=causal,
+            window_size_left=window_size[0],
+            window_size_right=window_size[1],
+        )
 
     # print_tensor(out.squeeze(0).squeeze(1), 'O')
 
@@ -133,16 +166,14 @@ def test_fmha_v3_fwd_ck(
         q,
         k,
         v,
+        causal=causal,
+        window_size=window_size,
     )
 
     # print_tensor(out_ref.squeeze(0).squeeze(1), 'out_ref')
 
     out_pt = run_torch(
-        q,
-        k,
-        v,
-        upcast=False,
-        reorder_ops=True,
+        q, k, v, causal=causal, window_size=window_size, upcast=False, reorder_ops=True
     )
 
     # print_tensor(out_pt.squeeze(0).squeeze(1), 'out_pt')
@@ -165,5 +196,15 @@ if __name__ == "__main__":
     seed = 0
 
     test_fmha_v3_fwd_ck(
-        batch_size, nheads, seqlen_q, seqlen_k, d, d_v, mha_type, dtype, seed
+        batch_size,
+        nheads,
+        seqlen_q,
+        seqlen_k,
+        d,
+        d_v,
+        True,
+        False,
+        mha_type,
+        dtype,
+        seed,
     )

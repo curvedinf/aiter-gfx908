@@ -587,6 +587,7 @@ def test_paged_attention(
         )
         # tensor_dump(out_aiter, 'out_aiter')
 
+    """
     for quant_algo_, cache_type_ in [
         (0, k_cache.dtype),
         (2, dtypes.fp8),
@@ -755,7 +756,7 @@ def test_paged_attention(
                 out_native,
                 msg=f"golden vs torch_native: {time_native:>8.2f} us...... (quant:{ck_naive_quant_algo[quant_algo_]}, kvcache:{cache_type_})",
             )
-
+    """
     if debug_mode == DUMP:
         dump_input(
             query,

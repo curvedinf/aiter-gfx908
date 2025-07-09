@@ -891,6 +891,14 @@ struct BlockFmhaPipelineQRKSVS
         static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
             /// NOTICE: bias might be materialized mask including -inf values, need
             /// consideration
+            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
+                         FmhaMask::IsMasking)
+            {
+                return raw_m == -numeric<SMPLComputeDataType>::infinity()
+                           ? type_convert<SMPLComputeDataType>(0.f)
+                           : raw_m;
+            }
+            else
             {
                 return raw_m;
             }
@@ -1354,29 +1362,6 @@ struct BlockFmhaPipelineQRKSVS
             auto xdl_SP_p23_reg_idx = ps_pi;
             gemm(xdl_SP_p23_reg_idx, /*gemm_idx=*/number<1>{});
         };
-
-        set_tile(metadata.s(number<0>{}),
-                 ck_tile::type_convert<
-                     typename std::decay_t<decltype(metadata.s(number<0>{}))>::DataType>(-1.0));
-        set_tile(metadata.s(number<1>{}),
-                 ck_tile::type_convert<
-                     typename std::decay_t<decltype(metadata.s(number<0>{}))>::DataType>(-1.0));
-
-        set_tile(
-            metadata.p_compute(number<0>{}),
-            ck_tile::type_convert<
-                typename std::decay_t<decltype(metadata.p_compute(number<0>{}))>::DataType>(-1.0));
-        set_tile(
-            metadata.p_compute(number<1>{}),
-            ck_tile::type_convert<
-                typename std::decay_t<decltype(metadata.p_compute(number<0>{}))>::DataType>(-1.0));
-
-        set_tile(metadata.p(number<0>{}),
-                 ck_tile::type_convert<
-                     typename std::decay_t<decltype(metadata.p(number<0>{}))>::DataType>(-1.0));
-        set_tile(metadata.p(number<1>{}),
-                 ck_tile::type_convert<
-                     typename std::decay_t<decltype(metadata.p(number<0>{}))>::DataType>(-1.0));
 
         // pre-stage
         {

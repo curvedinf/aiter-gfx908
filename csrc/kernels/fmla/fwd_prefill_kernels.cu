@@ -3769,12 +3769,12 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     // Combine shader, which only exists when num_splits > 1, will conduct type convert by default and force.
     // Thus, kForceOutAcc doesn't work in this case.
 #ifndef enable_inline
-    auto output = torch::zeros({batch_size, seqlen_q, num_heads_q, head_size_v},
+    auto output = torch::empty({batch_size, seqlen_q, num_heads_q, head_size_v},
                                (kForceOutAcc && !do_splits) ? opts_acc : opts);
-    auto softmax_lse = torch::zeros({batch_size, num_heads_q, seqlen_q}, opts_acc);
+    auto softmax_lse = torch::empty({batch_size, num_heads_q, seqlen_q}, opts_acc);
 #else
-    auto output = torch::zeros({batch_size * seqlen_q, num_splits, num_heads_q, head_size_v}, opts_acc);
-    auto softmax_lse = torch::zeros({batch_size * seqlen_q, num_splits, num_heads_q, 1}, opts_acc);
+    auto output = torch::empty({batch_size * seqlen_q, num_splits, num_heads_q, head_size_v}, opts_acc);
+    auto softmax_lse = torch::empty({batch_size * seqlen_q, num_splits, num_heads_q, 1}, opts_acc);
 #endif
 
     FlashMlaPrefillFwdParams params = {};
@@ -3834,9 +3834,9 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
     if(params.num_splits > 1)
     {
         auto output_accum =
-            torch::zeros({batch_size, params.num_splits, seqlen_q, num_heads_q, head_size_v}, opts_acc);
+            torch::empty({batch_size, params.num_splits, seqlen_q, num_heads_q, head_size_v}, opts_acc);
         auto softmax_lseaccum =
-            torch::zeros({batch_size, params.num_splits, num_heads_q, seqlen_q}, opts_acc);
+            torch::empty({batch_size, params.num_splits, num_heads_q, seqlen_q}, opts_acc);
         params.p_softmax_lseaccum = softmax_lseaccum.data_ptr();
         params.p_output_accum     = output_accum.data_ptr();
         params.stride_b_oacc      = output_accum.stride(0);

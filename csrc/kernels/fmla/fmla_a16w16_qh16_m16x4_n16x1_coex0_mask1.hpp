@@ -135,7 +135,7 @@ struct Fmla_m16x4_n16x1_Bf16: public Fmla_m16x4_n16x1_Base
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winline-asm"
         asm volatile(
-#include "fmla_gfx9_m16x4n16x1.inc"
+#include "fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1.inc"
             :
 
             :

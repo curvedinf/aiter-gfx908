@@ -180,7 +180,9 @@ def main():
         x_vals = []
         for _, config in configs.items():
             # layer takes (M, K) as input and produces (M, N) -> N is the number of experts
-            assert "n_routed_experts" in config, "Missing 'n_routed_experts' in config. Is this model using MoE?"
+            assert (
+                "n_routed_experts" in config
+            ), "Missing 'n_routed_experts' in config. Is this model using MoE?"
             N = config["n_routed_experts"]
             K = config["hidden_size"]
             for M in [2**i for i in range(15)]:

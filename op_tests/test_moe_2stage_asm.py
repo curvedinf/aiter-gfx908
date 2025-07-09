@@ -140,9 +140,9 @@ def test_fmoe(
         return
     torch_quant = aiter.get_torch_quant(qType)
     torch_act = aiter.get_torch_act(actType)
-    input = torch.ones((token, model_dim), dtype=dtype)
+    input = torch.randn((token, model_dim), dtype=dtype)
     if use_g1u1:
-        w1 = torch.ones((E, inter_dim * 2, model_dim), dtype=dtype) / 10
+        w1 = torch.randn((E, inter_dim * 2, model_dim), dtype=dtype)
     else:
         w1 = torch.randn((E, inter_dim, model_dim), dtype=dtype)
     w2 = torch.randn((E, model_dim, inter_dim), dtype=dtype)
@@ -155,9 +155,9 @@ def test_fmoe(
     BLOCK_SIZE_M = get_block_size_M(M, topk, E, inter_dim)
     if qType == aiter.QuantType.per_128x128:
         BLOCK_SIZE_M = 64
-    
+
     if qType == aiter.QuantType.per_1x32:
-        BLOCK_SIZE_M = 256    
+        BLOCK_SIZE_M = 256
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
         topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M
     )
@@ -282,10 +282,9 @@ def test_fmoe(
         if qType == aiter.QuantType.per_Tensor:
             a1_scale = a1_scale.view(1).repeat(token)
             w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
-        
-        sorted_expert_ids_nopad = sorted_expert_ids[:int(num_valid_ids[0] / 256)]
 
-        print(sorted_expert_ids_nopad,"######sorted_expert_ids_nopad####")
+        sorted_expert_ids_nopad = sorted_expert_ids[: int(num_valid_ids[0] / 256)]
+
         out1_asm = torch.empty((token, topk, inter_dim), dtype=dtype)
         _, us = run_perftest(
             asm_stage1,
@@ -293,13 +292,13 @@ def test_fmoe(
             shuffle_weight(w1_qt, (16, 16)),
             shuffle_weight(w2_qt, (16, 16)),
             sorted_ids,
-            sorted_expert_ids_nopad,
+            sorted_expert_ids,
             num_valid_ids,
             out1_asm,
             topk,
             # kernelName="fmoe_stage1_bf16_pertokenFp4_blockscale_g1u1_256x128",
             kernelName="",
-            w1_scale=fp4_utils.e8m0_shuffle(w2_scale),
+            w1_scale=fp4_utils.e8m0_shuffle(w1_scale),
             a1_scale=fp4_utils.moe_mxfp4_sort(
                 a1_scale_shuffle,
                 sorted_ids,

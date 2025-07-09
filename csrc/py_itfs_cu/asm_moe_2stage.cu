@@ -182,8 +182,7 @@ void moe_stage1_g1u1(
     int model_dim  = input.size(1);
     int hidden_dim = inter_dim;
     int sub_X_cnt  = sorted_expert_ids.size(0);
-    // std::cout<<"sorted_expert_ids: "<<sub_X_cnt<<"
-    // $$$"<<static_cast<int*>(sorted_expert_ids.data_ptr())[3]<<std::endl;
+
     if(kernelName.empty())
     {
         kernelName = get_heuristic_kernel(sub_X_cnt, inter_dim, block_m, config_map);
@@ -297,30 +296,29 @@ void moe_stage1_g1u1(
 
     int bdx = 256;
     int gdx = ((hidden_dim + sub_GU - 1) / sub_GU);
-    int gdy =
-        input.scalar_type() == torch::kFloat4_e2m1fn_x2 || input.scalar_type() == torch::kUInt8
-            ? sub_X_cnt // 8
-            : sub_X_cnt;
+    int gdy = sub_X_cnt;
     int gdz = k_num;
 
-    // std::cout << "num_valid_ids: " << static_cast<int*>(num_valid_ids.data_ptr())[0] <<
-    // std::endl; std::cout << "dim:" << args.dim << std::endl; std::cout << "hidden:" <<
-    // args.hidden_dim << std::endl; std::cout << "token:" << args.token_cnt << std::endl; std::cout
-    // << "eprt:" << args.eprt_cnt << std::endl; std::cout << "Xs:" << args.Xs << std::endl;
-    // std::cout << "GUs:" << args.GUs << std::endl;
-    // std::cout << "Os:" << args.Os << std::endl;
-    // std::cout << "eGUs:" << args.eGUs << std::endl;
-    // std::cout << "eGUQs:" << args.eGUQs << std::endl;
-    // std::cout << "eSMQs:" << args.eSMQs << std::endl;
-    // std::cout << "topk:" << args.topk << std::endl;
-    // std::cout << "splitk:" << args.splitk << std::endl;
-    // printf("gdx:%d, gdy:%d, gdz:%d, sub_X_cnt:%d, tgs:%d\n",
-    //        gdx,
-    //        gdy,
-    //        gdz,
-    //        sub_X_cnt,
-    //        sub_X_cnt * gdx * gdz);
-    // printf("argsize: %zu\n", arg_size);
+    std::cout << "num_valid_ids: " << static_cast<int*>(num_valid_ids.data_ptr())[0] << std::endl;
+    std::cout << "dim:" << args.dim << std::endl;
+    std::cout << "hidden:" << args.hidden_dim << std::endl;
+    std::cout << "token:" << args.token_cnt << std::endl;
+    std::cout << "eprt:" << args.eprt_cnt << std::endl;
+    std::cout << "Xs:" << args.Xs << std::endl;
+    std::cout << "GUs:" << args.GUs << std::endl;
+    std::cout << "Os:" << args.Os << std::endl;
+    std::cout << "eGUs:" << args.eGUs << std::endl;
+    std::cout << "eGUQs:" << args.eGUQs << std::endl;
+    std::cout << "eSMQs:" << args.eSMQs << std::endl;
+    std::cout << "topk:" << args.topk << std::endl;
+    std::cout << "splitk:" << args.splitk << std::endl;
+    printf("gdx:%d, gdy:%d, gdz:%d, sub_X_cnt:%d, tgs:%d\n",
+           gdx,
+           gdy,
+           gdz,
+           sub_X_cnt,
+           sub_X_cnt * gdx * gdz);
+    printf("argsize: %zu\n", arg_size);
 
     impl_ptr->launch_kernel({&args,
                              &arg_size,

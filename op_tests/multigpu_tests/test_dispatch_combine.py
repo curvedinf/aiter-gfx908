@@ -10,6 +10,7 @@ from aiter.fused_moe import fused_topk, fused_moe
 from aiter.ops.shuffle import shuffle_weight
 import mori
 import multiprocessing as mp
+import functools
 from aiter import get_hip_quant
 from aiter.test_common import (
     checkAllclose,
@@ -49,6 +50,8 @@ def run_ref(
             if quant_type != aiter.QuantType.per_128x128
             else aiter.QuantType.per_1x128
         )
+        if quant_type == aiter.QuantType.per_128x128:
+            quant_func = functools.partial(quant_func, transpose_scale=True)
         tokens_ep_qt, scale = quant_func(tokens_ep, quant_dtype=dtypes.fp8)
         out = fused_moe(
             tokens_ep_qt,
@@ -103,7 +106,8 @@ def run_mori(
         if quant_type != aiter.QuantType.per_128x128
         else aiter.QuantType.per_1x128
     )
-    tokens_qt, scale = quant_func(tokens, quant_dtype=dtypes.fp8)
+    # tokens_qt, scale = quant_func(tokens, quant_dtype=dtypes.fp8)
+    tokens_qt, scale = (tokens, None)
 
     # print(f"before init mori {scale.shape=} {tokens_qt.dtype=}")
     # init dist
@@ -244,6 +248,7 @@ def test_dispatch_combine(
         w1_scale=w1_scale,
         w2_scale=w2_scale,
         quant_type=quant_type,
+        num_local_tokens=torch.tensor([tokenNum], dtype=dtypes.i32, device=tokens.device)
     )
     ref = run_ref(
         world_size,
@@ -297,7 +302,7 @@ quant_types = [
     aiter.QuantType.No,
     aiter.QuantType.per_Token,
     aiter.QuantType.per_128x128,
-][-2:]
+][-1:]
 
 parser = argparse.ArgumentParser(description="config input of test")
 parser.add_argument(

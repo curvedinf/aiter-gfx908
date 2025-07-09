@@ -537,6 +537,8 @@ def fused_moe_2stages(
         sorted_weights=sorted_weights if doweight_stage1 else None,
     )
 
+    if num_local_tokens is not None:
+        num_local_tokens = num_local_tokens * topk
     if quant_type != QuantType.per_128x128:
         a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a, num_rows=num_local_tokens)
         a2 = a2.view(token_num, topk, inter_dim)

@@ -37,7 +37,7 @@ def get_config_dtype_str(
 
 
 @functools.lru_cache
-def get_moe_configs(dtype: Optional[str]) -> Optional[Dict[int, Any]]:
+def get_moe_configs(dtype: Optional[str], persistent: bool = False) -> Optional[Dict[int, Any]]:
     """
     Return optimized configurations for the fused MoE kernel.
 
@@ -50,7 +50,10 @@ def get_moe_configs(dtype: Optional[str]) -> Optional[Dict[int, Any]]:
     # directory
     dtype_str = "DEFAULT" if dtype is None else dtype
     dev = arch_info.get_device()
-    config_file_path = f"{AITER_TRITON_CONFIGS_PATH}/moe/{dev}-MOE-{dtype_str}.json"
+    config_file_path = f"{AITER_TRITON_CONFIGS_PATH}/moe/{dev}-MOE-{dtype_str}"
+    if persistent:
+        config_file_path += "-PERSISTENT"
+    config_file_path += ".json"
 
     if os.path.exists(config_file_path):
         with open(config_file_path) as f:
@@ -71,13 +74,14 @@ def get_optimal_moe_config(
     use_int8_w8a8: Optional[bool] = False,
     use_fp8_w8a8: Optional[bool] = False,
     use_int4_w4a16: Optional[bool] = False,
+    use_persistent: Optional[bool] = False,
     M: int = 1,
 ):
     dtype_str = get_config_dtype_str(
         dtype, use_int8_w8a16, use_int8_w8a8, use_fp8_w8a8, use_int4_w4a16
     )
     # print(f"dtype_str={dtype_str}")
-    configs = get_moe_configs(dtype_str)
+    configs = get_moe_configs(dtype_str, use_persistent)
     if configs is not None:
         if configs:
             if M < M_THRESHOLD_SMALL:

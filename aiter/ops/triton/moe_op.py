@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional, List
 from aiter.ops.triton.quant import dynamic_per_tensor_quant_fp8_i8
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 from aiter.ops.triton.utils.moe_common import _write_zeros_to_output
-
+from aiter.ops.triton.utils.moe_config_utils import get_optimal_moe_config
 
 # Source:
 # MoE Kernel adapted from VLLM
@@ -17,7 +17,7 @@ _PADDING_SIZE = 0
 
 _MOE_A_QUANT_FUNC = dynamic_per_tensor_quant_fp8_i8
 
-_USE_MOE_PERSISTENT_KERNEL = False
+_USE_MOE_PERSISTENT_KERNEL = True
 
 
 def moe_set_use_persistent_kernel(value: bool):
@@ -327,13 +327,14 @@ def _fused_moe_persistent_kernel_gptq_awq(
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     EVEN_K: tl.constexpr,
-    NUM_SMS: tl.constexpr,
     MUL_ROUTED_WEIGHT: tl.constexpr,
     top_k: tl.constexpr,
     compute_type: tl.constexpr,
     has_zp: tl.constexpr,
     use_int4_w4a16: tl.constexpr,
     use_int8_w8a16: tl.constexpr,
+    NUM_WGS: tl.constexpr,
+    CU_multiplier: tl.constexpr, # NUM_WGS = NUM_CUS * CU_multiplier
 ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -377,7 +378,7 @@ def _fused_moe_persistent_kernel_gptq_awq(
 
     num_tiles = num_pid_m * num_pid_n
     # Compute how many tiles are outside the padding region
-    num_valid_tiles = tl.cdiv((num_tiles - tile_id), NUM_SMS)
+    num_valid_tiles = tl.cdiv((num_tiles - tile_id), NUM_WGS)
     for _ in range(0, num_valid_tiles):
         tile_id_remapped = remap_xcd(tile_id, num_tiles, NUM_XCDS)
         pid_m, pid_n = pid_grid(tile_id_remapped, num_pid_m, num_pid_n, GROUP_SIZE_M)
@@ -507,7 +508,7 @@ def _fused_moe_persistent_kernel_gptq_awq(
         c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
         tl.store(c_ptrs, accumulator, mask=c_mask)
 
-        tile_id += NUM_SMS
+        tile_id += NUM_WGS
 
 
 @triton.heuristics(
@@ -765,12 +766,14 @@ def _fused_moe_persistent_kernel(
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     EVEN_K: tl.constexpr,
-    NUM_SMS: tl.constexpr,
     MUL_ROUTED_WEIGHT: tl.constexpr,
     top_k: tl.constexpr,
     compute_type: tl.constexpr,
     use_fp8_w8a8: tl.constexpr,
     use_int8_w8a16: tl.constexpr,
+    NUM_WGS: tl.constexpr,
+    CU_multiplier: tl.constexpr, # NUM_WGS = NUM_CUS * CU_multiplier
+    pid_counter,
 ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -799,8 +802,7 @@ def _fused_moe_persistent_kernel(
     BLOCK_SIZE_M, which is necessary to maintain consistency in block matrix
     multiplication across different blocks processed by the same expert.
     """
-    # -----------------------------------------------------------
-    # Simply compute how many iterations each persistent block needs to do
+    # 
     start_pid = tl.program_id(axis=0)
     NUM_XCDS: tl.constexpr = 8
 
@@ -815,12 +817,9 @@ def _fused_moe_persistent_kernel(
 
     num_tiles = num_pid_m * num_pid_n
 
-    # Compute how many tiles are outside the padding region
-    num_valid_tiles = tl.cdiv((num_tiles - tile_id), NUM_SMS)
-
-    for _ in range(0, num_valid_tiles):
-        tile_id_remapped = remap_xcd(tile_id, num_tiles, NUM_XCDS)
-        pid_m, pid_n = pid_grid(tile_id_remapped, num_pid_m, num_pid_n, GROUP_SIZE_M)
+    while tile_id < num_tiles:
+        tile_id = remap_xcd(tile_id, num_tiles, NUM_XCDS)
+        pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
         offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
         offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
@@ -932,8 +931,9 @@ def _fused_moe_persistent_kernel(
             c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
             tl.store(c_ptrs, accumulator, mask=c_mask)
 
-            # advance tile_id
-            tile_id += NUM_SMS
+            # fetch the next tile through atomic increment of a global variable
+            # this ensures perfect load balancing across CUs at the cost of scalar atomic operation
+            tile_id = tl.atomic_add(pid_counter, 1)
 
 
 def fused_moe(
@@ -960,6 +960,11 @@ def fused_moe(
     """
     #TODO: Add doc
     """
+    dtype = A.dtype
+    # if config is None:
+    config = get_optimal_moe_config(dtype, use_fp8_w8a8, use_int8_w8a16, use_fp8_w8a8, use_int4_w4a16, _USE_MOE_PERSISTENT_KERNEL, M=A.shape[0])
+
+
     assert topk_weights.stride(1) == 1
     assert sorted_token_ids.stride(0) == 1
 
@@ -1002,15 +1007,16 @@ def fused_moe(
         assert B_scale is not None and B_scale.ndim == 3
         assert B_zp is None or B_zp.ndim == 3
         if _USE_MOE_PERSISTENT_KERNEL:
-            NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count * 2
+            NUM_CUS = torch.cuda.get_device_properties("cuda").multi_processor_count
+            NUM_WGS = NUM_CUS * config["CU_multiplier"]
             grid = lambda META: (  # noqa: E731
                 min(
-                    NUM_SMS,
+                    NUM_WGS,
                     triton.cdiv(sorted_token_ids.shape[0], META["BLOCK_SIZE_M"])
                     * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]),
                 ),
             )
-
+            
             _fused_moe_persistent_kernel_gptq_awq[grid](
                 A,
                 B,
@@ -1040,13 +1046,13 @@ def fused_moe(
                 B_zp.stride(1) if B_zp is not None else 0,
                 block_k_diviable=A.shape[1] % config["BLOCK_SIZE_K"] == 0,
                 group_size=block_shape[1],
-                NUM_SMS=NUM_SMS,
                 MUL_ROUTED_WEIGHT=mul_routed_weight,
                 top_k=top_k,
                 compute_type=compute_type,
                 has_zp=B_zp is not None,
                 use_int4_w4a16=use_int4_w4a16,
                 use_int8_w8a16=use_int8_w8a16,
+                NUM_WGS=NUM_WGS,
                 **config,
             )
         else:
@@ -1094,16 +1100,17 @@ def fused_moe(
 
     else:
         if _USE_MOE_PERSISTENT_KERNEL:
-            NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count * 2
-
+            NUM_CUS = torch.cuda.get_device_properties("cuda").multi_processor_count
+            NUM_WGS = NUM_CUS * config["CU_multiplier"] # Number of persistent workgroups to launch, multiple of the number of CUs
             grid = lambda META: (  # noqa: E731
                 min(
-                    NUM_SMS,
+                    NUM_WGS,
                     triton.cdiv(sorted_token_ids.shape[0], META["BLOCK_SIZE_M"])
                     * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]),
                 ),
             )
-
+            # global variable for dynamic fetching of the next pid inside a persistent kernel
+            pid_counter = torch.ones((1,), dtype=torch.int32, device=A.device) * NUM_WGS
             _fused_moe_persistent_kernel[grid](
                 A,
                 B,
@@ -1132,12 +1139,13 @@ def fused_moe(
                 B_scale.stride(1) if B_scale is not None and B_scale.ndim >= 2 else 0,
                 0 if block_shape is None else block_shape[0],
                 0 if block_shape is None else block_shape[1],
-                NUM_SMS=NUM_SMS,
                 MUL_ROUTED_WEIGHT=mul_routed_weight,
                 top_k=top_k,
                 compute_type=compute_type,
                 use_fp8_w8a8=use_fp8_w8a8,
                 use_int8_w8a16=use_int8_w8a16,
+                NUM_WGS=NUM_WGS,
+                pid_counter=pid_counter,
                 **config,
             )
         else:

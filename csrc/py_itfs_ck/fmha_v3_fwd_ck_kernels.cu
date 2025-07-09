@@ -54,39 +54,32 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
         using namespace ck_tile;
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / NumThreadPerWarpGroup;
-        if constexpr(NumWarpGroups == 1)
-        {
-            return BasePolicy::template MakeKDramTileDistribution<Problem>();
-        }
-        else if constexpr(NumWarpGroups == 2)
-        {
-            using KDataType = remove_cvref_t<typename Problem::KDataType>;
+        static_assert(NumWarpGroups == 2);
 
-            // make distribution for a single warp-group and duplicate content in all groups
-            constexpr index_t kBlockSize = Problem::kBlockSize / NumWarpGroups;
-            constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
-            constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
+        using KDataType = remove_cvref_t<typename Problem::KDataType>;
 
-            constexpr index_t MaxVectorSize = 16 / sizeof(KDataType);
-            constexpr index_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
+        constexpr index_t kBlockSize = Problem::kBlockSize;
+        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
 
-            constexpr index_t KPerThread     = ck_tile::min(MaxVectorSize, ElemPerThread);
-            constexpr index_t KThreads       = kKPerBlock / KPerThread;
-            constexpr index_t NThreadPerWarp = get_warp_size() / KThreads;
-            constexpr index_t NumWarps       = kBlockSize / get_warp_size();
+        constexpr index_t MaxVectorSize = 16 / sizeof(KDataType);
+        constexpr index_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
 
-            constexpr index_t NPerThread = kNPerBlock / (NumWarps * NThreadPerWarp);
+        constexpr index_t KPerThread     = ck_tile::min(MaxVectorSize, ElemPerThread);
+        constexpr index_t KThreads       = kKPerBlock / KPerThread;
+        constexpr index_t NThreadPerWarp = get_warp_size() / KThreads;
+        constexpr index_t NumWarps       = kBlockSize / get_warp_size();
 
-            // 2 warp-groups share the same data
-            return make_static_tile_distribution(
-                tile_distribution_encoding<sequence<NumWarpGroups>,
-                                           tuple<sequence<NPerThread, NumWarps, NThreadPerWarp>,
-                                                 sequence<KThreads, KPerThread>>,
-                                           tuple<sequence<0, 1>, sequence<1, 2>>,
-                                           tuple<sequence<0, 1>, sequence<2, 0>>,
-                                           sequence<1, 2>,
-                                           sequence<0, 1>>{});
-        }
+        constexpr index_t NPerThread = kNPerBlock / (NumWarps * NThreadPerWarp);
+
+        return make_static_tile_distribution(
+            tile_distribution_encoding<sequence<1>,
+                                       tuple<sequence<NPerThread, NumWarps, NThreadPerWarp>,
+                                             sequence<KThreads, KPerThread>>,
+                                       tuple<sequence<1>, sequence<1, 2>>,
+                                       tuple<sequence<1>, sequence<2, 0>>,
+                                       sequence<1, 2>,
+                                       sequence<0, 1>>{});
     }
 
     template <typename Problem>
@@ -730,6 +723,7 @@ struct BlockFmhaPipelineQRKSVS
         static_assert(kN0 == kK1);
 
         constexpr index_t NumWarpGroups = Problem::kBlockSize / Policy::NumThreadPerWarpGroup;
+        static_assert(NumWarpGroups == 2);
 
         [[maybe_unused]] auto print_dist_tensor = [&](const auto& dist_tensor, const char* name) {
             printf("[POYENC] %s (size=%d): %5.2f",

@@ -79,3 +79,32 @@
             // [q_reg_70]"v"(q_nope_reg[70]),
             // [q_reg_71]"v"(q_nope_reg[71]),
 
+
+
+
+        //
+
+		// [q_res_0]"s"(q_ptr[0]),
+		// [q_res_1]"s"(q_ptr[1]),
+		// [q_res_2]"s"(q_ptr[2]),
+		// [q_res_3]"s"(q_ptr[3]),
+		// [kv_res_0]"s"(kv_ptr[0]),
+		// [kv_res_1]"s"(kv_ptr[1]),
+		// [kv_res_2]"s"(kv_ptr[2]),
+		// [kv_res_3]"s"(kv_ptr[3]),
+		// [o_res_0]"s"(o_ptr[0]),
+		// [o_res_1]"s"(o_ptr[1]),
+		// [o_res_2]"s"(o_ptr[2]),
+		// [o_res_3]"s"(o_ptr[3]),
+		// [lse_res_0]"s"(lse_ptr[0]),
+		// [lse_res_1]"s"(lse_ptr[1]),
+		// [lse_res_2]"s"(lse_ptr[2]),
+		// [lse_res_3]"s"(lse_ptr[3]),
+		// [kv_indptr_res_0]"s"(res_kv_indptr[0]),
+		// [kv_indptr_res_1]"s"(res_kv_indptr[1]),
+		// [kv_indices_res_0]"s"(kv_indices[0]),
+		// [kv_indices_res_1]"s"(kv_indices[1]),
+		// [kv_indices_res_2]"s"(kv_indices[2]),
+		// [kv_indices_res_3]"s"(kv_indices[3]),
+		// [qo_res_0]"s"(res_qo[0]),
+		// [qo_res_1]"s"(res_qo[1]),

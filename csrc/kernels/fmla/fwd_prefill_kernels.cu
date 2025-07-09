@@ -3127,8 +3127,21 @@ __global__ void kn_fmla_fwd_splictkv_prefill_inline(
     const FlashMlaPrefillFwdParams params)
 {
     // using Policy = FlashMlaPrefillPolicy<Traits, scalar_t, acc_t>;
+    const auto q_dram = MakeQDram<Policy>(params.p_query, params.size_s,  params.stride_s_q);
+    constexpr auto q_nope_dram_window_lengths =
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kSizeNope>{});
+    constexpr auto q_rope_dram_window_lengths =
+        ck_tile::make_tuple(ck_tile::number<Traits::kBlockM>{}, ck_tile::number<Traits::kSizeRope>{});
+    const auto q_nope_dram_window = ck_tile::make_tile_window(
+        q_dram,
+        q_nope_dram_window_lengths,
+        {mid, 0});
+    const auto q_rope_dram_window = ck_tile::make_tile_window(
+        q_dram,
+        q_rope_dram_window_lengths,
+        {mid, Traits::kSizeNope});
 
-    auto q_ptr      = ck_tile::make_wave_buffer_resource(params.p_query);
+    auto q_ptr      = ck_tile::make_wave_buffer_resource();
     auto kv_ptr     = ck_tile::make_wave_buffer_resource(params.p_key);
     auto o_ptr      = ck_tile::make_wave_buffer_resource(params.p_output);
     auto lse_ptr    = ck_tile::make_wave_buffer_resource(params.p_softmax_lse);

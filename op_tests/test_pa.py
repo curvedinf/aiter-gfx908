@@ -564,6 +564,24 @@ def test_paged_attention(
     )
     # tensor_dump(out_aiter, 'out_aiter')
 
+    # generate the golden output by torch native
+    out_golden, time_xx = run_native(
+        query,
+        k_cache,
+        v_cache,
+        block_tables,
+        seq_lens,
+        max_seq_len,
+        kv_cache_dtype,
+        num_kv_heads,
+        scale,
+        alibi_slopes,
+        k_scale,
+        v_scale,
+        num_queries_per_kv,
+        dtype,
+    )
+
     time_aiter_asm = None
     if dtype == dtypes.bf16:
         out_aiter_asm, time_aiter_asm = run_aiter_asm(

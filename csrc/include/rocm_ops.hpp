@@ -837,14 +837,16 @@
           py::arg("input"),                                              \
           py::arg("scales"),                                             \
           py::arg("scale_ub")      = std::nullopt,                       \
-          py::arg("shuffle_scale") = true);                              \
+          py::arg("shuffle_scale") = false,                              \
+          py::arg("num_rows")      = std::nullopt);                      \
     m.def("dynamic_per_group_scaled_quant_fp4",                          \
           &aiter::dynamic_per_group_scaled_quant_fp4,                    \
           py::arg("out"),                                                \
           py::arg("input"),                                              \
           py::arg("scales"),                                             \
           py::arg("group_size")    = 32,                                 \
-          py::arg("shuffle_scale") = true);
+          py::arg("shuffle_scale") = true,                               \
+          py::arg("num_rows")      = std::nullopt);
 
 #define RMSNORM_PYBIND                                                                             \
     m.def("rms_norm_cu",                                                                           \

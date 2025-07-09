@@ -41,16 +41,20 @@ __global__ void dynamic_per_group_scaled_quant_kernel(DTYPE_O* __restrict__ out,
                                                       DTYPE_I const* __restrict__ input,
                                                       float const* __restrict__ scale_ub,
                                                       const int32_t group_size,
-                                                      int32_t ori_rows,
+                                                      int64_t ori_rows,
                                                       int32_t ori_cols,
                                                       int32_t ori_row_stride,
-                                                      bool shuffle_scale = true)
+                                                      bool shuffle_scale = true,
+                                                      int32_t const* __restrict__ num_rows = nullptr)
 {
     auto fp4_scale_shuffle_id = [](int32_t scaleN_pad, int32_t x, int32_t y) {
         return (x / 32 * scaleN_pad) * 32 + (y / 8) * 256 + (y % 4) * 64 + (x % 16) * 4 +
                (y % 8) / 4 * 2 + (x % 32) / 16;
     };
-
+    if (num_rows != nullptr)
+    {
+        ori_rows = *num_rows;
+    }
     int num_thread_per_group = group_size / thread_data_size;
     int64_t row_offset       = blockIdx.x * groupQuantBlockSize;
     int64_t groupId          = (row_offset + threadIdx.x) / num_thread_per_group;
@@ -138,6 +142,10 @@ __global__ void dynamic_per_group_scaled_quant_kernel(DTYPE_O* __restrict__ out,
         }
         else
         {
+            if(shuffle_scale)
+            {
+                groupId = y * ori_rows + x;
+            }
             scale[groupId] = inverted_scale;
         }
     }
@@ -410,9 +418,16 @@ __global__ void dynamic_per_token_scaled_quant_kernel(DTYPE_O* __restrict__ out,
                                                       float* __restrict__ scale,
                                                       DTYPE_I* __restrict__ input,
                                                       float const* __restrict__ scale_ub,
-                                                      const int32_t cols)
+                                                      const int32_t cols,
+                                                      int32_t const* __restrict__ num_rows = nullptr)
 {
     const int token_idx = blockIdx.x;
+    if (num_rows != nullptr)
+    {
+        int32_t rows = *num_rows;
+        if (token_idx >= rows)
+            return;
+    }
     auto res            = data_to_per_row_scale<DTYPE_I, DTYPE_O, thread_data_size>(input, cols);
     float row_scale     = std::get<0>(res);
     DTYPE_I* vec_ptr    = std::get<1>(res);
@@ -491,7 +506,8 @@ void static_per_tensor_quant(torch::Tensor& out,         // [..., d]
             scales.data_ptr<float>(),                                                       \
             reinterpret_cast<input_dtype*>(input.data_ptr()),                               \
             scale_ub.has_value() ? scale_ub->data_ptr<float>() : nullptr,                   \
-            cols);                                                                          \
+            cols,                                                                           \
+            num_rows_ptr);                                                                  \
     });
 
 #define DYNAMIC_PER_TOKEN_SCALED_QUANT_KERNEL_DISPATCH(quant_kernel, DTYPE_O, cols) \
@@ -562,13 +578,15 @@ void dynamic_per_token_scaled_quant(torch::Tensor& out,         // [..., d]
                                     torch::Tensor const& input, // [..., d]
                                     torch::Tensor& scales,
                                     std::optional<at::Tensor> const& scale_ub,
-                                    bool shuffle_scale = true)
+                                    bool shuffle_scale = false,
+                                    std::optional<at::Tensor> const& num_rows = std::nullopt)
 {
     TORCH_CHECK(input.is_contiguous());
     TORCH_CHECK(out.is_contiguous());
 
     int const cols = input.size(-1);
     int const rows = input.numel() / cols;
+    int32_t* num_rows_ptr = num_rows.has_value() ? num_rows->data_ptr<int32_t>() : nullptr; 
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(input));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -581,8 +599,9 @@ void dynamic_per_token_scaled_quant(torch::Tensor& out,         // [..., d]
         int num_group_per_tg     = groupQuantBlockSize / num_thread_per_group;
         if(out.dtype() == torch_fp8)
         {
-            int ori_cols  = cols;
-            int ori_rows  = rows;
+            int ori_cols  = out.size(-1);
+            int scaleN    = ori_cols / cols;
+            int ori_rows  = rows / scaleN;
             int num_group = rows;
             dim3 const grid((num_group + num_group_per_tg - 1) / num_group_per_tg);
             dim3 const block(groupQuantBlockSize);
@@ -598,13 +617,15 @@ void dynamic_per_token_scaled_quant(torch::Tensor& out,         // [..., d]
                         ori_rows,
                         ori_cols,
                         ori_cols,
-                        shuffle_scale);
+                        shuffle_scale,
+                        num_rows_ptr);
                 });
         }
         else if(out.dtype() == torch::kInt8)
         {
             int ori_cols  = cols;
-            int ori_rows  = rows;
+            int scaleN    = ori_cols / cols;
+            int ori_rows  = rows / scaleN;
             int num_group = rows;
             dim3 const grid((num_group + num_group_per_tg - 1) / num_group_per_tg);
             dim3 const block(groupQuantBlockSize);
@@ -620,7 +641,8 @@ void dynamic_per_token_scaled_quant(torch::Tensor& out,         // [..., d]
                         ori_rows,
                         ori_cols,
                         ori_cols,
-                        shuffle_scale);
+                        shuffle_scale,
+                        num_rows_ptr);
                 });
         }
 #if defined(__Float4_e2m1fn_x2)
@@ -646,7 +668,8 @@ void dynamic_per_token_scaled_quant(torch::Tensor& out,         // [..., d]
                         ori_rows,
                         ori_cols,
                         ori_cols,
-                        shuffle_scale);
+                        shuffle_scale,
+                        num_rows_ptr);
                 });
         }
 #endif
@@ -687,7 +710,8 @@ void dynamic_per_group_scaled_quant_fp4(torch::Tensor& out,         // [..., d]
                                         torch::Tensor const& input, // [..., d]
                                         torch::Tensor& scales,
                                         int group_size     = 32,
-                                        bool shuffle_scale = true)
+                                        bool shuffle_scale = true,
+                                        std::optional<at::Tensor> const& num_rows = std::nullopt)
 {
     TORCH_CHECK(group_size == 32 || group_size == 64 || group_size == 128,
                 __func__,
@@ -697,6 +721,7 @@ void dynamic_per_group_scaled_quant_fp4(torch::Tensor& out,         // [..., d]
     int const cols       = input.size(-1);
     int const rows       = input.numel() / cols;
     int const row_stride = input.stride(-2);
+    int32_t* num_rows_ptr = num_rows.has_value() ? num_rows->data_ptr<int32_t>() : nullptr; 
 
     TORCH_CHECK(cols % group_size == 0, __func__, " cols is not divisible by group_size");
 
@@ -727,7 +752,8 @@ void dynamic_per_group_scaled_quant_fp4(torch::Tensor& out,         // [..., d]
                 rows,
                 cols,
                 row_stride,
-                shuffle_scale);
+                shuffle_scale,
+                num_rows_ptr);
         });
 #else
     TORCH_CHECK(false, __func__, " device not support Float4_e2m1fn_x2 dtype");

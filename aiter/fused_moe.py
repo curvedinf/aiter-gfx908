@@ -166,6 +166,7 @@ def fused_moe(
             w2_scale=w2_scale,
             a1_scale=a1_scale,
             a2_scale=a2_scale,
+            num_local_tokens=num_local_tokens
         )
     else:
         return fused_moe_2stages(
@@ -189,6 +190,7 @@ def fused_moe(
             w2_scale=w2_scale,
             a1_scale=a1_scale,
             a2_scale=a2_scale,
+            num_local_tokens=num_local_tokens,
         )
 
 
@@ -213,6 +215,7 @@ def fused_moe_1stage(
     w2_scale=None,  # [expert(local_expert:EP), model_dim, 1]
     a1_scale=None,  # [expert(local_expert:EP), 1, model_dim]
     a2_scale=None,  # [expert(local_expert:EP), 1, inter_dim]
+    num_local_tokens: Optional[torch.tensor] = None,
 ):
     if quant_type == QuantType.No and ActivationType.Silu and not isG1U1:
         # pure bf16
@@ -234,8 +237,10 @@ def fused_moe_1stage(
         )
         quant_func = get_quant(quant_type)
         if hidden_states.dtype != q_dtype_a:
+            if quant_type == QuantType.per_1x128:
+                quant_func = functools.partial(quant_func, transpose_scale=True)
             a1, a1_scale = quant_func(
-                hidden_states, scale=a1_scale, quant_dtype=q_dtype_a
+                hidden_states, scale=a1_scale, quant_dtype=q_dtype_a, num_rows=num_local_tokens
             )
         else:
             assert (
@@ -471,6 +476,7 @@ def fused_moe_2stages(
     w2_scale=None,  # [expert(local_expert:EP), model_dim, 1]
     a1_scale=None,  # [expert(local_expert:EP), 1, model_dim]
     a2_scale=None,  # [expert(local_expert:EP), 1, inter_dim]
+    num_local_tokens: Optional[torch.tensor] = None,
 ):
 
     quant_func = get_quant(quant_type)
@@ -496,7 +502,7 @@ def fused_moe_2stages(
     )
 
     if hidden_states.dtype != q_dtype_a:
-        a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a)
+        a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a, num_rows=num_local_tokens)
     else:
         assert (
             a1_scale is not None or quant_type == QuantType.No
@@ -532,7 +538,7 @@ def fused_moe_2stages(
     )
 
     if quant_type != QuantType.per_128x128:
-        a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
+        a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a, num_rows=num_local_tokens)
         a2 = a2.view(token_num, topk, inter_dim)
     else:
         a2_v = a2[:token_num, :, :]

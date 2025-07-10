@@ -3,6 +3,8 @@
 import triton
 import triton.language as tl
 import torch
+from aiter.ops.triton.utils.arch_info import get_num_sms
+import math
 
 
 @triton.jit
@@ -532,7 +534,6 @@ def reduce_segments(
 ):
     query_token_idx = tl.program_id(0)
     query_head_idx = tl.program_id(1)
-
     seq_idx = find_seq_idx(
         query_start_len_ptr, query_token_idx, num_seqs, BLOCK_Q, False
     )
@@ -631,10 +632,13 @@ def unified_attention(
     num_kv_heads = k.shape[2]
     num_queries_per_kv = num_query_heads // num_kv_heads
     head_size = q.shape[2]
-
-    BLOCK_M = 128
+    BLOCK_M = 16
     BLOCK_Q = BLOCK_M // num_queries_per_kv
-
+    # TODO (cagri): what happens when BLOCK_M < num_queries_per_kv?
+    # should we consider that case?
+    if BLOCK_Q == 0:
+        BLOCK_M = triton.next_power_of_2(num_queries_per_kv)
+        BLOCK_Q = BLOCK_M // num_queries_per_kv
     # Ideally we would launch with kernel with:
     # \sum_i[ceil(query_len[i] / BLOCK_Q)] blocks.
     # However, it is slow to realize the query_lens on cpu.
@@ -644,11 +648,29 @@ def unified_attention(
     #    = \sum_i[floor(query_len[i] / BLOCK_Q)] + num_seqs
     #   <= floor(\sum_i(query_len[i]) / BLOCK_Q) + num_seqs
     #    = floor(q.shape[0] / BLOCK_Q) + num_seqs
+
     total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
+    target_num_prgms = get_num_sms() * 2
+    num_2d_prgms = total_num_q_blocks * num_kv_heads
+
     # print(f"{total_num_q_blocks=} {num_kv_heads=}")
-    # TODO (cagri): Original condition:
+
+    # TODO (cagri): for med. and less context length (<=1024) w. bs > 32 and num_kv_heads=8, should use 2d attention for decode
+    # how to do that? Cant use context length
+    # Original condition:
     # if max_seqlen_q > 1 or total_num_q_blocks * num_kv_heads > 128:
-    if use_2d:
+    if max_seqlen_q > 1:
+        # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
+        # q.shape[0] is sum(query_lens) which is dynamic so it shouldnt be used in the heuristic
+
+        # make the block_m bigger if we already have enough parallelism
+        mult = math.ceil(num_2d_prgms / target_num_prgms)
+        mult = triton.next_power_of_2(mult)
+        if num_2d_prgms >= 2 * target_num_prgms:
+            BLOCK_M = BLOCK_M * mult
+            BLOCK_M = min(BLOCK_M, 64)
+            BLOCK_Q = BLOCK_M // num_queries_per_kv
+
         kernel_unified_attention_2d[
             (
                 total_num_q_blocks,
@@ -692,12 +714,20 @@ def unified_attention(
             BLOCK_Q=BLOCK_Q,
             num_seqs=num_seqs,
             BLOCK_M=BLOCK_M,
+            waves_per_eu=2,
+            # num_ctas=1,
+            # num_stages=1,
+            # num_warps=4,
         )
     else:
-        # for initial version, NUM_SEGMENTS = 16 is chosen as a default
-        # value that showed good performance in tests
-        NUM_SEGMENTS = 16
-
+        # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
+        # q.shape[0] is sum(query_lens) which becomes same as batch size
+        # so it is static dim. for decode, should be okay to use it in heuristics
+        NUM_SEGMENTS = math.ceil(target_num_prgms / (total_num_q_blocks * num_kv_heads))
+        NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
+        NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
+        NUM_SEGMENTS = max(NUM_SEGMENTS, 16)
+        num_3d_prgms = total_num_q_blocks * num_kv_heads * NUM_SEGMENTS
         segm_output = torch.empty(
             q.shape[0],
             num_query_heads,
@@ -760,6 +790,7 @@ def unified_attention(
             num_seqs=num_seqs,
             BLOCK_M=BLOCK_M,
             NUM_SEGMENTS_PER_SEQ=NUM_SEGMENTS,
+            waves_per_eu=2,
         )
 
         reduce_segments[(q.shape[0], num_query_heads)](

@@ -831,7 +831,7 @@ struct BlockFmhaPipelineQRKSVS
             // move K tile windows
             move_tile_window(k_dram_block_window, {kN0, 0});
 
-            __builtin_amdgcn_s_waitcnt(0xc07f);
+            __builtin_amdgcn_s_waitcnt(0xc07f); // lgkmcnt(0)
         };
 
         auto K_lds_load = [&](auto k_lds_read_idx) {
@@ -878,7 +878,7 @@ struct BlockFmhaPipelineQRKSVS
             /// FIXME: use the future-predicting method to move the window
             move_tile_window(v_dram_window, {0, kK1});
 
-            __builtin_amdgcn_s_waitcnt(0xc07f);
+            __builtin_amdgcn_s_waitcnt(0xc07f); // lgkmcnt(0)
         };
 
         auto V_lds_load = [&](auto v_lds_read_idx) {
@@ -1144,7 +1144,7 @@ struct BlockFmhaPipelineQRKSVS
                     DEBUG_STMTS { printf("[POYENC] phase0 Wave0-3\n"); }
 #endif
                     ASM_MARKER("phase0 Wave0-3");
-                    asm volatile("s_waitcnt lgkmcnt(0)");
+                    __builtin_amdgcn_s_waitcnt(0xc07f); // lgkmcnt(0)
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
                     fmha_alu1(xdl_SP_p23_reg_idx);
 
@@ -1179,7 +1179,7 @@ struct BlockFmhaPipelineQRKSVS
                     DEBUG_STMTS { printf("[POYENC] phase2 Wave0-3\n"); }
 #endif
                     ASM_MARKER("phase2 Wave0-3");
-                    asm volatile("s_waitcnt lgkmcnt(0)");
+                    __builtin_amdgcn_s_waitcnt(0xc07f); // lgkmcnt(0)
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
                     fmha_alu_D_upd();
@@ -1218,6 +1218,7 @@ struct BlockFmhaPipelineQRKSVS
 #endif
                     ASM_MARKER("phase1 Wave4-7");
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
+                    __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
                     fmha_alu1(xdl_SP_p23_reg_idx);
@@ -1267,6 +1268,7 @@ struct BlockFmhaPipelineQRKSVS
 #endif
                     ASM_MARKER("phase3 Wave4-7");
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
+                    __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
                     fmha_alu_D_upd();

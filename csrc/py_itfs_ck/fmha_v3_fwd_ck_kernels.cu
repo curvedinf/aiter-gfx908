@@ -514,25 +514,27 @@ struct BlockFmhaPipelineQRKSVS
 
     CK_TILE_DEVICE static constexpr void schedule_main_loop_gemm1() {}
 
-    template <unsigned char Vmcnt, unsigned char Lgkmcnt, unsigned char Expcnt = 7>
+    // vmcnt=0~63, lgkmcnt=0~15, expcnt=0~7
+    template <uint16_t Vmcnt, uint8_t Lgkmcnt, uint8_t Expcnt = 7>
     CK_TILE_DEVICE static constexpr void s_waitcnt()
     {
-        constexpr unsigned char reserved   = 0b1100;
-        constexpr unsigned char mask_4bits = 0b1111;
-        __builtin_amdgcn_s_waitcnt(((mask_4bits & reserved) << 12) | ((mask_4bits & Lgkmcnt) << 8) |
-                                   ((mask_4bits & Expcnt) << 4) | (mask_4bits & Vmcnt));
+        // vmcnt use bits {[15:14],[3:0]}
+        // expcnt use bits [6:4]
+        // lgkmcnt use bits [11:8]
+        __builtin_amdgcn_s_waitcnt((((0b110000 & Vmcnt) << (14 - 4)) | (0b1111 & Vmcnt)) |
+                                   ((0b111 & Expcnt) << 4) | ((0b1111 & Lgkmcnt) << 8));
     }
 
-    template <unsigned char Vmcnt>
+    template <uint16_t Vmcnt>
     CK_TILE_DEVICE static constexpr void s_waitcnt_vmcnt()
     {
         s_waitcnt<Vmcnt, 15>();
     }
 
-    template <unsigned char Lgkmcnt>
+    template <uint8_t Lgkmcnt>
     CK_TILE_DEVICE static constexpr void s_waitcnt_lgkmcnt()
     {
-        s_waitcnt<15, Lgkmcnt>();
+        s_waitcnt<63, Lgkmcnt>();
     }
 
     template <typename QDramBlockWindowTmp,
@@ -1189,7 +1191,7 @@ struct BlockFmhaPipelineQRKSVS
                     DEBUG_STMTS { printf("[POYENC] phase1 Wave0-3\n"); }
 #endif
                     ASM_MARKER("phase1 Wave0-3");
-                    asm volatile("s_waitcnt vmcnt(0)");
+                    s_waitcnt_vmcnt<0>();
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
@@ -1215,7 +1217,7 @@ struct BlockFmhaPipelineQRKSVS
                     DEBUG_STMTS { printf("[POYENC] phase3 Wave0-3\n"); }
 #endif
                     ASM_MARKER("phase3 Wave0-3");
-                    asm volatile("s_waitcnt vmcnt(0)");
+                    s_waitcnt_vmcnt<0>();
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     cl_load(memV, V_w0_lds_wr_idx, K_w0_lds_rd_idx);
@@ -1242,7 +1244,7 @@ struct BlockFmhaPipelineQRKSVS
                     DEBUG_STMTS { printf("[POYENC] phase1 Wave4-7\n"); }
 #endif
                     ASM_MARKER("phase1 Wave4-7");
-                    asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
+                    s_waitcnt<0, 0>();
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
@@ -1294,7 +1296,7 @@ struct BlockFmhaPipelineQRKSVS
                     DEBUG_STMTS { printf("[POYENC] phase3 Wave4-7\n"); }
 #endif
                     ASM_MARKER("phase3 Wave4-7");
-                    asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
+                    s_waitcnt<0, 0>();
                     __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);

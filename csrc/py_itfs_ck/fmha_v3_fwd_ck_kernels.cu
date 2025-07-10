@@ -37,7 +37,6 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
                                                    /* AsyncCopy = */ false,
                                                    /* NumPrefetchK = */ 1,
                                                    /* NumPrefetchV = */ 1>
-
 {
     using BasePolicy = ck_tile::BlockFmhaPipelineQXKSVSCustomPolicy</* QLoadOnce = */ true,
                                                                     /* AsyncCopy = */ false,
@@ -446,27 +445,29 @@ struct BlockFmhaPipelineQRKSVS
                                 kM0 * kN0 * sizeof(PDataType));
     }
 
+    // for debug only
     template <ck_tile::index_t MPerBlock, ck_tile::index_t NPerBlock>
     CK_TILE_DEVICE static constexpr auto MakeSimpleLdsDesc()
     {
         using namespace ck_tile;
-        constexpr auto k_lds_block_desc_0 =
+        constexpr auto lds_block_desc =
             make_naive_tensor_descriptor(make_tuple(number<MPerBlock>{}, number<NPerBlock>{}),
                                          make_tuple(number<NPerBlock>{}, number<1>{}),
                                          number<1>{},
                                          number<1>{});
 
-        return k_lds_block_desc_0;
+        return lds_block_desc;
     }
 
+    // for debug only
     template <ck_tile::index_t MPerBlock>
     CK_TILE_DEVICE static constexpr auto MakeSimpleLdsDesc1D()
     {
         using namespace ck_tile;
-        constexpr auto k_lds_block_desc_0 = make_naive_tensor_descriptor(
+        constexpr auto lds_block_desc = make_naive_tensor_descriptor(
             make_tuple(number<MPerBlock>{}), make_tuple(number<1>{}), number<1>{}, number<1>{});
 
-        return k_lds_block_desc_0;
+        return lds_block_desc;
     }
 
     template <typename DataType, typename Descriptor>
@@ -490,8 +491,28 @@ struct BlockFmhaPipelineQRKSVS
 #define DEBUG_STMTS if constexpr(false)
 #endif
 
+#define ENABLE_DEBUG_ASM_MAKER 1
+#if ENABLE_DEBUG_ASM_MAKER
+#define ASM_MARKER(desc)                   \
+    do                                     \
+    {                                      \
+        __builtin_amdgcn_sched_barrier(0); \
+        asm volatile("; [POYENC] " desc);  \
+        __builtin_amdgcn_sched_barrier(0); \
+    } while(false)
+#else
+#define ASM_MARKER(desc) \
+    do                   \
+    {                    \
+    } while(false)
+#endif
+
 #define ENABLE_TRACE 0
 #define ENABLE_TENSOR_DUMP 0
+
+    CK_TILE_DEVICE static constexpr void schedule_main_loop_gemm0() {}
+
+    CK_TILE_DEVICE static constexpr void schedule_main_loop_gemm1() {}
 
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
@@ -1087,9 +1108,7 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto core_loop = [&](auto cl_p) {
-            __builtin_amdgcn_sched_barrier(0);
-            asm volatile("; [POYENC] before core_loop");
-            __builtin_amdgcn_sched_barrier(0);
+            ASM_MARKER("before core_loop");
 #if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] core_loop, cl_p = %d\n", cl_p.value); }
 #endif
@@ -1124,13 +1143,12 @@ struct BlockFmhaPipelineQRKSVS
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase0 Wave0-3\n"); }
 #endif
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile("; [POYENC] phase0 Wave0-3");
-                    __builtin_amdgcn_sched_barrier(0);
+                    ASM_MARKER("phase0 Wave0-3");
                     asm volatile("s_waitcnt lgkmcnt(0)");
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
                     fmha_alu1(xdl_SP_p23_reg_idx);
 
+                    schedule_main_loop_gemm0();
 #if 0 && ENABLE_TENSOR_DUMP
                     // print K1
                     block_sync_lds();
@@ -1147,9 +1165,7 @@ struct BlockFmhaPipelineQRKSVS
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase1 Wave0-3\n"); }
 #endif
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile("; [POYENC] phase1 Wave0-3");
-                    __builtin_amdgcn_sched_barrier(0);
+                    ASM_MARKER("phase1 Wave0-3");
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
                     cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
@@ -1162,21 +1178,18 @@ struct BlockFmhaPipelineQRKSVS
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase2 Wave0-3\n"); }
 #endif
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile("; [POYENC] phase2 Wave0-3");
-                    __builtin_amdgcn_sched_barrier(0);
+                    ASM_MARKER("phase2 Wave0-3");
                     asm volatile("s_waitcnt lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
                     fmha_alu_D_upd();
 
+                    schedule_main_loop_gemm1();
 // phase3
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase3 Wave0-3\n"); }
 #endif
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile("; [POYENC] phase3 Wave0-3");
-                    __builtin_amdgcn_sched_barrier(0);
+                    ASM_MARKER("phase3 Wave0-3");
                     asm volatile("s_waitcnt vmcnt(0)");
                     __builtin_amdgcn_s_barrier();
                     cl_load(memV, V_w0_lds_wr_idx, K_w0_lds_rd_idx);
@@ -1193,9 +1206,7 @@ struct BlockFmhaPipelineQRKSVS
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase0 Wave4-7\n"); }
 #endif
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile("; [POYENC] phase0 Wave4-7");
-                    __builtin_amdgcn_sched_barrier(0);
+                    ASM_MARKER("phase0 Wave4-7");
                     cl_load(memV, V_w4_lds_wr_idx, K_w4_lds_rd_idx);
 #if 0
                     __builtin_amdgcn_sched_barrier(0);
@@ -1205,13 +1216,13 @@ struct BlockFmhaPipelineQRKSVS
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase1 Wave4-7\n"); }
 #endif
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile("; [POYENC] phase1 Wave4-7");
-                    __builtin_amdgcn_sched_barrier(0);
+                    ASM_MARKER("phase1 Wave4-7");
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
                     fmha_alu1(xdl_SP_p23_reg_idx);
+
+                    schedule_main_loop_gemm0();
 #if 0
                     // print K1 tile
                     DEBUG_STMTS
@@ -1239,9 +1250,7 @@ struct BlockFmhaPipelineQRKSVS
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase2 Wave4-7\n"); }
 #endif
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile("; [POYENC] phase2 Wave4-7");
-                    __builtin_amdgcn_sched_barrier(0);
+                    ASM_MARKER("phase2 Wave4-7");
                     __builtin_amdgcn_s_barrier();
                     cl_load(memK, K_w4_lds_wr_idx, V_w4_lds_rd_idx);
                     fmha_mask(xdl_SP_p01_reg_idx);
@@ -1256,19 +1265,17 @@ struct BlockFmhaPipelineQRKSVS
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase3 Wave4-7\n"); }
 #endif
-                    __builtin_amdgcn_sched_barrier(0);
-                    asm volatile("; [POYENC] phase3 Wave4-7");
-                    __builtin_amdgcn_sched_barrier(0);
+                    ASM_MARKER("phase3 Wave4-7");
                     asm volatile("s_waitcnt vmcnt(0)&lgkmcnt(0)");
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
                     fmha_alu_D_upd();
+
+                    schedule_main_loop_gemm1();
                 }
                 return result;
             };
-            __builtin_amdgcn_sched_barrier(0);
-            asm volatile("; [POYENC] end core_loop");
-            __builtin_amdgcn_sched_barrier(0);
+            ASM_MARKER("end core_loop");
             return iteration(number<0>{}) && iteration(number<1>{});
         };
 

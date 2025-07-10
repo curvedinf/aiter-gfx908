@@ -514,6 +514,27 @@ struct BlockFmhaPipelineQRKSVS
 
     CK_TILE_DEVICE static constexpr void schedule_main_loop_gemm1() {}
 
+    template <unsigned char Vmcnt, unsigned char Lgkmcnt, unsigned char Expcnt = 7>
+    CK_TILE_DEVICE static constexpr void s_waitcnt()
+    {
+        constexpr unsigned char reserved   = 0b1100;
+        constexpr unsigned char mask_4bits = 0b1111;
+        __builtin_amdgcn_s_waitcnt(((mask_4bits & reserved) << 12) | ((mask_4bits & Lgkmcnt) << 8) |
+                                   ((mask_4bits & Expcnt) << 4) | (mask_4bits & Vmcnt));
+    }
+
+    template <unsigned char Vmcnt>
+    CK_TILE_DEVICE static constexpr void s_waitcnt_vmcnt()
+    {
+        s_waitcnt<Vmcnt, 15>();
+    }
+
+    template <unsigned char Lgkmcnt>
+    CK_TILE_DEVICE static constexpr void s_waitcnt_lgkmcnt()
+    {
+        s_waitcnt<15, Lgkmcnt>();
+    }
+
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowTmp,
               typename VDramBlockWindowTmp,
@@ -831,7 +852,7 @@ struct BlockFmhaPipelineQRKSVS
             // move K tile windows
             move_tile_window(k_dram_block_window, {kN0, 0});
 
-            __builtin_amdgcn_s_waitcnt(0xc07f); // lgkmcnt(0)
+            s_waitcnt_lgkmcnt<0>();
         };
 
         auto K_lds_load = [&](auto k_lds_read_idx) {
@@ -878,7 +899,7 @@ struct BlockFmhaPipelineQRKSVS
             /// FIXME: use the future-predicting method to move the window
             move_tile_window(v_dram_window, {0, kK1});
 
-            __builtin_amdgcn_s_waitcnt(0xc07f); // lgkmcnt(0)
+            s_waitcnt_lgkmcnt<0>();
         };
 
         auto V_lds_load = [&](auto v_lds_read_idx) {
@@ -1144,7 +1165,8 @@ struct BlockFmhaPipelineQRKSVS
                     DEBUG_STMTS { printf("[POYENC] phase0 Wave0-3\n"); }
 #endif
                     ASM_MARKER("phase0 Wave0-3");
-                    __builtin_amdgcn_s_waitcnt(0xc07f); // lgkmcnt(0)
+                    s_waitcnt_lgkmcnt<0>();
+                    __builtin_amdgcn_sched_barrier(0);
                     cl_calc(xdl_SP_p01_reg_idx, gemm0);
                     fmha_alu1(xdl_SP_p23_reg_idx);
 
@@ -1168,6 +1190,7 @@ struct BlockFmhaPipelineQRKSVS
 #endif
                     ASM_MARKER("phase1 Wave0-3");
                     asm volatile("s_waitcnt vmcnt(0)");
+                    __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
                     fmha_mask(xdl_SP_p01_reg_idx);
@@ -1178,7 +1201,8 @@ struct BlockFmhaPipelineQRKSVS
                     DEBUG_STMTS { printf("[POYENC] phase2 Wave0-3\n"); }
 #endif
                     ASM_MARKER("phase2 Wave0-3");
-                    __builtin_amdgcn_s_waitcnt(0xc07f); // lgkmcnt(0)
+                    s_waitcnt_lgkmcnt<0>();
+                    __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     cl_calc(xdl_SP_p23_reg_idx, gemm1);
                     fmha_alu_D_upd();
@@ -1192,6 +1216,7 @@ struct BlockFmhaPipelineQRKSVS
 #endif
                     ASM_MARKER("phase3 Wave0-3");
                     asm volatile("s_waitcnt vmcnt(0)");
+                    __builtin_amdgcn_sched_barrier(0);
                     __builtin_amdgcn_s_barrier();
                     cl_load(memV, V_w0_lds_wr_idx, K_w0_lds_rd_idx);
 

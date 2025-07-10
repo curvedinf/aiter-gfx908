@@ -24,9 +24,9 @@ TRITON_HIP_PRESHUFFLE_SCALES = (
 )
 
 
-def bench_gemm_fn(M, N, K, metric):
+def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
     c_dtype = torch.bfloat16
-    x, w, _, _, x_scale, w_scale, _, _ = generate_gemm_afp4wfp4_inputs(M, N, K, c_dtype)
+    x, w, _, _, x_scale, w_scale, _, _ = generate_gemm_afp4wfp4_inputs(M, N, K, c_dtype, layout=layout)
     # flops
     flops = 2.0 * M * N * K
     # memory transfer
@@ -72,9 +72,7 @@ def run_benchmark(args, defaults):
         args.shape and args.M
     ), "User can specify --shape or --model MODEL -M VAL exclusively"
     if args.model:
-        unsupported_args = [
-            "layout",
-        ]
+        unsupported_args = []
         for arg in unsupported_args:
             if getattr(args, arg, None) != getattr(defaults, arg, None):
                 raise Exception(
@@ -99,7 +97,7 @@ def run_model_benchmark(args):
     benchmark = get_model_benchmark_object("GEMM MXFP4 x MXFP4 Benchmark", args)
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_afp4wfp4_blockscale(
+    def bench_gemm_afp4wfp4(
         M, hidden_dim, intermediate_dim, metric, layer, **kwargs
     ):
         if layer == "fc1":
@@ -114,19 +112,19 @@ def run_model_benchmark(args):
             # Divide K by tensor parallel
             K = math.ceil(K / args.tp)
 
-        return bench_gemm_fn(M, N, K, metric)
+        return bench_gemm_fn(M, N, K, metric, args.layout)
 
-    bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
+    bench_gemm_afp4wfp4.run(save_path=".", print_data=True)
 
 
 def run_shape_benchmark(args):
     benchmark = get_shape_benchmark_object("GEMM MXFP4 x MXFP4 Benchmark", args)
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_afp4wfp4_blockscale(M, N, K, metric, **kwargs):
-        return bench_gemm_fn(M, N, K, metric)
+    def bench_gemm_afp4wfp4(M, N, K, metric, **kwargs):
+        return bench_gemm_fn(M, N, K, metric, args.layout)
 
-    bench_gemm_afp4wfp4_blockscale.run(save_path=".", print_data=True)
+    bench_gemm_afp4wfp4.run(save_path=".", print_data=True)
 
 
 def parse_args():

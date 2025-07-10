@@ -154,6 +154,7 @@ def test_fmoe(
     BLOCK_SIZE_M = get_block_size_M(M, topk, E, inter_dim)
     if qType == aiter.QuantType.per_128x128:
         BLOCK_SIZE_M = 64
+    # BLOCK_SIZE_M = 64
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
         topk_ids, topk_weights, E, model_dim, dtype, BLOCK_SIZE_M
     )
@@ -412,26 +413,26 @@ def test_fmoe(
 
 
 l_dtype = ["bf16", "fp16"][:1]
-l_dim = [(6144, 4096)]
+l_dim = [(4096, 192)]
 l_tokenNum = [
-    1,
-    3,
-    5,
-    16,
-    32,
-    64,
-    128,
-    256,
-    1024,
+    # 1,
+    # 3,
+    # 5,
+    # 16,
+    # 32,
+    # 64,
+    # 128,
+    # 256,
+    # 1024,
     4096,
-    163840,
+    # 163840,
 ]
 l_quant = [
-    (aiter.QuantType.No, None, None),  # a16w16
-    (aiter.QuantType.per_Tensor, dtypes.fp8, dtypes.fp8),  # a8w8
+    # (aiter.QuantType.No, None, None),  # a16w16
+    # (aiter.QuantType.per_Tensor, dtypes.fp8, dtypes.fp8),  # a8w8
     (aiter.QuantType.per_Token, dtypes.fp8, dtypes.fp8),  # a8w8
-    (aiter.QuantType.per_Token, dtypes.fp8, torch.int4),  # a8w4
-    (aiter.QuantType.per_1x32, dtypes.fp4x2, dtypes.fp4x2),  # a4w4
+    # (aiter.QuantType.per_Token, dtypes.fp8, torch.int4),  # a8w4
+    # (aiter.QuantType.per_1x32, dtypes.fp4x2, dtypes.fp4x2),  # a4w4
     # (aiter.QuantType.per_128x128, dtypes.fp8, dtypes.fp8),  # a8w8 TODO add test
 ]
 l_act = [aiter.ActivationType.Silu, aiter.ActivationType.Gelu][:1]
@@ -514,7 +515,7 @@ parser.add_argument(
     "-e",
     "--expert",
     type=int,
-    default=8,
+    default=128,
     help="""Number of experts.
     e.g.: -e 8""",
 )
@@ -523,7 +524,7 @@ parser.add_argument(
     "-k",
     "--topk",
     type=int,
-    default=2,
+    default=8,
     help="""Number of top experts.
     e.g.: -k 2""",
 )

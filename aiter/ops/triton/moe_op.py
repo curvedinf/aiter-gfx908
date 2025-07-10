@@ -813,12 +813,16 @@ def _fused_moe_persistent_kernel(
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
     tile_id = start_pid
 
+    # Only remap the first tile because:
+    # the rest of the tiles are distributed randomly with atomic fetching
+    # i.e. theres no quarantees to be able to reuse L2 cache. Better to just ensure L3 caching with round-robin.
+    tile_id = remap_xcd(tile_id, NUM_WGS, NUM_XCDS)
+
     offs_k = tl.arange(0, BLOCK_SIZE_K)
 
     num_tiles = num_pid_m * num_pid_n
 
     while tile_id < num_tiles:
-        tile_id = remap_xcd(tile_id, num_tiles, NUM_XCDS)
         pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
         offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
@@ -933,7 +937,7 @@ def _fused_moe_persistent_kernel(
 
             # fetch the next tile through atomic increment of a global variable
             # this ensures perfect load balancing across CUs at the cost of scalar atomic operation
-            tile_id = tl.atomic_add(pid_counter, 1)
+            tile_id = tl.atomic_add(pid_counter, 1, sem="relaxed")
 
 
 def fused_moe(

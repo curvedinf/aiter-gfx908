@@ -22,8 +22,7 @@ def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
     # NOTE: Assume bias and output has the same dtype
     c_dtype = str_to_torch_dtype["bf16"]
     x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
-        M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, 
-        layout = layout, output=True
+        M, N, K, str_to_torch_dtype["fp8e4m3"], c_dtype, layout=layout, output=True
     )
 
     # flops
@@ -109,8 +108,7 @@ def run_benchmark(args, defaults):
         args.shape and args.M
     ), "User can specify --shape or --model MODEL -M VAL exclusively"
     if args.model:
-        unsupported_args = [
-        ]
+        unsupported_args = []
         for arg in unsupported_args:
             if getattr(args, arg, None) != getattr(defaults, arg, None):
                 raise Exception(

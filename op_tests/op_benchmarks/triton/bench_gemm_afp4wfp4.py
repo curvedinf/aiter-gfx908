@@ -26,7 +26,9 @@ TRITON_HIP_PRESHUFFLE_SCALES = (
 
 def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
     c_dtype = torch.bfloat16
-    x, w, _, _, x_scale, w_scale, _, _ = generate_gemm_afp4wfp4_inputs(M, N, K, c_dtype, layout=layout)
+    x, w, _, _, x_scale, w_scale, _, _ = generate_gemm_afp4wfp4_inputs(
+        M, N, K, c_dtype, layout=layout
+    )
     # flops
     flops = 2.0 * M * N * K
     # memory transfer
@@ -141,7 +143,7 @@ def main():
     args, defaults = parse_args()
     if args.print_vgpr:
         print("Retrieving VGPR usage for Triton kernels...")
-        fun = lambda: run_benchmark(args)  # noqa: E731
+        fun = lambda: run_benchmark(args, defaults)  # noqa: E731
         print_vgpr(fun, "GEMM")
         return 0
     run_benchmark(args, defaults)

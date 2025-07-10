@@ -1108,7 +1108,6 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto core_loop = [&](auto cl_p) {
-            ASM_MARKER("before core_loop");
 #if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] core_loop, cl_p = %d\n", cl_p.value); }
 #endif
@@ -1139,6 +1138,7 @@ struct BlockFmhaPipelineQRKSVS
 
                 if constexpr(cl_p == 0)
                 {
+                    __builtin_amdgcn_sched_barrier(0);
 // phase0
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase0 Wave0-3\n"); }
@@ -1161,6 +1161,7 @@ struct BlockFmhaPipelineQRKSVS
                     block_sync_lds();
                     DEBUG_STMTS { print_lds(s_lds_window, "S"); }
 #endif
+                    __builtin_amdgcn_sched_barrier(0);
 // phase1
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase1 Wave0-3\n"); }
@@ -1170,10 +1171,8 @@ struct BlockFmhaPipelineQRKSVS
                     __builtin_amdgcn_s_barrier();
                     cl_load(memK, K_w0_lds_wr_idx, V_w0_lds_rd_idx);
                     fmha_mask(xdl_SP_p01_reg_idx);
-#if 0
+
                     __builtin_amdgcn_sched_barrier(0);
-                    __builtin_amdgcn_sched_barrier(0);
-#endif
 // phase2
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase2 Wave0-3\n"); }
@@ -1185,6 +1184,8 @@ struct BlockFmhaPipelineQRKSVS
                     fmha_alu_D_upd();
 
                     schedule_main_loop_gemm1();
+
+                    __builtin_amdgcn_sched_barrier(0);
 // phase3
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase3 Wave0-3\n"); }
@@ -1202,16 +1203,15 @@ struct BlockFmhaPipelineQRKSVS
                 }
                 else
                 {
+                    __builtin_amdgcn_sched_barrier(0);
 // phase0
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase0 Wave4-7\n"); }
 #endif
                     ASM_MARKER("phase0 Wave4-7");
                     cl_load(memV, V_w4_lds_wr_idx, K_w4_lds_rd_idx);
-#if 0
+
                     __builtin_amdgcn_sched_barrier(0);
-                    __builtin_amdgcn_sched_barrier(0);
-#endif
 // phase1
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase1 Wave4-7\n"); }
@@ -1247,6 +1247,7 @@ struct BlockFmhaPipelineQRKSVS
                     block_sync_lds();
                     DEBUG_STMTS { print_lds(s_lds_window, "S"); }
 #endif
+                    __builtin_amdgcn_sched_barrier(0);
 // phase2
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase2 Wave4-7\n"); }
@@ -1262,6 +1263,7 @@ struct BlockFmhaPipelineQRKSVS
                         result = false;
                     }
 
+                    __builtin_amdgcn_sched_barrier(0);
 // phase3
 #if ENABLE_TRACE
                     DEBUG_STMTS { printf("[POYENC] phase3 Wave4-7\n"); }
@@ -1277,7 +1279,6 @@ struct BlockFmhaPipelineQRKSVS
                 }
                 return result;
             };
-            ASM_MARKER("end core_loop");
             return iteration(number<0>{}) && iteration(number<1>{});
         };
 

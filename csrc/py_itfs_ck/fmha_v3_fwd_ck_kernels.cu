@@ -1385,9 +1385,7 @@ struct BlockFmhaPipelineQRKSVS
 
         // pre-stage
         {
-            __builtin_amdgcn_sched_barrier(0);
-            asm volatile("; [POYENC] before pre-stage");
-            __builtin_amdgcn_sched_barrier(0);
+            ASM_MARKER("before pre-stage");
 #if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] pre-stage\n"); }
 #endif
@@ -1465,9 +1463,7 @@ struct BlockFmhaPipelineQRKSVS
                 K_mem_load(number<0>{}); // mem_K2
             }
 
-            __builtin_amdgcn_sched_barrier(0);
-            asm volatile("; [POYENC] end pre-stage");
-            __builtin_amdgcn_sched_barrier(0);
+            ASM_MARKER("end pre-stage");
         }
 
         if(1 < num_total_loop)

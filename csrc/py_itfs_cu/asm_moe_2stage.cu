@@ -299,26 +299,26 @@ void moe_stage1_g1u1(
     int gdy = sub_X_cnt;
     int gdz = k_num;
 
-    std::cout << "num_valid_ids: " << static_cast<int*>(num_valid_ids.data_ptr())[0] << std::endl;
-    std::cout << "dim:" << args.dim << std::endl;
-    std::cout << "hidden:" << args.hidden_dim << std::endl;
-    std::cout << "token:" << args.token_cnt << std::endl;
-    std::cout << "eprt:" << args.eprt_cnt << std::endl;
-    std::cout << "Xs:" << args.Xs << std::endl;
-    std::cout << "GUs:" << args.GUs << std::endl;
-    std::cout << "Os:" << args.Os << std::endl;
-    std::cout << "eGUs:" << args.eGUs << std::endl;
-    std::cout << "eGUQs:" << args.eGUQs << std::endl;
-    std::cout << "eSMQs:" << args.eSMQs << std::endl;
-    std::cout << "topk:" << args.topk << std::endl;
-    std::cout << "splitk:" << args.splitk << std::endl;
-    printf("gdx:%d, gdy:%d, gdz:%d, sub_X_cnt:%d, tgs:%d\n",
-           gdx,
-           gdy,
-           gdz,
-           sub_X_cnt,
-           sub_X_cnt * gdx * gdz);
-    printf("argsize: %zu\n", arg_size);
+    // std::cout << "num_valid_ids: " << static_cast<int*>(num_valid_ids.data_ptr())[0] << std::endl;
+    // std::cout << "dim:" << args.dim << std::endl;
+    // std::cout << "hidden:" << args.hidden_dim << std::endl;
+    // std::cout << "token:" << args.token_cnt << std::endl;
+    // std::cout << "eprt:" << args.eprt_cnt << std::endl;
+    // std::cout << "Xs:" << args.Xs << std::endl;
+    // std::cout << "GUs:" << args.GUs << std::endl;
+    // std::cout << "Os:" << args.Os << std::endl;
+    // std::cout << "eGUs:" << args.eGUs << std::endl;
+    // std::cout << "eGUQs:" << args.eGUQs << std::endl;
+    // std::cout << "eSMQs:" << args.eSMQs << std::endl;
+    // std::cout << "topk:" << args.topk << std::endl;
+    // std::cout << "splitk:" << args.splitk << std::endl;
+    // printf("gdx:%d, gdy:%d, gdz:%d, sub_X_cnt:%d, tgs:%d\n",
+    //        gdx,
+    //        gdy,
+    //        gdz,
+    //        sub_X_cnt,
+    //        sub_X_cnt * gdx * gdz);
+    // printf("argsize: %zu\n", arg_size);
 
     impl_ptr->launch_kernel({&args,
                              &arg_size,

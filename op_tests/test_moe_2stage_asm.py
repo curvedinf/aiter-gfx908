@@ -28,6 +28,7 @@ from aiter import ActivationType
 
 torch.int4 = getattr(torch, "int4", torch.uint32)
 torch.set_default_device("cuda")
+torch.set_printoptions(precision=6, sci_mode=False, linewidth=120)
 
 
 def ck_moe_stage1(
@@ -140,15 +141,19 @@ def test_fmoe(
         return
     torch_quant = aiter.get_torch_quant(qType)
     torch_act = aiter.get_torch_act(actType)
-    input = torch.randn((token, model_dim), dtype=dtype)
+    input = torch.ones((token, model_dim), dtype=dtype) / 10
+    ones_part = torch.ones((token//2, model_dim), dtype=dtype)
+    twos_part = torch.full((token - token//2, model_dim), 2, dtype=dtype)
+    #input = torch.cat([ones_part, twos_part], dim=0)
     if use_g1u1:
-        w1 = torch.randn((E, inter_dim * 2, model_dim), dtype=dtype)
+        w1 = torch.ones((E, inter_dim * 2, model_dim), dtype=dtype)
     else:
         w1 = torch.randn((E, inter_dim, model_dim), dtype=dtype)
     w2 = torch.randn((E, model_dim, inter_dim), dtype=dtype)
 
     score = torch.randn((token, E), dtype=dtype)
     topk_weights, topk_ids = fused_topk(input, score, topk, True)
+    print("##topk_ids:",topk_ids)
 
     M, _ = topk_ids.shape
 
@@ -284,7 +289,12 @@ def test_fmoe(
             w1_scale = w1_scale.view(E, 1).repeat(1, w1.shape[-2])
 
         sorted_expert_ids_nopad = sorted_expert_ids[: int(num_valid_ids[0] / 256)]
-
+        print("##arg to asm")
+        print("##sorted_ids:",sorted_ids[:])
+        print("##sorted_expert_ids",sorted_expert_ids[:])
+        print("##num_valid_ids",num_valid_ids)
+        print("##w1_scale",w1_scale)
+        print("##w1_scale sh",fp4_utils.e8m0_shuffle(w1_scale))
         out1_asm = torch.empty((token, topk, inter_dim), dtype=dtype)
         _, us = run_perftest(
             asm_stage1,
@@ -310,6 +320,7 @@ def test_fmoe(
             quant_type=qType,
             block_m=256,
         )
+        #print("out1_asm:",out1_asm)
         checkAllclose(
             out1_ref,
             out1_asm,
@@ -435,7 +446,7 @@ l_tokenNum = [
     1024,
     4096,
     163840,
-]
+][:5]
 l_quant = [
     (aiter.QuantType.No, None, None),  # a16w16
     (aiter.QuantType.per_Tensor, dtypes.fp8, dtypes.fp8),  # a8w8

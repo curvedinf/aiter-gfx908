@@ -42,6 +42,8 @@ def get_shape_benchmark_object(plot_name, args, x_names=None):
     benchmark = triton.testing.Benchmark(
         x_names=x_names,
         x_vals=x_vals_list,
+        x_log=True,
+        y_log=True,
         line_arg="provider",
         line_vals=["Triton"],
         line_names=["Triton"],
@@ -94,6 +96,8 @@ def get_model_benchmark_object(
     benchmark = triton.testing.Benchmark(
         x_names=x_names,
         x_vals=x_vals_list,
+        x_log=True,
+        y_log=True,
         line_arg="layer",
         line_vals=line_vals,
         line_names=line_names,

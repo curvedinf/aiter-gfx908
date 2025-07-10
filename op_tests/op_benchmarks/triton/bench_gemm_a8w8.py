@@ -33,7 +33,7 @@ def bench_gemm_fn(M, N, K, metric):
     mem = mem_read + mem_write
 
     ms = triton.testing.do_bench(
-        lambda: gemm_a8w8(x, weight, x_scale, w_scale, bias, c_dtype, y),  # noqa: E731
+        lambda: gemm_a8w8(x, weight, x_scale, w_scale, bias, c_dtype, y, use_origami=False),  # noqa: E731
         warmup=25,
         rep=100,
     )

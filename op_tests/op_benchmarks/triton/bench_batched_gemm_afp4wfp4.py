@@ -30,7 +30,9 @@ def model_benchmark_shapes(args):
             N = config["intermediate_size"]
             K = config["hidden_size"]
 
-            shapes.append((M, N, K, 16))  # batch is last dim
+            shapes.append(
+                (M, N, K, 16)
+            )  # rearrange batch to last dim so M is graph x-axis
 
     return shapes
 

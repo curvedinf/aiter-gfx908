@@ -9,6 +9,7 @@ import functools
 import aiter.ops.triton.utils.arch_info as arch_info
 from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
 import warnings
+import warnings
 
 M_THRESHOLD_SMALL = 256
 M_THRESHOLD_MEDIUM = 1024
@@ -49,6 +50,7 @@ def get_moe_configs(dtype: Optional[str], persistent: bool = False) -> Optional[
     # First look up if an optimized configuration is available in the configs
     # directory
     dtype_str = "DEFAULT" if dtype is None else dtype
+    dtype_str = "DEFAULT" if dtype is None else dtype
     dev = arch_info.get_device()
     config_file_path = f"{AITER_TRITON_CONFIGS_PATH}/moe/{dev}-MOE-{dtype_str}"
     if persistent:
@@ -62,6 +64,9 @@ def get_moe_configs(dtype: Optional[str], persistent: bool = False) -> Optional[
 
     # If no optimized configuration is available, we will use the default
     # configuration
+    warnings.warn(
+        f"No MoE configuration found for device '{dev}' with dtype '{dtype_str}'. Using default configuration."
+    )
     warnings.warn(
         f"No MoE configuration found for device '{dev}' with dtype '{dtype_str}'. Using default configuration."
     )

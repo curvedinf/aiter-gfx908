@@ -81,7 +81,6 @@ def _fused_moe_kernel_gptq_awq(
     stride_bze,
     stride_bzk,
     stride_bzn,
-    block_k_diviable: tl.constexpr,
     group_size: tl.constexpr,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
@@ -201,23 +200,24 @@ def _fused_moe_kernel_gptq_awq(
         # Load the next block of A and B, generate a mask by checking the
         # K dimension.
 
-        if not block_k_diviable:
-            k_mask = offs_k[:, None] < K - k * BLOCK_SIZE_K
-            k_other = 0.0
-        else:
+        if EVEN_K:
             k_mask = None
             k_other = None
+            a = tl.load(
+                a_ptrs,
+                mask=token_mask[:, None],
+                other=0.0,
+            )
+        else:
+            k_mask = offs_k[:, None] < K - k * BLOCK_SIZE_K
+            k_other = 0.0
+            a = tl.load(
+                a_ptrs,
+                mask=token_mask[:, None] & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                other=0.0,
+            )
 
-            if EVEN_K:
-                a = tl.load(a_ptrs, mask=token_mask[:, None], other=0.0)
-                b = tl.load(b_ptrs)
-            else:
-                a = tl.load(
-                    a_ptrs,
-                    mask=token_mask[:, None] & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
-                    other=0.0,
-                )
-                b = tl.load(b_ptrs)
+        b = tl.load(b_ptrs, mask=k_mask, other=k_other)
 
         if use_int4_w4a16:
             b = (b >> b_shifter) & 0xF
@@ -319,7 +319,6 @@ def _fused_moe_persistent_kernel_gptq_awq(
     stride_bze,
     stride_bzk,
     stride_bzn,
-    block_k_diviable: tl.constexpr,
     group_size: tl.constexpr,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
@@ -428,23 +427,23 @@ def _fused_moe_persistent_kernel_gptq_awq(
             # Load the next block of A and B, generate a mask by checking the
             # K dimension.
 
-            if not block_k_diviable:
-                k_mask = offs_k[:, None] < K - k * BLOCK_SIZE_K
-                k_other = 0.0
-            else:
+            if EVEN_K:
                 k_mask = None
                 k_other = None
-
-            if EVEN_K:
-                a = tl.load(a_ptrs, mask=token_mask[:, None], other=0.0)
-                b = tl.load(b_ptrs)
+                a = tl.load(
+                    a_ptrs,
+                    mask=token_mask[:, None],
+                    other=0.0,
+                )
             else:
+                k_mask = offs_k[:, None] < K - k * BLOCK_SIZE_K
+                k_other = 0.0
                 a = tl.load(
                     a_ptrs,
                     mask=token_mask[:, None] & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
                     other=0.0,
                 )
-                b = tl.load(b_ptrs)
+            b = tl.load(b_ptrs, mask=k_mask, other=k_other)
 
             if use_int4_w4a16:
                 b = (b >> b_shifter) & 0xF
@@ -861,7 +860,9 @@ def _fused_moe_persistent_kernel(
 
             if use_int8_w8a16:
                 b_scale_ptrs = (
-                    b_scale_ptr + off_experts * stride_bse + offs_bn[None, :] * stride_bsn
+                    b_scale_ptr
+                    + off_experts * stride_bse
+                    + offs_bn[None, :] * stride_bsn
                 )
                 b_scale = tl.load(b_scale_ptrs)
 
@@ -887,7 +888,8 @@ def _fused_moe_persistent_kernel(
                 else:
                     a = tl.load(
                         a_ptrs,
-                        mask=token_mask[:, None] & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                        mask=token_mask[:, None]
+                        & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
                         other=0.0,
                     )
                     b = tl.load(
@@ -901,10 +903,14 @@ def _fused_moe_persistent_kernel(
                         k_start = k * BLOCK_SIZE_K
                         offs_ks = k_start // group_k
                         a_scale = tl.load(
-                            a_scale_ptrs + offs_ks * stride_ask, mask=token_mask, other=0.0
+                            a_scale_ptrs + offs_ks * stride_ask,
+                            mask=token_mask,
+                            other=0.0,
                         )
                         b_scale = tl.load(b_scale_ptrs + offs_ks * stride_bsk)
-                        accumulator += tl.dot(a, b) * a_scale[:, None] * b_scale[None, :]
+                        accumulator += (
+                            tl.dot(a, b) * a_scale[:, None] * b_scale[None, :]
+                        )
                     else:
                         accumulator = tl.dot(a, b, acc=accumulator)
                 else:
@@ -1048,7 +1054,6 @@ def fused_moe(
                 B_zp.stride(0) if B_zp is not None else 0,
                 B_zp.stride(2) if B_zp is not None else 0,
                 B_zp.stride(1) if B_zp is not None else 0,
-                block_k_diviable=A.shape[1] % config["BLOCK_SIZE_K"] == 0,
                 group_size=block_shape[1],
                 MUL_ROUTED_WEIGHT=mul_routed_weight,
                 top_k=top_k,
@@ -1091,7 +1096,6 @@ def fused_moe(
                 B_zp.stride(0) if B_zp is not None else 0,
                 B_zp.stride(2) if B_zp is not None else 0,
                 B_zp.stride(1) if B_zp is not None else 0,
-                block_k_diviable=A.shape[1] % config["BLOCK_SIZE_K"] == 0,
                 group_size=block_shape[1],
                 MUL_ROUTED_WEIGHT=mul_routed_weight,
                 top_k=top_k,

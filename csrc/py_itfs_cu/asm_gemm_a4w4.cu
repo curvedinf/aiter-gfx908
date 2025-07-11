@@ -56,7 +56,7 @@ struct __attribute__((packed)) KernelArgs
     unsigned int stride_ScaleB1;
     p3 _p22;
     unsigned int log2_k_split;
-    p3 _p23;
+    // p3 _p23;
 };
 
 // A4W4 asm gemm kernel
@@ -110,7 +110,6 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     int gdy           = (Mdim + SUBM - 1) / SUBM;
     int gdz           = 1;
 
-
     if(log2_k_split.value() == 1)
     {
         int k_num = 1 << log2_k_split.value();
@@ -118,12 +117,13 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
         int k_per_tg = Kdim / k_num;
         k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;
         gdz          = (Kdim + k_per_tg - 1) / k_per_tg;
-        printf("Debug: Kdim %d, log2_k_split %d, k_per_tg %d, global_tg_z %d\n",
-               Kdim,
-               log2_k_split.value(),
-               k_per_tg,
-               gdz);
-        printf("gdx:%d, gdy:%d, gdz:%d\n", gdx, gdy, gdz);
+        // printf("Debug: Kdim %d, log2_k_split %d, k_per_tg %d, global_tg_z %d\n",
+        //        Kdim,
+        //        log2_k_split.value(),
+        //        k_per_tg,
+        //        gdz);
+        // printf("gdx:%d, gdy:%d, gdz:%d\n", gdx, gdy, gdz);
+        // printf("argsize: %zu\n", arg_size);
     }
 
     static AiterAsmKernel pro_noSplitK_impl("_ZN5aiter38f4gemm_outBF16_128x512_scale_B_ShuffleE",

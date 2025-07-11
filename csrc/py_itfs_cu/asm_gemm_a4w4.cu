@@ -67,9 +67,9 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
                             torch::Tensor& B_scale, // B_scale:[N, K/32] e8m0 paded
                             torch::Tensor& out,     // Out:[M, N] bf16
                             torch::Tensor& bias,    // bias:[M, N] f32
-                            std::optional<float> alpha      = 1.0,
-                            std::optional<float> beta       = 0.0,
-                            std::optional<bool> bpreshuffle = true,
+                            std::optional<float> alpha               = 1.0,
+                            std::optional<float> beta                = 0.0,
+                            std::optional<bool> bpreshuffle          = true,
                             std::optional<unsigned int> log2_k_split = 0)
 
 {
@@ -93,7 +93,7 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     args.M              = Mdim;
     args.N              = Ndim;
     args.K              = Kdim;
-    args.log2_k_split   = *log2_k_split;
+    args.log2_k_split   = log2_k_split.value();
     args.ptr_ScaleA     = (void*)A_scale.data_ptr();
     args.ptr_ScaleB     = (void*)B_scale.data_ptr();
     args.stride_ScaleA0 = A_scale.stride(0);
@@ -104,24 +104,26 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
 
     // TODO should get from kernel
     int tg_group_size = 32;
-    int SUBM          = 128;//256;
-    int SUBN          = 512;//256;
+    int SUBM          = 128; // 256;
+    int SUBN          = 512; // 256;
     int gdx           = (Ndim + SUBN - 1) / SUBN;
     int gdy           = (Mdim + SUBM - 1) / SUBM;
     int gdz           = 1;
 
-    if(*log2_k_split)
+
+    if(log2_k_split.value() == 1)
     {
-        int k_num = 1 << *log2_k_split;
+        int k_num = 1 << log2_k_split.value();
         assert(Kdim % k_num == 0);
         int k_per_tg = Kdim / k_num;
         k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;
         gdz          = (Kdim + k_per_tg - 1) / k_per_tg;
         printf("Debug: Kdim %d, log2_k_split %d, k_per_tg %d, global_tg_z %d\n",
                Kdim,
-               *log2_k_split,
+               log2_k_split.value(),
                k_per_tg,
                gdz);
+        printf("gdx:%d, gdy:%d, gdz:%d\n", gdx, gdy, gdz);
     }
 
     static AiterAsmKernel pro_noSplitK_impl("_ZN5aiter38f4gemm_outBF16_128x512_scale_B_ShuffleE",
@@ -144,8 +146,8 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     // {
     //     impl_ptr = &noSplitK_impl;
     // }
- 
-    if(*log2_k_split)
+
+    if(log2_k_split.value() == 1)
     {
         impl_ptr = &pro_SplitK_impl;
     }

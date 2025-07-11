@@ -61,18 +61,26 @@ def run_gemm_asm(
     log2_k_split=0,
 ):
     return aiter.gemm_a4w4_asm(
-        x, weightshuffle, x_scale, w_scale, out, bias, bpreshuffle=bpreshuffle
+        x,
+        weightshuffle,
+        x_scale,
+        w_scale,
+        out,
+        bias,
+        bpreshuffle=bpreshuffle,
+        log2_k_split=log2_k_split,
     )
 
 
 @benchmark()
 def test_gemm(dtype, M, N, K):
     from aiter.jit.utils.chip_info import get_gfx
+
     if get_gfx() not in ["gfx950"]:
         return
     quant_func = aiter.get_triton_quant(aiter.QuantType.per_1x32)
-    x = torch.randn((M, K), dtype=dtype)
-    w = torch.randn((N, K), dtype=dtype)
+    x = torch.ones((M, K), dtype=dtype)
+    w = torch.ones((N, K), dtype=dtype)
     _, x_scales = quant_func(x, shuffle=False)
     _, w_scales = quant_func(w, shuffle=False)
     x, x_scales_shuffle = quant_func(x, shuffle=True)
@@ -85,8 +93,8 @@ def test_gemm(dtype, M, N, K):
     x_scales = x_scales.view(torch.uint8)
     w_scales = w_scales.view(torch.uint8)
     a, avg_a = run_torch(x, w, x_scales, w_scales, dtype)
-    #b, avg_b = run_triton(x, w.T, x_scales, w_scales, out1, dtype)
-    b, avg_b = a, 0 
+    # b, avg_b = run_triton(x, w.T, x_scales, w_scales, out1, dtype)
+    b, avg_b = a, 0
     err0 = checkAllclose(a, b, msg="triton        ")
     avg_c = None
     tflops_c = None
@@ -99,7 +107,7 @@ def test_gemm(dtype, M, N, K):
         out2,
         bias_f32,
         bpreshuffle=True,
-        log2_k_split=0
+        log2_k_split=0,
     )
     err1 = checkAllclose(a, c[:M], msg="asm no splitK  ")
     tflops_c = M * N * K * 2 / avg_c / 1e6
@@ -109,7 +117,14 @@ def test_gemm(dtype, M, N, K):
     tflops_c2 = None
     tbs_c2 = None
     c2, avg_c2 = run_gemm_asm(
-        x, w, x_scales_shuffle, w_scales_shuffle, out2, bias_f32, bpreshuffle=False,log2_k_split=1
+        x,
+        w,
+        x_scales_shuffle,
+        w_scales_shuffle,
+        out2,
+        bias_f32,
+        bpreshuffle=True,
+        log2_k_split=1,
     )
     err1_ = checkAllclose(a, c2[:M], msg="asm splitK ")
     tflops_c2 = M * N * K * 2 / avg_c2 / 1e6
@@ -160,7 +175,7 @@ l_mnk = [
     # (64, 106496, 16384),
     # (32, 106496, 16384),
     # (32, 16384, 53248),
-    (32, 18432, 16384),
+    # (32, 18432, 16384),
     # (32, 16384, 16384),
     # # qkv_proj
     # (1, 1280, 8192),
@@ -198,6 +213,104 @@ l_mnk = [
     # (32768, 32768, 32768),
     # (51200, 18432, 16384),
     # (51200, 16384, 16384),
+    # SWDEV-542317
+# (128,8192,8192),
+# (256,8192,8192),
+# (384,8192,8192),
+# (512,8192,8192),
+# (640,8192,8192),
+# (768,8192,8192),
+# (896,8192,8192),
+# (1024,8192,8192),
+# (1152,8192,8192),
+# (1280,8192,8192),
+# (1408,8192,8192),
+# (1536,8192,8192),
+# (1664,8192,8192),
+# (1792,8192,8192),
+# (1920,8192,8192),
+# (2048,8192,8192),
+# (2176,8192,8192),
+# (2304,8192,8192),
+# (2432,8192,8192),
+# (2560,8192,8192),
+# (2688,8192,8192),
+# (2816,8192,8192),
+# (2944,8192,8192),
+# (3072,8192,8192),
+# (128,10240,8192),
+# (256,10240,8192),
+# (384,10240,8192),
+# (512,10240,8192),
+# (640,10240,8192),
+# (768,10240,8192),
+# (896,10240,8192),
+# (1024,10240,8192),
+# (1152,10240,8192),
+# (1280,10240,8192),
+# (1408,10240,8192),
+# (1536,10240,8192),
+# (1664,10240,8192),
+# (1792,10240,8192),
+# (1920,10240,8192),
+# (2048,10240,8192),
+# (2176,10240,8192),
+# (2304,10240,8192),
+# (2432,10240,8192),
+# (2560,10240,8192),
+# (2688,10240,8192),
+# (2816,10240,8192),
+# (2944,10240,8192),
+# (3072,10240,8192),
+# (128,57344,8192),
+# (256,57344,8192),
+# (384,57344,8192),
+# (512,57344,8192),
+# (640,57344,8192),
+# (768,57344,8192),
+# (896,57344,8192),
+# (1024,57344,8192),
+# (1152,57344,8192),
+# (1280,57344,8192),
+# (1408,57344,8192),
+# (1536,57344,8192),
+# (1664,57344,8192),
+# (1792,57344,8192),
+# (1920,57344,8192),
+# (2048,57344,8192),
+# (2176,57344,8192),
+# (2304,57344,8192),
+# (2432,57344,8192),
+# (2560,57344,8192),
+# (2688,57344,8192),
+# (2816,57344,8192),
+# (2944,57344,8192),
+# (3072,57344,8192),
+# (128,8192,28672),
+# (256,8192,28672),
+# (384,8192,28672),
+# (512,8192,28672),
+# (640,8192,28672),
+# (768,8192,28672),
+# (896,8192,28672),
+# (1024,8192,28672),
+# (1152,8192,28672),
+# (1280,8192,28672),
+# (1408,8192,28672),
+# (1536,8192,28672),
+# (1664,8192,28672),
+# (1792,8192,28672),
+# (1920,8192,28672),
+# (2048,8192,28672),
+# (2176,8192,28672),
+# (2304,8192,28672),
+# (2432,8192,28672),
+# (2560,8192,28672),
+# (2688,8192,28672),
+# (2816,8192,28672),
+# (2944,8192,28672),
+# (3072,8192,28672),
+(128,1024,1024)
 ]
 
 parser = argparse.ArgumentParser(
@@ -240,4 +353,5 @@ for dtype in l_dtype:
         ret = test_gemm(dtype, m, n, k)
         df.append(ret)
 df = pd.DataFrame(df)
+df.to_csv("data.csv")
 aiter.logger.info(f"summary:\n{df}")

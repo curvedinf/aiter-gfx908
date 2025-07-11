@@ -58,9 +58,17 @@ def run_gemm_asm(
     bias=None,
     dtype=dtypes.bf16,
     bpreshuffle=True,
+    log2_k_split=0
 ):
     return aiter.gemm_a4w4_asm(
-        x, weightshuffle, x_scale, w_scale, out, bias, bpreshuffle=bpreshuffle
+        x,
+        weightshuffle,
+        x_scale,
+        w_scale,
+        out,
+        bias,
+        bpreshuffle=bpreshuffle,
+        log2_k_split=log2_k_split
     )
 
 
@@ -100,6 +108,7 @@ def test_gemm(dtype, M, N, K):
         out2,
         bias_f32,
         bpreshuffle=True,
+        log2_k_split=0
     )
     err1 = checkAllclose(a, c[:M], msg="asm_bshuffle  ")
     tflops_c = M * N * K * 2 / avg_c / 1e6
@@ -109,7 +118,7 @@ def test_gemm(dtype, M, N, K):
     tflops_c2 = None
     tbs_c2 = None
     c2, avg_c2 = run_gemm_asm(
-        x, w, x_scales_shuffle, w_scales_shuffle, out2, bias_f32, bpreshuffle=False
+        x, w, x_scales_shuffle, w_scales_shuffle, out2, bias_f32, bpreshuffle=False,log2_k_split=0
     )
     err1_ = checkAllclose(a, c2[:M], msg="asm_NObshuffle ")
     tflops_c2 = M * N * K * 2 / avg_c2 / 1e6

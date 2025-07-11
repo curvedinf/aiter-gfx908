@@ -114,7 +114,7 @@ a16w16_gemm1_kernels_list= {
      3: kernelInstanceGEMM1(       256,        64,        64,        64,     1,       4,        1,),
      4: kernelInstanceGEMM1(       256,       128,        64,        64,     1,       4,        1,),
 
-     5: kernelInstanceGEMM1(       256,        64,       128,       128,     1,       4,        3,),
+     5: kernelInstanceGEMM1(       256,        64,       128,       64,     1,       4,        3,),
     #  6: kernelInstanceGEMM1(       256,        64,       128,        64,     1,       4,        3,),
      7: kernelInstanceGEMM1(       256,       128,       128,       128,     1,       4,        3,),
      8: kernelInstanceGEMM1(       256,       128,       128,        64,     1,       4,        3,),
@@ -189,8 +189,8 @@ gemm1_kernels_dict = {
 a16w16_gemm2_kernels_list_gfx950= {
 #   id: kernel:             BLOCK_SIZE| MPerBLOCK| NPerBLOCK| KPerBLOCK| MWaves| NWaves|GemmPipelineVersion
 # gemm2 out&AB:bf16/fp16
-     0: kernelInstanceGEMM2(       256,        32,       128,       128,     1,       4,         1,),
-     1: kernelInstanceGEMM2(       256,        64,       128,       128,     1,       4,         1,),
+     0: kernelInstanceGEMM2(       256,        32,       128,        64,     1,       4,         1,),
+     1: kernelInstanceGEMM2(       256,        64,       128,        64,     1,       4,         1,),
      2: kernelInstanceGEMM2(       256,       128,       128,        64,     1,       4,         1,),
      3: kernelInstanceGEMM2(       256,       256,       128,        64,     1,       4,         1,),
     #  4: kernelInstanceGEMM2(       256,        64,       128,       128,     1,       4,         3,),
@@ -201,11 +201,11 @@ a16w16_gemm2_kernels_list_gfx950= {
 a16w16_gemm2_kernels_list= {
 #   id: kernel:             BLOCK_SIZE| MPerBLOCK| NPerBLOCK| KPerBLOCK| MWaves| NWaves|GemmPipelineVersion
 # gemm2 out&AB:bf16/fp16
-     0: kernelInstanceGEMM2(       256,        32,        64,       128,     1,       4,         1,),
-     1: kernelInstanceGEMM2(       256,        64,        64,       128,     1,       4,         1,),
+     0: kernelInstanceGEMM2(       256,        32,        64,        64,     1,       4,         1,),
+     1: kernelInstanceGEMM2(       256,        64,        64,        64,     1,       4,         1,),
      2: kernelInstanceGEMM2(       256,       128,        64,        64,     1,       4,         1,),
      3: kernelInstanceGEMM2(       256,       256,        64,        64,     1,       4,         1,),
-     4: kernelInstanceGEMM2(       256,        64,       128,       128,     1,       4,         3,),
+     4: kernelInstanceGEMM2(       256,        64,       128,        64,     1,       4,         3,),
      5: kernelInstanceGEMM2(       256,       128,       128,        64,     1,       4,         3,),
      6: kernelInstanceGEMM2(       256,       256,       128,        64,     1,       4,         3,),
 }

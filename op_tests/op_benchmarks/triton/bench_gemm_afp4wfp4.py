@@ -3,11 +3,22 @@ import os
 import torch
 import triton
 import math
+import math
 from aiter.ops.triton.gemm_afp4wfp4 import (
     gemm_afp4wfp4,
     gemm_afp4wfp4_preshuffled_scales,
 )
 from op_tests.triton_tests.test_gemm_afp4wfp4 import generate_gemm_afp4wfp4_inputs
+from op_tests.op_benchmarks.triton.utils.argparse import (
+    get_parser,
+    add_argparse_ff,
+    get_ff_args,
+)
+from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
+    get_model_benchmark_object,
+    get_shape_benchmark_object,
+    print_vgpr,
+)
 from op_tests.op_benchmarks.triton.utils.argparse import (
     get_parser,
     add_argparse_ff,
@@ -55,7 +66,32 @@ def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
             warmup=25,
             rep=100,
         )
+    if TRITON_HIP_PRESHUFFLE_SCALES:
+        ms = triton.testing.do_bench(
+            lambda: gemm_afp4wfp4_preshuffled_scales(
+                x, w, x_scale, w_scale, c_dtype, out
+            ),
+            warmup=25,
+            rep=100,
+        )
+    else:
+        ms = triton.testing.do_bench(
+            lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
+            warmup=25,
+            rep=100,
+        )
 
+    # Return exactly one scalar depending on which metric is active
+    if metric == "time":
+        return ms
+    elif metric == "throughput":
+        tflops = flops / ms * 1e-9
+        return tflops
+    elif metric == "bandwidth":
+        bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
+        return bandwidth
+    else:
+        raise ValueError("Unknown metric: " + metric)
     # Return exactly one scalar depending on which metric is active
     if metric == "time":
         return ms
@@ -130,6 +166,8 @@ def run_shape_benchmark(args):
 def parse_args():
     parser = get_parser("MXFP4 x MXFP4 GEMM")
     parser = add_argparse_ff(parser)
+    parser = get_parser("MXFP4 x MXFP4 GEMM")
+    parser = add_argparse_ff(parser)
 
     parser.add_argument(
         "--print_vgpr",
@@ -141,11 +179,13 @@ def parse_args():
 
 def main():
     args, defaults = parse_args()
+    args, defaults = parse_args()
     if args.print_vgpr:
         print("Retrieving VGPR usage for Triton kernels...")
         fun = lambda: run_benchmark(args, defaults)  # noqa: E731
         print_vgpr(fun, "GEMM")
         return 0
+    run_benchmark(args, defaults)
     run_benchmark(args, defaults)
 
 

@@ -33,7 +33,21 @@ def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
     ms = triton.testing.do_bench(
         lambda: gemm_a16w16(x, w, c_dtype, y), warmup=25, rep=100  # noqa: E731
     )
+    ms = triton.testing.do_bench(
+        lambda: gemm_a16w16(x, w, c_dtype, y), warmup=25, rep=100  # noqa: E731
+    )
 
+    # Return exactly one scalar depending on which metric is active
+    if metric == "time":
+        return ms
+    elif metric == "throughput":
+        tflops = flops / ms * 1e-9
+        return tflops
+    elif metric == "bandwidth":
+        bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
+        return bandwidth
+    else:
+        raise ValueError("Unknown metric: " + metric)
     # Return exactly one scalar depending on which metric is active
     if metric == "time":
         return ms
@@ -125,13 +139,44 @@ def run_benchmark(args, defaults):
         run_shape_benchmark(args)
 
 
+def run_benchmark(args, defaults):
+    assert not (args.shape and args.model) or not (
+        args.shape and args.M
+    ), "User can specify --shape or --model MODEL -M VAL exclusively"
+    if args.model:
+        unsupported_args = []
+        for arg in unsupported_args:
+            if getattr(args, arg, None) != getattr(defaults, arg, None):
+                raise Exception(
+                    f"Argument '{arg}' is not supported for benchmarking with the --model flag."
+                )
+        run_model_benchmark(args)
+    else:
+        unsupported_args = [
+            "fc1",
+            "fc2",
+            "no_glu",
+        ]
+        for arg in unsupported_args:
+            if getattr(args, arg, None) != getattr(defaults, arg, None):
+                raise Exception(
+                    f"Argument '{arg}' is not supported for benchmarking without the --model flag."
+                )
+        run_shape_benchmark(args)
+
+
 def parse_args():
+    parser = get_parser(kernel_name="A16W16 GEMM")
+    parser = add_argparse_ff(parser)
+    return get_ff_args(parser)
     parser = get_parser(kernel_name="A16W16 GEMM")
     parser = add_argparse_ff(parser)
     return get_ff_args(parser)
 
 
 def main():
+    args, defaults = parse_args()
+    run_benchmark(args, defaults)
     args, defaults = parse_args()
     run_benchmark(args, defaults)
 

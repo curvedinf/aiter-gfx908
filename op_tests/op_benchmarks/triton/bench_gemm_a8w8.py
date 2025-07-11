@@ -50,6 +50,7 @@ def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
     else:
         raise ValueError("Unknown metric: " + metric)
 
+
 def run_model_benchmark(args):
     """
     Runs benchmark given a --model argument.

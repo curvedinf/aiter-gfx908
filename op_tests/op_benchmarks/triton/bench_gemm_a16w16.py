@@ -135,5 +135,6 @@ def main():
     args, defaults = parse_args()
     run_benchmark(args, defaults)
 
+
 if __name__ == "__main__":
     sys.exit(main())

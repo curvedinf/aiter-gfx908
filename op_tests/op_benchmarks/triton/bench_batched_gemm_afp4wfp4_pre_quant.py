@@ -1,8 +1,6 @@
-import argparse
 import sys
 import torch
 import triton
-import math
 import math
 from op_tests.triton_tests.test_batched_gemm_afp4wfp4_pre_quant import (
     generate_batched_gemm_afp4wfp4_pre_quant_inputs,
@@ -17,18 +15,7 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_shape_benchmark_object,
     get_model_configs,
 )
-from op_tests.op_benchmarks.triton.utils.argparse import (
-    get_parser,
-    add_argparse_ff,
-    get_ff_args,
-)
-from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
-    get_model_benchmark_object,
-    get_shape_benchmark_object,
-    get_model_configs,
-)
 from aiter.ops.triton.batched_gemm_afp4wfp4_pre_quant import (
-    batched_gemm_afp4wfp4_pre_quant,
     batched_gemm_afp4wfp4_pre_quant,
 )
 
@@ -43,9 +30,6 @@ def model_benchmark_shapes(args):
             N = config["intermediate_size"]
             K = config["hidden_size"]
 
-            shapes.append(
-                (M, N, K, 16)
-            )  # rearrange batch to last dim so M is graph x-axis
             shapes.append(
                 (M, N, K, 16)
             )  # rearrange batch to last dim so M is graph x-axis
@@ -77,23 +61,7 @@ def bench_gemm_fn(batch: int, M: int, N: int, K: int, metric: str, layout: str):
         warmup=25,
         rep=100,
     )
-    ms = triton.testing.do_bench(
-        lambda: batched_gemm_afp4wfp4_pre_quant(x, w, x_scale, w_scale, c_dtype, out),
-        warmup=25,
-        rep=100,
-    )
 
-    # Return exactly one scalar depending on which metric is active
-    if metric == "time":
-        return ms
-    elif metric == "throughput":
-        tflops = flops / ms * 1e-9
-        return tflops
-    elif metric == "bandwidth":
-        bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
-        return bandwidth
-    else:
-        raise ValueError("Unknown metric: " + metric)
     # Return exactly one scalar depending on which metric is active
     if metric == "time":
         return ms

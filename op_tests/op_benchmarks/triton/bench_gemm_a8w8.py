@@ -37,11 +37,6 @@ def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
         warmup=25,
         rep=100,
     )
-    ms = triton.testing.do_bench(
-        lambda: gemm_a8w8(x, weight, x_scale, w_scale, bias, c_dtype, y),  # noqa: E731
-        warmup=25,
-        rep=100,
-    )
 
     # Return exactly one scalar depending on which metric is active
     if metric == "time":
@@ -54,18 +49,6 @@ def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
         return bandwidth
     else:
         raise ValueError("Unknown metric: " + metric)
-    # Return exactly one scalar depending on which metric is active
-    if metric == "time":
-        return ms
-    elif metric == "throughput":
-        tflops = flops / ms * 1e-9
-        return tflops
-    elif metric == "bandwidth":
-        bandwidth = mem / (ms * 1e-3) * 1e-9  # GB/s
-        return bandwidth
-    else:
-        raise ValueError("Unknown metric: " + metric)
-
 
 def run_model_benchmark(args):
     """
@@ -149,14 +132,9 @@ def parse_args():
     parser = get_parser(kernel_name="A8W8 GEMM")
     parser = add_argparse_ff(parser)
     return get_ff_args(parser)
-    parser = get_parser(kernel_name="A8W8 GEMM")
-    parser = add_argparse_ff(parser)
-    return get_ff_args(parser)
 
 
 def main():
-    args, defaults = parse_args()
-    run_benchmark(args, defaults)
     args, defaults = parse_args()
     run_benchmark(args, defaults)
 

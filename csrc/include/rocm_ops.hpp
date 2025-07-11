@@ -302,7 +302,7 @@
           py::arg("pad_c")  = 0,                                        \
           py::arg("splitK") = 0);
 
-#define GEMM_A4W4_ASM_PYBIND             \
+#define GEMM_A4W4_ASM_PYBIND            \
     m.def("gemm_a4w4_asm",              \
           &gemm_a4w4_asm,               \
           "Asm gemm a4w4",              \
@@ -314,646 +314,638 @@
           py::arg("bias"),              \
           py::arg("alpha")       = 1.0, \
           py::arg("beta")        = 0.0, \
-          py::arg("bpreshuffle") = true \
+          py::arg("bpreshuffle") = true, \
           py::arg("log2_k_split") = 0);
 
 #define GEMM_A4W4_BLOCKSCALE_PYBIND \
-          m.def("gemm_a4w4_blockscale",   \
-                &gemm_a4w4_blockscale,    \
-                "fp4 blockscale gemm",    \
-                py::arg("XQ"),            \
-                py::arg("WQ"),            \
-                py::arg("x_scale"),       \
-                py::arg("w_scale"),       \
-                py::arg("Out"),           \
-                py::arg("splitK") = 0);
+    m.def("gemm_a4w4_blockscale",   \
+          &gemm_a4w4_blockscale,    \
+          "fp4 blockscale gemm",    \
+          py::arg("XQ"),            \
+          py::arg("WQ"),            \
+          py::arg("x_scale"),       \
+          py::arg("w_scale"),       \
+          py::arg("Out"),           \
+          py::arg("splitK") = 0);
 
 #define GEMM_A8W8_BLOCKSCALE_PYBIND \
-          m.def("gemm_a8w8_blockscale",   \
-                &gemm_a8w8_blockscale,    \
-                "fp8 blockscale gemm",    \
-                py::arg("XQ"),            \
-                py::arg("WQ"),            \
-                py::arg("x_scale"),       \
-                py::arg("w_scale"),       \
-                py::arg("Out"));
+    m.def("gemm_a8w8_blockscale",   \
+          &gemm_a8w8_blockscale,    \
+          "fp8 blockscale gemm",    \
+          py::arg("XQ"),            \
+          py::arg("WQ"),            \
+          py::arg("x_scale"),       \
+          py::arg("w_scale"),       \
+          py::arg("Out"));
 
 #define GEMM_A8W8_BLOCKSCALE_TUNE_PYBIND \
-          m.def("gemm_a8w8_blockscale_tune",   \
-                &gemm_a8w8_blockscale_tune,    \
-                "gemm_a8w8_blockscale_tune",   \
-                py::arg("XQ"),                 \
-                py::arg("WQ"),                 \
-                py::arg("x_scale"),            \
-                py::arg("w_scale"),            \
-                py::arg("Out"),                \
-                py::arg("kernelId") = 0,       \
-                py::arg("splitK")   = 0);
+    m.def("gemm_a8w8_blockscale_tune",   \
+          &gemm_a8w8_blockscale_tune,    \
+          "gemm_a8w8_blockscale_tune",   \
+          py::arg("XQ"),                 \
+          py::arg("WQ"),                 \
+          py::arg("x_scale"),            \
+          py::arg("w_scale"),            \
+          py::arg("Out"),                \
+          py::arg("kernelId") = 0,       \
+          py::arg("splitK")   = 0);
 
 #define GEMM_A4W4_BLOCKSCALE_TUNE_PYBIND \
-          m.def("gemm_a4w4_blockscale_tune",   \
-                &gemm_a4w4_blockscale_tune,    \
-                "gemm_a4w4_blockscale_tune",   \
-                py::arg("XQ"),                 \
-                py::arg("WQ"),                 \
-                py::arg("x_scale"),            \
-                py::arg("w_scale"),            \
-                py::arg("Out"),                \
-                py::arg("kernelId") = 0,       \
-                py::arg("splitK")   = 0);
+    m.def("gemm_a4w4_blockscale_tune",   \
+          &gemm_a4w4_blockscale_tune,    \
+          "gemm_a4w4_blockscale_tune",   \
+          py::arg("XQ"),                 \
+          py::arg("WQ"),                 \
+          py::arg("x_scale"),            \
+          py::arg("w_scale"),            \
+          py::arg("Out"),                \
+          py::arg("kernelId") = 0,       \
+          py::arg("splitK")   = 0);
 
 #define GEMM_A8W8_PYBIND                    \
-          m.def("gemm_a8w8",                      \
-                &gemm_a8w8,                       \
-                "gemm_a8w8",                      \
-                py::arg("XQ"),                    \
-                py::arg("WQ"),                    \
-                py::arg("x_scale"),               \
-                py::arg("w_scale"),               \
-                py::arg("Out"),                   \
-                py::arg("bias")   = std::nullopt, \
-                py::arg("splitK") = 0);
+    m.def("gemm_a8w8",                      \
+          &gemm_a8w8,                       \
+          "gemm_a8w8",                      \
+          py::arg("XQ"),                    \
+          py::arg("WQ"),                    \
+          py::arg("x_scale"),               \
+          py::arg("w_scale"),               \
+          py::arg("Out"),                   \
+          py::arg("bias")   = std::nullopt, \
+          py::arg("splitK") = 0);
 
 #define GEMM_A8W8_TUNE_PYBIND      \
-          m.def("gemm_a8w8_tune",        \
-                &gemm_a8w8_tune,         \
-                "gemm_a8w8_tune",        \
-                py::arg("XQ"),           \
-                py::arg("WQ"),           \
-                py::arg("x_scale"),      \
-                py::arg("w_scale"),      \
-                py::arg("Out"),          \
-                py::arg("kernelId") = 0, \
-                py::arg("splitK")   = 0);
+    m.def("gemm_a8w8_tune",        \
+          &gemm_a8w8_tune,         \
+          "gemm_a8w8_tune",        \
+          py::arg("XQ"),           \
+          py::arg("WQ"),           \
+          py::arg("x_scale"),      \
+          py::arg("w_scale"),      \
+          py::arg("Out"),          \
+          py::arg("kernelId") = 0, \
+          py::arg("splitK")   = 0);
 #define GEMM_A8W8_BPRESHUFFLE_PYBIND \
-          m.def("gemm_a8w8_bpreshuffle",   \
-                &gemm_a8w8_bpreshuffle,    \
-                "gemm_a8w8_bpreshuffle",   \
-                py::arg("XQ"),             \
-                py::arg("WQ"),             \
-                py::arg("x_scale"),        \
-                py::arg("w_scale"),        \
-                py::arg("Out"));
+    m.def("gemm_a8w8_bpreshuffle",   \
+          &gemm_a8w8_bpreshuffle,    \
+          "gemm_a8w8_bpreshuffle",   \
+          py::arg("XQ"),             \
+          py::arg("WQ"),             \
+          py::arg("x_scale"),        \
+          py::arg("w_scale"),        \
+          py::arg("Out"));
 
 #define GEMM_A8W8_BPRESHUFFLE_TUNE_PYBIND \
-          m.def("gemm_a8w8_bpreshuffle_tune",   \
-                &gemm_a8w8_bpreshuffle_tune,    \
-                "gemm_a8w8_bpreshuffle_tune",   \
-                py::arg("XQ"),                  \
-                py::arg("WQ"),                  \
-                py::arg("x_scale"),             \
-                py::arg("w_scale"),             \
-                py::arg("Out"),                 \
-                py::arg("kernelId") = 0,        \
-                py::arg("splitK")   = 0);
+    m.def("gemm_a8w8_bpreshuffle_tune",   \
+          &gemm_a8w8_bpreshuffle_tune,    \
+          "gemm_a8w8_bpreshuffle_tune",   \
+          py::arg("XQ"),                  \
+          py::arg("WQ"),                  \
+          py::arg("x_scale"),             \
+          py::arg("w_scale"),             \
+          py::arg("Out"),                 \
+          py::arg("kernelId") = 0,        \
+          py::arg("splitK")   = 0);
 #define MHA_BWD_ASM_PYBIND                        \
-          m.def("fmha_v3_bwd",                          \
-                &aiter::torch_itfs::fmha_v3_bwd,        \
-                py::arg("dout"),                        \
-                py::arg("q"),                           \
-                py::arg("k"),                           \
-                py::arg("v"),                           \
-                py::arg("out"),                         \
-                py::arg("softmax_lse"),                 \
-                py::arg("dropout_p"),                   \
-                py::arg("softmax_scale"),               \
-                py::arg("is_causal"),                   \
-                py::arg("window_size_left"),            \
-                py::arg("window_size_right"),           \
-                py::arg("deterministic"),               \
-                py::arg("is_v3_atomic_fp32"),           \
-                py::arg("how_v3_bf16_cvt"),             \
-                py::arg("dq")           = std::nullopt, \
-                py::arg("dk")           = std::nullopt, \
-                py::arg("dv")           = std::nullopt, \
-                py::arg("alibi_slopes") = std::nullopt, \
-                py::arg("rng_state")    = std::nullopt, \
-                py::arg("gen")          = std::nullopt);
+    m.def("fmha_v3_bwd",                          \
+          &aiter::torch_itfs::fmha_v3_bwd,        \
+          py::arg("dout"),                        \
+          py::arg("q"),                           \
+          py::arg("k"),                           \
+          py::arg("v"),                           \
+          py::arg("out"),                         \
+          py::arg("softmax_lse"),                 \
+          py::arg("dropout_p"),                   \
+          py::arg("softmax_scale"),               \
+          py::arg("is_causal"),                   \
+          py::arg("window_size_left"),            \
+          py::arg("window_size_right"),           \
+          py::arg("deterministic"),               \
+          py::arg("is_v3_atomic_fp32"),           \
+          py::arg("how_v3_bf16_cvt"),             \
+          py::arg("dq")           = std::nullopt, \
+          py::arg("dk")           = std::nullopt, \
+          py::arg("dv")           = std::nullopt, \
+          py::arg("alibi_slopes") = std::nullopt, \
+          py::arg("rng_state")    = std::nullopt, \
+          py::arg("gen")          = std::nullopt);
 
 #define MHA_VARLEN_BWD_ASM_PYBIND                 \
-          m.def("fmha_v3_varlen_bwd",                   \
-                &aiter::torch_itfs::fmha_v3_varlen_bwd, \
-                py::arg("dout"),                        \
-                py::arg("q"),                           \
-                py::arg("k"),                           \
-                py::arg("v"),                           \
-                py::arg("out"),                         \
-                py::arg("softmax_lse"),                 \
-                py::arg("cu_seqlens_q"),                \
-                py::arg("cu_seqlens_k"),                \
-                py::arg("max_seqlen_q"),                \
-                py::arg("max_seqlen_k"),                \
-                py::arg("dropout_p"),                   \
-                py::arg("softmax_scale"),               \
-                py::arg("zero_tensors"),                \
-                py::arg("is_causal"),                   \
-                py::arg("window_size_left"),            \
-                py::arg("window_size_right"),           \
-                py::arg("deterministic"),               \
-                py::arg("is_v3_atomic_fp32"),           \
-                py::arg("how_v3_bf16_cvt"),             \
-                py::arg("dq")           = std::nullopt, \
-                py::arg("dk")           = std::nullopt, \
-                py::arg("dv")           = std::nullopt, \
-                py::arg("alibi_slopes") = std::nullopt, \
-                py::arg("rng_state")    = std::nullopt, \
-                py::arg("gen")          = std::nullopt);
+    m.def("fmha_v3_varlen_bwd",                   \
+          &aiter::torch_itfs::fmha_v3_varlen_bwd, \
+          py::arg("dout"),                        \
+          py::arg("q"),                           \
+          py::arg("k"),                           \
+          py::arg("v"),                           \
+          py::arg("out"),                         \
+          py::arg("softmax_lse"),                 \
+          py::arg("cu_seqlens_q"),                \
+          py::arg("cu_seqlens_k"),                \
+          py::arg("max_seqlen_q"),                \
+          py::arg("max_seqlen_k"),                \
+          py::arg("dropout_p"),                   \
+          py::arg("softmax_scale"),               \
+          py::arg("zero_tensors"),                \
+          py::arg("is_causal"),                   \
+          py::arg("window_size_left"),            \
+          py::arg("window_size_right"),           \
+          py::arg("deterministic"),               \
+          py::arg("is_v3_atomic_fp32"),           \
+          py::arg("how_v3_bf16_cvt"),             \
+          py::arg("dq")           = std::nullopt, \
+          py::arg("dk")           = std::nullopt, \
+          py::arg("dv")           = std::nullopt, \
+          py::arg("alibi_slopes") = std::nullopt, \
+          py::arg("rng_state")    = std::nullopt, \
+          py::arg("gen")          = std::nullopt);
 
 #define MHA_BWD_PYBIND                            \
-          m.def("mha_bwd",                              \
-                &aiter::torch_itfs::mha_bwd,            \
-                py::arg("dout"),                        \
-                py::arg("q"),                           \
-                py::arg("k"),                           \
-                py::arg("v"),                           \
-                py::arg("out"),                         \
-                py::arg("softmax_lse"),                 \
-                py::arg("dropout_p"),                   \
-                py::arg("softmax_scale"),               \
-                py::arg("is_causal"),                   \
-                py::arg("window_size_left"),            \
-                py::arg("window_size_right"),           \
-                py::arg("deterministic"),               \
-                py::arg("dq")           = std::nullopt, \
-                py::arg("dk")           = std::nullopt, \
-                py::arg("dv")           = std::nullopt, \
-                py::arg("dbias")        = std::nullopt, \
-                py::arg("bias")         = std::nullopt, \
-                py::arg("alibi_slopes") = std::nullopt, \
-                py::arg("rng_state")    = std::nullopt, \
-                py::arg("gen")          = std::nullopt);
+    m.def("mha_bwd",                              \
+          &aiter::torch_itfs::mha_bwd,            \
+          py::arg("dout"),                        \
+          py::arg("q"),                           \
+          py::arg("k"),                           \
+          py::arg("v"),                           \
+          py::arg("out"),                         \
+          py::arg("softmax_lse"),                 \
+          py::arg("dropout_p"),                   \
+          py::arg("softmax_scale"),               \
+          py::arg("is_causal"),                   \
+          py::arg("window_size_left"),            \
+          py::arg("window_size_right"),           \
+          py::arg("deterministic"),               \
+          py::arg("dq")           = std::nullopt, \
+          py::arg("dk")           = std::nullopt, \
+          py::arg("dv")           = std::nullopt, \
+          py::arg("dbias")        = std::nullopt, \
+          py::arg("bias")         = std::nullopt, \
+          py::arg("alibi_slopes") = std::nullopt, \
+          py::arg("rng_state")    = std::nullopt, \
+          py::arg("gen")          = std::nullopt);
 
 #define MHA_FWD_ASM_PYBIND                        \
-          m.def("fmha_v3_fwd",                          \
-                &aiter::torch_itfs::fmha_v3_fwd,        \
-                py::arg("q"),                           \
-                py::arg("k"),                           \
-                py::arg("v"),                           \
-                py::arg("dropout_p"),                   \
-                py::arg("softmax_scale"),               \
-                py::arg("is_causal"),                   \
-                py::arg("window_size_left"),            \
-                py::arg("window_size_right"),           \
-                py::arg("return_softmax_lse"),          \
-                py::arg("return_dropout_randval"),      \
-                py::arg("out")          = std::nullopt, \
-                py::arg("bias")         = std::nullopt, \
-                py::arg("alibi_slopes") = std::nullopt, \
-                py::arg("gen")          = std::nullopt);
+    m.def("fmha_v3_fwd",                          \
+          &aiter::torch_itfs::fmha_v3_fwd,        \
+          py::arg("q"),                           \
+          py::arg("k"),                           \
+          py::arg("v"),                           \
+          py::arg("dropout_p"),                   \
+          py::arg("softmax_scale"),               \
+          py::arg("is_causal"),                   \
+          py::arg("window_size_left"),            \
+          py::arg("window_size_right"),           \
+          py::arg("return_softmax_lse"),          \
+          py::arg("return_dropout_randval"),      \
+          py::arg("out")          = std::nullopt, \
+          py::arg("bias")         = std::nullopt, \
+          py::arg("alibi_slopes") = std::nullopt, \
+          py::arg("gen")          = std::nullopt);
 
 #define MHA_FWD_PYBIND                            \
-          m.def("mha_fwd",                              \
-                &aiter::torch_itfs::mha_fwd,            \
-                py::arg("q"),                           \
-                py::arg("k"),                           \
-                py::arg("v"),                           \
-                py::arg("dropout_p"),                   \
-                py::arg("softmax_scale"),               \
-                py::arg("is_causal"),                   \
-                py::arg("window_size_left"),            \
-                py::arg("window_size_right"),           \
-                py::arg("return_softmax_lse"),          \
-                py::arg("return_dropout_randval"),      \
-                py::arg("out")          = std::nullopt, \
-                py::arg("bias")         = std::nullopt, \
-                py::arg("alibi_slopes") = std::nullopt, \
-                py::arg("gen")          = std::nullopt);
+    m.def("mha_fwd",                              \
+          &aiter::torch_itfs::mha_fwd,            \
+          py::arg("q"),                           \
+          py::arg("k"),                           \
+          py::arg("v"),                           \
+          py::arg("dropout_p"),                   \
+          py::arg("softmax_scale"),               \
+          py::arg("is_causal"),                   \
+          py::arg("window_size_left"),            \
+          py::arg("window_size_right"),           \
+          py::arg("return_softmax_lse"),          \
+          py::arg("return_dropout_randval"),      \
+          py::arg("out")          = std::nullopt, \
+          py::arg("bias")         = std::nullopt, \
+          py::arg("alibi_slopes") = std::nullopt, \
+          py::arg("gen")          = std::nullopt);
 
 #define MHA_VARLEN_BWD_PYBIND                     \
-          m.def("mha_varlen_bwd",                       \
-                &aiter::torch_itfs::mha_varlen_bwd,     \
-                py::arg("dout"),                        \
-                py::arg("q"),                           \
-                py::arg("k"),                           \
-                py::arg("v"),                           \
-                py::arg("out"),                         \
-                py::arg("softmax_lse"),                 \
-                py::arg("cu_seqlens_q"),                \
-                py::arg("cu_seqlens_k"),                \
-                py::arg("max_seqlen_q"),                \
-                py::arg("max_seqlen_k"),                \
-                py::arg("dropout_p"),                   \
-                py::arg("softmax_scale"),               \
-                py::arg("zero_tensors"),                \
-                py::arg("is_causal"),                   \
-                py::arg("window_size_left"),            \
-                py::arg("window_size_right"),           \
-                py::arg("deterministic"),               \
-                py::arg("dq")           = std::nullopt, \
-                py::arg("dk")           = std::nullopt, \
-                py::arg("dv")           = std::nullopt, \
-                py::arg("alibi_slopes") = std::nullopt, \
-                py::arg("rng_state")    = std::nullopt, \
-                py::arg("gen")          = std::nullopt);
+    m.def("mha_varlen_bwd",                       \
+          &aiter::torch_itfs::mha_varlen_bwd,     \
+          py::arg("dout"),                        \
+          py::arg("q"),                           \
+          py::arg("k"),                           \
+          py::arg("v"),                           \
+          py::arg("out"),                         \
+          py::arg("softmax_lse"),                 \
+          py::arg("cu_seqlens_q"),                \
+          py::arg("cu_seqlens_k"),                \
+          py::arg("max_seqlen_q"),                \
+          py::arg("max_seqlen_k"),                \
+          py::arg("dropout_p"),                   \
+          py::arg("softmax_scale"),               \
+          py::arg("zero_tensors"),                \
+          py::arg("is_causal"),                   \
+          py::arg("window_size_left"),            \
+          py::arg("window_size_right"),           \
+          py::arg("deterministic"),               \
+          py::arg("dq")           = std::nullopt, \
+          py::arg("dk")           = std::nullopt, \
+          py::arg("dv")           = std::nullopt, \
+          py::arg("alibi_slopes") = std::nullopt, \
+          py::arg("rng_state")    = std::nullopt, \
+          py::arg("gen")          = std::nullopt);
 
 #define MOE_CK_2STAGES_PYBIND                        \
-          m.def("ck_moe_stage1",                           \
-                &ck_moe_stage1,                            \
-                py::arg("hidden_states"),                  \
-                py::arg("w1"),                             \
-                py::arg("w2"),                             \
-                py::arg("sorted_token_ids"),               \
-                py::arg("sorted_expert_ids"),              \
-                py::arg("num_valid_ids"),                  \
-                py::arg("out"),                            \
-                py::arg("topk"),                           \
-                py::arg("kernelName"),                     \
-                py::arg("w1_scale")       = std::nullopt,  \
-                py::arg("a1_scale")       = std::nullopt,  \
-                py::arg("block_m")        = 32,            \
-                py::arg("sorted_weights") = std::nullopt); \
-                                                           \
-          m.def("ck_moe_stage2",                           \
-                &ck_moe_stage2,                            \
-                py::arg("inter_states"),                   \
-                py::arg("w1"),                             \
-                py::arg("w2"),                             \
-                py::arg("sorted_token_ids"),               \
-                py::arg("sorted_expert_ids"),              \
-                py::arg("num_valid_ids"),                  \
-                py::arg("out"),                            \
-                py::arg("topk"),                           \
-                py::arg("kernelName"),                     \
-                py::arg("w2_scale")       = std::nullopt,  \
-                py::arg("a2_scale")       = std::nullopt,  \
-                py::arg("block_m")        = 32,            \
-                py::arg("sorted_weights") = std::nullopt);
+    m.def("ck_moe_stage1",                           \
+          &ck_moe_stage1,                            \
+          py::arg("hidden_states"),                  \
+          py::arg("w1"),                             \
+          py::arg("w2"),                             \
+          py::arg("sorted_token_ids"),               \
+          py::arg("sorted_expert_ids"),              \
+          py::arg("num_valid_ids"),                  \
+          py::arg("out"),                            \
+          py::arg("topk"),                           \
+          py::arg("kernelName"),                     \
+          py::arg("w1_scale")       = std::nullopt,  \
+          py::arg("a1_scale")       = std::nullopt,  \
+          py::arg("block_m")        = 32,            \
+          py::arg("sorted_weights") = std::nullopt); \
+                                                     \
+    m.def("ck_moe_stage2",                           \
+          &ck_moe_stage2,                            \
+          py::arg("inter_states"),                   \
+          py::arg("w1"),                             \
+          py::arg("w2"),                             \
+          py::arg("sorted_token_ids"),               \
+          py::arg("sorted_expert_ids"),              \
+          py::arg("num_valid_ids"),                  \
+          py::arg("out"),                            \
+          py::arg("topk"),                           \
+          py::arg("kernelName"),                     \
+          py::arg("w2_scale")       = std::nullopt,  \
+          py::arg("a2_scale")       = std::nullopt,  \
+          py::arg("block_m")        = 32,            \
+          py::arg("sorted_weights") = std::nullopt);
 
 #define MHA_VARLEN_FWD_PYBIND                     \
-          m.def("mha_varlen_fwd",                       \
-                &aiter::torch_itfs::mha_varlen_fwd,     \
-                py::arg("q"),                           \
-                py::arg("k"),                           \
-                py::arg("v"),                           \
-                py::arg("cu_seqlens_q"),                \
-                py::arg("cu_seqlens_k"),                \
-                py::arg("max_seqlen_q"),                \
-                py::arg("max_seqlen_k"),                \
-                py::arg("min_seqlen_q"),                \
-                py::arg("dropout_p"),                   \
-                py::arg("softmax_scale"),               \
-                py::arg("logits_soft_cap"),             \
-                py::arg("zero_tensors"),                \
-                py::arg("is_causal"),                   \
-                py::arg("window_size_left"),            \
-                py::arg("window_size_right"),           \
-                py::arg("return_softmax_lse"),          \
-                py::arg("return_dropout_randval"),      \
-                py::arg("out")          = std::nullopt, \
-                py::arg("block_table")  = std::nullopt, \
-                py::arg("bias")         = std::nullopt, \
-                py::arg("alibi_slopes") = std::nullopt, \
-                py::arg("gen")          = std::nullopt);
+    m.def("mha_varlen_fwd",                       \
+          &aiter::torch_itfs::mha_varlen_fwd,     \
+          py::arg("q"),                           \
+          py::arg("k"),                           \
+          py::arg("v"),                           \
+          py::arg("cu_seqlens_q"),                \
+          py::arg("cu_seqlens_k"),                \
+          py::arg("max_seqlen_q"),                \
+          py::arg("max_seqlen_k"),                \
+          py::arg("min_seqlen_q"),                \
+          py::arg("dropout_p"),                   \
+          py::arg("softmax_scale"),               \
+          py::arg("logits_soft_cap"),             \
+          py::arg("zero_tensors"),                \
+          py::arg("is_causal"),                   \
+          py::arg("window_size_left"),            \
+          py::arg("window_size_right"),           \
+          py::arg("return_softmax_lse"),          \
+          py::arg("return_dropout_randval"),      \
+          py::arg("out")          = std::nullopt, \
+          py::arg("block_table")  = std::nullopt, \
+          py::arg("bias")         = std::nullopt, \
+          py::arg("alibi_slopes") = std::nullopt, \
+          py::arg("gen")          = std::nullopt);
 
 #define MHA_BATCH_PREFILL_PYBIND                  \
-          m.def("mha_batch_prefill",                    \
-                &aiter::torch_itfs::mha_batch_prefill,  \
-                py::arg("q"),                           \
-                py::arg("k"),                           \
-                py::arg("v"),                           \
-                py::arg("cu_seqlens_q"),                \
-                py::arg("kv_indptr"),                   \
-                py::arg("kv_page_indices"),             \
-                py::arg("max_seqlen_q"),                \
-                py::arg("max_seqlen_k"),                \
-                py::arg("dropout_p"),                   \
-                py::arg("softmax_scale"),               \
-                py::arg("logits_soft_cap"),             \
-                py::arg("zero_tensors"),                \
-                py::arg("is_causal"),                   \
-                py::arg("window_size_left"),            \
-                py::arg("window_size_right"),           \
-                py::arg("return_softmax_lse"),          \
-                py::arg("return_dropout_randval"),      \
-                py::arg("out")          = std::nullopt, \
-                py::arg("bias")         = std::nullopt, \
-                py::arg("alibi_slopes") = std::nullopt, \
-                py::arg("gen")          = std::nullopt);
+    m.def("mha_batch_prefill",                    \
+          &aiter::torch_itfs::mha_batch_prefill,  \
+          py::arg("q"),                           \
+          py::arg("k"),                           \
+          py::arg("v"),                           \
+          py::arg("cu_seqlens_q"),                \
+          py::arg("kv_indptr"),                   \
+          py::arg("kv_page_indices"),             \
+          py::arg("max_seqlen_q"),                \
+          py::arg("max_seqlen_k"),                \
+          py::arg("dropout_p"),                   \
+          py::arg("softmax_scale"),               \
+          py::arg("logits_soft_cap"),             \
+          py::arg("zero_tensors"),                \
+          py::arg("is_causal"),                   \
+          py::arg("window_size_left"),            \
+          py::arg("window_size_right"),           \
+          py::arg("return_softmax_lse"),          \
+          py::arg("return_dropout_randval"),      \
+          py::arg("out")          = std::nullopt, \
+          py::arg("bias")         = std::nullopt, \
+          py::arg("alibi_slopes") = std::nullopt, \
+          py::arg("gen")          = std::nullopt);
 
-#define MOE_OP_PYBIND                                                                       \
-          m.def(                                                                                  \
-              "topk_softmax", &aiter::topk_softmax, "Apply topk softmax to the gating outputs."); \
-          m.def("grouped_topk",                                                                   \
-                &grouped_topk,                                                                    \
-                py::arg("gating_output"),                                                         \
-                py::arg("topk_weights"),                                                          \
-                py::arg("topk_ids"),                                                              \
-                py::arg("num_expert_group"),                                                      \
-                py::arg("topk_grp"),                                                              \
-                py::arg("need_renorm"),                                                           \
-                py::arg("scoring_func")          = "softmax",                                     \
-                py::arg("routed_scaling_factor") = 1.0f,                                          \
-                "Apply grouped topk softmax/sigmodd to the gating outputs.");                     \
-          m.def("biased_grouped_topk",                                                            \
-                &biased_grouped_topk,                                                             \
-                py::arg("gating_output"),                                                         \
-                py::arg("correction_bias"),                                                       \
-                py::arg("topk_weights"),                                                          \
-                py::arg("topk_ids"),                                                              \
-                py::arg("num_expert_group"),                                                      \
-                py::arg("topk_grp"),                                                              \
-                py::arg("need_renorm"),                                                           \
-                py::arg("routed_scaling_factor") = 1.0f,                                          \
-                "Apply biased grouped topk softmax to the gating outputs.");                      \
-          m.def("moe_align_block_size",                                                           \
-                &aiter::moe_align_block_size,                                                     \
-                "Aligning the number of tokens to be processed by each expert such "              \
-                "that it is divisible by the block size.");                                       \
-          m.def("fmoe", &fmoe);                                                                   \
-          m.def("fmoe_int8_g1u0",                                                                 \
-                &fmoe_int8_g1u0,                                                                  \
-                py::arg("out"),                                                                   \
-                py::arg("input"),                                                                 \
-                py::arg("gate"),                                                                  \
-                py::arg("down"),                                                                  \
-                py::arg("sorted_token_ids"),                                                      \
-                py::arg("sorted_weights"),                                                        \
-                py::arg("sorted_expert_ids"),                                                     \
-                py::arg("num_valid_ids"),                                                         \
-                py::arg("topk"),                                                                  \
-                py::arg("input_scale"),                                                           \
-                py::arg("fc1_scale"),                                                             \
-                py::arg("fc2_scale"),                                                             \
-                py::arg("fc2_smooth_scale") = std::nullopt,                                       \
-                py::arg("activation")       = ActivationType::Silu);                                    \
-          m.def("fmoe_g1u1",                                                                      \
-                &fmoe_g1u1,                                                                       \
-                py::arg("out"),                                                                   \
-                py::arg("input"),                                                                 \
-                py::arg("gate"),                                                                  \
-                py::arg("down"),                                                                  \
-                py::arg("sorted_token_ids"),                                                      \
-                py::arg("sorted_weights"),                                                        \
-                py::arg("sorted_expert_ids"),                                                     \
-                py::arg("num_valid_ids"),                                                         \
-                py::arg("topk"),                                                                  \
-                py::arg("input_scale"),                                                           \
-                py::arg("fc1_scale"),                                                             \
-                py::arg("fc2_scale"),                                                             \
-                py::arg("fc2_smooth_scale") = std::nullopt,                                       \
-                py::arg("activation")       = ActivationType::Silu);                                    \
-          m.def("fmoe_g1u1_tkw1",                                                                 \
-                &fmoe_g1u1_tkw1,                                                                  \
-                py::arg("out"),                                                                   \
-                py::arg("input"),                                                                 \
-                py::arg("gate"),                                                                  \
-                py::arg("down"),                                                                  \
-                py::arg("sorted_token_ids"),                                                      \
-                py::arg("sorted_weights"),                                                        \
-                py::arg("sorted_expert_ids"),                                                     \
-                py::arg("num_valid_ids"),                                                         \
-                py::arg("topk"),                                                                  \
-                py::arg("input_scale"),                                                           \
-                py::arg("fc1_scale"),                                                             \
-                py::arg("fc2_scale"),                                                             \
-                py::arg("fc2_smooth_scale") = std::nullopt,                                       \
-                py::arg("activation")       = ActivationType::Silu);                                    \
-          m.def("fmoe_int8_g1u0_a16", &fmoe_int8_g1u0_a16);                                       \
-          m.def("fmoe_g1u1_a16", &fmoe_g1u1_a16);                                                 \
-          m.def("fmoe_fp8_blockscale_g1u1",                                                       \
-                &fmoe_fp8_blockscale_g1u1,                                                        \
-                py::arg("out"),                                                                   \
-                py::arg("input"),                                                                 \
-                py::arg("gate"),                                                                  \
-                py::arg("down"),                                                                  \
-                py::arg("sorted_token_ids"),                                                      \
-                py::arg("sorted_weights"),                                                        \
-                py::arg("sorted_expert_ids"),                                                     \
-                py::arg("num_valid_ids"),                                                         \
-                py::arg("topk"),                                                                  \
-                py::arg("input_scale"),                                                           \
-                py::arg("fc1_scale"),                                                             \
-                py::arg("fc2_scale"),                                                             \
-                py::arg("fc_scale_blkn")    = 128,                                                \
-                py::arg("fc_scale_blkk")    = 128,                                                \
-                py::arg("fc2_smooth_scale") = std::nullopt,                                       \
-                py::arg("activation")       = ActivationType::Silu);                                    \
-          m.def("moe_stage1_g1u1",                                                                \
-                &moe_stage1_g1u1,                                                                 \
-                py::arg("input"),                                                                 \
-                py::arg("w1"),                                                                    \
-                py::arg("w2"),                                                                    \
-                py::arg("sorted_token_ids"),                                                      \
-                py::arg("sorted_expert_ids"),                                                     \
-                py::arg("num_valid_ids"),                                                         \
-                py::arg("out"),                                                                   \
-                py::arg("inter_dim"),                                                             \
-                py::arg("kernelName"),                                                            \
-                py::arg("block_m"),                                                               \
-                py::arg("ksplit")         = 0,                                                    \
-                py::arg("activation")     = ActivationType::Silu,                                 \
-                py::arg("quant_type")     = QuantType::No,                                        \
-                py::arg("a1_scale")       = std::nullopt,                                         \
-                py::arg("w1_scale")       = std::nullopt,                                         \
-                py::arg("sorted_weights") = std::nullopt);                                        \
-          m.def("moe_sum", &aiter::moe_sum, "moe_sum(Tensor! input, Tensor output) -> ()");
+#define MOE_OP_PYBIND                                                                         \
+    m.def("topk_softmax", &aiter::topk_softmax, "Apply topk softmax to the gating outputs."); \
+    m.def("grouped_topk",                                                                     \
+          &grouped_topk,                                                                      \
+          py::arg("gating_output"),                                                           \
+          py::arg("topk_weights"),                                                            \
+          py::arg("topk_ids"),                                                                \
+          py::arg("num_expert_group"),                                                        \
+          py::arg("topk_grp"),                                                                \
+          py::arg("need_renorm"),                                                             \
+          py::arg("scoring_func")          = "softmax",                                       \
+          py::arg("routed_scaling_factor") = 1.0f,                                            \
+          "Apply grouped topk softmax/sigmodd to the gating outputs.");                       \
+    m.def("biased_grouped_topk",                                                              \
+          &biased_grouped_topk,                                                               \
+          py::arg("gating_output"),                                                           \
+          py::arg("correction_bias"),                                                         \
+          py::arg("topk_weights"),                                                            \
+          py::arg("topk_ids"),                                                                \
+          py::arg("num_expert_group"),                                                        \
+          py::arg("topk_grp"),                                                                \
+          py::arg("need_renorm"),                                                             \
+          py::arg("routed_scaling_factor") = 1.0f,                                            \
+          "Apply biased grouped topk softmax to the gating outputs.");                        \
+    m.def("moe_align_block_size",                                                             \
+          &aiter::moe_align_block_size,                                                       \
+          "Aligning the number of tokens to be processed by each expert such "                \
+          "that it is divisible by the block size.");                                         \
+    m.def("fmoe", &fmoe);                                                                     \
+    m.def("fmoe_int8_g1u0",                                                                   \
+          &fmoe_int8_g1u0,                                                                    \
+          py::arg("out"),                                                                     \
+          py::arg("input"),                                                                   \
+          py::arg("gate"),                                                                    \
+          py::arg("down"),                                                                    \
+          py::arg("sorted_token_ids"),                                                        \
+          py::arg("sorted_weights"),                                                          \
+          py::arg("sorted_expert_ids"),                                                       \
+          py::arg("num_valid_ids"),                                                           \
+          py::arg("topk"),                                                                    \
+          py::arg("input_scale"),                                                             \
+          py::arg("fc1_scale"),                                                               \
+          py::arg("fc2_scale"),                                                               \
+          py::arg("fc2_smooth_scale") = std::nullopt,                                         \
+          py::arg("activation")       = ActivationType::Silu);                                      \
+    m.def("fmoe_g1u1",                                                                        \
+          &fmoe_g1u1,                                                                         \
+          py::arg("out"),                                                                     \
+          py::arg("input"),                                                                   \
+          py::arg("gate"),                                                                    \
+          py::arg("down"),                                                                    \
+          py::arg("sorted_token_ids"),                                                        \
+          py::arg("sorted_weights"),                                                          \
+          py::arg("sorted_expert_ids"),                                                       \
+          py::arg("num_valid_ids"),                                                           \
+          py::arg("topk"),                                                                    \
+          py::arg("input_scale"),                                                             \
+          py::arg("fc1_scale"),                                                               \
+          py::arg("fc2_scale"),                                                               \
+          py::arg("fc2_smooth_scale") = std::nullopt,                                         \
+          py::arg("activation")       = ActivationType::Silu);                                      \
+    m.def("fmoe_g1u1_tkw1",                                                                   \
+          &fmoe_g1u1_tkw1,                                                                    \
+          py::arg("out"),                                                                     \
+          py::arg("input"),                                                                   \
+          py::arg("gate"),                                                                    \
+          py::arg("down"),                                                                    \
+          py::arg("sorted_token_ids"),                                                        \
+          py::arg("sorted_weights"),                                                          \
+          py::arg("sorted_expert_ids"),                                                       \
+          py::arg("num_valid_ids"),                                                           \
+          py::arg("topk"),                                                                    \
+          py::arg("input_scale"),                                                             \
+          py::arg("fc1_scale"),                                                               \
+          py::arg("fc2_scale"),                                                               \
+          py::arg("fc2_smooth_scale") = std::nullopt,                                         \
+          py::arg("activation")       = ActivationType::Silu);                                      \
+    m.def("fmoe_int8_g1u0_a16", &fmoe_int8_g1u0_a16);                                         \
+    m.def("fmoe_g1u1_a16", &fmoe_g1u1_a16);                                                   \
+    m.def("fmoe_fp8_blockscale_g1u1",                                                         \
+          &fmoe_fp8_blockscale_g1u1,                                                          \
+          py::arg("out"),                                                                     \
+          py::arg("input"),                                                                   \
+          py::arg("gate"),                                                                    \
+          py::arg("down"),                                                                    \
+          py::arg("sorted_token_ids"),                                                        \
+          py::arg("sorted_weights"),                                                          \
+          py::arg("sorted_expert_ids"),                                                       \
+          py::arg("num_valid_ids"),                                                           \
+          py::arg("topk"),                                                                    \
+          py::arg("input_scale"),                                                             \
+          py::arg("fc1_scale"),                                                               \
+          py::arg("fc2_scale"),                                                               \
+          py::arg("fc_scale_blkn")    = 128,                                                  \
+          py::arg("fc_scale_blkk")    = 128,                                                  \
+          py::arg("fc2_smooth_scale") = std::nullopt,                                         \
+          py::arg("activation")       = ActivationType::Silu);                                      \
+    m.def("moe_stage1_g1u1",                                                                  \
+          &moe_stage1_g1u1,                                                                   \
+          py::arg("input"),                                                                   \
+          py::arg("w1"),                                                                      \
+          py::arg("w2"),                                                                      \
+          py::arg("sorted_token_ids"),                                                        \
+          py::arg("sorted_expert_ids"),                                                       \
+          py::arg("num_valid_ids"),                                                           \
+          py::arg("out"),                                                                     \
+          py::arg("inter_dim"),                                                               \
+          py::arg("kernelName"),                                                              \
+          py::arg("block_m"),                                                                 \
+          py::arg("ksplit")         = 0,                                                      \
+          py::arg("activation")     = ActivationType::Silu,                                   \
+          py::arg("quant_type")     = QuantType::No,                                          \
+          py::arg("a1_scale")       = std::nullopt,                                           \
+          py::arg("w1_scale")       = std::nullopt,                                           \
+          py::arg("sorted_weights") = std::nullopt);                                          \
+    m.def("moe_sum", &aiter::moe_sum, "moe_sum(Tensor! input, Tensor output) -> ()");
 
 #define MOE_SORTING_PYBIND                             \
-          m.def("moe_sorting_fwd",                           \
-                &moe_sorting_fwd,                            \
-                py::arg("topk_ids"),                         \
-                py::arg("topk_weights"),                     \
-                py::arg("sorted_token_ids"),                 \
-                py::arg("sorted_weights"),                   \
-                py::arg("sorted_expert_ids"),                \
-                py::arg("num_valid_ids"),                    \
-                py::arg("moe_buf"),                          \
-                py::arg("num_experts"),                      \
-                py::arg("unit_size"),                        \
-                py::arg("local_expert_mask") = std::nullopt, \
-                py::arg("num_local_tokens")  = std::nullopt);
+    m.def("moe_sorting_fwd",                           \
+          &moe_sorting_fwd,                            \
+          py::arg("topk_ids"),                         \
+          py::arg("topk_weights"),                     \
+          py::arg("sorted_token_ids"),                 \
+          py::arg("sorted_weights"),                   \
+          py::arg("sorted_expert_ids"),                \
+          py::arg("num_valid_ids"),                    \
+          py::arg("moe_buf"),                          \
+          py::arg("num_experts"),                      \
+          py::arg("unit_size"),                        \
+          py::arg("local_expert_mask") = std::nullopt, \
+          py::arg("num_local_tokens")  = std::nullopt);
 
 #define NORM_PYBIND                                               \
-          m.def("layernorm2d_fwd",                                      \
-                &layernorm2d,                                           \
-                py::arg("input"),                                       \
-                py::arg("weight"),                                      \
-                py::arg("bias"),                                        \
-                py::arg("epsilon"),                                     \
-                py::arg("x_bias") = std::nullopt);                      \
-          m.def("layernorm2d_fwd_with_add",                             \
-                &layernorm2d_with_add,                                  \
-                py::arg("out"),                                         \
-                py::arg("input"),                                       \
-                py::arg("residual_in"),                                 \
-                py::arg("residual_out"),                                \
-                py::arg("weight"),                                      \
-                py::arg("bias"),                                        \
-                py::arg("epsilon"),                                     \
-                py::arg("x_bias") = std::nullopt);                      \
-          m.def("layernorm2d_fwd_with_smoothquant",                     \
-                &layernorm2d_with_smoothquant,                          \
-                py::arg("out"),                                         \
-                py::arg("input"),                                       \
-                py::arg("xscale"),                                      \
-                py::arg("yscale"),                                      \
-                py::arg("weight"),                                      \
-                py::arg("bias"),                                        \
-                py::arg("epsilon"),                                     \
-                py::arg("x_bias") = std::nullopt);                      \
-          m.def("layernorm2d_fwd_with_add_smoothquant",                 \
-                &layernorm2d_with_add_smoothquant,                      \
-                py::arg("out"),                                         \
-                py::arg("input"),                                       \
-                py::arg("residual_in"),                                 \
-                py::arg("residual_out"),                                \
-                py::arg("xscale"),                                      \
-                py::arg("yscale"),                                      \
-                py::arg("weight"),                                      \
-                py::arg("bias"),                                        \
-                py::arg("epsilon"),                                     \
-                py::arg("x_bias") = std::nullopt);                      \
-          m.def("layernorm2d_fwd_with_dynamicquant",                    \
-                &layernorm2d_with_dynamicquant,                         \
-                py::arg("out"),                                         \
-                py::arg("input"),                                       \
-                py::arg("yscale"),                                      \
-                py::arg("weight"),                                      \
-                py::arg("bias"),                                        \
-                py::arg("epsilon"),                                     \
-                py::arg("x_bias") = std::nullopt);                      \
-          m.def("layernorm2d_fwd_with_add_dynamicquant",                \
-                &layernorm2d_with_add_dynamicquant,                     \
-                py::arg("out"),                                         \
-                py::arg("input"),                                       \
-                py::arg("residual_in"),                                 \
-                py::arg("residual_out"),                                \
-                py::arg("yscale"),                                      \
-                py::arg("weight"),                                      \
-                py::arg("bias"),                                        \
-                py::arg("epsilon"),                                     \
-                py::arg("x_bias") = std::nullopt);                      \
-          m.def("layernorm2d_with_add_asm", &layernorm2d_with_add_asm); \
-          m.def("layernorm2d_with_add_smoothquant_asm", &layernorm2d_with_add_smoothquant_asm);
+    m.def("layernorm2d_fwd",                                      \
+          &layernorm2d,                                           \
+          py::arg("input"),                                       \
+          py::arg("weight"),                                      \
+          py::arg("bias"),                                        \
+          py::arg("epsilon"),                                     \
+          py::arg("x_bias") = std::nullopt);                      \
+    m.def("layernorm2d_fwd_with_add",                             \
+          &layernorm2d_with_add,                                  \
+          py::arg("out"),                                         \
+          py::arg("input"),                                       \
+          py::arg("residual_in"),                                 \
+          py::arg("residual_out"),                                \
+          py::arg("weight"),                                      \
+          py::arg("bias"),                                        \
+          py::arg("epsilon"),                                     \
+          py::arg("x_bias") = std::nullopt);                      \
+    m.def("layernorm2d_fwd_with_smoothquant",                     \
+          &layernorm2d_with_smoothquant,                          \
+          py::arg("out"),                                         \
+          py::arg("input"),                                       \
+          py::arg("xscale"),                                      \
+          py::arg("yscale"),                                      \
+          py::arg("weight"),                                      \
+          py::arg("bias"),                                        \
+          py::arg("epsilon"),                                     \
+          py::arg("x_bias") = std::nullopt);                      \
+    m.def("layernorm2d_fwd_with_add_smoothquant",                 \
+          &layernorm2d_with_add_smoothquant,                      \
+          py::arg("out"),                                         \
+          py::arg("input"),                                       \
+          py::arg("residual_in"),                                 \
+          py::arg("residual_out"),                                \
+          py::arg("xscale"),                                      \
+          py::arg("yscale"),                                      \
+          py::arg("weight"),                                      \
+          py::arg("bias"),                                        \
+          py::arg("epsilon"),                                     \
+          py::arg("x_bias") = std::nullopt);                      \
+    m.def("layernorm2d_fwd_with_dynamicquant",                    \
+          &layernorm2d_with_dynamicquant,                         \
+          py::arg("out"),                                         \
+          py::arg("input"),                                       \
+          py::arg("yscale"),                                      \
+          py::arg("weight"),                                      \
+          py::arg("bias"),                                        \
+          py::arg("epsilon"),                                     \
+          py::arg("x_bias") = std::nullopt);                      \
+    m.def("layernorm2d_fwd_with_add_dynamicquant",                \
+          &layernorm2d_with_add_dynamicquant,                     \
+          py::arg("out"),                                         \
+          py::arg("input"),                                       \
+          py::arg("residual_in"),                                 \
+          py::arg("residual_out"),                                \
+          py::arg("yscale"),                                      \
+          py::arg("weight"),                                      \
+          py::arg("bias"),                                        \
+          py::arg("epsilon"),                                     \
+          py::arg("x_bias") = std::nullopt);                      \
+    m.def("layernorm2d_with_add_asm", &layernorm2d_with_add_asm); \
+    m.def("layernorm2d_with_add_smoothquant_asm", &layernorm2d_with_add_smoothquant_asm);
 
 #define POS_ENCODING_PYBIND                                               \
-          m.def("rotary_embedding_fwd", &rotary_embedding, "rotary_embedding"); \
-          m.def("batched_rotary_embedding", &batched_rotary_embedding, "batched_rotary_embedding");
+    m.def("rotary_embedding_fwd", &rotary_embedding, "rotary_embedding"); \
+    m.def("batched_rotary_embedding", &batched_rotary_embedding, "batched_rotary_embedding");
 
 #define QUANT_PYBIND                                                     \
-          m.def("static_per_tensor_quant", &aiter::static_per_tensor_quant);   \
-          m.def("dynamic_per_tensor_quant", &aiter::dynamic_per_tensor_quant); \
-          m.def("dynamic_per_token_scaled_quant",                              \
-                &aiter::dynamic_per_token_scaled_quant,                        \
-                py::arg("out"),                                                \
-                py::arg("input"),                                              \
-                py::arg("scales"),                                             \
-                py::arg("scale_ub")      = std::nullopt,                       \
-                py::arg("shuffle_scale") = true);                              \
-          m.def("dynamic_per_group_scaled_quant_fp4",                          \
-                &aiter::dynamic_per_group_scaled_quant_fp4,                    \
-                py::arg("out"),                                                \
-                py::arg("input"),                                              \
-                py::arg("scales"),                                             \
-                py::arg("group_size")    = 32,                                 \
-                py::arg("shuffle_scale") = true);
+    m.def("static_per_tensor_quant", &aiter::static_per_tensor_quant);   \
+    m.def("dynamic_per_tensor_quant", &aiter::dynamic_per_tensor_quant); \
+    m.def("dynamic_per_token_scaled_quant",                              \
+          &aiter::dynamic_per_token_scaled_quant,                        \
+          py::arg("out"),                                                \
+          py::arg("input"),                                              \
+          py::arg("scales"),                                             \
+          py::arg("scale_ub")      = std::nullopt,                       \
+          py::arg("shuffle_scale") = true);                              \
+    m.def("dynamic_per_group_scaled_quant_fp4",                          \
+          &aiter::dynamic_per_group_scaled_quant_fp4,                    \
+          py::arg("out"),                                                \
+          py::arg("input"),                                              \
+          py::arg("scales"),                                             \
+          py::arg("group_size")    = 32,                                 \
+          py::arg("shuffle_scale") = true);
 
-#define RMSNORM_PYBIND                                                        \
-          m.def("rms_norm_cu",                                                      \
-                &rms_norm,                                                          \
-                "Apply Root Mean Square (RMS) Normalization to the input tensor."); \
-          m.def("fused_add_rms_norm_cu",                                            \
-                &fused_add_rms_norm,                                                \
-                "In-place fused Add and RMS Normalization");                        \
-          m.def("rmsnorm2d_fwd",                                                    \
-                &rmsnorm2d,                                                         \
-                py::arg("input"),                                                   \
-                py::arg("weight"),                                                  \
-                py::arg("epsilon"));                                                \
-          m.def("rmsnorm2d_fwd_with_add",                                           \
-                &rmsnorm2d_with_add,                                                \
-                py::arg("out"),                                                     \
-                py::arg("input"),                                                   \
-                py::arg("residual_in"),                                             \
-                py::arg("residual_out"),                                            \
-                py::arg("weight"),                                                  \
-                py::arg("epsilon"));                                                \
-          m.def("rmsnorm2d_fwd_with_smoothquant", &rmsnorm2d_with_smoothquant);     \
-          m.def("rmsnorm2d_fwd_with_add_smoothquant",                               \
-                &rmsnorm2d_with_add_smoothquant,                                    \
-                py::arg("out"),                                                     \
-                py::arg("input"),                                                   \
-                py::arg("residual_in"),                                             \
-                py::arg("residual_out"),                                            \
-                py::arg("xscale"),                                                  \
-                py::arg("yscale"),                                                  \
-                py::arg("weight"),                                                  \
-                py::arg("epsilon"),                                                 \
-                py::arg("out_before_quant") = std::nullopt);                        \
-          m.def("rmsnorm2d_fwd_with_dynamicquant", &rmsnorm2d_with_dynamicquant);   \
-          m.def("rmsnorm2d_fwd_with_add_dynamicquant", &rmsnorm2d_with_add_dynamicquant);
+#define RMSNORM_PYBIND                                                                             \
+    m.def("rms_norm_cu",                                                                           \
+          &rms_norm,                                                                               \
+          "Apply Root Mean Square (RMS) Normalization to the input tensor.");                      \
+    m.def(                                                                                         \
+        "fused_add_rms_norm_cu", &fused_add_rms_norm, "In-place fused Add and RMS Normalization"); \
+    m.def("rmsnorm2d_fwd", &rmsnorm2d, py::arg("input"), py::arg("weight"), py::arg("epsilon"));   \
+    m.def("rmsnorm2d_fwd_with_add",                                                                \
+          &rmsnorm2d_with_add,                                                                     \
+          py::arg("out"),                                                                          \
+          py::arg("input"),                                                                        \
+          py::arg("residual_in"),                                                                  \
+          py::arg("residual_out"),                                                                 \
+          py::arg("weight"),                                                                       \
+          py::arg("epsilon"));                                                                     \
+    m.def("rmsnorm2d_fwd_with_smoothquant", &rmsnorm2d_with_smoothquant);                          \
+    m.def("rmsnorm2d_fwd_with_add_smoothquant",                                                    \
+          &rmsnorm2d_with_add_smoothquant,                                                         \
+          py::arg("out"),                                                                          \
+          py::arg("input"),                                                                        \
+          py::arg("residual_in"),                                                                  \
+          py::arg("residual_out"),                                                                 \
+          py::arg("xscale"),                                                                       \
+          py::arg("yscale"),                                                                       \
+          py::arg("weight"),                                                                       \
+          py::arg("epsilon"),                                                                      \
+          py::arg("out_before_quant") = std::nullopt);                                             \
+    m.def("rmsnorm2d_fwd_with_dynamicquant", &rmsnorm2d_with_dynamicquant);                        \
+    m.def("rmsnorm2d_fwd_with_add_dynamicquant", &rmsnorm2d_with_add_dynamicquant);
 
 #define ROPE_GENERAL_FWD_PYBIND                                 \
-          m.def("rope_fwd_impl", &rope_fwd_impl);                     \
-          m.def("rope_2c_fwd_impl", &rope_2c_fwd_impl);               \
-          m.def("rope_cached_fwd_impl", &rope_cached_fwd_impl);       \
-          m.def("rope_cached_2c_fwd_impl", &rope_cached_2c_fwd_impl); \
-          m.def("rope_thd_fwd_impl", &rope_thd_fwd_impl);             \
-          m.def("rope_2d_fwd_impl", &rope_2d_fwd_impl);
+    m.def("rope_fwd_impl", &rope_fwd_impl);                     \
+    m.def("rope_2c_fwd_impl", &rope_2c_fwd_impl);               \
+    m.def("rope_cached_fwd_impl", &rope_cached_fwd_impl);       \
+    m.def("rope_cached_2c_fwd_impl", &rope_cached_2c_fwd_impl); \
+    m.def("rope_thd_fwd_impl", &rope_thd_fwd_impl);             \
+    m.def("rope_2d_fwd_impl", &rope_2d_fwd_impl);
 
 #define ROPE_GENERAL_BWD_PYBIND                                 \
-          m.def("rope_bwd_impl", &rope_bwd_impl);                     \
-          m.def("rope_2c_bwd_impl", &rope_2c_bwd_impl);               \
-          m.def("rope_cached_bwd_impl", &rope_cached_bwd_impl);       \
-          m.def("rope_cached_2c_bwd_impl", &rope_cached_2c_bwd_impl); \
-          m.def("rope_thd_bwd_impl", &rope_thd_bwd_impl);             \
-          m.def("rope_2d_bwd_impl", &rope_2d_bwd_impl);
+    m.def("rope_bwd_impl", &rope_bwd_impl);                     \
+    m.def("rope_2c_bwd_impl", &rope_2c_bwd_impl);               \
+    m.def("rope_cached_bwd_impl", &rope_cached_bwd_impl);       \
+    m.def("rope_cached_2c_bwd_impl", &rope_cached_2c_bwd_impl); \
+    m.def("rope_thd_bwd_impl", &rope_thd_bwd_impl);             \
+    m.def("rope_2d_bwd_impl", &rope_2d_bwd_impl);
 
-#define ROPE_POS_FWD_PYBIND                                                         \
-          m.def("rope_cached_positions_fwd_impl", &rope_cached_positions_fwd_impl);       \
-          m.def("rope_cached_positions_2c_fwd_impl", &rope_cached_positions_2c_fwd_impl); \
-          m.def("rope_cached_positions_offsets_fwd_impl",                                 \
-                &rope_cached_positions_offsets_fwd_impl);                                 \
-          m.def("rope_cached_positions_offsets_2c_fwd_impl",                              \
-                &rope_cached_positions_offsets_2c_fwd_impl);
+#define ROPE_POS_FWD_PYBIND                                                                   \
+    m.def("rope_cached_positions_fwd_impl", &rope_cached_positions_fwd_impl);                 \
+    m.def("rope_cached_positions_2c_fwd_impl", &rope_cached_positions_2c_fwd_impl);           \
+    m.def("rope_cached_positions_offsets_fwd_impl", &rope_cached_positions_offsets_fwd_impl); \
+    m.def("rope_cached_positions_offsets_2c_fwd_impl", &rope_cached_positions_offsets_2c_fwd_impl);
 
 #define SMOOTHQUANT_PYBIND                      \
-          m.def("smoothquant_fwd", &smoothquant_fwd); \
-          m.def("moe_smoothquant_fwd", &moe_smoothquant_fwd);
+    m.def("smoothquant_fwd", &smoothquant_fwd); \
+    m.def("moe_smoothquant_fwd", &moe_smoothquant_fwd);
 
 #define HIPBSOLGEMM_PYBIND                                                         \
-          m.def("hipb_create_extension", &hipb_create_extension, "create_extension");    \
-          m.def("hipb_destroy_extension", &hipb_destroy_extension, "destroy_extension"); \
-          m.def("hipb_mm",                                                               \
-                &hipb_mm,                                                                \
-                "hipb_mm",                                                               \
-                py::arg("mat1"),                                                         \
-                py::arg("mat2"),                                                         \
-                py::arg("solution_index"),                                               \
-                py::arg("bias")      = std::nullopt,                                     \
-                py::arg("out_dtype") = std::nullopt,                                     \
-                py::arg("scaleA")    = std::nullopt,                                     \
-                py::arg("scaleB")    = std::nullopt,                                     \
-                py::arg("scaleOut")  = std::nullopt);                                     \
-          m.def("hipb_findallsols",                                                      \
-                &hipb_findallsols,                                                       \
-                "hipb_findallsols",                                                      \
-                py::arg("mat1"),                                                         \
-                py::arg("mat2"),                                                         \
-                py::arg("bias")      = std::nullopt,                                     \
-                py::arg("out_dtype") = std::nullopt,                                     \
-                py::arg("scaleA")    = std::nullopt,                                     \
-                py::arg("scaleB")    = std::nullopt,                                     \
-                py::arg("scaleC")    = std::nullopt);                                       \
-          m.def("getHipblasltKernelName", &getHipblasltKernelName);
+    m.def("hipb_create_extension", &hipb_create_extension, "create_extension");    \
+    m.def("hipb_destroy_extension", &hipb_destroy_extension, "destroy_extension"); \
+    m.def("hipb_mm",                                                               \
+          &hipb_mm,                                                                \
+          "hipb_mm",                                                               \
+          py::arg("mat1"),                                                         \
+          py::arg("mat2"),                                                         \
+          py::arg("solution_index"),                                               \
+          py::arg("bias")      = std::nullopt,                                     \
+          py::arg("out_dtype") = std::nullopt,                                     \
+          py::arg("scaleA")    = std::nullopt,                                     \
+          py::arg("scaleB")    = std::nullopt,                                     \
+          py::arg("scaleOut")  = std::nullopt);                                     \
+    m.def("hipb_findallsols",                                                      \
+          &hipb_findallsols,                                                       \
+          "hipb_findallsols",                                                      \
+          py::arg("mat1"),                                                         \
+          py::arg("mat2"),                                                         \
+          py::arg("bias")      = std::nullopt,                                     \
+          py::arg("out_dtype") = std::nullopt,                                     \
+          py::arg("scaleA")    = std::nullopt,                                     \
+          py::arg("scaleB")    = std::nullopt,                                     \
+          py::arg("scaleC")    = std::nullopt);                                       \
+    m.def("getHipblasltKernelName", &getHipblasltKernelName);
 
 #define ROCSOLGEMM_PYBIND                                                          \
-          m.def("rocb_create_extension", &rocb_create_extension, "create_extension");    \
-          m.def("rocb_destroy_extension", &rocb_destroy_extension, "destroy_extension"); \
-          m.def("rocb_mm", &RocSolIdxBlas, "mm");                                        \
-          m.def("rocb_findallsols", &RocFindAllSolIdxBlas, "rocblas_find_all_sols");
+    m.def("rocb_create_extension", &rocb_create_extension, "create_extension");    \
+    m.def("rocb_destroy_extension", &rocb_destroy_extension, "destroy_extension"); \
+    m.def("rocb_mm", &RocSolIdxBlas, "mm");                                        \
+    m.def("rocb_findallsols", &RocFindAllSolIdxBlas, "rocblas_find_all_sols");
 
 #define AITER_ENUM_PYBIND                                \
-          pybind11::enum_<QuantType>(m, "QuantType")           \
-              .value("No", QuantType::No)                      \
-              .value("per_Tensor", QuantType::per_Tensor)      \
-              .value("per_Token", QuantType::per_Token)        \
-              .value("per_1x32", QuantType::per_1x32)          \
-              .value("per_1x128", QuantType::per_1x128)        \
-              .value("per_128x128", QuantType::per_128x128)    \
-              .export_values();                                \
-          pybind11::enum_<ActivationType>(m, "ActivationType") \
-              .value("No", ActivationType::No)                 \
-              .value("Silu", ActivationType::Silu)             \
-              .value("Gelu", ActivationType::Gelu)             \
-              .export_values();
+    pybind11::enum_<QuantType>(m, "QuantType")           \
+        .value("No", QuantType::No)                      \
+        .value("per_Tensor", QuantType::per_Tensor)      \
+        .value("per_Token", QuantType::per_Token)        \
+        .value("per_1x32", QuantType::per_1x32)          \
+        .value("per_1x128", QuantType::per_1x128)        \
+        .value("per_128x128", QuantType::per_128x128)    \
+        .export_values();                                \
+    pybind11::enum_<ActivationType>(m, "ActivationType") \
+        .value("No", ActivationType::No)                 \
+        .value("Silu", ActivationType::Silu)             \
+        .value("Gelu", ActivationType::Gelu)             \
+        .export_values();

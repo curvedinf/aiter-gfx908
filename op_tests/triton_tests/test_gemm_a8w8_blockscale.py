@@ -79,14 +79,14 @@ def get_x_vals():
 
 
 def generate_gemm_a8w8_blockscale_inputs(
-    M: int, 
-    N: int, 
-    K: int, 
-    block_shape_n: int, 
-    block_shape_k: int, 
+    M: int,
+    N: int,
+    K: int,
+    block_shape_n: int,
+    block_shape_k: int,
     dtype=torch.bfloat16,
-    layout: str="TN", 
-    output=False
+    layout: str = "TN",
+    output=False,
 ):
     """
     The GEMM kernel expects:
@@ -99,12 +99,22 @@ def generate_gemm_a8w8_blockscale_inputs(
     if layout[0] == "T":
         x = (torch.rand((M, K), dtype=torch.float16, device="cuda") / 10).to(e4m3_type)
     else:
-        x = (torch.rand((K, M), dtype=torch.float16, device="cuda") / 10).to(e4m3_type).T
+        x = (
+            (torch.rand((K, M), dtype=torch.float16, device="cuda") / 10)
+            .to(e4m3_type)
+            .T
+        )
 
     if layout[1] == "N":
-        weight = (torch.rand((N, K), dtype=torch.float16, device="cuda") / 10).to(e4m3_type)
+        weight = (torch.rand((N, K), dtype=torch.float16, device="cuda") / 10).to(
+            e4m3_type
+        )
     else:
-        weight = (torch.rand((K, N), dtype=torch.float16, device="cuda") / 10).to(e4m3_type).T
+        weight = (
+            (torch.rand((K, N), dtype=torch.float16, device="cuda") / 10)
+            .to(e4m3_type)
+            .T
+        )
 
     x_scale = torch.rand([M, scale_k], dtype=torch.float32, device="cuda")
     w_scale = torch.rand([scale_n, scale_k], dtype=torch.float32, device="cuda")

@@ -73,13 +73,15 @@ def get_x_vals():
     return x_vals
 
 
-def generate_gemm_a8w8_inputs(M: int, 
-                              N: int, 
-                              K: int, 
-                              in_dtype: Union[torch.dtype, str], 
-                              out_dtype: Union[torch.dtype, str],
-                              layout: str = "TN",
-                              output=False):
+def generate_gemm_a8w8_inputs(
+    M: int,
+    N: int,
+    K: int,
+    in_dtype: Union[torch.dtype, str],
+    out_dtype: Union[torch.dtype, str],
+    layout: str = "TN",
+    output=False,
+):
     """
     The GEMM kernel expects:
     - x: (M, K) -> row-major format
@@ -129,7 +131,7 @@ def test_gemm(in_dtype, out_dtype, m, n, k, output):
     in_dtype = str_to_torch_dtype[in_dtype]
     out_dtype = str_to_torch_dtype[out_dtype]
     x, weight, x_scale, w_scale, bias, y = generate_gemm_a8w8_inputs(
-        M = m, N = n, K = k, in_dtype = in_dtype, out_dtype = out_dtype, output = output
+        M=m, N=n, K=k, in_dtype=in_dtype, out_dtype=out_dtype, output=output
     )
 
     a = run_torch(x, weight, x_scale, w_scale, bias, out_dtype)

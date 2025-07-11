@@ -3,7 +3,6 @@ import os
 import torch
 import triton
 import math
-import math
 from aiter.ops.triton.gemm_afp4wfp4 import (
     gemm_afp4wfp4,
     gemm_afp4wfp4_preshuffled_scales,

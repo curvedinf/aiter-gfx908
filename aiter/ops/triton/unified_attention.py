@@ -612,7 +612,6 @@ def unified_attention(
     v_descale,
     alibi_slopes=None,
     sinks=None,  # Optional tensor for sinks
-    use_2d=True,  # TODO(cagri): this is only for testing, remove later
 ):
     assert causal, "Only causal attention is supported"
     assert q_descale is None, "Q scales not supported"
@@ -653,24 +652,22 @@ def unified_attention(
     target_num_prgms = get_num_sms() * 2
     num_2d_prgms = total_num_q_blocks * num_kv_heads
 
-    # print(f"{total_num_q_blocks=} {num_kv_heads=}")
-
-    # TODO (cagri): for med. and less context length (<=1024) w. bs > 32 and num_kv_heads=8, should use 2d attention for decode
-    # how to do that? Cant use context length
     # Original condition:
     # if max_seqlen_q > 1 or total_num_q_blocks * num_kv_heads > 128:
-    if max_seqlen_q > 1:
+    if max_seqlen_q > 1 or num_2d_prgms > target_num_prgms:
         # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         # q.shape[0] is sum(query_lens) which is dynamic so it shouldnt be used in the heuristic
 
         # make the block_m bigger if we already have enough parallelism
-        mult = math.ceil(num_2d_prgms / target_num_prgms)
-        mult = triton.next_power_of_2(mult)
         if num_2d_prgms >= 2 * target_num_prgms:
-            BLOCK_M = BLOCK_M * mult
-            BLOCK_M = min(BLOCK_M, 64)
+            if num_2d_prgms <= 4 * target_num_prgms:
+                BLOCK_M = 32
+            elif num_2d_prgms <= 8 * target_num_prgms:
+                BLOCK_M = 64
+            else:
+                BLOCK_M = 128
             BLOCK_Q = BLOCK_M // num_queries_per_kv
-
+            total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         kernel_unified_attention_2d[
             (
                 total_num_q_blocks,
@@ -715,9 +712,7 @@ def unified_attention(
             num_seqs=num_seqs,
             BLOCK_M=BLOCK_M,
             waves_per_eu=2,
-            # num_ctas=1,
-            # num_stages=1,
-            # num_warps=4,
+            num_warps=4,
         )
     else:
         # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
@@ -727,7 +722,6 @@ def unified_attention(
         NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
         NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
         NUM_SEGMENTS = max(NUM_SEGMENTS, 16)
-        num_3d_prgms = total_num_q_blocks * num_kv_heads * NUM_SEGMENTS
         segm_output = torch.empty(
             q.shape[0],
             num_query_heads,

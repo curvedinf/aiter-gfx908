@@ -352,8 +352,7 @@ struct BlockFmhaPipelineQRKSVS
     using FmhaMask              = ck_tile::remove_cvref_t<typename Problem::FmhaMask>;
 
     static_assert(std::is_same_v<SaccDataType, SMPLComputeDataType>,
-                  "we will reuse 's_acc' for computing softmax, so we won't have to create "
-                  "another dist tensor 's'");
+                  "we will the same dist tensor 'sp_compute' for both gemm0 & softmax");
 
     using BlockFmhaShape             = ck_tile::remove_cvref_t<typename Problem::BlockFmhaShape>;
     using VLayout                    = ck_tile::remove_cvref_t<typename BlockFmhaShape::VLayout>;
@@ -656,20 +655,16 @@ struct BlockFmhaPipelineQRKSVS
 
             decltype(make_static_distributed_tensor<QDataType>(
                 Policy::template MakeQRegTileDistribution<Problem>())) q_tile;
-            statically_indexed_array<decltype(gemm_0.MakeCBlockTile()), 2> s_acc;
+            statically_indexed_array<decltype(gemm_0.MakeCBlockTile()), 2> sp_compute;
             decltype(gemm_1.MakeCBlockTile()) o_acc;
 
             decltype(block_tile_reduce<SMPLComputeDataType>(
-                s_acc(number<0>{}), sequence<1>{}, f_max, SMPLComputeDataType{0})) m;
+                sp_compute(number<0>{}), sequence<1>{}, f_max, SMPLComputeDataType{0})) m;
             decltype(m) m_local;
             decltype(m) l;
 
-            statically_indexed_array<decltype(make_static_distributed_tensor<SMPLComputeDataType>(
-                                         s_acc(number<0>{}).get_tile_distribution())),
-                                     2>
-                p_compute;
             statically_indexed_array<decltype(cast_tile<PDataType>(tile_elementwise_in(
-                                         p_compute_element_func, p_compute(number<0>{})))),
+                                         p_compute_element_func, sp_compute(number<0>{})))),
                                      2>
                 p;
         } metadata;
@@ -938,12 +933,12 @@ struct BlockFmhaPipelineQRKSVS
 #if ENABLE_TRACE
             DEBUG_STMTS { printf("[POYENC] \tfmha_alu0, sp_reg_idx = %d\n", sp_reg_idx.value); }
 #endif
-            // S{j} = S_acc{j} * scale_s
+            // sp_compute{j} = sp_compute{j} * scale_s
             tile_elementwise_inout([&](auto& logits) { logits = logits * scale_s; },
-                                   metadata.s_acc(sp_reg_idx));
+                                   metadata.sp_compute(sp_reg_idx));
 
             metadata.m_local = block_tile_reduce<SMPLComputeDataType>(
-                metadata.s_acc(sp_reg_idx),
+                metadata.sp_compute(sp_reg_idx),
                 sequence<1>{},
                 f_max,
                 -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
@@ -955,23 +950,23 @@ struct BlockFmhaPipelineQRKSVS
                                    m_old,
                                    metadata.m_local); // m{j}
             constexpr auto p_spans =
-                std::decay_t<decltype(metadata.p_compute(sp_reg_idx))>::get_distributed_spans();
+                std::decay_t<decltype(metadata.sp_compute(sp_reg_idx))>::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
                 auto row_max         = get_validated_m(metadata.m[i_idx]);
 
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    metadata.p_compute(sp_reg_idx)(i_j_idx) =
-                        ck_tile::exp2(metadata.s_acc(sp_reg_idx)[i_j_idx] - row_max);
+                    metadata.sp_compute(sp_reg_idx)(i_j_idx) =
+                        ck_tile::exp2(metadata.sp_compute(sp_reg_idx)[i_j_idx] - row_max);
                 });
             });
 
             metadata.p(sp_reg_idx) = cast_tile<PDataType>(
-                tile_elementwise_in(p_compute_element_func, metadata.p_compute(sp_reg_idx)));
+                tile_elementwise_in(p_compute_element_func, metadata.sp_compute(sp_reg_idx)));
         };
 
-        decltype(block_tile_reduce<SMPLComputeDataType>(metadata.p_compute(number<0>{}),
+        decltype(block_tile_reduce<SMPLComputeDataType>(metadata.sp_compute(number<0>{}),
                                                         sequence<1>{},
                                                         f_sum,
                                                         SMPLComputeDataType{0})) rowsum_p;
@@ -981,7 +976,7 @@ struct BlockFmhaPipelineQRKSVS
             DEBUG_STMTS { printf("[POYENC] \tfmha_alu1, sp_reg_idx = %d\n", sp_reg_idx.value); }
 #endif
             rowsum_p = block_tile_reduce<SMPLComputeDataType>(
-                metadata.p_compute(sp_reg_idx),
+                metadata.sp_compute(sp_reg_idx),
                 sequence<1>{},
                 f_sum,
                 SMPLComputeDataType{0}); // rowsum(Pcompute{j})
@@ -1011,8 +1006,8 @@ struct BlockFmhaPipelineQRKSVS
 #endif
             if constexpr(gemm_idx == 0)
             {
-                clear_tile(metadata.s_acc(sp_reg_idx)); // initialize C
-                gemm_0(metadata.s_acc(sp_reg_idx),
+                clear_tile(metadata.sp_compute(sp_reg_idx)); // initialize C
+                gemm_0(metadata.sp_compute(sp_reg_idx),
                        get_slice_tile(metadata.q_tile,
                                       sequence<0, (k0_loops - 1) * kK0>{},
                                       sequence<kM0, k0_loops * kK0>{}),
@@ -1043,8 +1038,8 @@ struct BlockFmhaPipelineQRKSVS
 #endif
             if constexpr(gemm_idx == 0)
             {
-                clear_tile(metadata.s_acc(sp_reg_idx)); // initialize C
-                gemm_0(metadata.s_acc(sp_reg_idx),
+                clear_tile(metadata.sp_compute(sp_reg_idx)); // initialize C
+                gemm_0(metadata.sp_compute(sp_reg_idx),
                        get_slice_tile(metadata.q_tile,
                                       sequence<0, (k0_loops - 1) * kK0>{},
                                       sequence<kM0, k0_loops * kK0>{}),
@@ -1103,7 +1098,7 @@ struct BlockFmhaPipelineQRKSVS
                     q_origin.at(number<0>{}), kv_token_start, number<kM0>{}, number<kN0>{});
                 if(need_perpixel_check)
                 {
-                    set_tile_if(metadata.s_acc(sp_reg_idx),
+                    set_tile_if(metadata.sp_compute(sp_reg_idx),
                                 -numeric<SMPLComputeDataType>::infinity(),
                                 [&](auto tile_idx) {
                                     const auto row =
@@ -1179,7 +1174,7 @@ struct BlockFmhaPipelineQRKSVS
 #if 0 && ENABLE_TENSOR_DUMP
                     // print S1
                     block_sync_lds();
-                    store_tile(s_lds_window, metadata.s_acc(xdl_SP_p01_reg_idx));
+                    store_tile(s_lds_window, metadata.sp_compute(xdl_SP_p01_reg_idx));
                     block_sync_lds();
                     DEBUG_STMTS { print_lds(s_lds_window, "S"); }
 #endif
@@ -1268,7 +1263,7 @@ struct BlockFmhaPipelineQRKSVS
 #if 0 && ENABLE_TENSOR_DUMP
                     // print S1
                     block_sync_lds();
-                    store_tile(s_lds_window, metadata.s_acc(xdl_SP_p01_reg_idx));
+                    store_tile(s_lds_window, metadata.sp_compute(xdl_SP_p01_reg_idx));
                     block_sync_lds();
                     DEBUG_STMTS { print_lds(s_lds_window, "S"); }
 #endif
@@ -1351,7 +1346,7 @@ struct BlockFmhaPipelineQRKSVS
 
 #if 1
             block_sync_lds();
-            store_tile(s_lds_window, metadata.p_compute(sp_reg_idx));
+            store_tile(s_lds_window, metadata.sp_compute(sp_reg_idx));
             block_sync_lds();
             DEBUG_STMTS { print_lds(s_lds_window, "P_COMPUTE"); }
 #endif
@@ -1430,7 +1425,7 @@ struct BlockFmhaPipelineQRKSVS
 
 #if 0
             // clear s_lds_window
-            std::decay_t<decltype(metadata.s_acc(number<0>{}))> dummy;
+            std::decay_t<decltype(metadata.sp_compute(number<0>{}))> dummy;
             clear_tile(dummy);
             block_sync_lds();
             store_tile(s_lds_window, dummy);
@@ -1440,7 +1435,7 @@ struct BlockFmhaPipelineQRKSVS
 #if 0 && ENABLE_TENSOR_DUMP
             // print S0
             block_sync_lds();
-            store_tile(s_lds_window, metadata.s_acc(number<0>{}));
+            store_tile(s_lds_window, metadata.sp_compute(number<0>{}));
             block_sync_lds();
             DEBUG_STMTS { print_lds(s_lds_window, "S"); }
 #endif

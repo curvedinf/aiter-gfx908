@@ -646,12 +646,18 @@ struct BlockFmhaPipelineQRKSVS
                                      2>
                 v_lds_window;
 
-            decltype(load_tile(
-                make_tile_window(k_lds_window(number<0>{}),
-                                 Policy::template MakeKRegTileDistribution<Problem>()))) k_tile;
-            decltype(load_tile(
-                make_tile_window(v_lds_window(number<0>{}),
-                                 Policy::template MakeVRegTileDistribution<Problem>()))) v_tile;
+            union kv_tile_type
+            {
+                CK_TILE_DEVICE kv_tile_type() {}
+
+                decltype(load_tile(
+                    make_tile_window(k_lds_window(number<0>{}),
+                                     Policy::template MakeKRegTileDistribution<Problem>()))) k;
+
+                decltype(load_tile(
+                    make_tile_window(v_lds_window(number<0>{}),
+                                     Policy::template MakeVRegTileDistribution<Problem>()))) v;
+            } kv_tile;
 
             decltype(make_static_distributed_tensor<QDataType>(
                 Policy::template MakeQRegTileDistribution<Problem>())) q_tile;
@@ -861,7 +867,7 @@ struct BlockFmhaPipelineQRKSVS
                 make_tile_window(metadata.k_lds_window(k_lds_read_idx),
                                  Policy::template MakeKRegTileDistribution<Problem>());
 
-            metadata.k_tile = load_tile(k_lds_window_for_load);
+            metadata.kv_tile.k = load_tile(k_lds_window_for_load);
         };
 
         auto V_mem_load = [&](auto v_lds_write_idx) {
@@ -908,7 +914,7 @@ struct BlockFmhaPipelineQRKSVS
                 make_tile_window(metadata.v_lds_window(v_lds_read_idx),
                                  Policy::template MakeVRegTileDistribution<Problem>());
 
-            metadata.v_tile = load_tile(v_lds_window_for_load);
+            metadata.kv_tile.v = load_tile(v_lds_window_for_load);
         };
 
         static const auto get_validated_m = [](SMPLComputeDataType raw_m) {
@@ -1011,7 +1017,7 @@ struct BlockFmhaPipelineQRKSVS
                        get_slice_tile(metadata.q_tile,
                                       sequence<0, (k0_loops - 1) * kK0>{},
                                       sequence<kM0, k0_loops * kK0>{}),
-                       get_slice_tile(metadata.k_tile,
+                       get_slice_tile(metadata.kv_tile.k,
                                       sequence<0, (k0_loops - 1) * kK0>{},
                                       sequence<kN0, k0_loops * kK0>{}));
             }
@@ -1021,7 +1027,7 @@ struct BlockFmhaPipelineQRKSVS
                        get_slice_tile(metadata.p(sp_reg_idx),
                                       sequence<0, (k1_loops - 1) * kK1>{},
                                       sequence<kM0, k1_loops * kK1>{}),
-                       get_slice_tile(metadata.v_tile,
+                       get_slice_tile(metadata.kv_tile.v,
                                       sequence<0, (k1_loops - 1) * kK1>{},
                                       sequence<kN1, k1_loops * kK1>{}));
             }
@@ -1043,7 +1049,7 @@ struct BlockFmhaPipelineQRKSVS
                        get_slice_tile(metadata.q_tile,
                                       sequence<0, (k0_loops - 1) * kK0>{},
                                       sequence<kM0, k0_loops * kK0>{}),
-                       get_slice_tile(metadata.k_tile,
+                       get_slice_tile(metadata.kv_tile.k,
                                       sequence<0, (k0_loops - 1) * kK0>{},
                                       sequence<kN0, k0_loops * kK0>{}));
             }
@@ -1053,7 +1059,7 @@ struct BlockFmhaPipelineQRKSVS
                        get_slice_tile(metadata.p(sp_reg_idx),
                                       sequence<0, (k1_loops - 1) * kK1>{},
                                       sequence<kM0, k1_loops * kK1>{}),
-                       get_slice_tile(metadata.v_tile,
+                       get_slice_tile(metadata.kv_tile.v,
                                       sequence<0, (k1_loops - 1) * kK1>{},
                                       sequence<kN1, k1_loops * kK1>{}));
                 fmha_alu0(number<1>{} - sp_reg_idx);
@@ -1249,13 +1255,13 @@ struct BlockFmhaPipelineQRKSVS
                     DEBUG_STMTS
                     {
                         printf("[POYENC] K1 tile (size=%d): %5.2f",
-                               decltype(metadata.k_tile.thread_buf_)::size(),
-                               ck_tile::type_convert<float>(metadata.k_tile.thread_buf_[0]));
-                        static_for<1, decltype(metadata.k_tile.thread_buf_)::size(), 1>{}(
+                               decltype(metadata.kv_tile.k.thread_buf_)::size(),
+                               ck_tile::type_convert<float>(metadata.kv_tile.k.thread_buf_[0]));
+                        static_for<1, decltype(metadata.kv_tile.k.thread_buf_)::size(), 1>{}(
                             [&](auto i) {
                                 printf(
                                     ", %5.2f",
-                                    ck_tile::type_convert<float>(metadata.k_tile.thread_buf_[i]));
+                                    ck_tile::type_convert<float>(metadata.kv_tile.thread_buf_[i]));
                             });
                         printf("\n");
                     }
@@ -1410,10 +1416,10 @@ struct BlockFmhaPipelineQRKSVS
             DEBUG_STMTS
             {
                 printf("[POYENC] K0 tile (size=%d): %5.2f",
-                       decltype(metadata.k_tile.thread_buf_)::size(),
-                       ck_tile::type_convert<float>(metadata.k_tile.thread_buf_[0]));
-                static_for<1, decltype(metadata.k_tile.thread_buf_)::size(), 1>{}([&](auto i) {
-                    printf(", %5.2f", ck_tile::type_convert<float>(metadata.k_tile.thread_buf_[i]));
+                       decltype(metadata.kv_tile.k.thread_buf_)::size(),
+                       ck_tile::type_convert<float>(metadata.kv_tile.k.thread_buf_[0]));
+                static_for<1, decltype(metadata.kv_tile.k.thread_buf_)::size(), 1>{}([&](auto i) {
+                    printf(", %5.2f", ck_tile::type_convert<float>(metadata.kv_tile.k.thread_buf_[i]));
                 });
                 printf("\n");
             }

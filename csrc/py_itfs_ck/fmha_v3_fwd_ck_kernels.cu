@@ -351,6 +351,10 @@ struct BlockFmhaPipelineQRKSVS
     using ODataType             = ck_tile::remove_cvref_t<typename Problem::ODataType>;
     using FmhaMask              = ck_tile::remove_cvref_t<typename Problem::FmhaMask>;
 
+    static_assert(std::is_same_v<SaccDataType, SMPLComputeDataType>,
+                  "we will reuse 's_acc' for computing softmax, so we won't have to create "
+                  "another dist tensor 's'");
+
     using BlockFmhaShape             = ck_tile::remove_cvref_t<typename Problem::BlockFmhaShape>;
     using VLayout                    = ck_tile::remove_cvref_t<typename BlockFmhaShape::VLayout>;
     static constexpr bool kQLoadOnce = true; // if q_tile load whole block length (hdim) at once
@@ -660,11 +664,8 @@ struct BlockFmhaPipelineQRKSVS
             decltype(m) m_local;
             decltype(m) l;
 
-            statically_indexed_array<decltype(cast_tile<SMPLComputeDataType>(s_acc(number<0>{}))),
-                                     2>
-                s;
             statically_indexed_array<decltype(make_static_distributed_tensor<SMPLComputeDataType>(
-                                         s(number<0>{}).get_tile_distribution())),
+                                         s_acc(number<0>{}).get_tile_distribution())),
                                      2>
                 p_compute;
             statically_indexed_array<decltype(cast_tile<PDataType>(tile_elementwise_in(
@@ -938,14 +939,11 @@ struct BlockFmhaPipelineQRKSVS
             DEBUG_STMTS { printf("[POYENC] \tfmha_alu0, sp_reg_idx = %d\n", sp_reg_idx.value); }
 #endif
             // S{j} = S_acc{j} * scale_s
-            metadata.s(sp_reg_idx) = tile_elementwise_in(
-                [&](auto logits) {
-                    return ck_tile::type_convert<SMPLComputeDataType>(logits * scale_s);
-                },
-                metadata.s_acc(sp_reg_idx));
+            tile_elementwise_inout([&](auto& logits) { logits = logits * scale_s; },
+                                   metadata.s_acc(sp_reg_idx));
 
             metadata.m_local = block_tile_reduce<SMPLComputeDataType>(
-                metadata.s(sp_reg_idx),
+                metadata.s_acc(sp_reg_idx),
                 sequence<1>{},
                 f_max,
                 -numeric<SMPLComputeDataType>::infinity()); // m_local = rowmax(S{j})
@@ -965,7 +963,7 @@ struct BlockFmhaPipelineQRKSVS
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     metadata.p_compute(sp_reg_idx)(i_j_idx) =
-                        ck_tile::exp2(metadata.s(sp_reg_idx)[i_j_idx] - row_max);
+                        ck_tile::exp2(metadata.s_acc(sp_reg_idx)[i_j_idx] - row_max);
                 });
             });
 

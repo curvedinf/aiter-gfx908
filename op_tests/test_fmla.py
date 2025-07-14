@@ -204,8 +204,8 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, page_block_size, ca
         # debug_o = out[5]
         # debug_q = out[6]
         import pdb; pdb.set_trace()
+        checkAllclose(out_flash.reshape(32, 3, 16, 512), out_torch.to(dtype=dtype), msg="out")
         checkAllclose(lse_flash, lse_torch, msg="lse")
-        checkAllclose(out_flash, out_torch.to(dtype=dtype), msg="out")
 
     if test_perf:
         _, t = run_perftest(flash_mla,

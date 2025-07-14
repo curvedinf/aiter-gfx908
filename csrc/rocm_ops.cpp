@@ -16,11 +16,12 @@
 #include "communication_asm.h"
 #include "custom.h"
 #include "custom_all_reduce.h"
-#include "gemm_a8w8.h"
 #include "gemm_a4w4_blockscale.h"
+#include "gemm_a8w8.h"
 #include "gemm_a8w8_blockscale.h"
 #include "gemm_a8w8_bpreshuffle.h"
 #include "hipbsolgemm.cuh"
+#include "mla_metadata.h"
 #include "moe_ck.h"
 #include "moe_op.h"
 #include "moe_sorting.h"
@@ -91,5 +92,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     CACHE_PYBIND;
     HIPBSOLGEMM_PYBIND;
     ROCSOLGEMM_PYBIND;
+    MLA_METADATA_PYBIND;
 }
 #endif

@@ -565,6 +565,23 @@ def test_paged_attention(
     # tensor_dump(out_aiter, 'out_aiter')
 
     # generate the golden output by torch native
+    print(
+        f"query:\n    {query}\n"
+        f"k_cache:\n    {k_cache}\n"
+        f"v_cache:\n    {v_cache}\n"
+        f"block_tables:\n    {block_tables}\n   {block_tables.shape}\n"
+        f"seq_lens:\n    {seq_lens}\n"
+        f"max_seq_len:\n    {max_seq_len}\n"
+        f"kv_cache_dtype:\n    {kv_cache_dtype}\n"
+        f"num_kv_heads:\n    {num_kv_heads}\n"
+        f"scale:\n    {scale}\n"
+        f"alibi_slopes:\n    {alibi_slopes}\n"
+        f"k_scale:\n    {k_scale}\n"
+        f"v_scale:\n    {v_scale}\n"
+        f"num_queries_per_kv:\n    {num_queries_per_kv}\n"
+        f"dtype:\n    {dtype}"
+    )
+
     out_golden, time_xx = run_native(
         query,
         k_cache,

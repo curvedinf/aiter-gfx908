@@ -10,6 +10,7 @@ from ..jit.core import (
 from ..jit.utils.chip_info import get_cu_num
 import numpy as np
 
+
 def gemm_a4w4(
     A: Tensor,  # A:[M, K/2] f4x2
     B: Tensor,  # B:[N, K/2] f4x2

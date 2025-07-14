@@ -77,3 +77,23 @@ def pid_grid(pid: int, num_pid_m: int, num_pid_n: int, GROUP_SIZE_M: tl.constexp
         pid_n = (pid % num_pid_in_group) // group_size_m
 
     return pid_m, pid_n
+
+
+@triton.jit
+def get_tile_max_current_xcd(num_tiles: int, xcd: int, NUM_XCDS: tl.constexpr = 8):
+    pids_per_xcd = (num_tiles + NUM_XCDS - 1) // NUM_XCDS
+    # When GRID_MN cannot divide NUM_XCDS, some xcds will have
+    # pids_per_xcd pids, the other will have pids_per_xcd - 1 pids.
+    # We calculate the number of xcds that have pids_per_xcd pids as
+    # tall_xcds
+    tall_xcds = num_tiles % NUM_XCDS
+    tall_xcds = NUM_XCDS if tall_xcds == 0 else tall_xcds
+    if xcd < tall_xcds:
+        max_tile_id = xcd * pids_per_xcd + pids_per_xcd
+    else:
+        max_tile_id = (
+            tall_xcds * pids_per_xcd
+            + (xcd - tall_xcds) * (pids_per_xcd - 1) + (pids_per_xcd - 1)
+        )
+
+    return max_tile_id

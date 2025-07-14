@@ -6,7 +6,7 @@ import triton
 import triton.language as tl
 from typing import Any, Dict, Optional, List
 from aiter.ops.triton.quant import dynamic_per_tensor_quant_fp8_i8
-from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
+from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd, get_tile_max_current_xcd
 from aiter.ops.triton.utils.moe_common import _write_zeros_to_output
 from aiter.ops.triton.utils.moe_config_utils import get_optimal_moe_config
 
@@ -805,8 +805,6 @@ def _fused_moe_persistent_kernel(
     # 
     workgroup_id = tl.program_id(axis=0)
 
-    pool_id = workgroup_id % NUM_XCDS
-
     # Load tile-invariant runtime constant
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
 
@@ -818,12 +816,28 @@ def _fused_moe_persistent_kernel(
 
     num_tiles = num_pid_m * num_pid_n
 
-    # get tile id from the pool
-    tile_id = tl.atomic_add(pool_counters + pool_id, 1, sem="relaxed")
-    num_tiles_per_pool = tl.cdiv(num_tiles, NUM_XCDS)
+    # initial pool id, xcd id
+    xcd = workgroup_id % NUM_XCDS
+    # can be at most 7
+    xcd_tracker = 0
+    tile_id = tl.atomic_add(pool_counters + xcd, 1, sem="relaxed")
+    
+    tile_id_max = get_tile_max_current_xcd(num_tiles, xcd)
 
-    while tile_id < num_tiles:
+    # if we don't have enough tiles for all CUs we exit to prevent segfault
+    if tile_id >= tile_id_max:
+        return
+
+    # We checked all the xcds
+    while xcd_tracker < NUM_XCDS:
+        current_pool = (xcd + xcd_tracker) % NUM_XCDS
         pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
+
+        # tl.device_print("tile_id", tile_id)
+        # tl.device_print("num_tiles", num_tiles)
+        # tl.device_print("tile_id_max", tile_id_max)
+        # if tile_id >= num_tiles:
+        #     tl.device_print("wtf")
 
         offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
         offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
@@ -943,14 +957,12 @@ def _fused_moe_persistent_kernel(
             tl.store(c_ptrs, accumulator, mask=c_mask)
 
             # fetch next tile from the (next available) pool
-            tile_id = tl.atomic_add(pool_counters + pool_id, 1, sem="relaxed")
-            pools_checked = 0
-            while (tile_id >= pool_id * num_tiles_per_pool) & (pools_checked < NUM_XCDS):
-                pool_id = (pool_id + 1) % NUM_XCDS
-                tile_id = tl.atomic_add(pool_counters + pool_id, 1, sem="relaxed")
-                pools_checked += 1
-
-
+            tile_id = tl.atomic_add(pool_counters + current_pool, 1, sem="relaxed")
+            while (tile_id >= tile_id_max) and (xcd_tracker < NUM_XCDS):
+                xcd_tracker += 1
+                current_pool = (xcd + xcd_tracker) % NUM_XCDS
+                tile_id_max = get_tile_max_current_xcd(num_tiles, current_pool)
+                tile_id = tl.atomic_add(pool_counters + current_pool, 1, sem="relaxed")
 
 
 def fused_moe(

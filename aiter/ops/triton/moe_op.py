@@ -770,9 +770,10 @@ def _fused_moe_persistent_kernel(
     compute_type: tl.constexpr,
     use_fp8_w8a8: tl.constexpr,
     use_int8_w8a16: tl.constexpr,
+    NUM_XCDS: tl.constexpr,
     NUM_WGS: tl.constexpr,
     CU_multiplier: tl.constexpr, # NUM_WGS = NUM_CUS * CU_multiplier
-    pid_counter,
+    pool_counters,
 ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -802,24 +803,24 @@ def _fused_moe_persistent_kernel(
     multiplication across different blocks processed by the same expert.
     """
     # 
-    start_pid = tl.program_id(axis=0)
-    NUM_XCDS: tl.constexpr = 8
+    workgroup_id = tl.program_id(axis=0)
+
+    pool_id = workgroup_id % NUM_XCDS
 
     # Load tile-invariant runtime constant
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
 
     num_pid_m = tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    tile_id = start_pid
 
-    # Only remap the first tile because:
-    # the rest of the tiles are distributed randomly with atomic fetching
-    # i.e. theres no quarantees to be able to reuse L2 cache. Better to just ensure L3 caching with round-robin.
-    tile_id = remap_xcd(tile_id, NUM_WGS, NUM_XCDS)
 
     offs_k = tl.arange(0, BLOCK_SIZE_K)
 
     num_tiles = num_pid_m * num_pid_n
+
+    # get tile id from the pool
+    tile_id = tl.atomic_add(pool_counters + pool_id, 1, sem="relaxed")
+    num_tiles_per_pool = tl.cdiv(num_tiles, NUM_XCDS)
 
     while tile_id < num_tiles:
         pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
@@ -941,9 +942,15 @@ def _fused_moe_persistent_kernel(
             c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
             tl.store(c_ptrs, accumulator, mask=c_mask)
 
-            # fetch the next tile through atomic increment of a global variable
-            # this ensures perfect load balancing across CUs at the cost of scalar atomic operation
-            tile_id = tl.atomic_add(pid_counter, 1, sem="relaxed")
+            # pool counter is (at least initially) only shared variable between workgroups on the same XCD (cache coherence is easier for the memory system  to maintain)
+            tile_id = tl.atomic_add(pool_counters + pool_id, 1, sem="relaxed")
+            # if we go over the pool's set of pids, then we simply move to next pool (and repeat if also the next pool is empty). 
+            # This is when the cache coherence comes harder to maintain, but its only for a subset of pids at the end.
+            while (tile_id % num_tiles_per_pool == 0) \
+                & (tile_id < num_tiles) \
+                    & (pool_id < NUM_XCDS - 1):
+                pool_id += 1
+                tile_id = tl.atomic_add(pool_counters + pool_id, 1, sem="relaxed")
 
 
 def fused_moe(
@@ -1110,6 +1117,7 @@ def fused_moe(
         if _USE_MOE_PERSISTENT_KERNEL:
             NUM_CUS = torch.cuda.get_device_properties("cuda").multi_processor_count
             NUM_WGS = NUM_CUS * config["CU_multiplier"] # Number of persistent workgroups to launch, multiple of the number of CUs
+
             grid = lambda META: (  # noqa: E731
                 min(
                     NUM_WGS,
@@ -1117,8 +1125,15 @@ def fused_moe(
                     * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]),
                 ),
             )
-            # global variable for dynamic fetching of the next pid inside a persistent kernel
-            pid_counter = torch.ones((1,), dtype=torch.int32, device=A.device) * NUM_WGS
+            
+            
+            num_tiles = triton.cdiv(num_tokens_post_padded, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"])
+            NUM_XCDS = 8
+            pool_size = (num_tiles + NUM_XCDS - 1) // NUM_XCDS # ceiling division
+
+            # 0, num_pids_per_pool, 2 * num_pids_per_pool, ..., (NUM_XCDS - 1) * num_pids_per_pool
+            pool_counters = (torch.ones((NUM_XCDS,1), dtype=torch.int32, device=A.device) * pool_size).cumsum(dim=0).to(torch.int64) - pool_size
+        
             _fused_moe_persistent_kernel[grid](
                 A,
                 B,
@@ -1152,8 +1167,9 @@ def fused_moe(
                 compute_type=compute_type,
                 use_fp8_w8a8=use_fp8_w8a8,
                 use_int8_w8a16=use_int8_w8a16,
+                NUM_XCDS=NUM_XCDS,
                 NUM_WGS=NUM_WGS,
-                pid_counter=pid_counter,
+                pool_counters=pool_counters,
                 **config,
             )
         else:

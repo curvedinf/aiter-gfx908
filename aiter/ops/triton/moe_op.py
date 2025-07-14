@@ -942,15 +942,15 @@ def _fused_moe_persistent_kernel(
             c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
             tl.store(c_ptrs, accumulator, mask=c_mask)
 
-            # pool counter is (at least initially) only shared variable between workgroups on the same XCD (cache coherence is easier for the memory system  to maintain)
+            # fetch next tile from the (next available) pool
             tile_id = tl.atomic_add(pool_counters + pool_id, 1, sem="relaxed")
-            # if we go over the pool's set of pids, then we simply move to next pool (and repeat if also the next pool is empty). 
-            # This is when the cache coherence comes harder to maintain, but its only for a subset of pids at the end.
-            while (tile_id % num_tiles_per_pool == 0) \
-                & (tile_id < num_tiles) \
-                    & (pool_id < NUM_XCDS - 1):
-                pool_id += 1
+            pools_checked = 0
+            while (tile_id >= pool_id * num_tiles_per_pool) & (pools_checked < NUM_XCDS):
+                pool_id = (pool_id + 1) % NUM_XCDS
                 tile_id = tl.atomic_add(pool_counters + pool_id, 1, sem="relaxed")
+                pools_checked += 1
+
+
 
 
 def fused_moe(
@@ -1131,7 +1131,7 @@ def fused_moe(
             NUM_XCDS = 8
             pool_size = (num_tiles + NUM_XCDS - 1) // NUM_XCDS # ceiling division
 
-            # 0, num_pids_per_pool, 2 * num_pids_per_pool, ..., (NUM_XCDS - 1) * num_pids_per_pool
+            # 0, pool_size, 2 * pool_size, ..., (NUM_XCDS - 1) * pool_size
             pool_counters = (torch.ones((NUM_XCDS,1), dtype=torch.int32, device=A.device) * pool_size).cumsum(dim=0).to(torch.int64) - pool_size
         
             _fused_moe_persistent_kernel[grid](

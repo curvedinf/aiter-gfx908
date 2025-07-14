@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -252,7 +252,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
     using SaccShuffledTileType = decltype(ShuffleSacc<Policy>(s_acc, nullptr));
     auto s_acc_shuffled        = SaccShuffledTileType{};
     using MLBlockTileType      = decltype(block_reduce_2d(s_acc_shuffled,
-                                                          ck_tile::numeric<acc_t>::min(), 
+                                                          ck_tile::numeric<acc_t>::min(),
                                                           reduce_max_func));
     using OaccBlockTileType    = decltype(gemm_1.MakeCBlockTile());
     OaccBlockTileType o_acc[n1_loops];
@@ -318,14 +318,14 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
         {seqlen_k_start, 0});
     auto k_dist = Policy::MakeKDramTileDistribution();
     auto k_coord = k_dist.calculate_index();
-    constexpr auto kKIterations = Policy::GetNumRepeatOfKDramTileDistribution();
+    constexpr auto kKNumRepeat = Policy::GetNumRepeatOfKDramTileDistribution();
     constexpr auto kKPageIdxDim = ck_tile::number<0>{};
     const int32_t seqlen_k_base_idx = k_coord[kKPageIdxDim] + seqlen_k_start;
-    ck_tile::statically_indexed_array<int32_t, kKIterations> k_offsets;
-    ck_tile::statically_indexed_array<bool, kKIterations> k_valids;
-    ck_tile::static_for<0, kKIterations, 1>{}([&](auto rid)
+    ck_tile::statically_indexed_array<int32_t, kKNumRepeat> k_offsets;
+    ck_tile::statically_indexed_array<bool, kKNumRepeat> k_valids;
+    ck_tile::static_for<0, kKNumRepeat, 1>{}([&](auto rid)
     {
-        const int32_t seqlen_idx = seqlen_k_base_idx + Traits::kBlockN0 / kKIterations * rid.value;
+        const int32_t seqlen_idx = seqlen_k_base_idx + Traits::kBlockN0 / kKNumRepeat * rid.value;
         const int32_t page_idx   = seqlen_idx / page_block_size;
         const int32_t inside_idx = seqlen_idx % page_block_size;
         k_offsets[rid] = (p_block_table[page_idx] * page_block_size + inside_idx) * stride_s_k;
@@ -417,7 +417,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
             ck_tile::store_tile(k_lds_window, k_block_tile);
             k_block_tile = ck_tile::load_tile(k_dram_window);
 
-            // Main part of QK GEMM_0: conduct GEMM and load K tiles 
+            // Main part of QK GEMM_0: conduct GEMM and load K tiles
             if constexpr (k0_loops > 2)
             {
                 ck_tile::static_for<0, k0_loops - 2, 1>{}([&](auto k0_id)
@@ -464,7 +464,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
 
         // prefetch load V tile
         auto v_prefetch = ck_tile::load_tile(v_dram_windows[0]);
-        
+
         if (Policy::HandleGemm0())
         {
             // II. scale_s, mask, softmax
@@ -687,7 +687,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_tile(
         mask);
 }
 
-// this function work for mla which load key&value tensor once, 
+// this function work for mla which load key&value tensor once,
 // transpose the k-nope tensor into v tensor, and never load v tensor from dram again.
 // TODO: 1. async load from dram to lds. use double lds buffer to load two kv blocks.
 //       2. transpose v value while gemm_0.
@@ -826,7 +826,7 @@ CK_TILE_DEVICE static void kn_fmla_fwd_splitkv_prefill_load_once_tile(
     using SaccShuffledTileType = decltype(ShuffleSacc<Policy>(s_acc, nullptr));
     auto s_acc_shuffled        = SaccShuffledTileType{};
     using MLBlockTileType      = decltype(block_reduce_2d(s_acc_shuffled,
-                                                          ck_tile::numeric<acc_t>::min(), 
+                                                          ck_tile::numeric<acc_t>::min(),
                                                           reduce_max_func));
     using OaccBlockTileType    = decltype(gemm_1.MakeCBlockTile());
     OaccBlockTileType o_acc[n1_loops];

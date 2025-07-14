@@ -378,7 +378,8 @@ def kernel_unified_attention_3d(
     Q = tl.load(
         query_ptr + query_offset,
         mask=dim_mask[None, :] & query_mask_0[:, None] & query_mask_1[:, None],
-        other=0.0)
+        other=0.0,
+    )
 
     block_table_offset = seq_idx * block_table_stride
 

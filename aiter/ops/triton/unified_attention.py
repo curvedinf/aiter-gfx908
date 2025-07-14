@@ -378,9 +378,7 @@ def kernel_unified_attention_3d(
     Q = tl.load(
         query_ptr + query_offset,
         mask=dim_mask[None, :] & query_mask_0[:, None] & query_mask_1[:, None],
-        other=0.0,
-        cache_modifier=".cg",
-    )
+        other=0.0)
 
     block_table_offset = seq_idx * block_table_stride
 
@@ -671,7 +669,7 @@ def unified_attention(
     # call 2d if sliding window is used
     if (
         SLIDING_WINDOW > 0
-        or max_seqlen_q > 0
+        or max_seqlen_q > 1
         or total_num_q_blocks * num_kv_heads > get_num_sms()
     ):
         # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs

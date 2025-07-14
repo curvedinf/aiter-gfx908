@@ -638,7 +638,7 @@ def unified_attention(
         sinks is None or sinks.shape[0] == q.shape[1]
     ), "Sinks must be num_query_heads size"
     use_alibi_slopes = alibi_slopes is not None
-
+    SLIDING_WINDOW = 1 + window_size[0]
     block_size = v.shape[1]
     num_seqs = len(seqused_k)
     num_query_heads = q.shape[1]
@@ -668,8 +668,12 @@ def unified_attention(
 
     # Original condition:
     # if max_seqlen_q > 1 or total_num_q_blocks * num_kv_heads > 128:
-    # call 2d for all cases, it has real sliding window support
-    if True:
+    # call 2d if sliding window is used
+    if (
+        SLIDING_WINDOW > 0
+        or max_seqlen_q > 0
+        or total_num_q_blocks * num_kv_heads > get_num_sms()
+    ):
         # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         # q.shape[0] is sum(query_lens) which is dynamic so it shouldnt be used in the heuristic
 
@@ -713,7 +717,7 @@ def unified_attention(
             HEAD_SIZE_PADDED=triton.next_power_of_2(head_size),
             USE_ALIBI_SLOPES=use_alibi_slopes,
             USE_SOFTCAP=(softcap > 0),
-            SLIDING_WINDOW=(1 + window_size[0]),
+            SLIDING_WINDOW=SLIDING_WINDOW,
             stride_k_cache_0=k.stride(0),
             stride_k_cache_1=k.stride(1),
             stride_k_cache_2=k.stride(2),
@@ -740,18 +744,7 @@ def unified_attention(
         NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
         NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
         NUM_SEGMENTS = max(NUM_SEGMENTS, 16)
-        num_3d_prgms = total_num_q_blocks * NUM_SEGMENTS * num_kv_heads
 
-        if getattr(unified_attention, "print", True):
-            num_3d_prgms = total_num_q_blocks * NUM_SEGMENTS * num_kv_heads
-            setattr(unified_attention, "print", False)
-            print(f"{total_num_q_blocks=}")
-            print(f"{BLOCK_Q=}")
-            print(f"{BLOCK_M=}")
-            print(f"{NUM_SEGMENTS=}")
-            print(f"{num_3d_prgms=}")
-            print(f"{num_2d_prgms=}")
-            print(f"{target_num_prgms=}")
         segm_output = torch.empty(
             q.shape[0],
             num_query_heads,

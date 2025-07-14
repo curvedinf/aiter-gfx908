@@ -21,68 +21,79 @@ def apply_softcap(S, x):
 
 
 @triton.jit
-def kernel_unified_attention_2d(
-    output_ptr,  # [num_tokens, num_query_heads, head_size]
-    query_ptr,  # [num_tokens, num_query_heads, head_size]
-    key_cache_ptr,  # [num_blks, blk_size, num_kv_heads, head_size]
-    value_cache_ptr,  # [num_blks, blk_size, num_kv_heads, head_size]
-    sink_ptr,  # [num_query_heads]
-    block_tables_ptr,  # [num_seqs, max_num_blocks_per_seq]
-    seq_lens_ptr,  # [num_seqs]
-    alibi_slopes_ptr,  # [num_query_heads]
-    scale,  # float32
-    k_scale,  # float32
-    v_scale,  # float32
-    softcap,  # float32
-    num_query_heads: tl.constexpr,  # int
-    num_queries_per_kv: tl.constexpr,  # int
-    block_table_stride: tl.int64,  # int
-    query_stride_0: tl.int64,  # int
-    query_stride_1: tl.int64,  # int, should be equal to head_size
-    output_stride_0: tl.int64,  # int
-    output_stride_1: tl.int64,  # int, should be equal to head_size
-    BLOCK_SIZE: tl.constexpr,  # int
-    HEAD_SIZE: tl.constexpr,  # int
-    HEAD_SIZE_PADDED: tl.constexpr,  # int, must be power of 2
-    USE_ALIBI_SLOPES: tl.constexpr,  # bool
-    USE_SOFTCAP: tl.constexpr,  # bool
-    SLIDING_WINDOW: tl.constexpr,  # int
-    stride_k_cache_0: tl.int64,  # int
-    stride_k_cache_1: tl.int64,  # int
-    stride_k_cache_2: tl.int64,  # int
-    stride_k_cache_3: tl.constexpr,  # int
-    stride_v_cache_0: tl.int64,  # int
-    stride_v_cache_1: tl.int64,  # int
-    stride_v_cache_2: tl.int64,  # int
-    stride_v_cache_3: tl.constexpr,  # int
-    query_start_len_ptr,  # [num_seqs+1]
-    BLOCK_Q: tl.constexpr,  # int
-    num_seqs: tl.int32,
-    BLOCK_M: tl.constexpr,  # int
-):
-
-    q_block_global_idx = tl.program_id(0)
-    kv_head_idx = tl.program_id(1)
-
+def find_seq_idx(query_start_len_ptr, target_idx, num_seqs,
+                 BLOCK_Q: tl.constexpr, use_q_block_mode: tl.constexpr):
     left: tl.int32 = 0
     right = num_seqs
     while left < right:
         mid = (left + right) // 2
-        mid_val = tl.load(query_start_len_ptr + mid) // BLOCK_Q + mid
-        if mid_val <= q_block_global_idx:
+        val = tl.load(query_start_len_ptr + mid)
+        mid_val = val // BLOCK_Q + mid if use_q_block_mode else val
+
+        if mid_val <= target_idx:
             left = mid + 1
         else:
             right = mid
 
-    seq_idx = left - 1
-    q_block_start_idx = tl.load(query_start_len_ptr + seq_idx) // BLOCK_Q + seq_idx
+    return left - 1
+
+
+@triton.jit
+def kernel_unified_attention_2d(
+        output_ptr,  # [num_tokens, num_query_heads, head_size]
+        query_ptr,  # [num_tokens, num_query_heads, head_size]
+        key_cache_ptr,  # [num_blks, blk_size, num_kv_heads, head_size]
+        value_cache_ptr,  # [num_blks, blk_size, num_kv_heads, head_size]
+        sink_ptr,  # [num_query_heads]
+        block_tables_ptr,  # [num_seqs, max_num_blocks_per_seq]
+        seq_lens_ptr,  # [num_seqs]
+        alibi_slopes_ptr,  # [num_query_heads]
+        scale,  # float32
+        k_scale,  # float32
+        v_scale,  # float32
+        softcap,  # float32
+        num_query_heads: tl.constexpr,  # int
+        num_queries_per_kv: tl.constexpr,  # int
+        block_table_stride: tl.int64,  # int
+        query_stride_0: tl.int64,  # int
+        query_stride_1: tl.int64,  # int, should be equal to head_size
+        output_stride_0: tl.int64,  # int
+        output_stride_1: tl.int64,  # int, should be equal to head_size
+        BLOCK_SIZE: tl.constexpr,  # int
+        HEAD_SIZE: tl.constexpr,  # int
+        HEAD_SIZE_PADDED: tl.constexpr,  # int, must be power of 2
+        USE_ALIBI_SLOPES: tl.constexpr,  # bool
+        USE_SOFTCAP: tl.constexpr,  # bool
+        SLIDING_WINDOW: tl.constexpr,  # int
+        stride_k_cache_0: tl.int64,  # int
+        stride_k_cache_1: tl.int64,  # int
+        stride_k_cache_2: tl.int64,  # int
+        stride_k_cache_3: tl.constexpr,  # int
+        stride_v_cache_0: tl.int64,  # int
+        stride_v_cache_1: tl.int64,  # int
+        stride_v_cache_2: tl.int64,  # int
+        stride_v_cache_3: tl.constexpr,  # int
+        query_start_len_ptr,  # [num_seqs+1]
+        BLOCK_Q: tl.constexpr,  # int
+        num_seqs: tl.int32,
+        BLOCK_M: tl.constexpr,  # int
+):
+    q_block_global_idx = tl.program_id(0)
+    kv_head_idx = tl.program_id(1)
+
+    seq_idx = find_seq_idx(query_start_len_ptr, q_block_global_idx, num_seqs,
+                           BLOCK_Q, True)
+
+    q_block_start_idx = tl.load(query_start_len_ptr +
+                                seq_idx) // BLOCK_Q + seq_idx
 
     q_block_local_idx = q_block_global_idx - q_block_start_idx
 
     cur_batch_in_all_start_index = tl.load(query_start_len_ptr + seq_idx)
     cur_batch_in_all_stop_index = tl.load(query_start_len_ptr + seq_idx + 1)
 
-    cur_batch_query_len = cur_batch_in_all_stop_index - cur_batch_in_all_start_index
+    cur_batch_query_len = cur_batch_in_all_stop_index \
+        - cur_batch_in_all_start_index
 
     if q_block_local_idx * BLOCK_Q >= cur_batch_query_len:
         return
@@ -92,12 +103,10 @@ def kernel_unified_attention_2d(
     query_pos = q_block_local_idx * BLOCK_Q + offs_m // num_queries_per_kv
 
     query_offset_0 = cur_batch_in_all_start_index + query_pos
-    query_offset_1 = kv_head_idx * num_queries_per_kv + offs_m % num_queries_per_kv
-    query_offset = (
-        query_offset_0[:, None] * query_stride_0
-        + query_offset_1[:, None] * query_stride_1
-        + offs_d[None, :]
-    )
+    query_offset_1 = kv_head_idx * num_queries_per_kv + \
+        offs_m % num_queries_per_kv
+    query_offset = (query_offset_0[:, None] * query_stride_0 +
+                    query_offset_1[:, None] * query_stride_1 + offs_d[None, :])
 
     dim_mask = tl.where(offs_d < HEAD_SIZE, 1, 0).to(tl.int1)
     query_mask_0 = tl.where(query_pos < cur_batch_query_len, 1, 0).to(tl.int1)
@@ -129,38 +138,53 @@ def kernel_unified_attention_2d(
 
     # context length for this particular sequences
     context_len = seq_len - cur_batch_query_len
-
     # alibi slope for this head
     if USE_ALIBI_SLOPES:
-        alibi_slope = tl.load(
-            alibi_slopes_ptr + query_offset_1, mask=query_mask_1, other=0.0
-        )
+        alibi_slope = tl.load(alibi_slopes_ptr + query_offset_1,
+                              mask=query_mask_1,
+                              other=0.0)
 
-    num_blocks = cdiv_fn(seq_len, BLOCK_SIZE)
+    # compute the length of the longest sequence prefix spanned by any
+    # query token in the current q_block (q_block_local_idx)
+    max_seq_prefix_len = context_len + q_block_local_idx * BLOCK_Q + (
+        BLOCK_M - 1) // num_queries_per_kv + 1
+    
 
+    # adjust for potential padding in the last q_block by considering the
+    # actual sequence length
+    max_seq_prefix_len = tl.minimum(max_seq_prefix_len, seq_len)
+
+    # calculate the number of tiles (blocks) that need to be processed to
+    # cover the longest sequence prefix (due to causal masking, blocks beyond
+    # this prefix can be skipped)
+    num_blocks = cdiv_fn(max_seq_prefix_len, BLOCK_SIZE)
+    if SLIDING_WINDOW > 0:
+        num_blocks_start = (max_seq_prefix_len - SLIDING_WINDOW - 1) // BLOCK_SIZE
+        #TODO (cagri): this works for most cases but not all, not sure why: num_blocks_start = max(0, num_blocks_start)
+        num_blocks_start = max(0, num_blocks_start - 1)
+    else:
+        num_blocks_start = 0
     # iterate through tiles
-    for j in range(0, num_blocks):
+    for j in range(num_blocks_start, num_blocks):
 
         physical_block_idx = tl.load(block_tables_ptr + block_table_offset + j)
 
         offs_n = tl.arange(0, BLOCK_SIZE)
 
-        v_offset = (
-            physical_block_idx * stride_v_cache_0
-            + kv_head_idx * stride_v_cache_2
-            + offs_d[None, :] * stride_v_cache_3
-            + offs_n[:, None] * stride_v_cache_1
-        )
+        v_offset = (physical_block_idx * stride_v_cache_0 +
+                    kv_head_idx * stride_v_cache_2 +
+                    offs_d[None, :] * stride_v_cache_3 +
+                    offs_n[:, None] * stride_v_cache_1)
 
-        k_offset = (
-            physical_block_idx * stride_k_cache_0
-            + kv_head_idx * stride_k_cache_2
-            + offs_d[:, None] * stride_k_cache_3
-            + offs_n[None, :] * stride_k_cache_1
-        )
+        k_offset = (physical_block_idx * stride_k_cache_0 +
+                    kv_head_idx * stride_k_cache_2 +
+                    offs_d[:, None] * stride_k_cache_3 +
+                    offs_n[None, :] * stride_k_cache_1)
 
         # K : (HEAD_SIZE, BLOCK_SIZE)
-        K_load = tl.load(key_cache_ptr + k_offset, mask=dim_mask[:, None], other=0.0)
+        K_load = tl.load(key_cache_ptr + k_offset,
+                         mask=dim_mask[:, None],
+                         other=0.0)
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -171,7 +195,9 @@ def kernel_unified_attention_2d(
             K = K_load
 
         # V : (BLOCK_SIZE, HEAD_SIZE)
-        V_load = tl.load(value_cache_ptr + v_offset, mask=dim_mask[None, :], other=0.0)
+        V_load = tl.load(value_cache_ptr + v_offset,
+                         mask=dim_mask[None, :],
+                         other=0.0)
 
         if V_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -193,16 +219,12 @@ def kernel_unified_attention_2d(
         if USE_SOFTCAP:
             S = apply_softcap(S, softcap)
 
-        S = tl.where(
-            query_mask_1[:, None] & query_mask_0[:, None] & seq_mask, S, float("-inf")
-        )
+        S = tl.where(query_mask_1[:, None] & query_mask_0[:, None] & seq_mask,
+                     S, float("-inf"))
 
         if SLIDING_WINDOW > 0:
-            S = tl.where(
-                (context_len + query_pos[:, None] - seq_offset) < SLIDING_WINDOW,
-                S,
-                float("-inf"),
-            )
+            S = tl.where((context_len + query_pos[:, None] - seq_offset)
+                         < SLIDING_WINDOW, S, float("-inf"))
 
         if USE_ALIBI_SLOPES:
             S += alibi_slope[:, None] * (seq_offset - context_len)
@@ -236,11 +258,9 @@ def kernel_unified_attention_2d(
     # epilogue
     acc = acc / L[:, None]
 
-    output_offset = (
-        query_offset_0[:, None] * output_stride_0
-        + query_offset_1[:, None] * output_stride_1
-        + offs_d[None, :]
-    )
+    output_offset = (query_offset_0[:, None] * output_stride_0 +
+                     query_offset_1[:, None] * output_stride_1 +
+                     offs_d[None, :])
 
     tl.store(
         output_ptr + output_offset,
@@ -250,86 +270,64 @@ def kernel_unified_attention_2d(
 
 
 @triton.jit
-def find_seq_idx(
-    query_start_len_ptr,
-    target_idx,
-    num_seqs,
-    BLOCK_Q: tl.constexpr,
-    use_q_block_mode: tl.constexpr,
-):
-    left: tl.int32 = 0
-    right = num_seqs
-    while left < right:
-        mid = (left + right) // 2
-        val = tl.load(query_start_len_ptr + mid)
-        mid_val = val // BLOCK_Q + mid if use_q_block_mode else val
-
-        if mid_val <= target_idx:
-            left = mid + 1
-        else:
-            right = mid
-
-    return left - 1
-
-
-@triton.jit
 def kernel_unified_attention_3d(
-    segm_output_ptr,
-    # [num_tokens, num_query_heads, num_segments, head_size]
-    segm_max_ptr,  # [num_tokens, num_query_heads, num_segments]
-    segm_expsum_ptr,  # [num_tokens, num_query_heads, num_segments]
-    query_ptr,  # [num_tokens, num_query_heads, head_size]
-    key_cache_ptr,  # [num_blks, num_kv_heads, head_size // x, blk_size, x]
-    value_cache_ptr,  # [num_blks, num_kv_heads, head_size, blk_size]
-    sink_ptr,  # [num_query_heads]
-    block_tables_ptr,  # [num_seqs, max_num_blocks_per_seq]
-    seq_lens_ptr,  # [num_seqs]
-    alibi_slopes_ptr,  # [num_query_heads]
-    scale,  # float32
-    k_scale,  # float32
-    v_scale,  # float32
-    softcap,  # float32
-    num_query_heads: tl.constexpr,  # int
-    num_queries_per_kv: tl.constexpr,  # int
-    block_table_stride: tl.int64,  # int
-    query_stride_0: tl.int64,  # int
-    query_stride_1: tl.int64,  # int, should be equal to head_size
-    BLOCK_SIZE: tl.constexpr,  # int
-    HEAD_SIZE: tl.constexpr,  # int
-    HEAD_SIZE_PADDED: tl.constexpr,  # int, must be power of 2
-    USE_ALIBI_SLOPES: tl.constexpr,  # bool
-    USE_SOFTCAP: tl.constexpr,  # bool
-    SLIDING_WINDOW: tl.constexpr,  # int
-    stride_k_cache_0: tl.int64,  # int
-    stride_k_cache_1: tl.int64,  # int
-    stride_k_cache_2: tl.int64,  # int
-    stride_k_cache_3: tl.constexpr,  # int
-    stride_v_cache_0: tl.int64,  # int
-    stride_v_cache_1: tl.int64,  # int
-    stride_v_cache_2: tl.int64,  # int
-    stride_v_cache_3: tl.constexpr,  # int
-    query_start_len_ptr,  # [num_seqs+1]
-    BLOCK_Q: tl.constexpr,  # int
-    num_seqs: tl.int32,
-    BLOCK_M: tl.constexpr,  # int
-    NUM_SEGMENTS_PER_SEQ: tl.constexpr,  # int
+        segm_output_ptr,
+        # [num_tokens, num_query_heads, num_segments, head_size]
+        segm_max_ptr,  # [num_tokens, num_query_heads, num_segments]
+        segm_expsum_ptr,  # [num_tokens, num_query_heads, num_segments]
+        query_ptr,  # [num_tokens, num_query_heads, head_size]
+        key_cache_ptr,  # [num_blks, num_kv_heads, head_size // x, blk_size, x]
+        value_cache_ptr,  # [num_blks, num_kv_heads, head_size, blk_size]
+        sink_ptr, # [num_query_heads]
+        block_tables_ptr,  # [num_seqs, max_num_blocks_per_seq]
+        seq_lens_ptr,  # [num_seqs]
+        alibi_slopes_ptr,  # [num_query_heads]
+        scale,  # float32
+        k_scale,  # float32
+        v_scale,  # float32
+        softcap,  # float32
+        num_query_heads: tl.constexpr,  # int
+        num_queries_per_kv: tl.constexpr,  # int
+        block_table_stride: tl.int64,  # int
+        query_stride_0: tl.int64,  # int
+        query_stride_1: tl.int64,  # int, should be equal to head_size
+        BLOCK_SIZE: tl.constexpr,  # int
+        HEAD_SIZE: tl.constexpr,  # int
+        HEAD_SIZE_PADDED: tl.constexpr,  # int, must be power of 2
+        USE_ALIBI_SLOPES: tl.constexpr,  # bool
+        USE_SOFTCAP: tl.constexpr,  # bool
+        SLIDING_WINDOW: tl.constexpr,  # int
+        stride_k_cache_0: tl.int64,  # int
+        stride_k_cache_1: tl.int64,  # int
+        stride_k_cache_2: tl.int64,  # int
+        stride_k_cache_3: tl.constexpr,  # int
+        stride_v_cache_0: tl.int64,  # int
+        stride_v_cache_1: tl.int64,  # int
+        stride_v_cache_2: tl.int64,  # int
+        stride_v_cache_3: tl.constexpr,  # int
+        query_start_len_ptr,  # [num_seqs+1]
+        BLOCK_Q: tl.constexpr,  # int
+        num_seqs: tl.int32,
+        BLOCK_M: tl.constexpr,  # int
+        NUM_SEGMENTS_PER_SEQ: tl.constexpr,  # int
 ):
     q_block_global_idx = tl.program_id(0)
     kv_head_idx = tl.program_id(1)
     segm_idx = tl.program_id(2)
 
-    seq_idx = find_seq_idx(
-        query_start_len_ptr, q_block_global_idx, num_seqs, BLOCK_Q, True
-    )
+    seq_idx = find_seq_idx(query_start_len_ptr, q_block_global_idx, num_seqs,
+                           BLOCK_Q, True)
 
-    q_block_start_idx = tl.load(query_start_len_ptr + seq_idx) // BLOCK_Q + seq_idx
+    q_block_start_idx = tl.load(query_start_len_ptr +
+                                seq_idx) // BLOCK_Q + seq_idx
 
     q_block_local_idx = q_block_global_idx - q_block_start_idx
 
     cur_batch_in_all_start_index = tl.load(query_start_len_ptr + seq_idx)
     cur_batch_in_all_stop_index = tl.load(query_start_len_ptr + seq_idx + 1)
 
-    cur_batch_query_len = cur_batch_in_all_stop_index - cur_batch_in_all_start_index
+    cur_batch_query_len = cur_batch_in_all_stop_index \
+        - cur_batch_in_all_start_index
 
     if q_block_local_idx * BLOCK_Q >= cur_batch_query_len:
         return
@@ -350,13 +348,11 @@ def kernel_unified_attention_3d(
     query_pos = q_block_local_idx * BLOCK_Q + offs_m // num_queries_per_kv
 
     query_offset_0 = cur_batch_in_all_start_index + query_pos
-    query_offset_1 = kv_head_idx * num_queries_per_kv + offs_m % num_queries_per_kv
+    query_offset_1 = kv_head_idx * num_queries_per_kv + \
+        offs_m % num_queries_per_kv
 
-    query_offset = (
-        query_offset_0[:, None] * query_stride_0
-        + query_offset_1[:, None] * query_stride_1
-        + offs_d[None, :]
-    )
+    query_offset = (query_offset_0[:, None] * query_stride_0 +
+                    query_offset_1[:, None] * query_stride_1 + offs_d[None, :])
 
     dim_mask = tl.where(offs_d < HEAD_SIZE, 1, 0).to(tl.int1)
     query_mask_0 = tl.where(query_pos < cur_batch_query_len, 1, 0).to(tl.int1)
@@ -367,6 +363,7 @@ def kernel_unified_attention_3d(
         query_ptr + query_offset,
         mask=dim_mask[None, :] & query_mask_0[:, None] & query_mask_1[:, None],
         other=0.0,
+        cache_modifier=".cg"
     )
 
     block_table_offset = seq_idx * block_table_stride
@@ -388,37 +385,36 @@ def kernel_unified_attention_3d(
 
     # alibi slope for this head
     if USE_ALIBI_SLOPES:
-        alibi_slope = tl.load(
-            alibi_slopes_ptr + query_offset_1, mask=query_mask_1, other=0.0
-        )
+        alibi_slope = tl.load(alibi_slopes_ptr + query_offset_1,
+                              mask=query_mask_1,
+                              other=0.0)
 
     num_blocks = cdiv_fn(seq_len, BLOCK_SIZE)
+    
 
     # iterate through tiles within current segment
     for j in range(
-        segm_idx * blocks_per_segment,
-        min((segm_idx + 1) * blocks_per_segment, num_blocks),
+            segm_idx * blocks_per_segment,
+            min((segm_idx + 1) * blocks_per_segment, num_blocks),
     ):
         physical_block_idx = tl.load(block_tables_ptr + block_table_offset + j)
 
         offs_n = tl.arange(0, BLOCK_SIZE)
 
-        v_offset = (
-            physical_block_idx * stride_v_cache_0
-            + kv_head_idx * stride_v_cache_2
-            + offs_d[None, :] * stride_v_cache_3
-            + offs_n[:, None] * stride_v_cache_1
-        )
+        v_offset = (physical_block_idx * stride_v_cache_0 +
+                    kv_head_idx * stride_v_cache_2 +
+                    offs_d[None, :] * stride_v_cache_3 +
+                    offs_n[:, None] * stride_v_cache_1)
 
-        k_offset = (
-            physical_block_idx * stride_k_cache_0
-            + kv_head_idx * stride_k_cache_2
-            + offs_d[:, None] * stride_k_cache_3
-            + offs_n[None, :] * stride_k_cache_1
-        )
+        k_offset = (physical_block_idx * stride_k_cache_0 +
+                    kv_head_idx * stride_k_cache_2 +
+                    offs_d[:, None] * stride_k_cache_3 +
+                    offs_n[None, :] * stride_k_cache_1)
 
         # K : (HEAD_SIZE, BLOCK_SIZE)
-        K_load = tl.load(key_cache_ptr + k_offset, mask=dim_mask[:, None], other=0.0)
+        K_load = tl.load(key_cache_ptr + k_offset,
+                         mask=dim_mask[:, None],
+                         other=0.0)
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -429,7 +425,9 @@ def kernel_unified_attention_3d(
             K = K_load
 
         # V : (BLOCK_SIZE, HEAD_SIZE)
-        V_load = tl.load(value_cache_ptr + v_offset, mask=dim_mask[None, :], other=0.0)
+        V_load = tl.load(value_cache_ptr + v_offset,
+                         mask=dim_mask[None, :],
+                         other=0.0)
 
         if V_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -451,16 +449,12 @@ def kernel_unified_attention_3d(
         if USE_SOFTCAP:
             S = apply_softcap(S, softcap)
 
-        S = tl.where(
-            query_mask_1[:, None] & query_mask_0[:, None] & seq_mask, S, float("-inf")
-        )
+        S = tl.where(query_mask_1[:, None] & query_mask_0[:, None] & seq_mask,
+                     S, float("-inf"))
 
         if SLIDING_WINDOW > 0:
-            S = tl.where(
-                (context_len + query_pos[:, None] - seq_offset) < SLIDING_WINDOW,
-                S,
-                float("-inf"),
-            )
+            S = tl.where((context_len + query_pos[:, None] - seq_offset)
+                         < SLIDING_WINDOW, S, float("-inf"))
 
         if USE_ALIBI_SLOPES:
             S += alibi_slope[:, None] * (seq_offset - context_len)
@@ -492,51 +486,49 @@ def kernel_unified_attention_3d(
         acc += tl.dot(P.to(V.dtype), V)
 
     segm_output_offset = (
-        query_offset_0[:, None].to(tl.int64)
-        * (num_query_heads * NUM_SEGMENTS_PER_SEQ * HEAD_SIZE_PADDED)
-        + query_offset_1[:, None] * (NUM_SEGMENTS_PER_SEQ * HEAD_SIZE_PADDED)
-        + segm_idx * HEAD_SIZE_PADDED
-        + tl.arange(0, HEAD_SIZE_PADDED)[None, :]
-    )
+        query_offset_0[:, None].to(tl.int64) *
+        (num_query_heads * NUM_SEGMENTS_PER_SEQ * HEAD_SIZE_PADDED) +
+        query_offset_1[:, None] * (NUM_SEGMENTS_PER_SEQ * HEAD_SIZE_PADDED) +
+        segm_idx * HEAD_SIZE_PADDED + tl.arange(0, HEAD_SIZE_PADDED)[None, :])
     tl.store(
         segm_output_ptr + segm_output_offset,
         acc,
         mask=dim_mask[None, :] & query_mask_0[:, None] & query_mask_1[:, None],
     )
-    segm_offset = (
-        query_offset_0.to(tl.int64) * (num_query_heads * NUM_SEGMENTS_PER_SEQ)
-        + query_offset_1 * NUM_SEGMENTS_PER_SEQ
-        + segm_idx
-    )
+    segm_offset = (query_offset_0.to(tl.int64) *
+                   (num_query_heads * NUM_SEGMENTS_PER_SEQ) +
+                   query_offset_1 * NUM_SEGMENTS_PER_SEQ + segm_idx)
     tl.store(segm_max_ptr + segm_offset, M, mask=query_mask_0 & query_mask_1)
-    tl.store(segm_expsum_ptr + segm_offset, L, mask=query_mask_0 & query_mask_1)
+    tl.store(segm_expsum_ptr + segm_offset,
+             L,
+             mask=query_mask_0 & query_mask_1)
 
 
 @triton.jit
 def reduce_segments(
-    output_ptr,  # [num_tokens, num_query_heads, head_size]
-    segm_output_ptr,
-    # [num_tokens, num_query_heads, max_num_segments, head_size]
-    segm_max_ptr,  # [num_tokens, num_query_heads, max_num_segments]
-    segm_expsum_ptr,  # [num_tokens, num_query_heads, max_num_segments]
-    seq_lens_ptr,  # [num_seqs]
-    num_seqs,  # int
-    num_query_heads: tl.constexpr,  # int
-    output_stride_0: tl.int64,  # int
-    output_stride_1: tl.int64,  # int, should be equal to head_size
-    block_table_stride: tl.int64,  # int
-    BLOCK_SIZE: tl.constexpr,  # int
-    HEAD_SIZE: tl.constexpr,  # int, must be power of 2
-    HEAD_SIZE_PADDED: tl.constexpr,  # int, must be power of 2
-    query_start_len_ptr,  # [num_seqs+1]
-    BLOCK_Q: tl.constexpr,  # int
-    NUM_SEGMENTS_PER_SEQ: tl.constexpr,  # int
+        output_ptr,  # [num_tokens, num_query_heads, head_size]
+        segm_output_ptr,
+        #[num_tokens, num_query_heads, max_num_segments, head_size]
+        segm_max_ptr,  # [num_tokens, num_query_heads, max_num_segments]
+        segm_expsum_ptr,  # [num_tokens, num_query_heads, max_num_segments]
+        seq_lens_ptr,  # [num_seqs]
+        num_seqs,  # int
+        num_query_heads: tl.constexpr,  # int
+        output_stride_0: tl.int64,  # int
+        output_stride_1: tl.int64,  # int, should be equal to head_size
+        block_table_stride: tl.int64,  # int
+        BLOCK_SIZE: tl.constexpr,  # int
+        HEAD_SIZE: tl.constexpr,  # int, must be power of 2
+        HEAD_SIZE_PADDED: tl.constexpr,  # int, must be power of 2
+        query_start_len_ptr,  # [num_seqs+1]
+        BLOCK_Q: tl.constexpr,  # int
+        NUM_SEGMENTS_PER_SEQ: tl.constexpr,  # int
 ):
     query_token_idx = tl.program_id(0)
     query_head_idx = tl.program_id(1)
-    seq_idx = find_seq_idx(
-        query_start_len_ptr, query_token_idx, num_seqs, BLOCK_Q, False
-    )
+
+    seq_idx = find_seq_idx(query_start_len_ptr, query_token_idx, num_seqs,
+                           BLOCK_Q, False)
 
     # sequence len for this particular sequence
     seq_len = tl.load(seq_lens_ptr + seq_idx)
@@ -548,32 +540,34 @@ def reduce_segments(
     # create masks for subsequent loads
     act_num_segments = cdiv_fn(seq_len, blocks_per_segment * BLOCK_SIZE)
     segm_mask = tl.arange(0, NUM_SEGMENTS_PER_SEQ) < tl.full(
-        [NUM_SEGMENTS_PER_SEQ], act_num_segments, dtype=tl.int32
-    )
-    dim_mask = tl.where(tl.arange(0, HEAD_SIZE_PADDED) < HEAD_SIZE, 1, 0).to(tl.int1)
+        [NUM_SEGMENTS_PER_SEQ], act_num_segments, dtype=tl.int32)
+    dim_mask = tl.where(tl.arange(0, HEAD_SIZE_PADDED) < HEAD_SIZE, 1,
+                        0).to(tl.int1)
 
     # load segment maxima
-    segm_offset = (
-        query_token_idx.to(tl.int64) * (num_query_heads * NUM_SEGMENTS_PER_SEQ)
-        + query_head_idx * NUM_SEGMENTS_PER_SEQ
-        + tl.arange(0, NUM_SEGMENTS_PER_SEQ)
-    )
-    segm_max = tl.load(segm_max_ptr + segm_offset, mask=segm_mask, other=float("-inf"))
+    segm_offset = (query_token_idx.to(tl.int64) *
+                   (num_query_heads * NUM_SEGMENTS_PER_SEQ) +
+                   query_head_idx * NUM_SEGMENTS_PER_SEQ +
+                   tl.arange(0, NUM_SEGMENTS_PER_SEQ))
+    segm_max = tl.load(segm_max_ptr + segm_offset,
+                       mask=segm_mask,
+                       other=float("-inf"))
     overall_max = tl.max(segm_max)
 
     # load and rescale segment exp sums
-    segm_expsum = tl.load(segm_expsum_ptr + segm_offset, mask=segm_mask, other=0.0)
+    segm_expsum = tl.load(segm_expsum_ptr + segm_offset,
+                          mask=segm_mask,
+                          other=0.0)
     segm_expsum = segm_expsum * tl.exp(segm_max - overall_max)
     overall_expsum = tl.sum(segm_expsum)
 
     # load, rescale, and add segment attention outputs
     segm_output_offset = (
-        query_token_idx.to(tl.int64)
-        * (num_query_heads * NUM_SEGMENTS_PER_SEQ * HEAD_SIZE_PADDED)
-        + query_head_idx * (NUM_SEGMENTS_PER_SEQ * HEAD_SIZE_PADDED)
-        + tl.arange(0, NUM_SEGMENTS_PER_SEQ)[:, None] * HEAD_SIZE_PADDED
-        + tl.arange(0, HEAD_SIZE_PADDED)[None, :]
-    )
+        query_token_idx.to(tl.int64) *
+        (num_query_heads * NUM_SEGMENTS_PER_SEQ * HEAD_SIZE_PADDED) +
+        query_head_idx * (NUM_SEGMENTS_PER_SEQ * HEAD_SIZE_PADDED) +
+        tl.arange(0, NUM_SEGMENTS_PER_SEQ)[:, None] * HEAD_SIZE_PADDED +
+        tl.arange(0, HEAD_SIZE_PADDED)[None, :])
     segm_output = tl.load(
         segm_output_ptr + segm_output_offset,
         mask=segm_mask[:, None] & dim_mask[None, :],
@@ -585,11 +579,9 @@ def reduce_segments(
     acc = tl.where(overall_expsum == 0.0, 0.0, acc_sum / overall_expsum)
 
     # write result
-    output_offset = (
-        query_token_idx * output_stride_0
-        + query_head_idx * output_stride_1
-        + tl.arange(0, HEAD_SIZE_PADDED)
-    )
+    output_offset = (query_token_idx * output_stride_0 +
+                     query_head_idx * output_stride_1 +
+                     tl.arange(0, HEAD_SIZE_PADDED))
     tl.store(output_ptr + output_offset, acc, mask=dim_mask)
 
 
@@ -654,7 +646,8 @@ def unified_attention(
 
     # Original condition:
     # if max_seqlen_q > 1 or total_num_q_blocks * num_kv_heads > 128:
-    if max_seqlen_q > 1 or num_2d_prgms > target_num_prgms:
+    # call 2d for all cases, it has real sliding window support
+    if True:
         # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         # q.shape[0] is sum(query_lens) which is dynamic so it shouldnt be used in the heuristic
 
@@ -667,7 +660,7 @@ def unified_attention(
             else:
                 BLOCK_M = 128
             BLOCK_Q = BLOCK_M // num_queries_per_kv
-            total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
+            total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs 
         kernel_unified_attention_2d[
             (
                 total_num_q_blocks,
@@ -713,15 +706,30 @@ def unified_attention(
             BLOCK_M=BLOCK_M,
             waves_per_eu=2,
             num_warps=4,
+            num_stages=4 if BLOCK_M == 16 else 1,
         )
     else:
         # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         # q.shape[0] is sum(query_lens) which becomes same as batch size
         # so it is static dim. for decode, should be okay to use it in heuristics
+        # make the block_m bigger if we already have enough parallelism
+
         NUM_SEGMENTS = math.ceil(target_num_prgms / (total_num_q_blocks * num_kv_heads))
         NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
         NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
         NUM_SEGMENTS = max(NUM_SEGMENTS, 16)
+        num_3d_prgms = total_num_q_blocks * NUM_SEGMENTS * num_kv_heads
+        
+        if getattr(unified_attention, "print", True):
+            num_3d_prgms = total_num_q_blocks * NUM_SEGMENTS * num_kv_heads
+            setattr(unified_attention, "print", False)
+            print(f"{total_num_q_blocks=}")
+            print(f"{BLOCK_Q=}")
+            print(f"{BLOCK_M=}")
+            print(f"{NUM_SEGMENTS=}")
+            print(f"{num_3d_prgms=}")
+            print(f"{num_2d_prgms=}")
+            print(f"{target_num_prgms=}")
         segm_output = torch.empty(
             q.shape[0],
             num_query_heads,
@@ -745,47 +753,49 @@ def unified_attention(
             device=q.device,
         )
 
-        kernel_unified_attention_3d[(total_num_q_blocks, num_kv_heads, NUM_SEGMENTS)](
-            segm_output_ptr=segm_output,
-            segm_max_ptr=segm_max,
-            segm_expsum_ptr=segm_expsum,
-            query_ptr=q,
-            key_cache_ptr=k,
-            value_cache_ptr=v,
-            sink_ptr=sinks,
-            block_tables_ptr=block_table,
-            seq_lens_ptr=seqused_k,
-            alibi_slopes_ptr=alibi_slopes,
-            scale=softmax_scale,
-            k_scale=k_descale,
-            v_scale=v_descale,
-            softcap=softcap,
-            num_query_heads=num_query_heads,
-            num_queries_per_kv=num_queries_per_kv,
-            block_table_stride=block_table.stride(0),
-            query_stride_0=q.stride(0),
-            query_stride_1=q.stride(1),
-            BLOCK_SIZE=block_size,
-            HEAD_SIZE=head_size,
-            HEAD_SIZE_PADDED=triton.next_power_of_2(head_size),
-            USE_ALIBI_SLOPES=use_alibi_slopes,
-            USE_SOFTCAP=(softcap > 0),
-            SLIDING_WINDOW=(1 + window_size[0]),
-            stride_k_cache_0=k.stride(0),
-            stride_k_cache_1=k.stride(1),
-            stride_k_cache_2=k.stride(2),
-            stride_k_cache_3=k.stride(3),
-            stride_v_cache_0=v.stride(0),
-            stride_v_cache_1=v.stride(1),
-            stride_v_cache_2=v.stride(2),
-            stride_v_cache_3=v.stride(3),
-            query_start_len_ptr=cu_seqlens_q,
-            BLOCK_Q=BLOCK_Q,
-            num_seqs=num_seqs,
-            BLOCK_M=BLOCK_M,
-            NUM_SEGMENTS_PER_SEQ=NUM_SEGMENTS,
-            waves_per_eu=2,
-        )
+        kernel_unified_attention_3d[(
+            total_num_q_blocks, num_kv_heads, NUM_SEGMENTS)](
+                segm_output_ptr=segm_output,
+                segm_max_ptr=segm_max,
+                segm_expsum_ptr=segm_expsum,
+                query_ptr=q,
+                key_cache_ptr=k,
+                value_cache_ptr=v,
+                sink_ptr=sinks,
+                block_tables_ptr=block_table,
+                seq_lens_ptr=seqused_k,
+                alibi_slopes_ptr=alibi_slopes,
+                scale=softmax_scale,
+                k_scale=k_descale,
+                v_scale=v_descale,
+                softcap=softcap,
+                num_query_heads=num_query_heads,
+                num_queries_per_kv=num_queries_per_kv,
+                block_table_stride=block_table.stride(0),
+                query_stride_0=q.stride(0),
+                query_stride_1=q.stride(1),
+                BLOCK_SIZE=block_size,
+                HEAD_SIZE=head_size,
+                HEAD_SIZE_PADDED=triton.next_power_of_2(head_size),
+                USE_ALIBI_SLOPES=use_alibi_slopes,
+                USE_SOFTCAP=(softcap > 0),
+                SLIDING_WINDOW=(1 + window_size[0]),
+                stride_k_cache_0=k.stride(0),
+                stride_k_cache_1=k.stride(1),
+                stride_k_cache_2=k.stride(2),
+                stride_k_cache_3=k.stride(3),
+                stride_v_cache_0=v.stride(0),
+                stride_v_cache_1=v.stride(1),
+                stride_v_cache_2=v.stride(2),
+                stride_v_cache_3=v.stride(3),
+                query_start_len_ptr=cu_seqlens_q,
+                BLOCK_Q=BLOCK_Q,
+                num_seqs=num_seqs,
+                BLOCK_M=BLOCK_M,
+                NUM_SEGMENTS_PER_SEQ=NUM_SEGMENTS,
+                waves_per_eu=2,
+                num_stages=1
+            )
 
         reduce_segments[(q.shape[0], num_query_heads)](
             output_ptr=out,
@@ -804,4 +814,5 @@ def unified_attention(
             query_start_len_ptr=cu_seqlens_q,
             BLOCK_Q=BLOCK_Q,
             NUM_SEGMENTS_PER_SEQ=NUM_SEGMENTS,
+            num_stages=1,
         )

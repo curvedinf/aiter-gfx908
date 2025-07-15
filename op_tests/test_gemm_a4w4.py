@@ -52,7 +52,7 @@ def run_triton(x, w, x_scales, w_scales, out, dtype=dtypes.bf16):
 def run_gemm_asm(
     x,
     weightshuffle,
-    x_scale,
+    x_scale,formate 
     w_scale,
     out,
     bias=None,
@@ -60,7 +60,9 @@ def run_gemm_asm(
     bpreshuffle=True,
     log2_k_split=99,
 ):
-    out_reset = torch.zeros((out.shape[0] + 255) // 256 * 256, out.shape[1], dtype=dtype)
+    out_reset = torch.zeros(
+        (out.shape[0] + 255) // 256 * 256, out.shape[1], dtype=dtype
+    )
 
     return aiter.gemm_a4w4_asm(
         x,

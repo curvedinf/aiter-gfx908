@@ -670,20 +670,20 @@ def unified_attention(
     # call 2d if sliding window is used
     if (
         SLIDING_WINDOW > 0
-        or max_seqlen_q > 1
-        or total_num_q_blocks * num_kv_heads > get_num_sms()
+        or num_2d_prgms >= target_num_prgms * 2
+        or max_seqlen_k <= 1024
     ):
         # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         # q.shape[0] is sum(query_lens) which is dynamic so it shouldnt be used in the heuristic
-
+        num_stages_2d = 4
         # make the block_m bigger if we already have enough parallelism
-        if num_2d_prgms >= 2 * target_num_prgms:
-            if num_2d_prgms <= 4 * target_num_prgms:
-                BLOCK_M = 32
-            elif num_2d_prgms <= 8 * target_num_prgms:
+        if num_2d_prgms >= 4 * target_num_prgms:
+            if num_2d_prgms <= 8 * target_num_prgms:
                 BLOCK_M = 64
+                num_stages_2d = 2 if SLIDING_WINDOW > 0 else 4
             else:
-                BLOCK_M = 128
+                BLOCK_M = 64
+                num_stages_2d = 1
             BLOCK_Q = BLOCK_M // num_queries_per_kv
             total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         kernel_unified_attention_2d[
@@ -731,14 +731,13 @@ def unified_attention(
             BLOCK_M=BLOCK_M,
             waves_per_eu=2,
             num_warps=4,
-            num_stages=4 if BLOCK_M == 16 else 1,
+            num_stages=num_stages_2d,
         )
     else:
         # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         # q.shape[0] is sum(query_lens) which becomes same as batch size
         # so it is static dim. for decode, should be okay to use it in heuristics
         # make the block_m bigger if we already have enough parallelism
-
         NUM_SEGMENTS = math.ceil(target_num_prgms / (total_num_q_blocks * num_kv_heads))
         NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
         NUM_SEGMENTS = min(NUM_SEGMENTS, 256)

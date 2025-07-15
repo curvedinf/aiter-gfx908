@@ -658,7 +658,7 @@ struct BlockFmhaPipelineQRKSVS
                                  Policy::template MakeVRegTileDistribution<Problem>()))) v_tile;
         } kv_tile;
 
-        struct sp_compute_type
+        union sp_compute_type
         {
             CK_TILE_DEVICE sp_compute_type() {}
 
@@ -965,9 +965,6 @@ struct BlockFmhaPipelineQRKSVS
                         ck_tile::exp2(sp(sp_reg_idx).sp_compute[i_j_idx] - row_max);
                 });
             });
-
-            sp(sp_reg_idx).p = cast_tile<PDataType>(
-                tile_elementwise_in(p_compute_element_func, sp(sp_reg_idx).sp_compute));
         };
 
         decltype(block_tile_reduce<SMPLComputeDataType>(
@@ -982,8 +979,11 @@ struct BlockFmhaPipelineQRKSVS
                 sequence<1>{},
                 f_sum,
                 SMPLComputeDataType{0}); // rowsum(Pcompute{j})
-
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
+
+            sp(sp_reg_idx).p = cast_tile<PDataType>(
+                tile_elementwise_in(p_compute_element_func, sp(sp_reg_idx).sp_compute));
+
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {

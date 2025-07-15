@@ -1585,7 +1585,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill_inline(
     //     q_dram,
     //     q_rope_dram_window_lengths,
     //     {mid, Traits::kSizeNope});
-    __shared__ uint8_t smem[65500];
+    __shared__ uint8_t smem[65535];
     auto o_lds_ptr   = reinterpret_cast<acc_t*>(smem);
 
     const int32_t mid = __builtin_amdgcn_readfirstlane(blockIdx.x * Traits::kBlockM);
@@ -1752,7 +1752,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill_inline(
         params.p_seqlens_k,
         params.scale_softmax,
         __builtin_amdgcn_readfirstlane(16),
-        __builtin_amdgcn_readfirstlane(1),
+        __builtin_amdgcn_readfirstlane(5),
         __builtin_amdgcn_readfirstlane(55296),
         __builtin_amdgcn_readfirstlane(2 * 576),
         __builtin_amdgcn_readfirstlane(0),
@@ -1915,7 +1915,7 @@ void dispatch_fmla_fwd_splictkv_prefill_inline(
     int sub_Q = 64;
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     const int32_t num_blk   = ck_tile::integer_divide_ceil(params.size_s, sub_Q);
-    const dim3    grid_attn = dim3(num_blk, params.size_b, 1);
+    const dim3    grid_attn = dim3(num_blk, params.size_b, 5);
     const dim3    grid_comb = dim3(params.size_s, params.size_h, params.size_b);
 
     auto kn_attn = &kn_fmla_fwd_splictkv_prefill_inline<Traits, scalar_t, acc_t, out_t>;
@@ -2067,19 +2067,19 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
 #ifndef enable_inline
     const int32_t num_splits = calculate_num_splits<Traits>(batch_size, num_heads_q, seqlen_q);
 #else
-    const int32_t num_splits = 1;
+    const int32_t num_splits = 5;
 #endif
     const bool    do_splits = num_splits > 1;
 
     // Combine shader, which only exists when num_splits > 1, will conduct type convert by default and force.
     // Thus, kForceOutAcc doesn't work in this case.
 #ifndef enable_inline
-    auto output = torch::empty({batch_size, seqlen_q, num_heads_q, head_size_v},
+    auto output = torch::zeros({batch_size, seqlen_q, num_heads_q, head_size_v},
                                (kForceOutAcc && !do_splits) ? opts_acc : opts);
-    auto softmax_lse = torch::empty({batch_size, num_heads_q, seqlen_q}, opts_acc);
+    auto softmax_lse = torch::zeros({batch_size, num_heads_q, seqlen_q}, opts_acc);
 #else
-    auto output = torch::empty({batch_size * seqlen_q, num_splits, num_heads_q, head_size_v}, num_splits == 1? opts : opts_acc);
-    auto softmax_lse = torch::empty({batch_size * seqlen_q, num_splits, num_heads_q, 1}, opts_acc);
+    auto output = torch::zeros({batch_size * seqlen_q_ori, num_splits, hq_hk_ratio, head_size_v}, num_splits == 1? opts : opts_acc);
+    auto softmax_lse = torch::zeros({batch_size * seqlen_q_ori, num_splits, hq_hk_ratio, 1}, opts_acc);
 #endif
 
     ck_tile::FlashMlaPrefillFwdParams params = {};

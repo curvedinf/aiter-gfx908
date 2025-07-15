@@ -773,7 +773,8 @@
             "f'{AITER_CSRC_DIR}/kernels/fmla/fwd_prefill_kernels.cu'",
             "f'{AITER_CSRC_DIR}/pybind/fmla_fwd_pybind.cu'"
         ],
-        "flags_extra_cc": [],
+        "flags_extra_cc": [
+        ],
         "flags_extra_hip": [
             "'-DCK_TILE_FMHA_FWD_FAST_EXP2=1'",
             "'-DCK_TILE_FLOAT_TO_BFLOAT16_DEFAULT=3'",

@@ -850,3 +850,284 @@
              [o_regs_125]"+v"(o_reg[125]),
              [o_regs_126]"+v"(o_reg[126]),
              [o_regs_127]"+v"(o_reg[127]),
+
+
+
+
+        LOOP_STRIDE4(0, VGPR2SHUFFLE);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx);
+        LOOP_STRIDE4(1, VGPR2SHUFFLE);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 288);
+
+        LOOP_STRIDE4(2, VGPR2SHUFFLE);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 36);
+        LOOP_STRIDE4(3, VGPR2SHUFFLE);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 36 + 288);
+
+
+        LOOP_STRIDE4(16, VGPR2SHUFFLE);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576);
+        LOOP_STRIDE4(17, VGPR2SHUFFLE);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 288);
+
+        LOOP_STRIDE4(18, VGPR2SHUFFLE);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36);
+        LOOP_STRIDE4(19, VGPR2SHUFFLE);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36 + 288);
+
+
+        std::array<uint32_t, 16> arr;
+
+// #pragma unroll
+// 		for (int r = 0; r < 2; ++r)
+// 		{
+// #pragma unroll
+// 			for (int i = 0; i < 2; ++i)
+// 			{
+// #pragma unroll
+// 				for (int j = 0; j < 2; ++j)
+// 				{
+//                     arr[r * 8 + i * 2 + j] = o_lds_ptr[lds_ld_idx + r * 576 + i * 288 + j];
+// 				}
+//
+// #pragma unroll
+// 				for (int j = 0; j < 2; ++j)
+// 				{
+//                     arr[r * 8 + i * 2 + j + 4] = o_lds_ptr[lds_ld_idx + r * 576 + i * 288 + j + 16];
+// 				}
+// 			}
+// 		}
+
+        // B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36 + 288);
+
+        B16_LDS_2_VGPR_LOOP_STRIDE1(B16_LDS_2_VGPR, lds_ld_idx);
+
+        // register bf16x2_t shuffle asm("v176");
+        // asm volatile("v_mov_b32 %0, %1"
+        //         : "=v"(shuffle)
+        //         : "v"(arr[15])
+        //         // : "v"(v0)
+        //         );
+
+        int copy_index = (int((vthread & 7)  << 4) +
+                         int(vthread >> 3) * 1024 +
+                         int(s4) * 16 * 512 * 2+
+                         int(s3) * 3 * 16 * 512 * 2 +
+                         wave_id * 16 * 512 * 2) >> 2; //num_splits == 1
+
+        // if (vthread == 0)
+        //     printf("%d, %d, %d %d, %d, v172:[%f, %f]\n ", s2, s3, s4, wave_id, copy_index, bf16_to_float(shuffle.x), bf16_to_float(shuffle.y));
+
+
+        B16_VGPR_2_DRAM_LOOP_STRIDE1(B16_VGPR_2_DRAM, copy_index);
+// if (s3 == 0 && vthread == 0) {
+		// p_output[copy_index] = arr[0];
+// #pragma unroll
+// 		for (int r = 0; r < 2; ++r)
+// 		{
+// #pragma unroll
+// 			for (int i = 0; i < 2; ++i)
+// 			{
+// #pragma unroll
+// 				for (int j = 0; j < 4; ++j)
+// 				{
+// 					// B16_VGPR_2_DRAM(copy_index + r * 2048 + i * 32 + j, 
+// 					// 			   r * 4 + i * 8 + j);
+//                     p_output[copy_index + r * 2048 + i * 32 + j] = arr[r * 4 + i * 8 + j];
+// 				}
+// 			}
+		// }
+//
+// 		copy_index += 64;
+// // }
+
+
+
+        // int o_reg_idx = 0;
+        // int lds_st_idx = (wave_id * 4608 + 288 * (vthread >> 4) + 8 * (vthread & 15)) >> 1;
+        // int lds_ld_idx = (wave_id * 4608 + 8 * (vthread >> 3) + 144 * (vthread & 7))  >> 1;
+        //
+        // int copy_index = ((vthread & 7)  << 4 +
+        //                  (vthread >> 3) * 1024 +
+        //                  s4 * 16 * 1024 +
+        //                  wave_id * 16 * 1024) >> 2; //num_splits == 1
+        //
+// #pragma unroll
+//         for (int epi_loop = 0; epi_loop < 1; ++epi_loop)
+//         {
+// #pragma unroll
+//             for (int r = 0; r < 2; ++r)
+//             {
+// #pragma unroll
+//                 for (int i = 0; i < 2; ++i)
+//                 {
+//                     int o_reg_inner = o_reg_idx;
+//
+//                     B16_VGPR_2_SHUFFLEX(0, o_reg_inner);
+//                     o_reg_inner += 4;
+//                     B16_VGPR_2_SHUFFLEY(0, o_reg_inner);
+//                     o_reg_inner += 4;
+//                     B16_VGPR_2_SHUFFLEX(1, o_reg_inner);
+//                     o_reg_inner += 4;
+//                     B16_VGPR_2_SHUFFLEY(1, o_reg_inner);
+//
+//                     o_reg_idx += 1;
+//
+// 					B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0, 0);
+// 					B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0, 0);
+// 					B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1, 1);
+// 					B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1, 1);
+//
+//                     o_reg_inner = o_reg_idx;
+//                     B16_VGPR_2_SHUFFLEX(0, o_reg_inner);
+//                     o_reg_inner += 4;
+//                     B16_VGPR_2_SHUFFLEY(0, o_reg_inner);
+//                     o_reg_inner += 4;
+//                     B16_VGPR_2_SHUFFLEX(1, o_reg_inner);
+//                     o_reg_inner += 4;
+//                     B16_VGPR_2_SHUFFLEY(1, o_reg_inner);
+//
+//                     o_reg_idx += 1;
+//
+//                     B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0 + 576, 0);
+//                     B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0 + 576, 0);
+//                     B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1 + 576, 1);
+//                     B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1 + 576, 1);
+//                 }
+//
+//                 o_reg_idx += 16;
+//             }
+//
+//
+//             // ds_read regard vgpr as fp32
+// #pragma unroll
+//             for (int r = 0; r < 2; ++r)
+//             {
+// #pragma unroll
+//                 for (int i = 0; i < 2; ++i)
+//                 {
+// #pragma unroll
+//                     for (int j = 0; j < 2; ++j)
+//                     {
+//                         B16_LDS_2_VGPR(r * 8 + i * 2 + j,
+//                                        lds_ld_idx + r * 576 + i * 16 + j);
+								   // lds_ld_idx + r * 576 + i * 288 + j);
+//                     }
+//
+// #pragma unroll
+//                     for (int j = 0; j < 2; ++j)
+//                     {
+//                         B16_LDS_2_VGPR(r * 8 + i * 2 + j + 4,
+//                                        lds_ld_idx + r * 576 + i * 16 + j + 288);
+								   // lds_ld_idx + r * 576 + i * 288 + j + 16);
+//                     }
+//                 }
+//             }
+//
+//             // vgpr 2 dram as fp32
+// #pragma unroll
+//             for (int r = 0; r < 2; ++r)
+//             {
+// #pragma unroll
+//                 for (int i = 0; i < 2; ++i)
+//                 {
+// #pragma unroll
+//                     for (int j = 0; j < 4; ++j)
+//                     {
+//                         B16_VGPR_2_DRAM(copy_index + r * 2048 + i * 32 + j, 
+//                                        r * 4 + i * 8 + j);
+//                     }
+//                 }
+//             }
+//             copy_index += 64;
+//         });
+
+        // if (vthread == 0)
+        //     printf("%d, %d, %d, v172:%f \n ", s2, s3, s4, bf16_to_float(shuffle0.x));
+// #pragma unroll
+// 		for (int r = 0; r < 2; ++r)
+// 		{
+// #pragma unroll
+// 			for (int i = 0; i < 2; ++i)
+// 			{
+// 				int o_reg_inner = o_reg_idx;
+//
+// 				B16_VGPR_2_SHUFFLEX(0, o_reg_inner);
+// 				o_reg_inner += 4;
+// 				B16_VGPR_2_SHUFFLEY(0, o_reg_inner);
+// 				o_reg_inner += 4;
+// 				B16_VGPR_2_SHUFFLEX(1, o_reg_inner);
+// 				o_reg_inner += 4;
+// 				B16_VGPR_2_SHUFFLEY(1, o_reg_inner);
+//
+// 				o_reg_idx += 1;
+//
+// 				B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0, 0);
+// 				B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0, 0);
+// 				B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1, 1);
+// 				B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1, 1);
+//
+// 				o_reg_inner = o_reg_idx;
+// 				B16_VGPR_2_SHUFFLEX(0, o_reg_inner);
+// 				o_reg_inner += 4;
+// 				B16_VGPR_2_SHUFFLEY(0, o_reg_inner);
+// 				o_reg_inner += 4;
+// 				B16_VGPR_2_SHUFFLEX(1, o_reg_inner);
+// 				o_reg_inner += 4;
+// 				B16_VGPR_2_SHUFFLEY(1, o_reg_inner);
+//
+// 				o_reg_idx += 1;
+//
+// 				B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0 + 576, 0);
+// 				B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0 + 576, 0);
+// 				B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1 + 576, 1);
+// 				B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1 + 576, 1);
+// 			}
+//
+// 			o_reg_idx += 12;
+// 		}
+//
+//
+// 		// ds_read regard vgpr as fp32
+// #pragma unroll
+// 		for (int r = 0; r < 2; ++r)
+// 		{
+// #pragma unroll
+// 			for (int i = 0; i < 2; ++i)
+// 			{
+// #pragma unroll
+// 				for (int j = 0; j < 2; ++j)
+// 				{
+// 					B16_LDS_2_VGPR(r * 8 + i * 2 + j,
+// 								   lds_ld_idx + r * 576 + i * 288 + j);
+// 				}
+//
+// #pragma unroll
+// 				for (int j = 0; j < 2; ++j)
+// 				{
+// 					B16_LDS_2_VGPR(r * 8 + i * 2 + j + 4,
+// 								   lds_ld_idx + r * 576 + i * 288 + j + 16);
+// 				}
+// 			}
+// 		}
+//
+// 		// vgpr 2 dram as fp32
+// #pragma unroll
+// 		for (int r = 0; r < 2; ++r)
+// 		{
+// #pragma unroll
+// 			for (int i = 0; i < 2; ++i)
+// 			{
+// #pragma unroll
+// 				for (int j = 0; j < 4; ++j)
+// 				{
+// 					B16_VGPR_2_DRAM(copy_index + r * 2048 + i * 32 + j, 
+// 								   r * 4 + i * 8 + j);
+// 				}
+// 			}
+// 		}
+// 		copy_index += 64;
+
+        // if (vthread == 0)
+        //     printf("%d, %d, %d, v172:%f \n ", s2, s3, s4, v0);
+

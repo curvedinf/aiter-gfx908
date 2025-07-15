@@ -7,6 +7,9 @@
 #include "aiter_hip_common.h"
 #include "macro_utils.hpp"
 
+
+#define numsplit5
+
 #define VGPR2SHUFFLE(n_s, n_v)  shuffle##n_s = v##n_v
 #define SUFFFLE2LDS(n_lds, n_s) o_lds_ptr[n_lds] = shuffle##n_s
 #define LDS2VGPR(n_v, n_lds)    v##n_v = o_lds_ptr[n_lds]
@@ -14,27 +17,64 @@
 
 
 #define B16_VGPR_2_SHUFFLEX(n_s, n_v)  (shuffle##n_s).x = float_to_bf16(v##n_v);
-#define B16_VGPR_2_SHUFFLEY(n_s, n_v)  (shuffle##n_s).y = float_to_bf16(v##n_v);
 
 
 
+#define VGPR2SHUFFLE(n_s, n_v)   \
+asm volatile (                   \
+        "v_mov_b32 %0, %1 \n"      \
+        : "=v"(shuffle##n_s)     \
+        : "v"(v##n_v)            \
+        );         
 
-#define LOOP_STRIDE4(n_v_begin, func1, func2) \
-        LOOP_STRIDE4_##n_v_begin(func1, func2);
+#define VGPR_F32_2_B16(n_target, n_s0, n_s1)   \
+asm volatile (                  \
+  "v_cmp_u_f32   s[38:39], %1, %1 \n"           \
+  "v_add3_u32    v28, %1, v31, 1 \n"           \
+  "v_cndmask_b32  v20, v28, v30, s[38:39] \n"   \
+  "v_cmp_u_f32   s[38:39], %2, %2 \n"           \
+  "v_add3_u32    v28, %2, v31, 1 \n"           \
+  "v_cndmask_b32  v21, v28, v30, s[38:39] \n"    \
+  "v_perm_b32    %0, v21, v20, %3 \n"  \
+  : "=v"(shuffle##n_target)                                \
+  : "v"(shuffle##n_s0),                           \
+    "v"(shuffle##n_s1),                           \
+    "s"(s_perm)                            \
+  : "v20", "v21", "v28", "v30", "v31", "s38", "s39"                      \
+  );
+
+// #define B16_VGPR_2_SHUFFLE(n_s, n_v)  (shuffle##n_s).y = float_to_bf16(v##n_v);
+
+
+#define F32_SUFFFLEY_2_LDS_LOOP(n_lds)  \ 
+        o_lds_ptr[n_lds]     = shuffle0;  \
+        o_lds_ptr[n_lds + 1] = shuffle1;  \
+        o_lds_ptr[n_lds + 2] = shuffle2;  \
+        o_lds_ptr[n_lds + 3] = shuffle3;
+
+#define F32_LDS_2_VGPR_LOOP_STRIDE1(func, lds_st_base) \
+        F32_LDS_2_VGPR_LOOP_STRIDE1_0_0_0(func, lds_st_base)
+#define F32_VGPR_2_DRAM_LOOP_STRIDE1(func, dram_st_base) \
+        F32_VGPR_2_DRAM_LOOP_STRIDE1_0_0_0(func, dram_st_base)
+
+        
+
+#define LOOP_STRIDE4_TAIL(...) \
+
+#define LOOP_STRIDE4(n_v_begin, func0, func1, ...) \
+        LOOP_STRIDE4_##n_v_begin(func0); \
+        func1(__VA_ARGS__);
 
 
 #define LOOP_STRIDE1(n_v_begin, fuc) \
         LOOP_STRIDE1_##n_v_begin(n_v_begin, fuc, ...);
 
-#define B16_SUFFFLEX_2_LDS(n_lds, n_s) o_bf16_lds_ptr[n_lds]     = (shuffle##n_s).x;
-#define B16_SUFFFLEY_2_LDS(n_lds, n_s) o_bf16_lds_ptr[n_lds + 1] = (shuffle##n_s).y;
-
 
 #define B16_SUFFFLEY_2_LDS_LOOP(n_lds)  \ 
-    B16_SUFFFLEX_2_LDS(n_lds, 0)        \
-    B16_SUFFFLEY_2_LDS(n_lds, 0)        \
-    B16_SUFFFLEX_2_LDS(n_lds + 2, 1)    \
-    B16_SUFFFLEY_2_LDS(n_lds + 2, 1)
+    VGPR_F32_2_B16(0, 0, 1)        \
+    VGPR_F32_2_B16(1, 2, 3)        \
+    o_lds_ptr[n_lds]     = shuffle0;  \
+    o_lds_ptr[n_lds + 1] = shuffle1;
 
 
 
@@ -43,15 +83,18 @@
 //
 // #define OFFSET_B16_VGPR_2_DRAM_VGPR(r, i, j) (r * 4 + i * 8 + j)
 // #define OFFSET_B16_VGPR_2_DRAM_DRAM(r, i, j) (r * 2048 + i * 32 + j)
-//
+
+
+
 #define B16_VGPR_2_DRAM_LOOP_STRIDE1(func, ptr_base) \
     B16_VGPR_2_DRAM_LOOP_STRIDE1_0_0_0(func, ptr_base)
 
 #define B16_LDS_2_VGPR_LOOP_STRIDE1(func, ptr_base) \
     B16_LDS_2_VGPR_LOOP_STRIDE1_0_0_0(func, ptr_base)
 
-#define B16_LDS_2_VGPR(n_v, n_lds)     v##n_v = o_lds_ptr[n_lds];
-#define B16_VGPR_2_DRAM(n_v, n_dram)   p_output[n_dram] = v##n_v;
+#define LDS_2_VGPR(n_v, n_lds)     arr[n_v] = o_lds_ptr[n_lds];
+
+#define VGPR_2_DRAM(n_v, n_dram)   p_output[n_dram] = arr[n_v];
 
 
 namespace ck_tile {
@@ -806,7 +849,7 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
                CK_TILE_LDS_ADDR void* smem
                )
     {
-        auto o_lds_ptr   = reinterpret_cast<acc_t*>(smem);
+        auto o_lds_ptr   = reinterpret_cast<uint32_t*>(smem);
 
         auto o_bf16_lds_ptr   = reinterpret_cast<bf16_t*>(smem);
 
@@ -821,7 +864,8 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 		auto lse_ptr    = ck_tile::make_wave_buffer_resource(params.p_softmax_lse);
 		auto kv_indices = ck_tile::make_wave_buffer_resource(params.p_block_table);
 
-		auto p_output = reinterpret_cast<float*>(params.p_output);
+		auto p_output = reinterpret_cast<uint32_t*>(params.p_output);
+		auto p_lse    = reinterpret_cast<uint32_t*>(params.p_softmax_lse);
 
         register float s64 asm("s64") = s_scalar;
         register int s65 asm("s65") = s_head_num_q;
@@ -872,146 +916,149 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 
         register int vthread asm("v0") = threadIdx.x;
 
-        register float v0 asm("v40");
-        register float v1 asm("v41");
-        register float v2 asm("v42");
-        register float v3 asm("v43");
-        register float v4 asm("v44");
-        register float v5 asm("v45");
-        register float v6 asm("v46");
-        register float v7 asm("v47");
-        register float v8 asm("v48");
-        register float v9 asm("v49");
+        register uint32_t v_lse asm("v172");
 
-        register float v10 asm("v50");
-        register float v11 asm("v51");
-        register float v12 asm("v52");
-        register float v13 asm("v53");
-        register float v14 asm("v54");
-        register float v15 asm("v55");
-        register float v16 asm("v56");
-        register float v17 asm("v57");
-        register float v18 asm("v58");
-        register float v19 asm("v59");
+        register uint32_t v0 asm("v40");
+        register uint32_t v1 asm("v41");
+        register uint32_t v2 asm("v42");
+        register uint32_t v3 asm("v43");
+        register uint32_t v4 asm("v44");
+        register uint32_t v5 asm("v45");
+        register uint32_t v6 asm("v46");
+        register uint32_t v7 asm("v47");
+        register uint32_t v8 asm("v48");
+        register uint32_t v9 asm("v49");
 
-        register float v20 asm("v60");
-        register float v21 asm("v61");
-        register float v22 asm("v62");
-        register float v23 asm("v63");
-        register float v24 asm("v64");
-        register float v25 asm("v65");
-        register float v26 asm("v66");
-        register float v27 asm("v67");
-        register float v28 asm("v68");
-        register float v29 asm("v69");
+        register uint32_t v10 asm("v50");
+        register uint32_t v11 asm("v51");
+        register uint32_t v12 asm("v52");
+        register uint32_t v13 asm("v53");
+        register uint32_t v14 asm("v54");
+        register uint32_t v15 asm("v55");
+        register uint32_t v16 asm("v56");
+        register uint32_t v17 asm("v57");
+        register uint32_t v18 asm("v58");
+        register uint32_t v19 asm("v59");
 
-        register float v30 asm("v70");
-        register float v31 asm("v71");
-        register float v32 asm("v72");
-        register float v33 asm("v73");
-        register float v34 asm("v74");
-        register float v35 asm("v75");
-        register float v36 asm("v76");
-        register float v37 asm("v77");
-        register float v38 asm("v78");
-        register float v39 asm("v79");
+        register uint32_t v20 asm("v60");
+        register uint32_t v21 asm("v61");
+        register uint32_t v22 asm("v62");
+        register uint32_t v23 asm("v63");
+        register uint32_t v24 asm("v64");
+        register uint32_t v25 asm("v65");
+        register uint32_t v26 asm("v66");
+        register uint32_t v27 asm("v67");
+        register uint32_t v28 asm("v68");
+        register uint32_t v29 asm("v69");
 
-        register float v40 asm("v80");
-        register float v41 asm("v81");
-        register float v42 asm("v82");
-        register float v43 asm("v83");
-        register float v44 asm("v84");
-        register float v45 asm("v85");
-        register float v46 asm("v86");
-        register float v47 asm("v87");
-        register float v48 asm("v88");
-        register float v49 asm("v89");
+        register uint32_t v30 asm("v70");
+        register uint32_t v31 asm("v71");
+        register uint32_t v32 asm("v72");
+        register uint32_t v33 asm("v73");
+        register uint32_t v34 asm("v74");
+        register uint32_t v35 asm("v75");
+        register uint32_t v36 asm("v76");
+        register uint32_t v37 asm("v77");
+        register uint32_t v38 asm("v78");
+        register uint32_t v39 asm("v79");
 
-        register float v50 asm("v90");
-        register float v51 asm("v91");
-        register float v52 asm("v92");
-        register float v53 asm("v93");
-        register float v54 asm("v94");
-        register float v55 asm("v95");
-        register float v56 asm("v96");
-        register float v57 asm("v97");
-        register float v58 asm("v98");
-        register float v59 asm("v99");
+        register uint32_t v40 asm("v80");
+        register uint32_t v41 asm("v81");
+        register uint32_t v42 asm("v82");
+        register uint32_t v43 asm("v83");
+        register uint32_t v44 asm("v84");
+        register uint32_t v45 asm("v85");
+        register uint32_t v46 asm("v86");
+        register uint32_t v47 asm("v87");
+        register uint32_t v48 asm("v88");
+        register uint32_t v49 asm("v89");
 
-        register float v60 asm("v100");
-        register float v61 asm("v101");
-        register float v62 asm("v102");
-        register float v63 asm("v103");
-        register float v64 asm("v104");
-        register float v65 asm("v105");
-        register float v66 asm("v106");
-        register float v67 asm("v107");
-        register float v68 asm("v108");
-        register float v69 asm("v109");
+        register uint32_t v50 asm("v90");
+        register uint32_t v51 asm("v91");
+        register uint32_t v52 asm("v92");
+        register uint32_t v53 asm("v93");
+        register uint32_t v54 asm("v94");
+        register uint32_t v55 asm("v95");
+        register uint32_t v56 asm("v96");
+        register uint32_t v57 asm("v97");
+        register uint32_t v58 asm("v98");
+        register uint32_t v59 asm("v99");
 
-        register float v70 asm("v110");
-        register float v71 asm("v111");
-        register float v72 asm("v112");
-        register float v73 asm("v113");
-        register float v74 asm("v114");
-        register float v75 asm("v115");
-        register float v76 asm("v116");
-        register float v77 asm("v117");
-        register float v78 asm("v118");
-        register float v79 asm("v119");
+        register uint32_t v60 asm("v100");
+        register uint32_t v61 asm("v101");
+        register uint32_t v62 asm("v102");
+        register uint32_t v63 asm("v103");
+        register uint32_t v64 asm("v104");
+        register uint32_t v65 asm("v105");
+        register uint32_t v66 asm("v106");
+        register uint32_t v67 asm("v107");
+        register uint32_t v68 asm("v108");
+        register uint32_t v69 asm("v109");
 
-        register float v80 asm("v120");
-        register float v81 asm("v121");
-        register float v82 asm("v122");
-        register float v83 asm("v123");
-        register float v84 asm("v124");
-        register float v85 asm("v125");
-        register float v86 asm("v126");
-        register float v87 asm("v127");
-        register float v88 asm("v128");
-        register float v89 asm("v129");
+        register uint32_t v70 asm("v110");
+        register uint32_t v71 asm("v111");
+        register uint32_t v72 asm("v112");
+        register uint32_t v73 asm("v113");
+        register uint32_t v74 asm("v114");
+        register uint32_t v75 asm("v115");
+        register uint32_t v76 asm("v116");
+        register uint32_t v77 asm("v117");
+        register uint32_t v78 asm("v118");
+        register uint32_t v79 asm("v119");
 
-        register float v90 asm("v130");
-        register float v91 asm("v131");
-        register float v92 asm("v132");
-        register float v93 asm("v133");
-        register float v94 asm("v134");
-        register float v95 asm("v135");
-        register float v96 asm("v136");
-        register float v97 asm("v137");
-        register float v98 asm("v138");
-        register float v99 asm("v139");
+        register uint32_t v80 asm("v120");
+        register uint32_t v81 asm("v121");
+        register uint32_t v82 asm("v122");
+        register uint32_t v83 asm("v123");
+        register uint32_t v84 asm("v124");
+        register uint32_t v85 asm("v125");
+        register uint32_t v86 asm("v126");
+        register uint32_t v87 asm("v127");
+        register uint32_t v88 asm("v128");
+        register uint32_t v89 asm("v129");
 
-        register float v100 asm("v140");
-        register float v101 asm("v141");
-        register float v102 asm("v142");
-        register float v103 asm("v143");
-        register float v104 asm("v144");
-        register float v105 asm("v145");
-        register float v106 asm("v146");
-        register float v107 asm("v147");
-        register float v108 asm("v148");
-        register float v109 asm("v149");
+        register uint32_t v90 asm("v130");
+        register uint32_t v91 asm("v131");
+        register uint32_t v92 asm("v132");
+        register uint32_t v93 asm("v133");
+        register uint32_t v94 asm("v134");
+        register uint32_t v95 asm("v135");
+        register uint32_t v96 asm("v136");
+        register uint32_t v97 asm("v137");
+        register uint32_t v98 asm("v138");
+        register uint32_t v99 asm("v139");
 
-        register float v110 asm("v150");
-        register float v111 asm("v151");
-        register float v112 asm("v152");
-        register float v113 asm("v153");
-        register float v114 asm("v154");
-        register float v115 asm("v155");
-        register float v116 asm("v156");
-        register float v117 asm("v157");
-        register float v118 asm("v158");
-        register float v119 asm("v159");
+        register uint32_t v100 asm("v140");
+        register uint32_t v101 asm("v141");
+        register uint32_t v102 asm("v142");
+        register uint32_t v103 asm("v143");
+        register uint32_t v104 asm("v144");
+        register uint32_t v105 asm("v145");
+        register uint32_t v106 asm("v146");
+        register uint32_t v107 asm("v147");
+        register uint32_t v108 asm("v148");
+        register uint32_t v109 asm("v149");
 
-        register float v120 asm("v160");
-        register float v121 asm("v161");
-        register float v122 asm("v162");
-        register float v123 asm("v163");
-        register float v124 asm("v164");
-        register float v125 asm("v165");
-        register float v126 asm("v166");
-        register float v127 asm("v167");
+        register uint32_t v110 asm("v150");
+        register uint32_t v111 asm("v151");
+        register uint32_t v112 asm("v152");
+        register uint32_t v113 asm("v153");
+        register uint32_t v114 asm("v154");
+        register uint32_t v115 asm("v155");
+        register uint32_t v116 asm("v156");
+        register uint32_t v117 asm("v157");
+        register uint32_t v118 asm("v158");
+        register uint32_t v119 asm("v159");
+
+        register uint32_t v120 asm("v160");
+        register uint32_t v121 asm("v161");
+        register uint32_t v122 asm("v162");
+        register uint32_t v123 asm("v163");
+        register uint32_t v124 asm("v164");
+        register uint32_t v125 asm("v165");
+        register uint32_t v126 asm("v166");
+        register uint32_t v127 asm("v167");
+
 
 
         // std::array<float, 128> o_reg {
@@ -1036,6 +1083,8 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 #include "fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total_w.inc"
             :
             [smem_]"+r"(smem),
+
+             [lse_result]"=v"(v_lse),
 
              [o_regs_0]"+v"(v0),
              [o_regs_1]"+v"(v1),
@@ -1178,6 +1227,7 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
              [o_regs_126]"+v"(v126),
              [o_regs_127]"+v"(v127),
 
+
             [kv_indptr_res_0]"+s"(s28),
             [kv_indptr_res_1]"+s"(s29),
             [qo_res_0]"+s"(s32),
@@ -1301,317 +1351,257 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         );
 #pragma clang diagnostic pop
 
-        // int o_reg_idx = 0;
-        // int lds_st_idx = (wave_id * 4608 + 288 * (vthread >> 4) + 8 * (vthread & 15)) >> 1;
-        // int lds_ld_idx = (wave_id * 4608 + 8 * (vthread >> 3) + 144 * (vthread & 7))  >> 1;
-        //
-        // int copy_index = ((vthread & 7)  << 4 +
-        //                  (vthread >> 3) * 1024 +
-        //                  s4 * 16 * 1024 +
-        //                  wave_id * 16 * 1024) >> 2; //num_splits == 1
-        //
-// #pragma unroll
-//         for (int epi_loop = 0; epi_loop < 1; ++epi_loop)
-//         {
-// #pragma unroll
-//             for (int r = 0; r < 2; ++r)
-//             {
-// #pragma unroll
-//                 for (int i = 0; i < 2; ++i)
-//                 {
-//                     int o_reg_inner = o_reg_idx;
-//
-//                     B16_VGPR_2_SHUFFLEX(0, o_reg_inner);
-//                     o_reg_inner += 4;
-//                     B16_VGPR_2_SHUFFLEY(0, o_reg_inner);
-//                     o_reg_inner += 4;
-//                     B16_VGPR_2_SHUFFLEX(1, o_reg_inner);
-//                     o_reg_inner += 4;
-//                     B16_VGPR_2_SHUFFLEY(1, o_reg_inner);
-//
-//                     o_reg_idx += 1;
-//
-// 					B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0, 0);
-// 					B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0, 0);
-// 					B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1, 1);
-// 					B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1, 1);
-//
-//                     o_reg_inner = o_reg_idx;
-//                     B16_VGPR_2_SHUFFLEX(0, o_reg_inner);
-//                     o_reg_inner += 4;
-//                     B16_VGPR_2_SHUFFLEY(0, o_reg_inner);
-//                     o_reg_inner += 4;
-//                     B16_VGPR_2_SHUFFLEX(1, o_reg_inner);
-//                     o_reg_inner += 4;
-//                     B16_VGPR_2_SHUFFLEY(1, o_reg_inner);
-//
-//                     o_reg_idx += 1;
-//
-//                     B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0 + 576, 0);
-//                     B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0 + 576, 0);
-//                     B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1 + 576, 1);
-//                     B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1 + 576, 1);
-//                 }
-//
-//                 o_reg_idx += 16;
-//             }
-//
-//
-//             // ds_read regard vgpr as fp32
-// #pragma unroll
-//             for (int r = 0; r < 2; ++r)
-//             {
-// #pragma unroll
-//                 for (int i = 0; i < 2; ++i)
-//                 {
-// #pragma unroll
-//                     for (int j = 0; j < 2; ++j)
-//                     {
-//                         B16_LDS_2_VGPR(r * 8 + i * 2 + j,
-//                                        lds_ld_idx + r * 576 + i * 16 + j);
-								   // lds_ld_idx + r * 576 + i * 288 + j);
-//                     }
-//
-// #pragma unroll
-//                     for (int j = 0; j < 2; ++j)
-//                     {
-//                         B16_LDS_2_VGPR(r * 8 + i * 2 + j + 4,
-//                                        lds_ld_idx + r * 576 + i * 16 + j + 288);
-								   // lds_ld_idx + r * 576 + i * 288 + j + 16);
-//                     }
-//                 }
-//             }
-//
-//             // vgpr 2 dram as fp32
-// #pragma unroll
-//             for (int r = 0; r < 2; ++r)
-//             {
-// #pragma unroll
-//                 for (int i = 0; i < 2; ++i)
-//                 {
-// #pragma unroll
-//                     for (int j = 0; j < 4; ++j)
-//                     {
-//                         B16_VGPR_2_DRAM(copy_index + r * 2048 + i * 32 + j, 
-//                                        r * 4 + i * 8 + j);
-//                     }
-//                 }
-//             }
-//             copy_index += 64;
-//         });
+        if (wave_id == 3) {
+            return;
+        }
 
-        // if (vthread == 0)
-        //     printf("%d, %d, %d, v172:%f \n ", s2, s3, s4, bf16_to_float(shuffle0.x));
-// #pragma unroll
-// 		for (int r = 0; r < 2; ++r)
-// 		{
-// #pragma unroll
-// 			for (int i = 0; i < 2; ++i)
-// 			{
-// 				int o_reg_inner = o_reg_idx;
-//
-// 				B16_VGPR_2_SHUFFLEX(0, o_reg_inner);
-// 				o_reg_inner += 4;
-// 				B16_VGPR_2_SHUFFLEY(0, o_reg_inner);
-// 				o_reg_inner += 4;
-// 				B16_VGPR_2_SHUFFLEX(1, o_reg_inner);
-// 				o_reg_inner += 4;
-// 				B16_VGPR_2_SHUFFLEY(1, o_reg_inner);
-//
-// 				o_reg_idx += 1;
-//
-// 				B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0, 0);
-// 				B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0, 0);
-// 				B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1, 1);
-// 				B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1, 1);
-//
-// 				o_reg_inner = o_reg_idx;
-// 				B16_VGPR_2_SHUFFLEX(0, o_reg_inner);
-// 				o_reg_inner += 4;
-// 				B16_VGPR_2_SHUFFLEY(0, o_reg_inner);
-// 				o_reg_inner += 4;
-// 				B16_VGPR_2_SHUFFLEX(1, o_reg_inner);
-// 				o_reg_inner += 4;
-// 				B16_VGPR_2_SHUFFLEY(1, o_reg_inner);
-//
-// 				o_reg_idx += 1;
-//
-// 				B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0 + 576, 0);
-// 				B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 0 + 576, 0);
-// 				B16_SUFFFLEX_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1 + 576, 1);
-// 				B16_SUFFFLEY_2_LDS(lds_st_idx + r * 1152 + i * 72 + 1 + 576, 1);
-// 			}
-//
-// 			o_reg_idx += 12;
-// 		}
-//
-//
-// 		// ds_read regard vgpr as fp32
-// #pragma unroll
-// 		for (int r = 0; r < 2; ++r)
-// 		{
-// #pragma unroll
-// 			for (int i = 0; i < 2; ++i)
-// 			{
-// #pragma unroll
-// 				for (int j = 0; j < 2; ++j)
-// 				{
-// 					B16_LDS_2_VGPR(r * 8 + i * 2 + j,
-// 								   lds_ld_idx + r * 576 + i * 288 + j);
-// 				}
-//
-// #pragma unroll
-// 				for (int j = 0; j < 2; ++j)
-// 				{
-// 					B16_LDS_2_VGPR(r * 8 + i * 2 + j + 4,
-// 								   lds_ld_idx + r * 576 + i * 288 + j + 16);
-// 				}
-// 			}
-// 		}
-//
-// 		// vgpr 2 dram as fp32
-// #pragma unroll
-// 		for (int r = 0; r < 2; ++r)
-// 		{
-// #pragma unroll
-// 			for (int i = 0; i < 2; ++i)
-// 			{
-// #pragma unroll
-// 				for (int j = 0; j < 4; ++j)
-// 				{
-// 					B16_VGPR_2_DRAM(copy_index + r * 2048 + i * 32 + j, 
-// 								   r * 4 + i * 8 + j);
-// 				}
-// 			}
-// 		}
-// 		copy_index += 64;
+#ifdef numsplit1
+        register uint32_t shuffle0 asm("v24");
+        register uint32_t shuffle1 asm("v25");
+        register uint32_t shuffle2 asm("v26");
+        register uint32_t shuffle3 asm("v27");
 
-        if (vthread == 0)
-            printf("%d, %d, %d, v172:%f \n ", s2, s3, s4, v0);
+        int s_perm = 0x07060302;
+
 
         int o_reg_idx = 0;
-        int lds_st_idx = (wave_id * 4608 + 288 * (vthread >> 4) + 8 * (vthread & 15)) >> 1;
-        int lds_ld_idx = (wave_id * 4608 + 8 * (vthread >> 3) + 144 * (vthread & 7))  >> 1;
+        int lds_st_idx = (wave_id * 4608 + 288 * (vthread >> 4) + 8 * (vthread & 15)) >> 2;
+        int lds_ld_idx = (wave_id * 4608 + 8 * (vthread >> 3) + 144 * (vthread & 7))  >> 2;
 
-        int copy_index = ((vthread & 7)  << 4 +
-                         (vthread >> 3) * 1024 +
-                         s4 * 16 * 1024 +
-                         wave_id * 16 * 1024) >> 2; //num_splits == 1
+        // int copy_index = 0;
+        int copy_index = int((int((vthread & 7)  << 4) +
+							 int(vthread >> 3) * 1024 +
+							 int(s3) * 3 * 16 * 512 * 2 +
+							 wave_id * 16 * 512 * 2) >> 2); //num_splits == 1
 
-		register ck_tile::fp16x2_t temp asm("v176");
+        std::array<uint32_t, 16> arr{};
 
-        asm volatile("v_mov_b32 %0, %1")
-
-        LOOP_STRIDE4(0, B16_VGPR_2_SHUFFLEX, B16_VGPR_2_SHUFFLEY);
+        LOOP_STRIDE4(0, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
         B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx);
-        LOOP_STRIDE4(1, B16_VGPR_2_SHUFFLEX, B16_VGPR_2_SHUFFLEY);
+        LOOP_STRIDE4(1, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 288);
+        LOOP_STRIDE4(2, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 36);
+        LOOP_STRIDE4(3, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 36 + 288);
+        LOOP_STRIDE4(16, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
         B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576);
+        LOOP_STRIDE4(17, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 288);
+        LOOP_STRIDE4(18, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36);
+        LOOP_STRIDE4(19, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36 + 288);
+        B16_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx);
+        B16_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index);
+		copy_index += 64;
 
-        LOOP_STRIDE4(2, B16_VGPR_2_SHUFFLEX, B16_VGPR_2_SHUFFLEY);
-        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 72);
-        LOOP_STRIDE4(3, B16_VGPR_2_SHUFFLEX, B16_VGPR_2_SHUFFLEY);
-        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 72 + 576);
+        LOOP_STRIDE4(32, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx);
+        LOOP_STRIDE4(33, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 288);
+        LOOP_STRIDE4(34, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 36);
+        LOOP_STRIDE4(35, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 36 + 288);
+        LOOP_STRIDE4(48, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576);
+        LOOP_STRIDE4(49, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 288);
+        LOOP_STRIDE4(50, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36);
+        LOOP_STRIDE4(51, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36 + 288);
 
-
-        LOOP_STRIDE4(16, B16_VGPR_2_SHUFFLEX, B16_VGPR_2_SHUFFLEY);
-        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 1152);
-        LOOP_STRIDE4(17, B16_VGPR_2_SHUFFLEX, B16_VGPR_2_SHUFFLEY);
-        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 1152 + 576);
-
-        LOOP_STRIDE4(18, B16_VGPR_2_SHUFFLEX, B16_VGPR_2_SHUFFLEY);
-        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 1152 + 72);
-        LOOP_STRIDE4(19, B16_VGPR_2_SHUFFLEX, B16_VGPR_2_SHUFFLEY);
-        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 1152 + 72 + 576);
-
-        if (vthread == 0)
-            printf("%d, %d, %d, v172:%f \n ", s2, s3, s4, );
-
-        B16_VGPR_2_DRAM_LOOP_STRIDE1(B16_LDS_2_VGPR, lds_ld_idx);
-        B16_LDS_2_VGPR_LOOP_STRIDE1(B16_VGPR_2_DRAM, copy_index);
-
+        B16_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx);
+        B16_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index);
 		copy_index += 64;
 
 
 
+        LOOP_STRIDE4(64, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx);
+        LOOP_STRIDE4(65, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 288);
+        LOOP_STRIDE4(66, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 36);
+        LOOP_STRIDE4(67, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 36 + 288);
+        LOOP_STRIDE4(80, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576);
+        LOOP_STRIDE4(81, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 288);
+        LOOP_STRIDE4(82, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36);
+        LOOP_STRIDE4(83, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36 + 288);
+
+        B16_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx);
+        B16_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index);
+		copy_index += 64;
+
+
+        LOOP_STRIDE4(96, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx);
+        LOOP_STRIDE4(97, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 288);
+        LOOP_STRIDE4(98, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 36);
+        LOOP_STRIDE4(99, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 36 + 288);
+        LOOP_STRIDE4(112, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576);
+        LOOP_STRIDE4(113, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 288);
+        LOOP_STRIDE4(114, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36);
+        LOOP_STRIDE4(115, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
+        B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36 + 288);
+
+        B16_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx);
+        B16_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index);
+#endif
+
+
+
+
 #ifdef numsplit5
-		register int shuffle0 asm("v172");
-		register int shuffle1 asm("v173");
-		register int shuffle2 asm("v174");
-		register int shuffle3 asm("v175");
+        register uint32_t shuffle0 asm("v20");
+        register uint32_t shuffle1 asm("v21");
+        register uint32_t shuffle2 asm("v22");
+        register uint32_t shuffle3 asm("v23");
 
-        int lds_read_idx = wave_id * 2112 + (vthread >> 4) * 4 + (vthread & 3) * 256 + (vthread & 15) * 16;
+        int lds_ld_idx = wave_id * 2112 +
+                         int(vthread >> 4) * 4 +
+                         int(vthread & 3) * 264 +
+                         int((vthread & 15) >> 2) * 64;
+        int lds_st_idx = wave_id * 2112 +
+                         int(vthread << 2);
+        int copy_index = int((int((vthread & 15) << 4) +
+                             int(vthread >> 4) * 2048 +
+                             int(s3) * 3 * 16 * 512 * 5 * 4 +
+                             int(s4) * 16 * 512 * 4 +
+                             wave_id * 5 * 16 * 512 * 4) >> 2);
 
-        int lds_st_idx = wave_id * 2112 + vthread * 4;
+            // printf("s3 %d, s4 %d, copy_index :%d \n", s3, s4, copy_index);
 
-        // int copy_index = wave_id * 8192 +
-        //                  (vthread & 15) * 4 +
-        //                  (vthread >> 4) * 2048 +
-        //                  s2 * 16 * 512 * 5 +
-        //                  s3 * 16 * 512;
+        std::array<uint32_t, 32> arr{};
+
+        LOOP_STRIDE4(0, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx      );
+        LOOP_STRIDE4(1, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 264);
+        LOOP_STRIDE4(2, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 528);
+        LOOP_STRIDE4(3, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 792);
+
+        LOOP_STRIDE4(16, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1056);
+        LOOP_STRIDE4(17, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1320);
+        LOOP_STRIDE4(18, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
+        LOOP_STRIDE4(19, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1848);
+
+        F32_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx)
+        F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+        copy_index += 128;
+
+        LOOP_STRIDE4(32, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx      );
+        LOOP_STRIDE4(33, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 264);
+        LOOP_STRIDE4(34, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 528);
+        LOOP_STRIDE4(35, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 792);
+
+        LOOP_STRIDE4(48, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1056);
+        LOOP_STRIDE4(49, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1320);
+        LOOP_STRIDE4(50, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
+        LOOP_STRIDE4(51, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1848);
+        F32_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx)
+        F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+        copy_index += 128;
+
+        LOOP_STRIDE4(64, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx      );
+        LOOP_STRIDE4(65, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 264);
+        LOOP_STRIDE4(66, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 528);
+        LOOP_STRIDE4(67, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 792);
+
+        LOOP_STRIDE4(80, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1056);
+        LOOP_STRIDE4(81, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1320);
+        LOOP_STRIDE4(82, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
+        LOOP_STRIDE4(83, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1848);
+        F32_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx)
+        F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+        copy_index += 128;
+
+        LOOP_STRIDE4(96, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx      );
+        LOOP_STRIDE4(97, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 264);
+        LOOP_STRIDE4(98, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 528);
+        LOOP_STRIDE4(99, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 792);
+
+        LOOP_STRIDE4(112, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1056);
+        LOOP_STRIDE4(113, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1320);
+        LOOP_STRIDE4(114, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
+        LOOP_STRIDE4(115, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1848);
+        F32_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx)
+        F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+
+        int lse_index = int((int((vthread & 15) << 2) +
+                            int(s3) * 3 * 16 * 5 * 4 +
+                            int(s4) * 16 * 4 +
+                            wave_id * 5 * 16 * 4) >> 2);
+
+        p_lse[lse_index] = v_lse;
         //
         //
-        (vthread & 15) << 4
-
-
-
-
-        int o_reg_idx = 0;
-        for (int epi_loop = 0; epi_loop < 4; ++epi_loop)
-        {
-
-
-#pragma unroll
-            for (int r = 0; r < 2; ++r)
-            {
-#pragma unroll
-                for (int i = 0; i < 4; ++i)
-                {
-#pragma unroll
-                    for (int j = 0; j < 4; ++j)
-                    {
-                        int n_v = o_reg_idx + i + 4 * j;
-                        VGPR2SHUFFLE(j, n_v);
-                    }
-
-#pragma unroll
-                    for (int j = 0; j < 4; ++j)
-                    {
-                        SUFFFLE2LDS(lds_st_idx + r * 1056 + 264 * i + j , j); // 1056 / 4 = 264
-                    }
-                }
-                o_reg_idx += 16;
-            }
-
-#pragma unroll
-            for (int r = 0; r < 2; ++r)
-            {
-#pragma unroll
-                for (int i = 0; i < 4; ++i)
-                {
-#pragma unroll
-                    for (int j = 0; j < 4; ++j)
-                    {
-                        LDS2VGPR(r * 16 + i * 4 + j, lds_read_idx + r * 1056 + i * 4 + j);
-                    }
-                }
-            }
-
-
-#pragma unroll
-            for (int r = 0; r < 4; ++r) {
-#pragma unroll
-                for (int i = 0; i < 2; ++i) {
-#pragma unroll
-                    for (int j = 0; j < 4; ++j)
-                    {
-                        int n_v = r * 4 + i * 16 + j;
-                        VGPR2DRAM(copy_index + r * 2048 + i * 64 + j, n_v);
-                    }
-                }
-            }
-            copy_index += 128;
-        }
-        // clang-format on
+//         for (int epi_loop = 0; epi_loop < 4; ++epi_loop)
+//         {
+//
+//
+// #pragma unroll
+//             for (int r = 0; r < 2; ++r)
+//             {
+// #pragma unroll
+//                 for (int i = 0; i < 4; ++i)
+//                 {
+// #pragma unroll
+//                     for (int j = 0; j < 4; ++j)
+//                     {
+//                         int n_v = o_reg_idx + i + 4 * j;
+//                         VGPR2SHUFFLE(j, n_v);
+//                     }
+//
+// #pragma unroll
+//                     for (int j = 0; j < 4; ++j)
+//                     {
+//                         SUFFFLE2LDS(lds_st_idx + r * 1056 + 264 * i + j , j); // 1056 / 4 = 264
+//                     }
+//                 }
+//                 o_reg_idx += 16;
+//             }
+//
+// #pragma unroll
+//             for (int r = 0; r < 2; ++r)
+//             {
+// #pragma unroll
+//                 for (int i = 0; i < 4; ++i)
+//                 {
+// #pragma unroll
+//                     for (int j = 0; j < 4; ++j)
+//                     {
+//                         LDS2VGPR(r * 16 + i * 4 + j, lds_read_idx + r * 1056 + i * 4 + j);
+//                     }
+//                 }
+//             }
+//
+//
+// #pragma unroll
+//             for (int r = 0; r < 4; ++r) {
+// #pragma unroll
+//                 for (int i = 0; i < 2; ++i) {
+// #pragma unroll
+//                     for (int j = 0; j < 4; ++j)
+//                     {
+//                         int n_v = r * 4 + i * 16 + j;
+//                         VGPR2DRAM(copy_index + r * 2048 + i * 64 + j, n_v);
+//                     }
+//                 }
+//             }
+//             copy_index += 128;
+//         }
 #endif
     }
 };

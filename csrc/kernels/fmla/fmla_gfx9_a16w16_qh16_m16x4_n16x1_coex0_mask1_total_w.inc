@@ -2717,7 +2717,8 @@
   "v_rcp_f32     v14, v14                               \n"// 00000000486C: 7E1C450E
   "v_rcp_f32     v15, v15                               \n"// 000000004870: 7E1E450F
   "s_nop         0x0001                                 \n"// 000000004874: BF800001
-  "v_fma_f32     v24, v21, s63, v20                     \n"// 000000004878: D1CB0018 04507F15
+  ";v_fma_f32     v24, v21, s63, v20                     \n"// 000000004878: D1CB0018 04507F15
+  "v_fma_f32     %[lse_result], v21, s63, v20                     \n"// 000000004878: D1CB0018 04507F15
   "v_fma_f32     v25, v23, s63, v22                     \n"// 000000004880: D1CB0019 04587F17
   "v_mul_f32     %[o_regs_0], v14, %[o_regs_0]                          \n"// 000000004888: 0A50510E
   "v_mul_f32     %[o_regs_1], v14, %[o_regs_1]                          \n"// 00000000488C: 0A52530E
@@ -3904,7 +3905,7 @@
   "buffer_store_dwordx4  [%[o_regs_12], %[o_regs_13], %[o_regs_14], %[o_regs_15]], v18, [%[o_res_0], %[o_res_1], %[o_res_2], %[o_res_3]], 0 offen offset:1536\n"// 000000006554: E07C1600 80023412
   "buffer_store_dwordx4  [%[o_regs_28], %[o_regs_29], %[o_regs_30], %[o_regs_31]], v18, [%[o_res_0], %[o_res_1], %[o_res_2], %[o_res_3]], 0 offen offset:1792\n"// 00000000655C: E07C1700 80024412
   "v_add_u32     v18, 0x00002000, v18                   \n"// 000000006564: 682424FF 00002000
-  "buffer_store_dword  v24, v26, [%[lse_res_0], %[lse_res_1], %[lse_res_2], %[lse_res_3]], 0 offen      \n"// 00000000656C: E0701000 8003181A
+  "buffer_store_dword  %[lse_result], v26, [%[lse_res_0], %[lse_res_1], %[lse_res_2], %[lse_res_3]], 0 offen      \n"// 00000000656C: E0701000 8003181A
   "s_mul_i32     s56, 4, s77                            \n"// 000000006574: 92384D84
   "v_add_u32     v26, v26, s56                          \n"// 000000006578: D134001A 0000711A
 "label_1960: \n"

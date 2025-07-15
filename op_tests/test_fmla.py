@@ -127,8 +127,8 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, page_block_size, ca
     max_seqlen_pad = max_seqlen
     print(f"{total_seqlens=}, {mean_seqlens=}, {max_seqlen=}")
 
-    # q = torch.randn(b, s_q, h_q, d, device="cuda", dtype=dtype)
-    q = torch.ones(b, s_q, h_q, d, device="cuda", dtype=dtype)
+    q = torch.randn(b, s_q, h_q, d, device="cuda", dtype=dtype)
+    # q = torch.ones(b, s_q, h_q, d, device="cuda", dtype=dtype)
 
     block_table = torch.arange(
         b * max_seqlen_pad // page_block_size, dtype=torch.int32, device="cuda"
@@ -195,7 +195,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, page_block_size, ca
         out_torch, lse_torch = ref_mla()
         # out_flash, lse_flash = flash_mla()
         out = flash_mla()
-        out_flash = out[0]
+        out_flash = out[0].reshape(32, 3, 16, 512)
         lse_flash = out[1]
         # debug_m = out[2]
         # debug_p = out[3]

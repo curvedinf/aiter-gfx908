@@ -346,21 +346,21 @@ def test_mla(
         sm_scale,
     )
 
-    # from torch.profiler import profile, record_function, ProfilerActivity
-    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],) as prof:
-    #     aiter.mla.mla_decode_fwd(
-    #         q,
-    #         kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
-    #         out_asm,
-    #         qo_indptr,
-    #         kv_indptr,
-    #         kv_indices,
-    #         kv_last_page_lens,
-    #         max_seqlen_qo,
-    #         sm_scale,
-    #         )
-    # prof.export_chrome_trace("trace.json")
-    # print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+    from torch.profiler import profile, record_function, ProfilerActivity
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],) as prof:
+        aiter.mla.mla_decode_fwd(
+            q,
+            kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
+            out_asm,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            max_seqlen_qo,
+            sm_scale,
+            )
+    prof.export_chrome_trace("trace.json")
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
 
     # print(f"{out_ref.view(total_q, -1)=}")
     # print(f"{out_asm.view(total_q, -1)=}")

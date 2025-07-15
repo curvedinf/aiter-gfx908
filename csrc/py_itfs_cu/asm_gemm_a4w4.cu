@@ -75,9 +75,11 @@ int get_heuristic_mblksize(int M, int N, const std::vector<int>& available_tiles
 
     for(auto tile : available_tiles)
     {
-        if((M * N % 256) == 0)
+        if((M * N % 65536) == 0)
         {
-            tg_num               = M * N / 256;
+            int tg_num_M         = (M + tile - 1) / tile;
+            int tg_num_N         = (N + 256 - 1) / 256;
+            tg_num               = tg_num_M * tg_num_N;
             uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
             if(local_round < round)
             {
@@ -100,7 +102,7 @@ int get_heuristic_mblksize(int M, int N, const std::vector<int>& available_tiles
 };
 
 int get_heuristic_ksplit(
-    int dim, int inter_dim, int tileM, int tileN, const std::vector<int>& available_ksplit)
+    int M, int N, int tileM, int tileN, const std::vector<int>& available_ksplit)
 {
     hipDevice_t dev;
     hipDeviceProp_t dev_prop;
@@ -110,17 +112,17 @@ int get_heuristic_ksplit(
     uint32_t empty_cu = num_cu;
     uint32_t tg_num   = 0;
     uint32_t round    = 0xffffffff;
-    int selectedK     = ((dim * inter_dim) / tileM * tileN > num_cu) ? 1 : 0;
+    int selectedK     = ((M * N) / tileM * tileN > num_cu) ? 1 : 0;
     if(selectedK == 0)
         return 0;
 
     for(auto tile : available_ksplit)
     {
-        if((inter_dim % tile) == 0)
+        if((N % tile) == 0)
         {
-            tg_num = (dim * inter_dim) / tileM * tileN;
-            // tg_num               = inter_dim / tile;
-            tg_num               = tg_num / tile;
+            int tg_num_M         = (M + tileM - 1) / tileM;
+            int tg_num_N         = (N + tileN - 1) / tileN;
+            tg_num               = tg_num_M * tg_num_N * tile;
             uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
             if(local_round < round)
             {

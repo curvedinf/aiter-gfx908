@@ -28,7 +28,7 @@ def get_shape_benchmark_object(plot_name, args, x_names=None):
     if args.shape:
         x_vals_list = [args.shape]
     else:
-        x_vals_list = get_x_vals()
+        x_vals_list = get_x_vals(dims = len(x_names))
 
     if args.metric == "time":
         ylabel = "Time (ms)"
@@ -126,10 +126,11 @@ def model_benchmark_shapes(args):
     return shapes
 
 
-def get_x_vals():
+def get_x_vals(dims: int):
     """
     Get a default set of benchmarking values (M, N, K).
     """
+    assert dims in [3, 4], "Invalid number of dimensions"
     x_vals = [
         (1, 1280, 8192),
         (32, 1280, 8192),
@@ -145,6 +146,8 @@ def get_x_vals():
         (8192, 1280, 8192),
         (16384, 1280, 8192),
     ]
+    if dims == 4:
+        x_vals = [tuple(list(i) + [16]) for i in x_vals] # (M, N, K, B)
     return x_vals
 
 

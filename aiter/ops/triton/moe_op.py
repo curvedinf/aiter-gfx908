@@ -830,12 +830,15 @@ def _fused_moe_persistent_kernel(
 
     tile_id_max = get_tile_max_current_xcd(num_tiles, xcd)
 
-    # if we don't have enough tiles for all CUs we exit to prevent segfault
+    # if we don't have enough tiles for all CUs we do early exit for those CUs (i.e. persistent workgroups)
     if tile_id >= num_tiles:
         return
 
     # We checked all the xcds
-    while xcd_tracker < NUM_XCDS:
+    while (tile_id < tile_id_max) and (xcd_tracker < NUM_XCDS):
+        
+        # print("tile_id: ", tile_id)
+        
         pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
         offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
@@ -1148,30 +1151,26 @@ def fused_moe(
 
     else:
         if _USE_MOE_PERSISTENT_KERNEL:
-            NUM_CUS = torch.cuda.get_device_properties("cuda").multi_processor_count
-            assert config["CU_multiplier"] == 1, "CU_multiplier must be 1 for pooled approach, because we must ensure concurrency of all persistent workgroups"
-            NUM_WGS = NUM_CUS * config["CU_multiplier"] # Number of persistent workgroups to launch, multiple of the number of CUs
-
-            grid = lambda META: (  # noqa: E731
-                min(
-                    NUM_WGS,
-                    triton.cdiv(sorted_token_ids.shape[0], META["BLOCK_SIZE_M"])
-                    * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]),
-                ),
-            )
+            # NUM_CUS = torch.cuda.get_device_properties("cuda").multi_processor_count
+            # assert config["CU_multiplier"] == 1, "CU_multiplier must be 1 for pooled approach, because we must ensure concurrency of all persistent workgroups"
+            # NUM_CUS * config["CU_multiplier"] # Number of persistent workgroups to launch, multiple of the number of CUs
             
-            
+            # number of persistent workgroups
+            NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count 
             num_tiles = triton.cdiv(num_tokens_post_padded, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"])
+            grid_size = min(NUM_WGS, num_tiles)
+            grid = (
+                grid_size,
+            )
             NUM_XCDS = 8
-            # pool_size = (num_tiles + NUM_XCDS - 1) // NUM_XCDS # ceiling division
+            # We create NUM_XCDS pools of pids. Persistent workgroups will fetch pids from their own pools. Only once they have exhausted their pool, they will start fetching from the next pool.
+            # This way we ensure:
+            # - load balancing, because workgroups ultimately have access to all pids.
+            # - good L2 caching for pids of the initial pool, as they are consecutive.
+            # - mitigate cache coherency issues for fetching the next pid, because for the initial pool, all other workgroups accessing it are on the same XCD, and only after exhausting it, it will start accessing the next pool.
 
-            # 0, pool_size, 2 * pool_size, ..., (NUM_XCDS - 1) * pool_size (note: pool_size is not be same for each xcd if num_tiles is not divisible by NUM_XCDS)
+            # 0, pool_size, 2 * pool_size, ..., (NUM_XCDS - 1) * pool_size (not that the pool_size will vary if num_tiles is not evenly divisible by NUM_XCDS)
             pool_counters = torch.tensor([get_tile_max_current_xcd_python(num_tiles, pool-1, NUM_XCDS) if pool > 0 else 0 for pool in range(NUM_XCDS)]).to(torch.int32).to(A.device)
-            print("num_tiles", num_tiles)
-            print("pool_counters", pool_counters)
-            print("NUM_XCDS", NUM_XCDS)
-            print("NUM_WGS", NUM_WGS)
-            print("max tiles per pool", [get_tile_max_current_xcd_python(num_tiles, pool, NUM_XCDS) for pool in range(NUM_XCDS)])
 
             # every XCD gets NUM_WGS // NUM_XCDS persistent workgroups, which can get their first tile id statically.
             # only for the second tile it is needed to be fetched dynamically from the pool

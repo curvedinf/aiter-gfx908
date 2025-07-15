@@ -763,6 +763,13 @@ def test_fused_moe(
             triton_out_silu, torch_out_silu, atol=1e-1, rtol=1e-1
         )
     else:
+        print("Comparing outputs")
+        print("M:", M, "N:", N, "K:", K, "top_k:", top_k, "E:", E)
+        print("triton_out.shape:", triton_out.shape)
+        print("torch_out.shape:", torch_out.shape)
+
+        print("triton_out:", triton_out)
+        print("torch_out:", torch_out)
         torch.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
 
 

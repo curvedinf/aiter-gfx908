@@ -52,7 +52,7 @@ def run_triton(x, w, x_scales, w_scales, out, dtype=dtypes.bf16):
 def run_gemm_asm(
     x,
     weightshuffle,
-    x_scale,formate 
+    x_scale,
     w_scale,
     out,
     bias=None,

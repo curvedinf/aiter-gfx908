@@ -1152,73 +1152,33 @@ def test_moe_e2e(
 
 
 if __name__ == "__main__":
-    if __name__ == "__main__":
-        torch.manual_seed(20)
+    torch.manual_seed(20)
 
-        # Parameters for llama3-405B moe test
-        M = 2048
-        N = 53248
-        K = 16384
-        top_k = 2
-        E = 8
+    # Parameters for moe test
+    M = 2048
+    N = 2048
+    K = 256
+    top_k = 2
+    E = 4
 
-        # Configuration flags
-        routed_weight = False
-        fp8_w8a8 = False
-        int8_w8a16 = False
-        persistent = True  # Change to True to enable persistent kernel mode
-        silu_fused = False   # Change to False to use the non-silu fused variant
-        dtype = torch.float16
+    # Configuration flags
+    routed_weight = False
+    fp8_w8a8 = False
+    int8_w8a16 = False
+    persistent = True  # Change to True to enable persistent kernel mode
+    silu_fused = False   # Change to False to use the non-silu fused variant
+    dtype = torch.float16
 
-        # Set persistent kernel mode accordingly
-        if persistent:
-            if silu_fused:
-                triton_moe_silu_set_use_persistent_kernel(True)
-            else:
-                triton_moe_set_use_persistent_kernel(True)
-        else:
-            if silu_fused:
-                triton_moe_silu_set_use_persistent_kernel(False)
-            else:
-                triton_moe_set_use_persistent_kernel(False)
-
-        # Prepare inputs and configuration for the moe test
-        (a, b, triton_out, triton_out_silu, b_zp, a_scale, b_scale, topk_weights,
-         topk_ids, sorted_token_ids, expert_ids, num_tokens_post_padded, config) = input_helper(
-             M, N, K, top_k, E,
-             routed_weight=routed_weight,
-             dtype=dtype,
-             fp8_w8a8=fp8_w8a8,
-             int8_w8a16=int8_w8a16
-        )
-
-        # Select the correct moe operator based on silu_fused flag
-        _triton_moe = triton_moe_silu if silu_fused else triton_moe
-
-        print("Starting Moe test for llama3-405B...")
-        start_time = time.time()
-
-        _triton_moe(
-            a,
-            b,
-            triton_out_silu if silu_fused else triton_out,
-            a_scale,
-            b_scale,
-            b_zp,
-            topk_weights,
-            topk_ids,
-            sorted_token_ids,
-            expert_ids,
-            num_tokens_post_padded,
-            routed_weight,
-            top_k,
-            torch_to_triton_dtype[dtype],
-            fp8_w8a8,
-            int8_w8a16,
-            False,
-            config=config,
-        )
-        torch.cuda.synchronize()  # Ensure all CUDA work is done
-
-        elapsed_time = (time.time() - start_time) * 1000  # Convert to milliseconds
-        print(f"llama3-405B: M={M} N={N} K={K} E={E} top_k={top_k} Time (ms): {elapsed_time:.6f}")
+    test_fused_moe(
+        M,
+        N,
+        K,
+        top_k,
+        E,
+        routed_weight,
+        fp8_w8a8,
+        int8_w8a16,
+        persistent,
+        silu_fused,
+        dtype,
+    )

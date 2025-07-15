@@ -195,7 +195,7 @@ def test_flash_mla(dtype, b, s_q, mean_sk, h_q, h_kv, d, dv, page_block_size, ca
         out_torch, lse_torch = ref_mla()
         # out_flash, lse_flash = flash_mla()
         out = flash_mla()
-        out_flash = out[0].reshape(32, 3, 16, 512)
+        out_flash = out[0].reshape(32, 3, 5, 16, 512)
         lse_flash = out[1]
         # debug_m = out[2]
         # debug_p = out[3]

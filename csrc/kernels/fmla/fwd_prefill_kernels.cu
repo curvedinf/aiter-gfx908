@@ -2078,8 +2078,8 @@ std::vector<torch::Tensor> flash_mla_fwd_prefill_with_kvcache_impl(
                                (kForceOutAcc && !do_splits) ? opts_acc : opts);
     auto softmax_lse = torch::zeros({batch_size, num_heads_q, seqlen_q}, opts_acc);
 #else
-    auto output = torch::zeros({batch_size * seqlen_q_ori, num_splits, hq_hk_ratio, head_size_v}, num_splits == 1? opts : opts_acc);
-    auto softmax_lse = torch::zeros({batch_size * seqlen_q_ori, num_splits, hq_hk_ratio, 1}, opts_acc);
+    auto output = torch::empty({batch_size * seqlen_q_ori, num_splits, hq_hk_ratio, head_size_v}, num_splits == 1? opts : opts_acc);
+    auto softmax_lse = torch::empty({batch_size * seqlen_q_ori, num_splits, hq_hk_ratio, 1}, opts_acc);
 #endif
 
     ck_tile::FlashMlaPrefillFwdParams params = {};

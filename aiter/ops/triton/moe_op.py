@@ -831,7 +831,7 @@ def _fused_moe_persistent_kernel(
     tile_id_max = get_tile_max_current_xcd(num_tiles, xcd)
 
     # if we don't have enough tiles for all CUs we exit to prevent segfault
-    if tile_id >= tile_id_max:
+    if tile_id >= num_tiles:
         return
 
     # We checked all the xcds

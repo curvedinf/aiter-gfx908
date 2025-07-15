@@ -27,7 +27,12 @@ TRITON_HIP_PRESHUFFLE_SCALES = (
 def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
     c_dtype = torch.bfloat16
     x, w, _, _, x_scale, w_scale, _, y = generate_gemm_afp4wfp4_inputs(
-        M, N, K, c_dtype, layout=layout, output=True,
+        M,
+        N,
+        K,
+        c_dtype,
+        layout=layout,
+        output=True,
     )
     # flops
     flops = 2.0 * M * N * K

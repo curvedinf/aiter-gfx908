@@ -9,7 +9,13 @@ SCALE_GROUP_SIZE = 32
 
 
 def generate_batched_gemm_afp4wfp4_inputs(
-    B: int, M: int, N: int, K: int, dtype: Union[str, torch.dtype], layout: str = "TN", output: bool = False
+    B: int,
+    M: int,
+    N: int,
+    K: int,
+    dtype: Union[str, torch.dtype],
+    layout: str = "TN",
+    output: bool = False,
 ):
     """
     Returns:
@@ -177,7 +183,9 @@ def test_batched_gemm_afp4_wfp4(B: int, M: int, N: int, K: int, dtype):
     if not (arch_info.is_fp4_avail()):
         pytest.skip("MXFP4 not supported on this architecture")
 
-    x, w, x_scales, w_scales, out = generate_batched_gemm_afp4wfp4_inputs(B, M, N, K, dtype, output=True)
+    x, w, x_scales, w_scales, out = generate_batched_gemm_afp4wfp4_inputs(
+        B, M, N, K, dtype, output=True
+    )
 
     torch_out = run_torch(x, w, x_scales, w_scales, dtype).to(dtype)
     assert torch_out.shape == (B, M, N)

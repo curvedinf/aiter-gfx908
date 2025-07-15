@@ -40,7 +40,13 @@ def model_benchmark_shapes(args):
 def bench_gemm_fn(batch: int, M: int, N: int, K: int, metric: str, layout: str):
     c_dtype = torch.bfloat16
     x, w, x_scale, w_scale, y = generate_batched_gemm_afp4wfp4_inputs(
-        batch, M, N, K, c_dtype, layout=layout, output=True,
+        batch,
+        M,
+        N,
+        K,
+        c_dtype,
+        layout=layout,
+        output=True,
     )
     # print(f"M: {M}, N: {N}, K: {K}, x.shape: {x.shape}, x.stride(): {x.stride()}, w.shape: {w.shape}, w.stride(): {w.stride()}")
     # flops

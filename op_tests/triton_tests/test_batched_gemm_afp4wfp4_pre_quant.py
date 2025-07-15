@@ -9,7 +9,9 @@ import aiter.ops.triton.utils.arch_info as arch_info
 SCALE_GROUP_SIZE = 32
 
 
-def generate_batched_gemm_afp4wfp4_pre_quant_inputs(B, M, N, K, dtype, layout="TN", output=False):
+def generate_batched_gemm_afp4wfp4_pre_quant_inputs(
+    B, M, N, K, dtype, layout="TN", output=False
+):
     """
     Returns:
         - x: (B, M, K)

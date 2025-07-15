@@ -46,7 +46,7 @@ def gemm_a4w4_asm(
     alpha: Optional[float] = 1.0,
     beta: Optional[float] = 0.0,
     bpreshuffle: Optional[bool] = True,
-    log2_k_split: Optional[int] = 0,
+    log2_k_split: Optional[int] = None,
 ) -> torch.Tensor: ...
 
 

@@ -153,7 +153,7 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
                             std::optional<float> alpha      = 1.0,
                             std::optional<float> beta       = 0.0,
                             std::optional<bool> bpreshuffle = true,
-                            std::optional<int> log2_k_split = 99)
+                            std::optional<int> log2_k_split = std::nullopt)
 
 {
     TORCH_CHECK(
@@ -196,57 +196,65 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     int selectedMTile  = get_heuristic_mblksize(Mdim, Ndim, {256, 128});
 
     AiterAsmKernel* impl_ptr = nullptr;
-    if(log2_k_split.value() != 0 || selectedksplit != 0)
-    {
-        int k_num = 1;
-        if(log2_k_split.value() == 99)
-        {
-            k_num             = 1 << selectedksplit;
-            args.log2_k_split = selectedksplit;
-        }
-        else
-        {
-            k_num             = 1 << log2_k_split.value();
-            args.log2_k_split = log2_k_split.value();
-        }
-        static AiterAsmKernel SplitK_impl(
-            "_ZN5aiter45f4gemm_outBF16_128x512_scale_B_Shuffle_KSplitE",
-            "f4gemm/f4gemm_outBF16_128x512_scale_B_Shuffle_KSplit.co");
-        impl_ptr = &SplitK_impl;
-        SUBM     = 128;
-        SUBN     = 512;
 
+    // #splitK kernel
+    static AiterAsmKernel SplitK_impl("_ZN5aiter45f4gemm_outBF16_128x512_scale_B_Shuffle_KSplitE",
+                                      "f4gemm/f4gemm_outBF16_128x512_scale_B_Shuffle_KSplit.co");
+
+    // #splitK_no m128 kernel
+    static AiterAsmKernel noSplitK_m128_impl("_ZN5aiter38f4gemm_outBF16_128x512_scale_B_ShuffleE",
+                                             "f4gemm/f4gemm_outBF16_128x512_scale_B_Shuffle.co");
+
+    // #splitK_no m256 bpreshuffle kernel
+    static AiterAsmKernel noSplitK_bpreshuffle_m256_impl(
+        "_ZN5aiter45f4gemm_bf16_per1x32Fp4_tn_bpreshuffle_256x256E",
+        "f4gemm/f4gemm_bf16_per1x32Fp4_tn_bpreshuffle_256x256.co");
+
+    // #splitK_no m256 kernel
+    static AiterAsmKernel noSplitK_m256("_ZN5aiter33f4gemm_bf16_per1x32Fp4_tn_256x256E",
+                                        "f4gemm/f4gemm_bf16_per1x32Fp4_tn_256x256.co");
+
+    if(log2_k_split.has_value() && log2_k_split.value() != 0)
+    {
+        int k_num         = 1 << log2_k_split.value();
+        args.log2_k_split = log2_k_split.value();
+        SUBM              = 128;
+        SUBN              = 512;
         assert(Kdim % k_num == 0);
         int k_per_tg = Kdim / k_num;
         k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;
         gdz          = (Kdim + k_per_tg - 1) / k_per_tg;
-        // printf("Debug: Kdim %d, log2_k_split %d, k_per_tg %d, global_tg_z %d\n",
-        //        Kdim,
-        //        log2_k_split.value(),
-        //        k_per_tg,
-        //        gdz);
+        impl_ptr     = &SplitK_impl;
+    }
+    else if(!log2_k_split.has_value() && selectedksplit > 0)
+    {
+        int k_num         = 1 << selectedksplit;
+        args.log2_k_split = selectedksplit;
+        SUBM              = 128;
+        SUBN              = 512;
+        assert(Kdim % k_num == 0);
+        int k_per_tg = Kdim / k_num;
+        k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;
+        gdz          = (Kdim + k_per_tg - 1) / k_per_tg;
+        impl_ptr     = &SplitK_impl;
     }
     else if(selectedMTile < 256)
     {
-        static AiterAsmKernel noSplitK_m128_impl(
-            "_ZN5aiter38f4gemm_outBF16_128x512_scale_B_ShuffleE",
-            "f4gemm/f4gemm_outBF16_128x512_scale_B_Shuffle.co");
-        impl_ptr = &noSplitK_m128_impl;
         SUBM     = 128;
         SUBN     = 512;
+        impl_ptr = &noSplitK_m128_impl;
     }
-    else if(bpreshuffle.has_value())
+    else if(bpreshuffle.has_value() && !bpreshuffle)
     {
-        static AiterAsmKernel noSplitK_bpreshuffle_m128_impl(
-            "_ZN5aiter45f4gemm_bf16_per1x32Fp4_tn_bpreshuffle_256x256E",
-            "f4gemm/f4gemm_bf16_per1x32Fp4_tn_bpreshuffle_256x256.co");
-        impl_ptr = &noSplitK_bpreshuffle_m128_impl;
+        SUBM     = 256;
+        SUBN     = 256;
+        impl_ptr = &noSplitK_m256;
     }
     else
     {
-        static AiterAsmKernel noSplitK_m128("_ZN5aiter33f4gemm_bf16_per1x32Fp4_tn_256x256E",
-                                            "f4gemm/f4gemm_bf16_per1x32Fp4_tn_256x256.co");
-        impl_ptr = &noSplitK_m128;
+        SUBM     = 256;
+        SUBN     = 256;
+        impl_ptr = &noSplitK_bpreshuffle_m256_impl;
     }
 
     int gdx = (Ndim + SUBN - 1) / SUBN;

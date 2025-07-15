@@ -58,7 +58,7 @@ def run_gemm_asm(
     bias=None,
     dtype=dtypes.bf16,
     bpreshuffle=True,
-    log2_k_split=99,
+    log2_k_split=None,
 ):
     out_reset = torch.zeros(
         (out.shape[0] + 255) // 256 * 256, out.shape[1], dtype=dtype

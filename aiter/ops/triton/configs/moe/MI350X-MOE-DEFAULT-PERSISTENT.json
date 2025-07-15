@@ -9,7 +9,7 @@
     "waves_per_eu": 2,
     "matrix_instr_nonkdim": 16,
     "kpack": 1,
-    "CU_multiplier": 2
+    "CU_multiplier": 1
   },
   "medium_M": {
     "BLOCK_SIZE_M": 128,

@@ -1161,6 +1161,7 @@ if __name__ == "__main__":
     top_k = 2
     E = 4
 
+
     # Configuration flags
     routed_weight = False
     fp8_w8a8 = False
@@ -1169,16 +1170,17 @@ if __name__ == "__main__":
     silu_fused = False   # Change to False to use the non-silu fused variant
     dtype = torch.float16
 
+    # Run the test
     test_fused_moe(
         M,
         N,
         K,
         top_k,
         E,
-        routed_weight,
-        fp8_w8a8,
-        int8_w8a16,
-        persistent,
-        silu_fused,
-        dtype,
+        routed_weight=routed_weight,
+        fp8_w8a8=fp8_w8a8,
+        int8_w8a16=int8_w8a16,
+        persistent=persistent,
+        silu_fused=silu_fused,
+        dtype=dtype,
     )

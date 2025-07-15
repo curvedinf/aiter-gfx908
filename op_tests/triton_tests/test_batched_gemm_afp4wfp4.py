@@ -2,13 +2,14 @@ import torch
 import pytest
 from aiter.ops.triton.batched_gemm_afp4wfp4 import batched_gemm_afp4wfp4
 import aiter.ops.triton.utils.arch_info as arch_info
+from typing import Union
 
 # Note this is specified by the HW and cannot be changed.
 SCALE_GROUP_SIZE = 32
 
 
 def generate_batched_gemm_afp4wfp4_inputs(
-    B: int, M: int, N: int, K: int, layout: str = "TN"
+    B: int, M: int, N: int, K: int, dtype: Union[str, torch.dtype], layout: str = "TN", output: bool = False
 ):
     """
     Returns:
@@ -52,7 +53,11 @@ def generate_batched_gemm_afp4wfp4_inputs(
     x_scales = x_scales.transpose(1, 2)
     w_scales = w_scales.transpose(1, 2)
 
-    return x, w, x_scales, w_scales
+    y = None
+    if output:
+        y = torch.empty(B, M, N, device=x.device, dtype=dtype)
+
+    return x, w, x_scales, w_scales, y
 
 
 def get_x_vals():
@@ -172,8 +177,7 @@ def test_batched_gemm_afp4_wfp4(B: int, M: int, N: int, K: int, dtype):
     if not (arch_info.is_fp4_avail()):
         pytest.skip("MXFP4 not supported on this architecture")
 
-    x, w, x_scales, w_scales = generate_batched_gemm_afp4wfp4_inputs(B, M, N, K)
-    out = torch.empty(B, M, N, device=x.device, dtype=dtype)
+    x, w, x_scales, w_scales, out = generate_batched_gemm_afp4wfp4_inputs(B, M, N, K, dtype, output=True)
 
     torch_out = run_torch(x, w, x_scales, w_scales, dtype).to(dtype)
     assert torch_out.shape == (B, M, N)

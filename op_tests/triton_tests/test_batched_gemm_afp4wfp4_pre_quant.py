@@ -9,7 +9,7 @@ import aiter.ops.triton.utils.arch_info as arch_info
 SCALE_GROUP_SIZE = 32
 
 
-def generate_batched_gemm_afp4wfp4_pre_quant_inputs(B, M, N, K, layout="TN"):
+def generate_batched_gemm_afp4wfp4_pre_quant_inputs(B, M, N, K, dtype, layout="TN", output=False):
     """
     Returns:
         - x: (B, M, K)
@@ -58,7 +58,11 @@ def generate_batched_gemm_afp4wfp4_pre_quant_inputs(B, M, N, K, layout="TN"):
     )
     w_scales = w_scales.transpose(1, 2)
 
-    return x, w, x_scales, w_scales
+    y = None
+    if output:
+        y = torch.empty(B, M, N, device=x.device, dtype=dtype)
+
+    return x, w, x_scales, w_scales, y
 
 
 def get_x_vals():
@@ -168,10 +172,9 @@ def test_batched_gemm_afp4_wfp4_pre_quant(B: int, M: int, N: int, K: int, dtype)
     if not (arch_info.is_fp4_avail()):
         pytest.skip("MXFP4 not supported on this architecture")
 
-    x, w, x_scales, w_scales = generate_batched_gemm_afp4wfp4_pre_quant_inputs(
-        B, M, N, K
+    x, w, x_scales, w_scales, out = generate_batched_gemm_afp4wfp4_pre_quant_inputs(
+        B, M, N, K, dtype, output=True
     )
-    out = torch.empty(B, M, N, device=x.device, dtype=dtype)
 
     torch_out = run_torch(x, w, x_scales, w_scales, dtype).to(dtype)
 

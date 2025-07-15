@@ -39,8 +39,8 @@ def model_benchmark_shapes(args):
 
 def bench_gemm_fn(batch: int, M: int, N: int, K: int, metric: str, layout: str):
     c_dtype = torch.bfloat16
-    x, w, x_scale, w_scale = generate_batched_gemm_afp4wfp4_inputs(
-        batch, M, N, K, layout=layout
+    x, w, x_scale, w_scale, y = generate_batched_gemm_afp4wfp4_inputs(
+        batch, M, N, K, c_dtype, layout=layout, output=True,
     )
     # print(f"M: {M}, N: {N}, K: {K}, x.shape: {x.shape}, x.stride(): {x.stride()}, w.shape: {w.shape}, w.stride(): {w.stride()}")
     # flops
@@ -53,12 +53,9 @@ def bench_gemm_fn(batch: int, M: int, N: int, K: int, metric: str, layout: str):
     )
     mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
     mem = mem_read + mem_write
-    out = torch.empty(
-        x.shape[0], x.shape[1], w.shape[2], device=x.device, dtype=c_dtype
-    )
 
     ms = triton.testing.do_bench(
-        lambda: batched_gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
+        lambda: batched_gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, y),
         warmup=25,
         rep=100,
     )

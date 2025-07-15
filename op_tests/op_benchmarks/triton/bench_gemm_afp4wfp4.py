@@ -26,8 +26,8 @@ TRITON_HIP_PRESHUFFLE_SCALES = (
 
 def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
     c_dtype = torch.bfloat16
-    x, w, _, _, x_scale, w_scale, _, _ = generate_gemm_afp4wfp4_inputs(
-        M, N, K, c_dtype, layout=layout
+    x, w, _, _, x_scale, w_scale, _, y = generate_gemm_afp4wfp4_inputs(
+        M, N, K, c_dtype, layout=layout, output=True,
     )
     # flops
     flops = 2.0 * M * N * K
@@ -39,19 +39,18 @@ def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
     )
     mem_write = (M * N) * 2  # TODO: Fix for c_dtype != bf16
     mem = mem_read + mem_write
-    out = torch.empty(x.shape[0], w.shape[1], device=x.device, dtype=c_dtype)
 
     if TRITON_HIP_PRESHUFFLE_SCALES:
         ms = triton.testing.do_bench(
             lambda: gemm_afp4wfp4_preshuffled_scales(
-                x, w, x_scale, w_scale, c_dtype, out
+                x, w, x_scale, w_scale, c_dtype, y
             ),
             warmup=25,
             rep=100,
         )
     else:
         ms = triton.testing.do_bench(
-            lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, out),
+            lambda: gemm_afp4wfp4(x, w, x_scale, w_scale, c_dtype, y),
             warmup=25,
             rep=100,
         )

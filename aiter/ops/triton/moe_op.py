@@ -6,9 +6,10 @@ import triton
 import triton.language as tl
 from typing import Any, Dict, Optional, List
 from aiter.ops.triton.quant import dynamic_per_tensor_quant_fp8_i8
-from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd, get_tile_max_current_xcd
-from aiter.ops.triton.utils.moe_common import _write_zeros_to_output
+from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd, get_max_tile_id_from_xcd_pool, get_max_tile_id_from_xcd_pool_python
 from aiter.ops.triton.utils.moe_config_utils import get_optimal_moe_config
+from aiter.ops.triton.utils.moe_common import _write_zeros_to_output
+
 
 # Source:
 # MoE Kernel adapted from VLLM
@@ -17,7 +18,7 @@ _PADDING_SIZE = 0
 
 _MOE_A_QUANT_FUNC = dynamic_per_tensor_quant_fp8_i8
 
-_USE_MOE_PERSISTENT_KERNEL = True
+_USE_MOE_PERSISTENT_KERNEL = False
 
 
 def moe_set_use_persistent_kernel(value: bool):
@@ -326,14 +327,13 @@ def _fused_moe_persistent_kernel_gptq_awq(
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     EVEN_K: tl.constexpr,
+    NUM_SMS: tl.constexpr,
     MUL_ROUTED_WEIGHT: tl.constexpr,
     top_k: tl.constexpr,
     compute_type: tl.constexpr,
     has_zp: tl.constexpr,
     use_int4_w4a16: tl.constexpr,
     use_int8_w8a16: tl.constexpr,
-    NUM_WGS: tl.constexpr,
-    CU_multiplier: tl.constexpr, # NUM_WGS = NUM_CUS * CU_multiplier
 ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -377,7 +377,7 @@ def _fused_moe_persistent_kernel_gptq_awq(
 
     num_tiles = num_pid_m * num_pid_n
     # Compute how many tiles are outside the padding region
-    num_valid_tiles = tl.cdiv((num_tiles - tile_id), NUM_WGS)
+    num_valid_tiles = tl.cdiv((num_tiles - tile_id), NUM_SMS)
     for _ in range(0, num_valid_tiles):
         tile_id_remapped = remap_xcd(tile_id, num_tiles, NUM_XCDS)
         pid_m, pid_n = pid_grid(tile_id_remapped, num_pid_m, num_pid_n, GROUP_SIZE_M)
@@ -507,7 +507,7 @@ def _fused_moe_persistent_kernel_gptq_awq(
         c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
         tl.store(c_ptrs, accumulator, mask=c_mask)
 
-        tile_id += NUM_WGS
+        tile_id += NUM_SMS
 
 
 @triton.heuristics(
@@ -770,10 +770,9 @@ def _fused_moe_persistent_kernel(
     compute_type: tl.constexpr,
     use_fp8_w8a8: tl.constexpr,
     use_int8_w8a16: tl.constexpr,
-    NUM_XCDS: tl.constexpr,
-    NUM_WGS: tl.constexpr,
-    CU_multiplier: tl.constexpr, # NUM_WGS = NUM_CUS * CU_multiplier
+    CU_multiplier: tl.constexpr,
     pool_counters,
+    NUM_XCDS: tl.constexpr = 8,
 ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -802,7 +801,8 @@ def _fused_moe_persistent_kernel(
     BLOCK_SIZE_M, which is necessary to maintain consistency in block matrix
     multiplication across different blocks processed by the same expert.
     """
-    # 
+
+    # persistent workgroup id
     workgroup_id = tl.program_id(axis=0)
 
     # Load tile-invariant runtime constant
@@ -811,41 +811,22 @@ def _fused_moe_persistent_kernel(
     num_pid_m = tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
-
     offs_k = tl.arange(0, BLOCK_SIZE_K)
 
     num_tiles = num_pid_m * num_pid_n
 
-    # initial pool id = xcd id
     xcd = workgroup_id % NUM_XCDS
-    # can be at most 7
-    xcd_tracker = 0
+    xcd_counter = 0 # how many XCD pools have been checked
+    max_tile_id = get_max_tile_id_from_xcd_pool(num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS)
+
+    tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1, sem="relaxed")
     
-    # get the first tile id statically from the pool
-    pool_start_tile_id = get_tile_max_current_xcd(num_tiles, xcd-1) if xcd > 0 else 0
-    tile_id = pool_start_tile_id + (workgroup_id // NUM_XCDS) 
-
-    # no need for this for the first tile
-    # tile_id = tl.atomic_add(pool_counters + xcd, 1, sem="relaxed")
-
-    tile_id_max = get_tile_max_current_xcd(num_tiles, xcd)
-
-    # if we don't have enough tiles for all CUs we do early exit for those CUs (i.e. persistent workgroups)
-    if tile_id >= num_tiles:
-        return
-
-    # We checked all the xcds
-    while (tile_id < tile_id_max) and (xcd_tracker < NUM_XCDS):
-        
-        # print("tile_id: ", tile_id)
-        
+    while (tile_id < max_tile_id) and (tile_id < num_tiles):
         pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
         offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
         offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
         token_mask = offs_token < num_valid_tokens
-
-
 
         off_experts = tl.load(expert_ids_ptr + pid_m).to(tl.int64)
         if off_experts == -1:
@@ -958,39 +939,24 @@ def _fused_moe_persistent_kernel(
             # -----------------------------------------------------------
             # Write back the block of the output
             offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-            c_ptrs = c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
+            c_ptrs = (
+                c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
+            )
             c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
             tl.store(c_ptrs, accumulator, mask=c_mask)
 
-            # fetch next tile from the (next available) pool
-            current_pool = (xcd + xcd_tracker) % NUM_XCDS
-            tile_id = tl.atomic_add(pool_counters + current_pool, 1, sem="relaxed")
-            # if current pool is exhausted (fetched tile_id >= max tile id of the pool),
-            # search the next pool until find one which is not exhausted
-            while (tile_id >= tile_id_max) and (xcd_tracker < NUM_XCDS):
-                xcd_tracker += 1
-                current_pool = (xcd + xcd_tracker) % NUM_XCDS
-                tile_id = tl.atomic_add(pool_counters + current_pool, 1, sem="relaxed")
-                tile_id_max = get_tile_max_current_xcd(num_tiles, current_pool)
-
-
-def get_tile_max_current_xcd_python(num_tiles: int, xcd: int, NUM_XCDS: int = 8):
-    pids_per_xcd = (num_tiles + NUM_XCDS - 1) // NUM_XCDS
-    # When NUM_XCDS cannot divide num_tiles, some xcds will have
-    # pids_per_xcd pids, the other will have pids_per_xcd - 1 pids.
-    # We calculate the number of xcds that have pids_per_xcd pids as
-    # tall_xcds
-    tall_xcds = num_tiles % NUM_XCDS
-    tall_xcds = NUM_XCDS if tall_xcds == 0 else tall_xcds
-    if xcd < tall_xcds:
-        max_tile_id = xcd * pids_per_xcd + pids_per_xcd
-    else:
-        max_tile_id = (
-            tall_xcds * pids_per_xcd
-            + (xcd - tall_xcds) * (pids_per_xcd - 1) + (pids_per_xcd - 1)
-        )
-
-    return max_tile_id
+        # fetch the next tile id from the pool
+        tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1, sem="relaxed")
+        # if current pool is exhausted, move to the next pool.
+        # repeat until we find a valid tile id, at max NUM_XCD - 1 times (no need to check the start pool again).
+        while (tile_id >= max_tile_id) and ( (xcd_counter+1) < NUM_XCDS):
+            xcd_counter += 1
+            max_tile_id = get_max_tile_id_from_xcd_pool(
+                num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS
+            )
+            tile_id = tl.atomic_add(
+                pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1, sem="relaxed"
+            )
 
 
 def fused_moe(
@@ -1017,6 +983,7 @@ def fused_moe(
     """
     #TODO: Add doc
     """
+
     dtype = A.dtype
     # if config is None:
     config = get_optimal_moe_config(dtype, use_fp8_w8a8, use_int8_w8a16, use_fp8_w8a8, use_int4_w4a16, _USE_MOE_PERSISTENT_KERNEL, M=A.shape[0])
@@ -1064,16 +1031,15 @@ def fused_moe(
         assert B_scale is not None and B_scale.ndim == 3
         assert B_zp is None or B_zp.ndim == 3
         if _USE_MOE_PERSISTENT_KERNEL:
-            NUM_CUS = torch.cuda.get_device_properties("cuda").multi_processor_count
-            NUM_WGS = NUM_CUS * config["CU_multiplier"]
+            NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count * 2
             grid = lambda META: (  # noqa: E731
                 min(
-                    NUM_WGS,
+                    NUM_SMS,
                     triton.cdiv(sorted_token_ids.shape[0], META["BLOCK_SIZE_M"])
                     * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]),
                 ),
             )
-            
+
             _fused_moe_persistent_kernel_gptq_awq[grid](
                 A,
                 B,
@@ -1102,13 +1068,13 @@ def fused_moe(
                 B_zp.stride(2) if B_zp is not None else 0,
                 B_zp.stride(1) if B_zp is not None else 0,
                 group_size=block_shape[1],
+                NUM_SMS=NUM_SMS,
                 MUL_ROUTED_WEIGHT=mul_routed_weight,
                 top_k=top_k,
                 compute_type=compute_type,
                 has_zp=B_zp is not None,
                 use_int4_w4a16=use_int4_w4a16,
                 use_int8_w8a16=use_int8_w8a16,
-                NUM_WGS=NUM_WGS,
                 **config,
             )
         else:
@@ -1155,30 +1121,20 @@ def fused_moe(
 
     else:
         if _USE_MOE_PERSISTENT_KERNEL:
-            # NUM_CUS = torch.cuda.get_device_properties("cuda").multi_processor_count
-            # assert config["CU_multiplier"] == 1, "CU_multiplier must be 1 for pooled approach, because we must ensure concurrency of all persistent workgroups"
-            # NUM_CUS * config["CU_multiplier"] # Number of persistent workgroups to launch, multiple of the number of CUs
-            
-            # number of persistent workgroups
-            NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count 
+            NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
             num_tiles = triton.cdiv(num_tokens_post_padded, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"])
-            grid_size = min(NUM_WGS, num_tiles)
-            grid = (
-                grid_size,
-            )
+
+            grid = (min(num_tiles, NUM_WGS),)
+
             NUM_XCDS = 8
-            # We create NUM_XCDS pools of pids. Persistent workgroups will fetch pids from their own pools. Only once they have exhausted their pool, they will start fetching from the next pool.
-            # This way we ensure:
-            # - load balancing, because workgroups ultimately have access to all pids.
-            # - good L2 caching for pids of the initial pool, as they are consecutive.
-            # - mitigate cache coherency issues for fetching the next pid, because for the initial pool, all other workgroups accessing it are on the same XCD, and only after exhausting it, it will start accessing the next pool.
+            pool_counters = torch.tensor([ (get_max_tile_id_from_xcd_pool_python(num_tiles, xcd-1, NUM_XCDS) if xcd > 0 else 0) for xcd in range(NUM_XCDS)]).to(A.device).to(torch.int32)
+            
+            print("NUM_WGS", NUM_WGS)
+            print("num_tiles", num_tiles)
+            print("pool_counters", pool_counters)
+            print("pool_counters.shape", pool_counters.shape)
+            print("pool_counters.stride", pool_counters.stride())
 
-            # 0, pool_size, 2 * pool_size, ..., (NUM_XCDS - 1) * pool_size (not that the pool_size will vary if num_tiles is not evenly divisible by NUM_XCDS)
-            pool_counters = torch.tensor([get_tile_max_current_xcd_python(num_tiles, pool-1, NUM_XCDS) if pool > 0 else 0 for pool in range(NUM_XCDS)]).to(torch.int32).to(A.device)
-
-            # every XCD gets NUM_WGS // NUM_XCDS persistent workgroups, which can get their first tile id statically.
-            # only for the second tile it is needed to be fetched dynamically from the pool
-            pool_counters += NUM_WGS // NUM_XCDS
 
             _fused_moe_persistent_kernel[grid](
                 A,
@@ -1213,9 +1169,8 @@ def fused_moe(
                 compute_type=compute_type,
                 use_fp8_w8a8=use_fp8_w8a8,
                 use_int8_w8a16=use_int8_w8a16,
-                NUM_XCDS=NUM_XCDS,
-                NUM_WGS=NUM_WGS,
                 pool_counters=pool_counters,
+                NUM_XCDS=NUM_XCDS,
                 **config,
             )
         else:

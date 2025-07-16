@@ -97,3 +97,51 @@ def get_tile_max_current_xcd(num_tiles: int, xcd: int, NUM_XCDS: tl.constexpr = 
         )
 
     return max_tile_id
+
+@triton.jit
+def get_max_tile_id_from_xcd_pool(num_tiles: int, xcd: int, NUM_XCDS: tl.constexpr = 8):
+    """
+    num_tiles: total number of tiles all the pools combined
+    xcd: current xcd id (pool id). 0-indexed.
+    NUM_XCDS: total number of xcds (pools). Default is 8 for MI3XX series.
+    """
+    pids_per_xcd = (num_tiles + NUM_XCDS - 1) // NUM_XCDS # ceiling division
+    # When NUM_XCDS cannot divide num_tiles, some XCD pools will have
+    # pids_per_xcd pids, the other will have pids_per_xcd - 1 pids.
+    # We calculate the number of xcds that have pids_per_xcd pids as
+    # tall_xcds
+    tall_xcds = num_tiles % NUM_XCDS
+    tall_xcds = NUM_XCDS if tall_xcds == 0 else tall_xcds
+    if xcd < tall_xcds:
+        max_tile_id = xcd * pids_per_xcd + pids_per_xcd
+    else:
+        max_tile_id = (
+            tall_xcds * pids_per_xcd
+            + (xcd - tall_xcds) * (pids_per_xcd - 1) + (pids_per_xcd - 1)
+        )
+
+    return max_tile_id
+
+
+def get_max_tile_id_from_xcd_pool_python(num_tiles: int, xcd: int, NUM_XCDS: tl.constexpr = 8):
+    """
+    num_tiles: total number of tiles all the pools combined
+    xcd: current xcd id (pool id). 0-indexed.
+    NUM_XCDS: total number of xcds (pools). Default is 8 for MI3XX series.
+    """
+    pids_per_xcd = (num_tiles + NUM_XCDS - 1) // NUM_XCDS # ceiling division
+    # When NUM_XCDS cannot divide num_tiles, some XCD pools will have
+    # pids_per_xcd pids, the other will have pids_per_xcd - 1 pids.
+    # We calculate the number of xcds that have pids_per_xcd pids as
+    # tall_xcds
+    tall_xcds = num_tiles % NUM_XCDS
+    tall_xcds = NUM_XCDS if tall_xcds == 0 else tall_xcds
+    if xcd < tall_xcds:
+        max_tile_id = xcd * pids_per_xcd + pids_per_xcd
+    else:
+        max_tile_id = (
+            tall_xcds * pids_per_xcd
+            + (xcd - tall_xcds) * (pids_per_xcd - 1) + (pids_per_xcd - 1)
+        )
+
+    return max_tile_id

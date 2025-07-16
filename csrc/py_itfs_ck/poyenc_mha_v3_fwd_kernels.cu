@@ -806,6 +806,7 @@ struct BlockFmhaPipelineQRKSVS
             __builtin_amdgcn_s_barrier();
             __builtin_amdgcn_sched_barrier(0);
             // (4) softmax + mfma =============================================
+            asm volatile ("; [POYENC] do fp32 to fp16/bf16 conversion only");
             metadata.p = cast_tile<PDataType>(
                 tile_elementwise_in(p_compute_element_func, metadata.p_compute));
             __builtin_amdgcn_sched_barrier(0);

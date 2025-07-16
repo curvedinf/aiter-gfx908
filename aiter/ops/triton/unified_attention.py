@@ -739,7 +739,7 @@ def unified_attention(
         # so it is static dim. for decode, should be okay to use it in heuristics
         # make the block_m bigger if we already have enough parallelism
         NUM_SEGMENTS = math.ceil(target_num_prgms / (total_num_q_blocks * num_kv_heads))
-        NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
+        NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS) * 2
         NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
         NUM_SEGMENTS = max(NUM_SEGMENTS, 16)
 

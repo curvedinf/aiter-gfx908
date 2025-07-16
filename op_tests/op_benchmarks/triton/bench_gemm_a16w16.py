@@ -17,7 +17,7 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
 )
 
 
-def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str):
+def bench_gemm_fn(M: int, N: int, K: int, metric: str, layout: str, model_name=None):
     # NOTE: Assume bias and output has the same dtype
     c_dtype = torch.bfloat16
     x, w, out_dtype, y = generate_gemm_a16w16_inputs(
@@ -54,7 +54,7 @@ def run_model_benchmark(args):
     benchmark = get_model_benchmark_object("GEMM A16W16 Benchmark", args)
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_a16w16(M, hidden_dim, intermediate_dim, metric, layer, **kwargs):
+    def bench_gemm_a16w16(M, hidden_dim, intermediate_dim, metric, layer, model_name=None, **kwargs):
         """
         Fc1:
              M      K                  K           N          M       N

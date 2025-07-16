@@ -83,8 +83,8 @@ def kernel_unified_attention_2d(
     num_seqs: tl.int32,
     BLOCK_M: tl.constexpr,  # int
 ):
-    q_block_global_idx = tl.program_id(0)
-    kv_head_idx = tl.program_id(1)
+    kv_head_idx = tl.program_id(0)
+    q_block_global_idx = tl.program_id(1)
 
     seq_idx = find_seq_idx(
         query_start_len_ptr, q_block_global_idx, num_seqs, BLOCK_Q, True
@@ -688,8 +688,8 @@ def unified_attention(
             total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         kernel_unified_attention_2d[
             (
-                total_num_q_blocks,
                 num_kv_heads,
+                total_num_q_blocks,
             )
         ](
             output_ptr=out,

@@ -25,6 +25,7 @@
 #include "moe_ck.h"
 #include "moe_op.h"
 #include "moe_sorting.h"
+#include "m_grouped_gemm_ck.h"
 #include "norm.h"
 #include "pos_encoding.h"
 #include "quant.h"
@@ -93,5 +94,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     CACHE_PYBIND;
     HIPBSOLGEMM_PYBIND;
     ROCSOLGEMM_PYBIND;
+    M_GROUPED_GEMM_PYBIND;
 }
 #endif

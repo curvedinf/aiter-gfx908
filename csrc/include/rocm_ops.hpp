@@ -154,6 +154,17 @@
           py::arg("kernelId") = 0,    \
           py::arg("splitK")   = 0);
 
+#define M_GROUPED_FLATMM_PYBIND            \
+      m.def("m_grouped_flatmm_ck",              \
+            &m_grouped_flatmm_ck,               \
+            "m_grouped_flatmm_ck",              \
+            py::arg("XQ"),                    \
+            py::arg("WQ"),                    \
+            py::arg("x_scale"),               \
+            py::arg("w_scale"),               \
+            py::arg("out"),                   \
+            py::arg("group_layout"));
+
 #define CACHE_PYBIND                                                                \
     m.def("swap_blocks",                                                            \
           &aiter::swap_blocks,                                                      \

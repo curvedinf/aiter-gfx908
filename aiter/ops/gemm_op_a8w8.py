@@ -306,3 +306,14 @@ def gemm_a8w8_bpreshuffle_tune(
     kernelId: int = 0,
     splitK: int = 0,
 ) -> torch.Tensor: ...
+
+
+@compile_ops("module_m_grouped_gemm", fc_name="m_grouped_flatmm_ck")
+def m_grouped_flatmm_ck(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    out: Tensor,
+    group_layout: Tensor,
+): ...

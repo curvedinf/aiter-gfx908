@@ -24,6 +24,7 @@ from aiter.ops.triton.moe_op_gelu import (
 
 from aiter.ops.triton.utils.moe_config_utils import get_optimal_moe_config_func
 from aiter.ops.triton.utils.types import torch_to_triton_dtype
+import time
 
 DEBUG_MODE = False
 
@@ -762,6 +763,13 @@ def test_fused_moe(
             triton_out_silu, torch_out_silu, atol=1e-1, rtol=1e-1
         )
     else:
+        print("Comparing outputs")
+        print("M:", M, "N:", N, "K:", K, "top_k:", top_k, "E:", E)
+        print("triton_out.shape:", triton_out.shape)
+        print("torch_out.shape:", torch_out.shape)
+
+        print("triton_out:", triton_out)
+        print("torch_out:", torch_out)
         torch.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
 
 
@@ -1147,3 +1155,39 @@ def test_moe_e2e(
         print(f"torch_out={torch_out}")
     # Validate correctness
     torch.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
+
+
+
+if __name__ == "__main__":
+    torch.manual_seed(20)
+
+    # Parameters for moe test
+    M = 2048
+    N = 2048
+    K = 256
+    top_k = 2
+    E = 4
+
+
+    # Configuration flags
+    routed_weight = False
+    fp8_w8a8 = False
+    int8_w8a16 = False
+    persistent = True  # Change to True to enable persistent kernel mode
+    silu_fused = False   # Change to False to use the non-silu fused variant
+    dtype = torch.float16
+
+    # Run the test
+    test_fused_moe(
+        M,
+        N,
+        K,
+        top_k,
+        E,
+        routed_weight=routed_weight,
+        fp8_w8a8=fp8_w8a8,
+        int8_w8a16=int8_w8a16,
+        persistent=persistent,
+        silu_fused=silu_fused,
+        dtype=dtype,
+    )

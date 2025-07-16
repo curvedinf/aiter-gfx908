@@ -479,6 +479,12 @@ def parse_args():
         default="extend",
         help="Mode of the benchmark. Options: extend, prefill",
     )
+    parser.add_argument(
+        "-o",
+        action="store_true",
+        default=False
+        help="Write performance results to CSV file"
+    )
     return parser.parse_args()
 
 

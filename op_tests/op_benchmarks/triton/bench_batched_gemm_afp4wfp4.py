@@ -106,7 +106,7 @@ def run_model_benchmark(args):
 
         return bench_gemm_fn(batch, M, N, K, metric, layout=args.layout)
 
-    bench_batched_gemm_afp4wfp4.run(save_path=".", print_data=True)
+    bench_batched_gemm_afp4wfp4.run(save_path="." if args.o else None, print_data=True)
 
 
 def run_shape_benchmark(args):
@@ -120,7 +120,7 @@ def run_shape_benchmark(args):
     def bench_batched_gemm_afp4wfp4(M, N, K, batch, metric, provider):
         return bench_gemm_fn(batch, M, N, K, metric, layout=args.layout)
 
-    bench_batched_gemm_afp4wfp4.run(save_path=".", print_data=True)
+    bench_batched_gemm_afp4wfp4.run(save_path="." if args.o else None, print_data=True)
 
 
 def run_benchmark(args, defaults):

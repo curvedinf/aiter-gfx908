@@ -25,62 +25,57 @@ def _fwd_kernel_stage2_asm(
     stride_mid_os,
     stride_obs,
     stride_oh,
-    bs,
-    nheads,
-    max_seqlen_q,
-    NUM_KV_SPLITS: tl.constexpr,
     BLOCK_DV: tl.constexpr,
     Lv: tl.constexpr,
     mgc: tl.constexpr,
 ):
     cur_batch = tl.program_id(0)
     cur_head = tl.program_id(1)
-    cur_qo_offs = tl.program_id(2)
-
     cur_qo_start = tl.load(qo_indptr + cur_batch)
     cur_qo_end = tl.load(qo_indptr + cur_batch + 1)
     cur_split_start = tl.load(num_kv_splits_indptr + cur_batch)
     cur_split_end = tl.load(num_kv_splits_indptr + cur_batch + 1)
-    cur_qo = cur_qo_start + cur_qo_offs
-    if cur_qo > cur_qo_end:
-        return
     cur_kv_seq_len = tl.load(kv_indptr + cur_batch + 1) - tl.load(kv_indptr + cur_batch)
 
     offs_d = tl.arange(0, BLOCK_DV)
     mask_d = offs_d < Lv
 
-    e_sum = 0.0
-    e_max = -float("inf")
-    acc = tl.zeros([BLOCK_DV], dtype=tl.float32)
-
-    offs_v = (cur_qo * stride_mid_ob + cur_head * stride_mid_oh) * Lv + offs_d
-    offs_logic = cur_qo * stride_mid_ob + cur_head * stride_mid_oh
-
+    offs_logic = cur_qo_start * stride_mid_ob + cur_head * stride_mid_oh
+    offs_v = offs_logic * Lv + offs_d
     num_valid_kv_splits = tl.minimum(
         cur_split_end - cur_split_start, tl.cdiv(cur_kv_seq_len, mgc)
     )
-    for split_kv_id in range(0, num_valid_kv_splits):
-        tv = tl.load(
-            Mid_O + offs_v + split_kv_id * stride_mid_os * Lv,
+
+    for cur_qo in range(cur_qo_start, cur_qo_end):
+        e_sum = 0.0
+        e_max = -float("inf")
+        acc = tl.zeros([BLOCK_DV], dtype=tl.float32)
+        for split_kv_id in range(0, num_valid_kv_splits):
+            tv = tl.load(
+                Mid_O + offs_v + split_kv_id * stride_mid_os * Lv,
+                mask=mask_d,
+                other=0.0,
+            )
+            tlogic = tl.load(Mid_lse + offs_logic + split_kv_id * stride_mid_os)
+            n_e_max = tl.maximum(tlogic, e_max)
+
+            old_scale = tl.exp(e_max - n_e_max)
+            acc *= old_scale
+            exp_logic = tl.exp(tlogic - n_e_max)
+            acc += exp_logic * tv
+
+            e_sum = e_sum * old_scale + exp_logic
+            e_max = n_e_max
+
+        tl.store(
+            O + cur_qo * stride_obs + cur_head * stride_oh + offs_d,
+            acc / e_sum,
             mask=mask_d,
-            other=0.0,
         )
-        tlogic = tl.load(Mid_lse + offs_logic + split_kv_id * stride_mid_os)
-        n_e_max = tl.maximum(tlogic, e_max)
-
-        old_scale = tl.exp(e_max - n_e_max)
-        acc *= old_scale
-        exp_logic = tl.exp(tlogic - n_e_max)
-        acc += exp_logic * tv
-
-        e_sum = e_sum * old_scale + exp_logic
-        e_max = n_e_max
-
-    tl.store(
-        O + cur_qo * stride_obs + cur_head * stride_oh + offs_d,
-        acc / e_sum,
-        mask=mask_d,
-    )
+        offs_logic += stride_mid_ob
+        offs_v += stride_mid_ob * Lv
+        # offs_logic += num_valid_kv_splits * stride_mid_os
+        # offs_v += num_valid_kv_splits * stride_mid_os * Lv
 
 
 @functools.lru_cache(maxsize=1)
@@ -157,6 +152,7 @@ def mla_decode_fwd(
             num_kv_splits_indptr is not None
         ), "num_kv_splits_indptr must be provided when num_kv_splits is specified"
 
+    num_kv_splits = 16
     if nhead == 16 and max_seqlen_q == 1:
         # special case for 16 heads and max_seqlen_q == 1
         logits = torch.empty(
@@ -194,12 +190,11 @@ def mla_decode_fwd(
         logits,
         attn_lse,
     )
-
     if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
         return logits.view(total_s, nhead, v_head_dim), attn_lse
     Lv = v_head_dim
     BLOCK_DV = triton.next_power_of_2(Lv)
-    grid = (bs, nhead, max_seqlen_q)
+    grid = (bs, nhead)
     extra_kargs = {"waves_per_eu": 4}
     _fwd_kernel_stage2_asm[grid](
         logits,
@@ -213,10 +208,6 @@ def mla_decode_fwd(
         attn_lse.stride(1),
         o.stride(0),
         o.stride(1),
-        bs,
-        nhead,
-        max_seqlen_q,
-        NUM_KV_SPLITS=num_kv_splits,
         BLOCK_DV=BLOCK_DV,
         Lv=Lv,
         mgc=mgc,

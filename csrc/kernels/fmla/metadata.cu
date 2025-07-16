@@ -46,8 +46,8 @@ __global__ void kn_get_mla_metadata_v0(
     constexpr int32_t kMaxSplits = 16;
     constexpr int32_t kWarpSize  = get_warp_size();
 
-    int32_t base_scan        = 0;
-    int32_t local_max_splits = 1;
+    int32_t base_scan  = 0;
+    int32_t max_splits = 1;
 
     const int32_t num_loops = (batch_size + kWarpSize - 1) / kWarpSize;
     for (int32_t i = 0; i < num_loops; ++i)
@@ -70,7 +70,7 @@ __global__ void kn_get_mla_metadata_v0(
                 }
             }
 
-            local_max_splits = (local_max_splits > splits) ? local_max_splits : splits;
+            max_splits = (max_splits > splits) ? max_splits : splits;
         }
 
         // prefix sum
@@ -96,14 +96,14 @@ __global__ void kn_get_mla_metadata_v0(
     // Reduce max_num_split
     for (int32_t mask = (kWarpSize >> 1); mask > 0; mask >>= 1)
     {
-        const int32_t remote_max = __shfl_xor(local_max_splits, mask);
-        local_max_splits = (local_max_splits > remote_max) ? local_max_splits : remote_max;
+        const int32_t remote_max = __shfl_xor(max_splits, mask);
+        max_splits = (max_splits > remote_max) ? max_splits : remote_max;
     }
 
     if (threadIdx.x == 0)
     {
         p_num_kv_splits[0] = 0;
-        p_max_num_splits[0] = local_max_splits;
+        p_max_num_splits[0] = max_splits;
     }
 }
 
@@ -116,32 +116,34 @@ __global__ void kn_get_mla_metadata_v0(
 //   [1] max_num_splits: (1), dtype torch.int32.
 //
 std::vector<torch::Tensor> get_mla_metadata_v0(
-    const torch::Tensor& seqlens,               // [batch size + 1]
+    const torch::Tensor& cum_seqlens,           // [batch size + 1]
     const int32_t        num_heads_per_head_k,
     const int32_t        num_heads_k)
 {
-    TORCH_CHECK(seqlens.stride(0) == 1, "seqlens should be continuous!");
-    TORCH_CHECK(seqlens.scalar_type() == at::ScalarType::Int, "seqlens's element type should be int!");
+    TORCH_CHECK(cum_seqlens.stride(0) == 1, __func__, ": cum_seqlens should be continuous!");
+    TORCH_CHECK(cum_seqlens.scalar_type() == at::ScalarType::Int, __func__, ": cum_seqlens's element type should be int!");
+
+    const at::cuda::OptionalCUDAGuard device_guard(device_of(cum_seqlens));
+    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
     hipDevice_t dev;
     hipDeviceProp_t dev_prop;
     HIP_CALL(hipGetDevice(&dev));
     HIP_CALL(hipGetDeviceProperties(&dev_prop, dev));
 
-    const int32_t batch_size = seqlens.size(0);
+    const int32_t batch_size = cum_seqlens.size(0) - 1;
 
     // declare outputs
-    auto num_kv_splits = torch::empty({batch_size + 1}, seqlens.options());
-    auto max_num_splits = torch::empty({1}, seqlens.options());
+    auto num_kv_splits = torch::empty({batch_size + 1}, cum_seqlens.options());
+    auto max_num_splits = torch::empty({1}, cum_seqlens.options());
 
     // launch kernel
-    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     const dim3 grid = dim3(1, 1, 1);
     const int32_t num_thr = dev_prop.warpSize; // only use 1 warp for simplicity
     kn_get_mla_metadata_v0<<<grid, num_thr, 0, stream>>>(
         num_kv_splits.data_ptr<int32_t>(),
         max_num_splits.data_ptr<int32_t>(),
-        seqlens.data_ptr<int32_t>(),
+        cum_seqlens.data_ptr<int32_t>(),
         dev_prop.multiProcessorCount,
         batch_size,
         num_heads_per_head_k,

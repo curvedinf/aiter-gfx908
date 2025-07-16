@@ -183,7 +183,7 @@ def get_mla_metadata_v0(
     """
     Arguments:
         cumulated seqlens: (batch_size + 1), dtype torch.int32.
-        num_heads_per_head_k: Equals to seq_len_q * num_heads_q // num_heads_k.
+        num_heads_per_head_k: Equals to num_heads_q // num_heads_k.
         num_heads_k: num_heads_k.
     Returns:
         cumulated num_kv_splits: (batch_size + 1), dtype torch.int32.

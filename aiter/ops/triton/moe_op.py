@@ -828,6 +828,8 @@ def _fused_moe_persistent_kernel(
             max_tile_id = get_max_tile_id_from_xcd_pool(
                 num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS
             )
+            # fetch the next tile id from the pool
+            tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
         else: # process the tile
             pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
@@ -953,8 +955,8 @@ def _fused_moe_persistent_kernel(
                 c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
                 tl.store(c_ptrs, accumulator, mask=c_mask)
 
-        # fetch the next tile id from the pool
-        tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
+                # fetch the next tile id from the pool
+                tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
             
 
 
@@ -982,11 +984,8 @@ def fused_moe(
     """
     #TODO: Add doc
     """
-
-    dtype = A.dtype
-    # if config is None:
-    config = get_optimal_moe_config(dtype, use_fp8_w8a8, use_int8_w8a16, use_fp8_w8a8, use_int4_w4a16, _USE_MOE_PERSISTENT_KERNEL, M=A.shape[0])
-
+    if config is None:
+        assert False, "Config must be provided for fused_moe since certain BLOCK_SIZE_M has been used for sorted_token_ids."
 
     assert topk_weights.stride(1) == 1
     assert sorted_token_ids.stride(0) == 1
@@ -1123,20 +1122,9 @@ def fused_moe(
         if _USE_MOE_PERSISTENT_KERNEL:
             NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
             num_tiles = triton.cdiv(num_tokens_post_padded, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"]) # TODO: can we use the num_tokens_post_padded here?
-
             grid = (min(num_tiles, NUM_WGS),)
-
             NUM_XCDS = 8
             pool_counters = torch.tensor([ (get_max_tile_id_from_xcd_pool_python(num_tiles, xcd-1, NUM_XCDS) if xcd > 0 else 0) for xcd in range(NUM_XCDS)]).to(A.device).to(torch.int32)
-            
-            print("NUM_WGS", NUM_WGS)
-            print("num_tiles", num_tiles)
-            print("pool_counters", pool_counters)
-            print("pool_counters.shape", pool_counters.shape)
-            print("pool_counters.stride", pool_counters.stride())
-            print("max tile ids for pools", [get_max_tile_id_from_xcd_pool_python(num_tiles, xcd, NUM_XCDS) for xcd in range(NUM_XCDS)])
-
-            print("Starting kernel")
             _fused_moe_persistent_kernel[grid](
                 A,
                 B,

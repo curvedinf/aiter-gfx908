@@ -11,6 +11,11 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     print_vgpr,
 )
 
+from aiter.ops.triton.moe_op import (
+    fused_moe as triton_moe,
+    moe_set_use_persistent_kernel as triton_moe_set_use_persistent_kernel,
+)
+
 
 def model_benchmark_configs(args):
     no_bench_stage2 = args.no_bench_stage2
@@ -52,7 +57,10 @@ def fused_moe(
     int8_w8a16=False,
     group_size=128,
     has_zp=True,
+    persistent=False,
 ):
+    
+    triton_moe_set_use_persistent_kernel(persistent)
     if int4_w4a16:
         (
             a,
@@ -125,6 +133,7 @@ def fused_moe(
             dtype=dtype,
             fp8_w8a8=fp8_w8a8,
             int8_w8a16=int8_w8a16,
+            persistent=persistent,
         )
 
         return lambda: triton_moe(
@@ -159,6 +168,7 @@ def run_benchmark(args):
     print_time = args.print_time
     dtype = str_to_torch_dtype[args.dtype]
     fp8_type = str_to_torch_dtype[args.fp8_type]
+    persistent = args.persistent
 
     if int4_w4a16:
         assert group_size != None, "set group_size with -group_size"
@@ -228,6 +238,7 @@ def run_benchmark(args):
             int8_w8a16=int8_w8a16,
             group_size=group_size,
             has_zp=has_zp,
+            persistent=persistent,
         )
 
         ms = triton.testing.do_bench(fn, warmup=25, rep=100)
@@ -271,6 +282,7 @@ def parse_args():
         "-group_size", type=int, default=None, help="group_size for in4"
     )
     parser.add_argument("-routed_weight", action="store_true", default=False)
+    parser.add_argument("-persistent", action="store_true", default=False)
     parser.add_argument("-int8_w8a16", action="store_true", default=False)
     parser.add_argument("-fp8_w8a8", action="store_true", default=False)
     parser.add_argument("-int4_w4a16", action="store_true", default=False)

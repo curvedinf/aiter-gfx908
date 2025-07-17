@@ -8,8 +8,7 @@
     "num_stages": 2,
     "waves_per_eu": 2,
     "matrix_instr_nonkdim": 16,
-    "kpack": 1,
-    "CU_multiplier": 1
+    "kpack": 1
   },
   "medium_M": {
     "BLOCK_SIZE_M": 128,
@@ -20,8 +19,7 @@
     "num_stages": 2,
     "waves_per_eu": 2,
     "matrix_instr_nonkdim": 16,
-    "kpack": 1,
-    "CU_multiplier": 1
+    "kpack": 1
   },
   "large_M": {
     "BLOCK_SIZE_M": 256,
@@ -32,7 +30,6 @@
     "num_stages": 2,
     "waves_per_eu": 2,
     "matrix_instr_nonkdim": 16,
-    "kpack": 1,
-    "CU_multiplier": 1
+    "kpack": 1
   }
 }

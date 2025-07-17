@@ -67,9 +67,6 @@ def get_moe_configs(dtype: Optional[str], persistent: bool = False) -> Optional[
     warnings.warn(
         f"No MoE configuration found for device '{dev}' with dtype '{dtype_str}'. Using default configuration."
     )
-    warnings.warn(
-        f"No MoE configuration found for device '{dev}' with dtype '{dtype_str}'. Using default configuration."
-    )
     return None
 
 
@@ -119,6 +116,7 @@ def get_optimal_moe_config_func(
     use_int8_w8a8: Optional[bool] = False,
     use_fp8_w8a8: Optional[bool] = False,
     use_int4_w4a16: Optional[bool] = False,
+    use_persistent: Optional[bool] = False,
 ):
     return functools.partial(
         get_optimal_moe_config,
@@ -127,4 +125,5 @@ def get_optimal_moe_config_func(
         use_int8_w8a8,
         use_fp8_w8a8,
         use_int4_w4a16,
+        use_persistent,
     )

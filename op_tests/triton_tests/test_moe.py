@@ -439,6 +439,7 @@ def input_helper(
     dtype,
     fp8_w8a8: bool,
     int8_w8a16: bool,
+    persistent: bool,
 ):
     assert not (fp8_w8a8 and int8_w8a16)
 
@@ -464,7 +465,7 @@ def input_helper(
     topk_weights, topk_ids = torch.topk(softmax_vals, k=top_k, dim=1)
 
     moe_config_func = get_optimal_moe_config_func(
-        dtype, use_int8_w8a16=int8_w8a16, use_fp8_w8a8=fp8_w8a8
+        dtype, use_int8_w8a16=int8_w8a16, use_fp8_w8a8=fp8_w8a8, persistent=persistent,
     )
 
     config = moe_config_func(M)
@@ -696,6 +697,7 @@ def test_fused_moe(
         dtype=dtype,
         fp8_w8a8=fp8_w8a8,
         int8_w8a16=int8_w8a16,
+        persistent=persistent,
     )
 
     if DEBUG_MODE:

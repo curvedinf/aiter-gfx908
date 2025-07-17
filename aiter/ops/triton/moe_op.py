@@ -818,7 +818,7 @@ def _fused_moe_persistent_kernel(
     xcd_counter = 0 # to keep track of how many XCD pools have been checked
     max_tile_id = get_max_tile_id_from_xcd_pool(num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS)
 
-    tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
+    tile_id = get_max_tile_id_from_xcd_pool(num_tiles, (xcd + xcd_counter - 1) % NUM_XCDS, NUM_XCDS) + workgroup_id // NUM_XCDS
 
     while xcd_counter < NUM_XCDS:
         # print("max_tile_id", max_tile_id)
@@ -1120,10 +1120,12 @@ def fused_moe(
     else:
         if _USE_MOE_PERSISTENT_KERNEL:            
             NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
-            num_tiles = triton.cdiv(num_tokens_post_padded, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"]) # TODO: can we use the num_tokens_post_padded here?
+            num_tiles = triton.cdiv(EM, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"]) # TODO: can we use the num_tokens_post_padded here?
             grid = (min(num_tiles, NUM_WGS),)
             NUM_XCDS = 8
-            pool_counters = torch.tensor([ (get_max_tile_id_from_xcd_pool_python(num_tiles, xcd-1, NUM_XCDS) if xcd > 0 else 0) for xcd in range(NUM_XCDS)]).to(A.device).to(torch.int32)
+            pool_counters = torch.tensor([(get_max_tile_id_from_xcd_pool_python(num_tiles, xcd-1, NUM_XCDS) if xcd > 0 else 0) for xcd in range(NUM_XCDS)]).to(A.device).to(torch.int32)
+
+            pool_counters += (NUM_WGS // NUM_XCDS)
             _fused_moe_persistent_kernel[grid](
                 A,
                 B,

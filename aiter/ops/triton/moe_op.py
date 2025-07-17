@@ -770,7 +770,6 @@ def _fused_moe_persistent_kernel(
     compute_type: tl.constexpr,
     use_fp8_w8a8: tl.constexpr,
     use_int8_w8a16: tl.constexpr,
-    CU_multiplier: tl.constexpr,
     pool_counters,
     NUM_XCDS: tl.constexpr = 8,
 ):
@@ -1162,14 +1161,11 @@ def fused_moe(
                 NUM_XCDS=NUM_XCDS,
                 **config,
             )
-            torch.cuda.synchronize()  # wait for the kernel to finish
-            print("got here")
         else:
             grid = lambda META: (  # noqa: E731
                 triton.cdiv(EM, META["BLOCK_SIZE_M"])
                 * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]),
             )
-            print("running the non persistent")
             _fused_moe_kernel[grid](
                 A,
                 B,

@@ -465,7 +465,7 @@ def input_helper(
     topk_weights, topk_ids = torch.topk(softmax_vals, k=top_k, dim=1)
 
     moe_config_func = get_optimal_moe_config_func(
-        dtype, use_int8_w8a16=int8_w8a16, use_fp8_w8a8=fp8_w8a8, persistent=persistent,
+        dtype, use_int8_w8a16=int8_w8a16, use_fp8_w8a8=fp8_w8a8, use_persistent=persistent,
     )
 
     config = moe_config_func(M)
@@ -765,13 +765,13 @@ def test_fused_moe(
             triton_out_silu, torch_out_silu, atol=1e-1, rtol=1e-1
         )
     else:
-        print("Comparing outputs")
-        print("M:", M, "N:", N, "K:", K, "top_k:", top_k, "E:", E)
-        print("triton_out.shape:", triton_out.shape)
-        print("torch_out.shape:", torch_out.shape)
+        # print("Comparing outputs")
+        # print("M:", M, "N:", N, "K:", K, "top_k:", top_k, "E:", E)
+        # print("triton_out.shape:", triton_out.shape)
+        # print("torch_out.shape:", torch_out.shape)
 
-        print("triton_out:", triton_out)
-        print("torch_out:", torch_out)
+        # print("triton_out:", triton_out)
+        # print("torch_out:", torch_out)
         torch.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
 
 
@@ -1175,7 +1175,7 @@ if __name__ == "__main__":
     routed_weight = False
     fp8_w8a8 = False
     int8_w8a16 = False
-    persistent = False  # Change to True to enable persistent kernel mode
+    persistent = True  # Change to True to enable persistent kernel mode
     silu_fused = False   # Change to False to use the non-silu fused variant
     dtype = torch.float16
 
@@ -1193,3 +1193,5 @@ if __name__ == "__main__":
         silu_fused=silu_fused,
         dtype=dtype,
     )
+
+    print("Test completed successfully.")

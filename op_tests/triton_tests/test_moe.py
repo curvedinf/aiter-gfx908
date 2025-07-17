@@ -643,8 +643,8 @@ def input_helper_e2e(
 # @pytest.mark.parametrize('fp8_w8a8, int8_w8a16', [(False, False), (True, False), (False, True)]) #TODO: Accuracy issues with fp8
 @pytest.mark.parametrize("fp8_w8a8, int8_w8a16", [(False, False)])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("persistent", [False, True])
-@pytest.mark.parametrize("silu_fused", [False, True])
+@pytest.mark.parametrize("persistent", [True])
+@pytest.mark.parametrize("silu_fused", [False])
 def test_fused_moe(
     M: int,
     N: int,

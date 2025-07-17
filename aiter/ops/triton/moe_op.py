@@ -816,10 +816,13 @@ def _fused_moe_persistent_kernel(
 
     xcd = workgroup_id % NUM_XCDS
     xcd_counter = 0 # to keep track of how many XCD pools have been checked
-    max_tile_id = get_max_tile_id_from_xcd_pool(num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS)
+    max_tile_id = get_max_tile_id_from_xcd_pool(num_tiles, xcd, NUM_XCDS)
 
-    pool_start_id = get_max_tile_id_from_xcd_pool(num_tiles, (xcd + xcd_counter - 1) % NUM_XCDS, NUM_XCDS) if xcd > 0 else 0
+    pool_start_id = get_max_tile_id_from_xcd_pool(num_tiles, xcd - 1, NUM_XCDS) if xcd > 0 else 0
     tile_id = pool_start_id + workgroup_id // NUM_XCDS
+
+    if tile_id >= num_tiles:
+        return
 
     while xcd_counter < NUM_XCDS:
         # print("max_tile_id", max_tile_id)
@@ -828,8 +831,6 @@ def _fused_moe_persistent_kernel(
             max_tile_id = get_max_tile_id_from_xcd_pool(
                 num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS
             )
-            # fetch the next tile id from the pool
-            tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
         else: # process the tile
             pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
@@ -955,8 +956,8 @@ def _fused_moe_persistent_kernel(
                 c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
                 tl.store(c_ptrs, accumulator, mask=c_mask)
 
-                # fetch the next tile id from the pool
-                tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
+            # fetch the next tile id from the pool
+            tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
             
 
 
@@ -1121,8 +1122,10 @@ def fused_moe(
     else:
         if _USE_MOE_PERSISTENT_KERNEL:            
             NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
-            num_tiles = triton.cdiv(EM, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"]) # TODO: can we use the num_tokens_post_padded here?
-            grid = (min(num_tiles, NUM_WGS),)
+            num_tiles = triton.cdiv(num_tokens_post_padded, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"])
+            # TODO: why can't we use the num_tokens_post_padded here? Maybe because it is a runtime variable and we need static variable as the grid size in the cuda graph?
+            num_tiles_padded = triton.cdiv(EM, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"]) 
+            grid = (min(num_tiles_padded, NUM_WGS),)
             NUM_XCDS = 8
             pool_counters = torch.tensor([(get_max_tile_id_from_xcd_pool_python(num_tiles, xcd-1, NUM_XCDS) if xcd > 0 else 0) for xcd in range(NUM_XCDS)]).to(A.device).to(torch.int32)
 

@@ -818,7 +818,7 @@ def _fused_moe_persistent_kernel(
     xcd_counter = 0 # to keep track of how many XCD pools have been checked
     max_tile_id = get_max_tile_id_from_xcd_pool(num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS)
 
-    tile_id = get_max_tile_id_from_xcd_pool(num_tiles, (xcd + xcd_counter - 1) % NUM_XCDS, NUM_XCDS) + workgroup_id // NUM_XCDS
+    tile_id = get_max_tile_id_from_xcd_pool(num_tiles, (xcd + xcd_counter - 1 + NUM_XCDS) % NUM_XCDS, NUM_XCDS) + workgroup_id // NUM_XCDS
 
     while xcd_counter < NUM_XCDS:
         # print("max_tile_id", max_tile_id)

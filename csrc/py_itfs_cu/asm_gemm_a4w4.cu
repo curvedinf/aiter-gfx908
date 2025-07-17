@@ -86,24 +86,23 @@ std::string get_heuristic_kernel(int tile_m,
                                  std::optional<bool> bpreshuffle,
                                  CFG* cfgs)
 {
-    int log2_k_split_en = (log2_k_split.has_value() && log2_k_split.value() != 0) ? 1 : 0;
-    int bpreshuffle_en  = (bpreshuffle.has_value() && !bpreshuffle) ? 0 : 1;
+    int log2_k_split_en  = (log2_k_split.has_value() && log2_k_split.value() != 0) ? 1 : 0;
+    int bpreshuffle_en   = (bpreshuffle.has_value() && !bpreshuffle) ? 0 : 1;
     std::string selected = "";
     for(const auto& el : *cfgs)
     {
         const auto& cfg = el.second;
-        if(cfg.splitK == 1 && (log2_k_split_en == 1 || (!log2_k_split.has_value() && selectedksplit>0)))
+        if(cfg.splitK == 1 &&
+           (log2_k_split_en == 1 || (!log2_k_split.has_value() && selectedksplit > 0)))
         {
             return el.first;
         }
-        else if(cfg.tile_M == tile_m && cfg.bpreshuffle == bpreshuffle_en && cfg.splitK == log2_k_split_en)
+        else if(cfg.tile_M == tile_m && cfg.bpreshuffle == bpreshuffle_en &&
+                cfg.splitK == log2_k_split_en)
         {
             return el.first;
         }
-
     }
-  
-
 
     TORCH_CHECK(false,
                 __func__,
@@ -249,18 +248,18 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     int gdz           = 1;
     args.log2_k_split = 0;
 
-    int selectedksplit       = get_heuristic_ksplit(Mdim, Ndim, Kdim, SUBM, SUBN, {2, 4, 8, 16});
-    selectedksplit           = std::log2(selectedksplit);
-    auto selectedTile        = get_heuristic_tilesize(Mdim, Ndim, {{256, 256}, {128, 512}});
-    int selectedMTile        = selectedTile.first;
-    std::string kernelName   = "";
-    kernelName               = get_heuristic_kernel(selectedTile.first,
+    int selectedksplit     = get_heuristic_ksplit(Mdim, Ndim, Kdim, SUBM, SUBN, {2, 4, 8, 16});
+    selectedksplit         = std::log2(selectedksplit);
+    auto selectedTile      = get_heuristic_tilesize(Mdim, Ndim, {{256, 256}, {128, 512}});
+    int selectedMTile      = selectedTile.first;
+    std::string kernelName = "";
+    kernelName             = get_heuristic_kernel(selectedTile.first,
                                       selectedTile.second,
                                       log2_k_split,
                                       selectedksplit,
                                       bpreshuffle,
                                       config_map);
-                               
+
     AiterAsmKernel* impl_ptr = nullptr;
 
     if(log2_k_split.has_value() && log2_k_split.value() != 0)
@@ -272,7 +271,7 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
         assert(Kdim % k_num == 0);
         int k_per_tg = Kdim / k_num;
         k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;
-        gdz          = (Kdim + k_per_tg - 1) / k_per_tg;  
+        gdz          = (Kdim + k_per_tg - 1) / k_per_tg;
     }
     else if(!log2_k_split.has_value() && selectedksplit > 0)
     {
@@ -283,10 +282,10 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
         assert(Kdim % k_num == 0);
         int k_per_tg = Kdim / k_num;
         k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;
-        gdz          = (Kdim + k_per_tg - 1) / k_per_tg;  
+        gdz          = (Kdim + k_per_tg - 1) / k_per_tg;
     }
     else if(selectedMTile < 256)
-    { 
+    {
         SUBM = 128;
         SUBN = 512;
     }

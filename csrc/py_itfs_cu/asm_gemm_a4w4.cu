@@ -219,7 +219,7 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     KernelArgs args;
     size_t arg_size = sizeof(args);
     args.ptr_D      = (void*)out.data_ptr();
-    args.ptr_C      = (void*)bias.data_ptr();
+    args.ptr_C      = bias.has_value() ? (void*)bias.value().data_ptr() : nullptr;
     args.ptr_A      = (void*)A.data_ptr();
     args.ptr_B      = (void*)B.data_ptr();
 

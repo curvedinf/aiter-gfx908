@@ -760,7 +760,8 @@
           py::arg("num_experts"),                      \
           py::arg("unit_size"),                        \
           py::arg("local_expert_mask") = std::nullopt, \
-          py::arg("num_local_tokens")  = std::nullopt);
+          py::arg("num_local_tokens")  = std::nullopt, \
+          py::arg("dispatch_policy")   = 0);
 
 #define NORM_PYBIND                                               \
     m.def("layernorm2d_fwd",                                      \
@@ -853,7 +854,12 @@
           "Apply Root Mean Square (RMS) Normalization to the input tensor.");                      \
     m.def(                                                                                         \
         "fused_add_rms_norm_cu", &fused_add_rms_norm, "In-place fused Add and RMS Normalization"); \
-    m.def("rmsnorm2d_fwd", &rmsnorm2d, py::arg("input"), py::arg("weight"), py::arg("epsilon"));   \
+    m.def("rmsnorm2d_fwd",                                                                         \
+          &rmsnorm2d,                                                                              \
+          py::arg("input"),                                                                        \
+          py::arg("weight"),                                                                       \
+          py::arg("epsilon"),                                                                      \
+          py::arg("use_model_sensitive_rmsnorm") = 0);                                             \
     m.def("rmsnorm2d_fwd_with_add",                                                                \
           &rmsnorm2d_with_add,                                                                     \
           py::arg("out"),                                                                          \
@@ -861,7 +867,8 @@
           py::arg("residual_in"),                                                                  \
           py::arg("residual_out"),                                                                 \
           py::arg("weight"),                                                                       \
-          py::arg("epsilon"));                                                                     \
+          py::arg("epsilon"),                                                                      \
+          py::arg("use_model_sensitive_rmsnorm") = 0);                                             \
     m.def("rmsnorm2d_fwd_with_smoothquant", &rmsnorm2d_with_smoothquant);                          \
     m.def("rmsnorm2d_fwd_with_add_smoothquant",                                                    \
           &rmsnorm2d_with_add_smoothquant,                                                         \
@@ -873,7 +880,8 @@
           py::arg("yscale"),                                                                       \
           py::arg("weight"),                                                                       \
           py::arg("epsilon"),                                                                      \
-          py::arg("out_before_quant") = std::nullopt);                                             \
+          py::arg("out_before_quant")            = std::nullopt,                                   \
+          py::arg("use_model_sensitive_rmsnorm") = 0);                                             \
     m.def("rmsnorm2d_fwd_with_dynamicquant", &rmsnorm2d_with_dynamicquant);                        \
     m.def("rmsnorm2d_fwd_with_add_dynamicquant", &rmsnorm2d_with_add_dynamicquant);
 

@@ -86,9 +86,9 @@ def ref_paged_attn(
     return torch.cat(outputs, dim=0)
 
 
-@pytest.mark.parametrize(
-    "seq_lens", [[(1, 1328), (5, 18), (129, 463)], [(1, 523), (1, 37), (1, 2011)]]
-)
+@pytest.mark.parametrize("seq_lens",
+                         [[(1, 1328), (5, 18),
+(129, 463)], [(1, 523), (1, 37), (1, 2011), (1, 16384), (4096, 4096), (512, 4096)], [(11, 13142), (1065, 6712)]])
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
 @pytest.mark.parametrize("block_size", BLOCK_SIZES)
@@ -97,7 +97,6 @@ def ref_paged_attn(
 @pytest.mark.parametrize("soft_cap", [None, 10.0, 50.0])
 @pytest.mark.parametrize("num_blocks", NUM_BLOCKS)
 @pytest.mark.parametrize("q_dtype", QDTYPES)
-@pytest.mark.parametrize("use_2d_attention", [True, False])
 @torch.inference_mode()
 def test_triton_unified_attn(
     seq_lens: list[tuple[int, int]],
@@ -109,7 +108,6 @@ def test_triton_unified_attn(
     soft_cap: Optional[float],
     num_blocks: int,
     q_dtype: Optional[torch.dtype],
-    use_2d_attention: bool,  # TODO (cagri): Remove this later
 ) -> None:
     if q_dtype is not None and q_dtype.itemsize < 2 and block_size < 32:
         pytest.skip("block size must be at least 32 for fp8")
@@ -180,7 +178,6 @@ def test_triton_unified_attn(
         k_descale=k_descale,
         v_descale=v_descale,
         sinks=sinks,
-        use_2d=use_2d_attention,
     )
 
     ref_output = ref_paged_attn(

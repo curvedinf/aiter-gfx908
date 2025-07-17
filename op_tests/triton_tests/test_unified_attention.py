@@ -86,9 +86,14 @@ def ref_paged_attn(
     return torch.cat(outputs, dim=0)
 
 
-@pytest.mark.parametrize("seq_lens",
-                         [[(1, 1328), (5, 18),
-(129, 463)], [(1, 523), (1, 37), (1, 2011), (1, 16384), (4096, 4096), (512, 4096)], [(11, 13142), (1065, 6712)]])
+@pytest.mark.parametrize(
+    "seq_lens",
+    [
+        [(1, 1328), (5, 18), (129, 463)],
+        [(1, 523), (1, 37), (1, 2011), (1, 16384), (4096, 4096), (512, 4096)],
+        [(11, 13142), (1065, 6712)],
+    ],
+)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
 @pytest.mark.parametrize("block_size", BLOCK_SIZES)

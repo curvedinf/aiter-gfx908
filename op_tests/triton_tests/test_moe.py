@@ -1173,7 +1173,7 @@ if __name__ == "__main__":
     routed_weight = False
     fp8_w8a8 = False
     int8_w8a16 = False
-    persistent = True  # Change to True to enable persistent kernel mode
+    persistent = False  # Change to True to enable persistent kernel mode
     silu_fused = False   # Change to False to use the non-silu fused variant
     dtype = torch.float16
 

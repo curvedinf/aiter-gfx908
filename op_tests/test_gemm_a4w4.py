@@ -60,16 +60,18 @@ def run_gemm_asm(
     bpreshuffle=True,
     log2_k_split=None,
 ):
-    out_reset = torch.zeros(
-        (out.shape[0] + 255) // 256 * 256, out.shape[1], dtype=dtype
-    )
+    if log2_k_split != 0:
+        out_reset = torch.zeros(
+            (out.shape[0] + 255) // 256 * 256, out.shape[1], dtype=dtype
+        )
+        out = out_reset
 
     return aiter.gemm_a4w4_asm(
         x,
         weightshuffle,
         x_scale,
         w_scale,
-        out_reset,
+        out,
         bias,
         bpreshuffle=bpreshuffle,
         log2_k_split=log2_k_split,
@@ -132,7 +134,7 @@ def test_gemm(dtype, M, N, K):
         out3,
         bias_f32,
         bpreshuffle=True,
-        log2_k_split=2,
+        log2_k_split=4,
     )
     err_d = checkAllclose(a, d[:M], msg="asm splitK ")
     tflops_d = M * N * K * 2 / avg_d / 1e6
@@ -168,7 +170,8 @@ def test_gemm(dtype, M, N, K):
 l_dtype = ["bf16"]
 l_mnk = [
     # pure_compute
-    (1024, 2048, 1024),
+    (256, 2048, 8192),
+    (2048, 8192, 8192),
     (16384, 16384, 16384),
     (32768, 106496, 16384),
     (32768, 16384, 53248),

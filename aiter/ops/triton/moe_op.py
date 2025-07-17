@@ -801,9 +801,11 @@ def _fused_moe_persistent_kernel(
     BLOCK_SIZE_M, which is necessary to maintain consistency in block matrix
     multiplication across different blocks processed by the same expert.
     """
-
+    
     # persistent workgroup id
     workgroup_id = tl.program_id(axis=0)
+
+    tl.device_assert(workgroup_id == -1, "test fail")
 
     # Load tile-invariant runtime constant
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
@@ -816,12 +818,13 @@ def _fused_moe_persistent_kernel(
     num_tiles = num_pid_m * num_pid_n
 
     xcd = workgroup_id % NUM_XCDS
-    xcd_counter = 0 # how many XCD pools have been checked
+    xcd_counter = 0 # to keep track of how many XCD pools have been checked
     max_tile_id = get_max_tile_id_from_xcd_pool(num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS)
 
     tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1, sem="relaxed")
-    
-    while (tile_id < max_tile_id) and (tile_id < num_tiles):
+
+    while (tile_id < num_tiles) and ((xcd_counter+1) < NUM_XCDS):
+        # part of the code that processes the tile
         pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
         offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
@@ -829,6 +832,7 @@ def _fused_moe_persistent_kernel(
         token_mask = offs_token < num_valid_tokens
 
         off_experts = tl.load(expert_ids_ptr + pid_m).to(tl.int64)
+        
         if off_experts == -1:
             # -----------------------------------------------------------
             # Write back zeros to the output when the expert is not
@@ -945,10 +949,12 @@ def _fused_moe_persistent_kernel(
             c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
             tl.store(c_ptrs, accumulator, mask=c_mask)
 
+        ##########################################
+
         # fetch the next tile id from the pool
         tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1, sem="relaxed")
         # if current pool is exhausted, move to the next pool.
-        # repeat until we find a valid tile id, at max NUM_XCD - 1 times (no need to check the start pool again).
+        # repeat until we find a valid tile id, at max NUM_XCD - 1 times (no need to check the starting pool again).
         while (tile_id >= max_tile_id) and ( (xcd_counter+1) < NUM_XCDS):
             xcd_counter += 1
             max_tile_id = get_max_tile_id_from_xcd_pool(
@@ -1039,6 +1045,7 @@ def fused_moe(
                     * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]),
                 ),
             )
+            
 
             _fused_moe_persistent_kernel_gptq_awq[grid](
                 A,
@@ -1129,13 +1136,13 @@ def fused_moe(
             NUM_XCDS = 8
             pool_counters = torch.tensor([ (get_max_tile_id_from_xcd_pool_python(num_tiles, xcd-1, NUM_XCDS) if xcd > 0 else 0) for xcd in range(NUM_XCDS)]).to(A.device).to(torch.int32)
             
-            print("NUM_WGS", NUM_WGS)
-            print("num_tiles", num_tiles)
-            print("pool_counters", pool_counters)
-            print("pool_counters.shape", pool_counters.shape)
-            print("pool_counters.stride", pool_counters.stride())
+            # print("NUM_WGS", NUM_WGS)
+            # print("num_tiles", num_tiles)
+            # print("pool_counters", pool_counters)
+            # print("pool_counters.shape", pool_counters.shape)
+            # print("pool_counters.stride", pool_counters.stride())
 
-
+            print("Starting kernel")
             _fused_moe_persistent_kernel[grid](
                 A,
                 B,
@@ -1173,6 +1180,8 @@ def fused_moe(
                 NUM_XCDS=NUM_XCDS,
                 **config,
             )
+            torch.cuda.synchronize()  # wait for the kernel to finish
+            print("got here")
         else:
             grid = lambda META: (  # noqa: E731
                 triton.cdiv(EM, META["BLOCK_SIZE_M"])

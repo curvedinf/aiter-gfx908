@@ -230,6 +230,8 @@ __launch_bounds__(WARPS_PER_CTA* WARP_SIZE) __global__
                            const int output_stride,
                            const int indices_stride)
 {
+    printf("==================topk_softmax_kernels.cu:206 topkGatingSoftmax===============\n");
+
     // We begin by enforcing compile time assertions and setting up compile time constants.
     static_assert(VPT == (VPT & -VPT), "VPT must be power of 2");
     static_assert(NUM_EXPERTS == (NUM_EXPERTS & -NUM_EXPERTS), "NUM_EXPERTS must be power of 2");
@@ -645,6 +647,7 @@ void topk_softmax(torch::Tensor& topk_weights,         // [num_tokens, topk]
                   torch::Tensor& gating_output,        // [num_tokens, num_experts]
                   bool need_renorm)
 {
+    printf("==================topk_softmax_kernels.cu:644 topk_softmax===============\n");
     const int num_experts         = gating_output.size(-1);
     const int num_tokens          = gating_output.numel() / num_experts;
     const int topk                = topk_weights.size(-1);

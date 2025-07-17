@@ -181,10 +181,15 @@ def test_grouped_topk(
     return {"err": err, "us": us_aiter}
 
 
-l_dtype = ["fp32", "bf16", "fp16"]
-l_expert = [64, 256]
-l_m = [1, 8, 16, 32, 64, 128, 256, 65536, 163840]
-l_token = [1, 2, 5, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000, 16384]
+# l_dtype = ["fp32", "bf16", "fp16"]
+# l_expert = [64, 256]
+# l_m = [1, 8, 16, 32, 64, 128, 256, 65536, 163840]
+# l_token = [1, 2, 5, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000, 16384]
+
+l_dtype = ["bf16"]
+l_expert = [64]
+l_m = [1]
+l_token = [1]
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,
@@ -252,43 +257,43 @@ for dtype in l_dtype:
 df = pd.DataFrame(df)
 aiter.logger.info(f"summary:\n{df}")
 
-df = []
-for token in l_token:
-    # DeepSeek-R1
-    topk = 8
-    group = 8
-    topk_group = 4
-    expert = 256
-    dtype = dtypes.bf16
-    need_renorm = True
-    ret = test_biased_grouped_topk(
-        token, expert, group, topk, topk_group, need_renorm, dtype
-    )
-    df.append(ret)
-df = pd.DataFrame(df)
-aiter.logger.info(f"summary:\n{df}")
+# df = []
+# for token in l_token:
+#     # DeepSeek-R1
+#     topk = 8
+#     group = 8
+#     topk_group = 4
+#     expert = 256
+#     dtype = dtypes.bf16
+#     need_renorm = True
+#     ret = test_biased_grouped_topk(
+#         token, expert, group, topk, topk_group, need_renorm, dtype
+#     )
+#     df.append(ret)
+# df = pd.DataFrame(df)
+# aiter.logger.info(f"summary:\n{df}")
 
-df = []
-for token in l_token:
-    for scoring_func in ["softmax", "sigmoid"]:
-        # DeepSeek-R1
-        topk = 8
-        group = 8
-        topk_group = 4
-        expert = 256
-        dtype = dtypes.bf16
-        need_renorm = True
-        ret = test_grouped_topk(
-            token,
-            expert,
-            group,
-            topk,
-            topk_group,
-            need_renorm,
-            dtype,
-            scale_factor=1.5,
-            scoring_func=scoring_func,
-        )
-        df.append(ret)
-df = pd.DataFrame(df)
-aiter.logger.info(f"summary:\n{df}")
+# df = []
+# for token in l_token:
+#     for scoring_func in ["softmax", "sigmoid"]:
+#         # DeepSeek-R1
+#         topk = 8
+#         group = 8
+#         topk_group = 4
+#         expert = 256
+#         dtype = dtypes.bf16
+#         need_renorm = True
+#         ret = test_grouped_topk(
+#             token,
+#             expert,
+#             group,
+#             topk,
+#             topk_group,
+#             need_renorm,
+#             dtype,
+#             scale_factor=1.5,
+#             scoring_func=scoring_func,
+#         )
+#         df.append(ret)
+# df = pd.DataFrame(df)
+# aiter.logger.info(f"summary:\n{df}")

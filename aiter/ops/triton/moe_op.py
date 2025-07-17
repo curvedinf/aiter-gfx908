@@ -6,7 +6,7 @@ import triton
 import triton.language as tl
 from typing import Any, Dict, Optional, List
 from aiter.ops.triton.quant import dynamic_per_tensor_quant_fp8_i8
-from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
+from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd, get_max_tile_id_from_xcd_pool, get_max_tile_id_from_xcd_pool_python
 from aiter.ops.triton.utils.moe_common import _write_zeros_to_output
 
 
@@ -764,12 +764,13 @@ def _fused_moe_persistent_kernel(
     BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
     EVEN_K: tl.constexpr,
-    NUM_SMS: tl.constexpr,
     MUL_ROUTED_WEIGHT: tl.constexpr,
     top_k: tl.constexpr,
     compute_type: tl.constexpr,
     use_fp8_w8a8: tl.constexpr,
     use_int8_w8a16: tl.constexpr,
+    pool_counters,
+    NUM_XCDS: tl.constexpr = 8,
 ):
     """
     Implements the fused computation for a Mixture of Experts (MOE) using
@@ -798,153 +799,162 @@ def _fused_moe_persistent_kernel(
     BLOCK_SIZE_M, which is necessary to maintain consistency in block matrix
     multiplication across different blocks processed by the same expert.
     """
-    # -----------------------------------------------------------
-    # Simply compute how many iterations each persistent block needs to do
-    start_pid = tl.program_id(axis=0)
-    NUM_XCDS: tl.constexpr = 8
+    
+    # persistent workgroup id
+    workgroup_id = tl.program_id(axis=0)
 
     # Load tile-invariant runtime constant
     num_tokens_post_padded = tl.load(num_tokens_post_padded_ptr)
 
     num_pid_m = tl.cdiv(num_tokens_post_padded, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    tile_id = start_pid
 
     offs_k = tl.arange(0, BLOCK_SIZE_K)
 
     num_tiles = num_pid_m * num_pid_n
 
-    # Compute how many tiles are outside the padding region
-    num_valid_tiles = tl.cdiv((num_tiles - tile_id), NUM_SMS)
+    xcd = workgroup_id % NUM_XCDS
+    xcd_counter = 0 # to keep track of how many XCD pools have been checked
+    max_tile_id = get_max_tile_id_from_xcd_pool(num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS)
 
-    for _ in range(0, num_valid_tiles):
-        tile_id_remapped = remap_xcd(tile_id, num_tiles, NUM_XCDS)
-        pid_m, pid_n = pid_grid(tile_id_remapped, num_pid_m, num_pid_n, GROUP_SIZE_M)
+    tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
 
-        offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
-        offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
-        token_mask = offs_token < num_valid_tokens
-
-        off_experts = tl.load(expert_ids_ptr + pid_m).to(tl.int64)
-        if off_experts == -1:
-            # -----------------------------------------------------------
-            # Write back zeros to the output when the expert is not
-            # in the current expert parallel rank.
-            _write_zeros_to_output(
-                c_ptr,
-                stride_cm,
-                stride_cn,
-                pid_n,
-                N,
-                offs_token,
-                token_mask,
-                BLOCK_SIZE_M,
-                BLOCK_SIZE_N,
-                compute_type,
+    while xcd_counter < NUM_XCDS:
+        if tile_id >= max_tile_id: # current pool is exhausted => move to the next pool
+            xcd_counter += 1
+            max_tile_id = get_max_tile_id_from_xcd_pool(
+                num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS
             )
-        else:
-            # Compute the A pointer
-            a_ptrs = a_ptr + (
-                offs_token[:, None] // top_k * stride_am + offs_k[None, :] * stride_ak
-            )
-            # Compute the B pointer
-            offs_bn = (
-                pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
-            ) % N
-            b_ptrs = (
-                b_ptr
-                + off_experts * stride_be
-                + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
-            )
+            # fetch the next tile id from the pool
+            tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
+        else: # process the tile
+            pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
-            if use_int8_w8a16:
-                b_scale_ptrs = (
-                    b_scale_ptr
-                    + off_experts * stride_bse
-                    + offs_bn[None, :] * stride_bsn
+            offs_token_id = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M).to(tl.int64)
+            offs_token = tl.load(sorted_token_ids_ptr + offs_token_id)
+            token_mask = offs_token < num_valid_tokens
+
+            off_experts = tl.load(expert_ids_ptr + pid_m).to(tl.int64)
+            
+            if off_experts == -1:
+                # -----------------------------------------------------------
+                # Write back zeros to the output when the expert is not
+                # in the current expert parallel rank.
+                _write_zeros_to_output(
+                    c_ptr,
+                    stride_cm,
+                    stride_cn,
+                    pid_n,
+                    N,
+                    offs_token,
+                    token_mask,
+                    BLOCK_SIZE_M,
+                    BLOCK_SIZE_N,
+                    compute_type,
                 )
-                b_scale = tl.load(b_scale_ptrs)
+            else:
+                # Compute the A pointer
+                a_ptrs = a_ptr + (
+                    offs_token[:, None] // top_k * stride_am + offs_k[None, :] * stride_ak
+                )
+                # Compute the B pointer
+                offs_bn = (
+                    pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
+                ) % N
+                b_ptrs = (
+                    b_ptr
+                    + off_experts * stride_be
+                    + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+                )
 
-            if use_fp8_w8a8:
-                if group_k > 0 and group_n > 0:
-                    a_scale_ptrs = a_scale_ptr + (offs_token // top_k) * stride_asm
-                    offs_bsn = offs_bn // group_n
-                    b_scale_ptrs = (
-                        b_scale_ptr + off_experts * stride_bse + offs_bsn * stride_bsn
-                    )
-                else:
-                    a_scale = tl.load(a_scale_ptr)
-                    b_scale = tl.load(b_scale_ptr + off_experts)
-
-            accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-
-            for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-                # Load the next block of A and B, generate a mask by checking the
-                # K dimension.
-                if EVEN_K:
-                    a = tl.load(a_ptrs, mask=token_mask[:, None], other=0.0)
-                    b = tl.load(b_ptrs)
-                else:
-                    a = tl.load(
-                        a_ptrs,
-                        mask=token_mask[:, None]
-                        & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
-                        other=0.0,
-                    )
-                    b = tl.load(
-                        b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0
-                    )
-                # We accumulate along the K dimension.
                 if use_int8_w8a16:
-                    accumulator = tl.dot(a, b.to(compute_type), acc=accumulator)
-                elif use_fp8_w8a8:
+                    b_scale_ptrs = (
+                        b_scale_ptr
+                        + off_experts * stride_bse
+                        + offs_bn[None, :] * stride_bsn
+                    )
+                    b_scale = tl.load(b_scale_ptrs)
+
+                if use_fp8_w8a8:
                     if group_k > 0 and group_n > 0:
-                        k_start = k * BLOCK_SIZE_K
-                        offs_ks = k_start // group_k
-                        a_scale = tl.load(
-                            a_scale_ptrs + offs_ks * stride_ask,
-                            mask=token_mask,
-                            other=0.0,
-                        )
-                        b_scale = tl.load(b_scale_ptrs + offs_ks * stride_bsk)
-                        accumulator += (
-                            tl.dot(a, b) * a_scale[:, None] * b_scale[None, :]
+                        a_scale_ptrs = a_scale_ptr + (offs_token // top_k) * stride_asm
+                        offs_bsn = offs_bn // group_n
+                        b_scale_ptrs = (
+                            b_scale_ptr + off_experts * stride_bse + offs_bsn * stride_bsn
                         )
                     else:
-                        accumulator = tl.dot(a, b, acc=accumulator)
+                        a_scale = tl.load(a_scale_ptr)
+                        b_scale = tl.load(b_scale_ptr + off_experts)
+
+                accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+
+                for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+                    # Load the next block of A and B, generate a mask by checking the
+                    # K dimension.
+                    if EVEN_K:
+                        a = tl.load(a_ptrs, mask=token_mask[:, None], other=0.0)
+                        b = tl.load(b_ptrs)
+                    else:
+                        a = tl.load(
+                            a_ptrs,
+                            mask=token_mask[:, None]
+                            & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                            other=0.0,
+                        )
+                        b = tl.load(
+                            b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0
+                        )
+                    # We accumulate along the K dimension.
+                    if use_int8_w8a16:
+                        accumulator = tl.dot(a, b.to(compute_type), acc=accumulator)
+                    elif use_fp8_w8a8:
+                        if group_k > 0 and group_n > 0:
+                            k_start = k * BLOCK_SIZE_K
+                            offs_ks = k_start // group_k
+                            a_scale = tl.load(
+                                a_scale_ptrs + offs_ks * stride_ask,
+                                mask=token_mask,
+                                other=0.0,
+                            )
+                            b_scale = tl.load(b_scale_ptrs + offs_ks * stride_bsk)
+                            accumulator += (
+                                tl.dot(a, b) * a_scale[:, None] * b_scale[None, :]
+                            )
+                        else:
+                            accumulator = tl.dot(a, b, acc=accumulator)
+                    else:
+                        accumulator += tl.dot(a, b)
+                    # Advance the ptrs to the next K block.
+                    a_ptrs += BLOCK_SIZE_K * stride_ak
+                    b_ptrs += BLOCK_SIZE_K * stride_bk
+
+                if MUL_ROUTED_WEIGHT:
+                    moe_weight = tl.load(
+                        topk_weights_ptr + offs_token, mask=token_mask, other=0
+                    )
+                    accumulator = accumulator * moe_weight[:, None]
+
+                if use_int8_w8a16:
+                    accumulator = (accumulator * b_scale).to(compute_type)
+                elif use_fp8_w8a8:
+                    if group_k > 0 and group_n > 0:
+                        accumulator = accumulator.to(compute_type)
+                    else:
+                        accumulator = (accumulator * a_scale * b_scale).to(compute_type)
                 else:
-                    accumulator += tl.dot(a, b)
-                # Advance the ptrs to the next K block.
-                a_ptrs += BLOCK_SIZE_K * stride_ak
-                b_ptrs += BLOCK_SIZE_K * stride_bk
-
-            if MUL_ROUTED_WEIGHT:
-                moe_weight = tl.load(
-                    topk_weights_ptr + offs_token, mask=token_mask, other=0
-                )
-                accumulator = accumulator * moe_weight[:, None]
-
-            if use_int8_w8a16:
-                accumulator = (accumulator * b_scale).to(compute_type)
-            elif use_fp8_w8a8:
-                if group_k > 0 and group_n > 0:
                     accumulator = accumulator.to(compute_type)
-                else:
-                    accumulator = (accumulator * a_scale * b_scale).to(compute_type)
-            else:
-                accumulator = accumulator.to(compute_type)
-            # -----------------------------------------------------------
-            # Write back the block of the output
-            offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-            c_ptrs = (
-                c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
-            )
-            c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
-            tl.store(c_ptrs, accumulator, mask=c_mask)
+                # -----------------------------------------------------------
+                # Write back the block of the output
+                offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+                c_ptrs = (
+                    c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
+                )
+                c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
+                tl.store(c_ptrs, accumulator, mask=c_mask)
 
-            # advance tile_id
-            tile_id += NUM_SMS
-
+                # fetch the next tile id from the pool
+                tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
+                    
 
 def fused_moe(
     A: torch.Tensor,
@@ -1102,16 +1112,14 @@ def fused_moe(
 
     else:
         if _USE_MOE_PERSISTENT_KERNEL:
-            NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count * 2
+            NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
+            num_tiles = triton.cdiv(num_tokens_post_padded, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"]) # TODO: can we use the num_tokens_post_padded here?
 
-            grid = lambda META: (  # noqa: E731
-                min(
-                    NUM_SMS,
-                    triton.cdiv(sorted_token_ids.shape[0], META["BLOCK_SIZE_M"])
-                    * triton.cdiv(B.shape[1], META["BLOCK_SIZE_N"]),
-                ),
-            )
+            grid = (min(num_tiles, NUM_WGS),)
 
+            NUM_XCDS = 8
+            pool_counters = torch.tensor([ (get_max_tile_id_from_xcd_pool_python(num_tiles, xcd-1, NUM_XCDS) if xcd > 0 else 0) for xcd in range(NUM_XCDS)]).to(A.device).to(torch.int32)
+            
             _fused_moe_persistent_kernel[grid](
                 A,
                 B,
@@ -1140,14 +1148,17 @@ def fused_moe(
                 B_scale.stride(1) if B_scale is not None and B_scale.ndim >= 2 else 0,
                 0 if block_shape is None else block_shape[0],
                 0 if block_shape is None else block_shape[1],
-                NUM_SMS=NUM_SMS,
                 MUL_ROUTED_WEIGHT=mul_routed_weight,
                 top_k=top_k,
                 compute_type=compute_type,
                 use_fp8_w8a8=use_fp8_w8a8,
                 use_int8_w8a16=use_int8_w8a16,
+                pool_counters=pool_counters,
+                NUM_XCDS=NUM_XCDS,
                 **config,
             )
+            torch.cuda.synchronize()  # wait for the kernel to finish
+            print("got here")
         else:
             grid = lambda META: (  # noqa: E731
                 triton.cdiv(EM, META["BLOCK_SIZE_M"])

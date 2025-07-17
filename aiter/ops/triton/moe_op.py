@@ -1118,7 +1118,7 @@ def fused_moe(
             )
 
     else:
-        if _USE_MOE_PERSISTENT_KERNEL:
+        if _USE_MOE_PERSISTENT_KERNEL:            
             NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
             num_tiles = triton.cdiv(num_tokens_post_padded, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"]) # TODO: can we use the num_tokens_post_padded here?
             grid = (min(num_tiles, NUM_WGS),)

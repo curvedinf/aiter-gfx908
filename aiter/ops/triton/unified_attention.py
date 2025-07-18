@@ -203,8 +203,6 @@ def kernel_unified_attention_2d(
         if BLOCK_N == BLOCK_SIZE:
             physical_block_idx = tl.load(block_tables_ptr + block_table_offset + j)
 
-            offs_n = tl.arange(0, BLOCK_SIZE)
-
             v_offset = (
                 physical_block_idx * stride_v_cache_0
                 + kv_head_idx * stride_v_cache_2
@@ -234,6 +232,7 @@ def kernel_unified_attention_2d(
                 other=0.0,
             )
         else:
+            j = tl.multiple_of(j, BLOCK_N)
             seq_offset = j + offs_n
             physical_block_idx = tl.load(
                 block_tables_ptr + block_table_offset + seq_offset // BLOCK_SIZE,

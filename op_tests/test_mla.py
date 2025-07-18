@@ -10,7 +10,7 @@ import itertools
 import argparse
 
 torch.set_default_device("cuda")
-torch.set_printoptions(sci_mode=False)
+torch.set_printoptions(sci_mode=False, threshold=torch.inf)
 
 
 def ref_masked_attention(
@@ -388,7 +388,6 @@ parser.add_argument(
     "-c",
     "--ctxLen",
     type=int,
-    choices=list_ctx_len,
     nargs="?",
     const=None,
     default=None,
@@ -398,7 +397,6 @@ parser.add_argument(
     "-b",
     "--batchSize",
     type=int,
-    choices=list_batch_size,
     nargs="?",
     const=None,
     default=None,
@@ -408,7 +406,6 @@ parser.add_argument(
     "-n",
     "--nhead",
     type=dtypes.str2tuple,
-    choices=list_nhead,
     nargs="?",
     const=None,
     default=None,

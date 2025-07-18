@@ -41,7 +41,7 @@ def run_torch(x, weight, x_scale, w_scale, dtype=dtypes.bf16):
 
 @perftest()
 def run_gemm_ck(x, weight, x_scale, w_scale, dtype=dtypes.bf16):
-    return aiter.gemm_a8w8_blockscale_CK(x, weight, x_scale, w_scale, dtype)
+    return aiter.gemm_a8w8_blockscale(x, weight, x_scale, w_scale, dtype)
 
 
 @benchmark()
@@ -131,7 +131,10 @@ l_nk = [
     (4096, 512),
 ]
 
-parser = argparse.ArgumentParser(description="config input of test")
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.RawTextHelpFormatter,
+    description="config input of test",
+)
 parser.add_argument(
     "-d",
     "--dtype",
@@ -140,19 +143,26 @@ parser.add_argument(
     nargs="?",
     const=None,
     default=None,
-    help="data type",
+    help="""Data type.
+    e.g.: -d bf16""",
 )
 parser.add_argument(
-    "-m", type=int, choices=l_m, nargs="?", const=None, default=None, help="shape"
+    "-m",
+    type=int,
+    nargs="?",
+    const=None,
+    default=None,
+    help="""M of mnk.
+    e.g.: -m 32""",
 )
 parser.add_argument(
     "-nk",
     type=dtypes.str2tuple,
-    choices=l_nk,
     nargs="?",
     const=None,
     default=None,
-    help="shape",
+    help="""N&K of mnk.
+    e.g.: -nk 4096,512""",
 )
 
 args = parser.parse_args()

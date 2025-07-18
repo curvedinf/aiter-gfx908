@@ -8,7 +8,10 @@ import os
 import torch
 import triton
 import triton.language as tl
-from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
+from aiter.ops.triton.utils.pid_preprocessing import (
+    pid_grid,
+    remap_xcd,
+)
 import aiter.ops.triton.utils.arch_info as arch_info
 from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
 
@@ -83,21 +86,22 @@ def _gemm_afp4_wfp4_kernel(
     # Map program ids `pid` to the block of C it should compute.
     # This is done in a grouped ordering to promote L2 data reuse.
     pid_unified = tl.program_id(axis=0)
+    # remap so that XCDs get continous chunks of pids (of CHUNK_SIZE).
+    pid_unified = remap_xcd(pid_unified, GRID_MN * NUM_KSPLIT, NUM_XCDS=8)
+
     pid_k = pid_unified % NUM_KSPLIT
     pid = pid_unified // NUM_KSPLIT
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
     if NUM_KSPLIT == 1:
-        remap_xcd(pid, GRID_MN)
-
         pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
     else:
         pid_m = pid // num_pid_n
         pid_n = pid % num_pid_n
 
-    tl.assume(pid_m > 0)
-    tl.assume(pid_n > 0)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
     # We assume 32 elements along K share the same scale.
     SCALE_GROUP_SIZE: tl.constexpr = 32
 
@@ -145,7 +149,10 @@ def _gemm_afp4_wfp4_kernel(
                     a_ptrs, mask=offs_k[None, :] < K - k * (BLOCK_SIZE_K // 2), other=0
                 )
                 b = tl.load(
-                    b_ptrs, mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2), other=0
+                    b_ptrs,
+                    mask=offs_k[:, None] < K - k * (BLOCK_SIZE_K // 2),
+                    other=0,
+                    cache_modifier=cache_modifier,
                 )
 
             accumulator += tl.dot_scaled(a, a_scales, "e2m1", b, b_scales, "e2m1")
@@ -233,21 +240,20 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
     # Map program ids `pid` to the block of C it should compute.
     # This is done in a grouped ordering to promote L2 data reuse.
     pid_unified = tl.program_id(axis=0)
+    pid_unified = remap_xcd(pid_unified, GRID_MN * NUM_KSPLIT, NUM_XCDS=8)
     pid_k = pid_unified % NUM_KSPLIT
     pid = pid_unified // NUM_KSPLIT
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
 
     if NUM_KSPLIT == 1:
-        remap_xcd(pid, GRID_MN)
-
         pid_m, pid_n = pid_grid(pid, num_pid_m, num_pid_n, GROUP_SIZE_M=GROUP_SIZE_M)
     else:
         pid_m = pid // num_pid_n
         pid_n = pid % num_pid_n
 
-    tl.assume(pid_m > 0)
-    tl.assume(pid_n > 0)
+    tl.assume(pid_m >= 0)
+    tl.assume(pid_n >= 0)
     # We assume 32 elements along K share the same scale.
     SCALE_GROUP_SIZE: tl.constexpr = 32
 
@@ -494,7 +500,7 @@ def gemm_afp4wfp4(
 
     Key parameters:
     - X: Matrix X with shape (M, K).
-    - W: Matrix W with shape (K, N).
+    - W: Matrix W with shape (N, K).
     - X_scales: Matrix with shape (M, K // 32)
     - W_scales: Matrix with shape (N, K // 32)
 
@@ -503,7 +509,10 @@ def gemm_afp4wfp4(
     """
 
     M, K = x.shape
-    K, N = w.shape
+    N, K = w.shape
+
+    # Transpose w
+    w = w.T
 
     if y is None:
         y = torch.empty((M, N), dtype=dtype, device=x.device)
@@ -539,6 +548,7 @@ def gemm_afp4wfp4(
             * triton.cdiv(N, META["BLOCK_SIZE_N"])
         ),
     )
+
     _gemm_afp4_wfp4_kernel[grid](
         x,
         w,
@@ -611,7 +621,7 @@ def gemm_afp4wfp4_preshuffled_scales(
 
     Key parameters:
     - X: Matrix X with shape (M, K).
-    - W: Matrix W with shape (K, N).
+    - W: Matrix W with shape (N, K).
     - X_scales: Matrix with shape (M // 32, K)
     - W_scales: Matrix with shape (N // 32, K)
 
@@ -622,7 +632,10 @@ def gemm_afp4wfp4_preshuffled_scales(
     assert arch_info.is_fp4_avail(), "MXFP4 is not available on your device"
 
     M, K = x.shape
-    K, N = w.shape
+    N, K = w.shape
+
+    # Transpose w
+    w = w.T
 
     if y is None:
         y = torch.empty((M, N), dtype=dtype, device=x.device)
@@ -651,7 +664,12 @@ def gemm_afp4wfp4_preshuffled_scales(
         config["SPLITK_BLOCK_SIZE"] = 2 * K
         y_pp = None
 
+    if config["BLOCK_SIZE_K"] >= 2 * K:
+        config["BLOCK_SIZE_K"] = triton.next_power_of_2(2 * K)
+        config["SPLITK_BLOCK_SIZE"] = 2 * K
+
     config["BLOCK_SIZE_N"] = max(config["BLOCK_SIZE_N"], 32)
+
     grid = lambda META: (  # noqa: E731
         (
             META["NUM_KSPLIT"]
@@ -659,6 +677,7 @@ def gemm_afp4wfp4_preshuffled_scales(
             * triton.cdiv(N, META["BLOCK_SIZE_N"])
         ),
     )
+
     _gemm_afp4_wfp4_kernel_preshuffled_scales[grid](
         x,
         w,

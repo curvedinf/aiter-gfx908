@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
 import triton
@@ -74,6 +74,7 @@ def get_x_vals():
         (159, 17389, 597),
         (16, 576, 7168),
     ]
+    x_vals += [(1, 1, 1)]  # minimal case
     return x_vals
 
 

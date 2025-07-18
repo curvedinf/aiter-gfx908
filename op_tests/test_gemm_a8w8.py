@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
 import torch.nn.functional as F
@@ -31,7 +31,7 @@ def run_gemm_ck(x, weight, x_scale, w_scale, bias=None, dtype=dtypes.bf16):
 
 @perftest()
 def run_gemm_ck_bpreshuffle(x, weight, x_scale, w_scale, dtype=dtypes.bf16):
-    return aiter.gemm_a8w8_bpreshuffle_CK(x, weight, x_scale, w_scale, dtype)
+    return aiter.gemm_a8w8_bpreshuffle(x, weight, x_scale, w_scale, None, dtype)
 
 
 @perftest()
@@ -76,7 +76,15 @@ def test_gemm(dtype, m, n, k, quantDtype=dtypes.i8):
 
     avg_d = None
     err_d = None
-    if dtype == dtypes.bf16 and quantDtype == dtypes.i8 and bias is not None:
+    gpu = torch.cuda.current_device()
+    device_properties = torch.cuda.get_device_properties(gpu)
+    cu_num = device_properties.multi_processor_count
+    if (
+        dtype == dtypes.bf16
+        and quantDtype == dtypes.i8
+        and bias is not None
+        and cu_num == 80
+    ):
         weightshuffle_asm = shuffle_weight(weight, layout=(32, 16))
         bias_f32 = bias.to(dtypes.fp32)
         d, avg_d = run_gemm_asm(x, weightshuffle_asm, x_scale, w_scale, bias_f32, dtype)
@@ -103,12 +111,11 @@ def test_skinny_gemm(dtype, m, n, k, quantDtype=dtypes.fp8, cu_count=80):
     weight, w_scale = aiter.per_tensor_quant(weight, quant_dtype=quantDtype)
     bias = None
 
+    a, avg_a = run_torch(x, weight, x_scale, w_scale, bias, dtype)
     if m <= 2:
-        a, avg_a = run_torch(x, weight, x_scale, w_scale, bias, dtype)
+        b, avg_b = run_gemm_skinny(x, weight, x_scale, w_scale, None, dtype, cu_count)
     else:
-        a, avg_a = run_gemm_ck(x, weight, x_scale, w_scale, bias, dtype)
-
-    b, avg_b = run_gemm_skinny(x, weight, x_scale, w_scale, None, dtype, cu_count)
+        b, avg_b = run_gemm_ck(x, weight, x_scale, w_scale, bias, dtype)
 
     msg = f"[perf] dim: {str(dim):<20} dtype: {dtype}, quantDtype: {quantDtype}, torch avg: {avg_a:<8.2f} us, skinny_gemm avg: {avg_b:<8.2f} us, uplift: {avg_a/avg_b-1:<5.1%}"
     checkAllclose(a, b, msg="a,b: " + msg, rtol=1e-2, atol=0.01)
@@ -323,7 +330,10 @@ l_mnk_nm = [
     (16384, 8192, 1024),
 ]
 
-parser = argparse.ArgumentParser(description="config input of test")
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.RawTextHelpFormatter,
+    description="config input of test",
+)
 parser.add_argument(
     "-d",
     "--dtype",
@@ -332,7 +342,8 @@ parser.add_argument(
     nargs="?",
     const=None,
     default=None,
-    help="data type",
+    help="""Data type.
+    e.g.: -d bf16""",
 )
 parser.add_argument(
     "-q",
@@ -342,16 +353,17 @@ parser.add_argument(
     nargs="?",
     const=None,
     default=None,
-    help="shape",
+    help="""Date type of quantization.
+    e.g.: -q fp8""",
 )
 parser.add_argument(
     "-mnk",
     type=dtypes.str2tuple,
-    choices=l_mnk_nm,
     nargs="?",
     const=None,
     default=None,
-    help="shape",
+    help="""shape of mnk.
+    e.g. -mnk 1280,8192,1024""",
 )
 
 args = parser.parse_args()

@@ -219,6 +219,20 @@ def kernel_unified_attention_2d(
                 + offs_n[None, :] * stride_k_cache_1
             )
             seq_offset = j * BLOCK_N + offs_n
+
+            # K : (HEAD_SIZE_PADDED, BLOCK_N)
+            K_load = tl.load(
+                key_cache_ptr + k_offset,
+                mask=dim_mask[:, None],
+                other=0.0,
+            )
+
+            # V : (BLOCK_N, HEAD_SIZE_PADDED)
+            V_load = tl.load(
+                value_cache_ptr + v_offset,
+                mask=dim_mask[None, :],
+                other=0.0,
+            )
         else:
             seq_offset = j + offs_n
             physical_block_idx = tl.load(
@@ -240,19 +254,26 @@ def kernel_unified_attention_2d(
                 + offs_d[:, None] * stride_k_cache_3
                 + (offs_n[None, :] % BLOCK_SIZE) * stride_k_cache_1
             )
+            load_mask = seq_offset < max_seq_prefix_len
+            # K : (HEAD_SIZE_PADDED, BLOCK_N)
+            K_load = tl.load(
+                key_cache_ptr + k_offset,
+                mask=dim_mask[:, None] & load_mask[None, :],
+                other=0.0,
+            )
+
+            # V : (BLOCK_N, HEAD_SIZE_PADDED)
+            V_load = tl.load(
+                value_cache_ptr + v_offset,
+                mask=dim_mask[None, :] & load_mask[:, None],
+                other=0.0,
+            )
 
         # seq_mask: (BLOCK_M, BLOCK_N)
         seq_mask = seq_offset[None, :] < context_len + query_pos[:, None] + 1
         # Cagri: load masking is not needed even when we load multiple block sizes
         # as the later masks, get rid of the effect.
         # This increases the overhead, hence removed.
-        # load_mask = seq_offset_load < max_seq_prefix_len
-        # K : (HEAD_SIZE_PADDED, BLOCK_N)
-        K_load = tl.load(
-            key_cache_ptr + k_offset,
-            mask=dim_mask[:, None],  # & load_mask[None, :],
-            other=0.0,
-        )
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -261,13 +282,6 @@ def kernel_unified_attention_2d(
                 K = (K_load.to(tl.float32) * tl.load(k_scale)).to(Q.dtype)
         else:
             K = K_load
-
-        # V : (BLOCK_N, HEAD_SIZE_PADDED)
-        V_load = tl.load(
-            value_cache_ptr + v_offset,
-            mask=dim_mask[None, :],  # & load_mask[:, None],
-            other=0.0,
-        )
 
         if V_load.dtype.is_fp8():
             if Q.dtype.is_fp8():

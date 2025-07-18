@@ -234,18 +234,20 @@
           py::arg("full_nvlink"));                                                             \
     m.def("all_reduce_reg",                                                                    \
           &aiter::all_reduce_reg,                                                              \
-          "all_reduce_reg(int fa, Tensor inp, Tensor! out, bool open_fp8_quant) -> ()",        \
+          "all_reduce_reg(int fa, Tensor inp, Tensor! out, bool open_fp8_quant, int block_limit) -> ()",        \
           py::arg("_fa"),                                                                      \
           py::arg("inp"),                                                                      \
           py::arg("out"),                                                                      \
-          py::arg("open_fp8_quant"));                                                          \
+          py::arg("open_fp8_quant"),                                                          \
+          py::arg("block_limit"));                                                          \
     m.def("all_reduce_unreg",                                                                  \
           &aiter::all_reduce_unreg,                                                            \
-          "all_reduce_unreg(int fa, Tensor inp, Tensor reg_buffer, Tensor! out) -> ()",        \
+          "all_reduce_unreg(int fa, Tensor inp, Tensor reg_buffer, Tensor! out, int block_limit) -> ()",        \
           py::arg("_fa"),                                                                      \
           py::arg("inp"),                                                                      \
           py::arg("reg_buffer"),                                                               \
-          py::arg("out"));                                                                     \
+          py::arg("out"),                                                                     \
+          py::arg("block_limit"));                                                          \
     m.def("all_reduce_asm_", &all_reduce_asm, "");                                             \
     m.def("all_reduce_rmsnorm_", &all_reduce_rmsnorm, "all_reduce_rmsnorm");                   \
     m.def("all_reduce_rmsnorm_quant_", &all_reduce_rmsnorm_quant, "all_reduce_rmsnorm_quant"); \

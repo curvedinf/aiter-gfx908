@@ -114,12 +114,12 @@ if supports_custom_op():
 
     # @torch.library.custom_op("vllm::outplace_all_reduce", mutates_args=[])
     def outplace_all_reduce(tensor: torch.Tensor, open_fp8_quant: bool,
-                            group_name: str) -> torch.Tensor:
+                            group_name: str, block_limit: int = 16) -> torch.Tensor:
         assert group_name in _groups, f"Group {group_name} is not found."
         group = _groups[group_name]()
         if group is None:
             raise ValueError(f"Group {group_name} is destroyed.")
-        return group._all_reduce_out_place(tensor, open_fp8_quant)
+        return group._all_reduce_out_place(tensor, open_fp8_quant, block_limit)
 
     # @outplace_all_reduce.register_fake
     # def _(tensor: torch.Tensor, group_name: str) -> torch.Tensor:
@@ -319,7 +319,7 @@ class GroupCoordinator:
             with maybe_pynccl_context:
                 yield graph_capture_context
 
-    def all_reduce(self, input_: torch.Tensor, open_fp8_quant: bool) -> torch.Tensor:
+    def all_reduce(self, input_: torch.Tensor, open_fp8_quant: bool, block_limit: int = 16) -> torch.Tensor:
         """
         User-facing all-reduce function before we actually call the
         all-reduce operation.
@@ -351,17 +351,17 @@ class GroupCoordinator:
             not self.ca_comm.disabled and \
                 self.ca_comm.should_custom_ar(input_):
             return outplace_all_reduce(
-                input_, open_fp8_quant, group_name=self.unique_name)
+                input_, open_fp8_quant, group_name=self.unique_name, block_limit=block_limit)
         else:
             inplace_all_reduce(input_,
                                group_name=self.unique_name)
             return input_
 
-    def _all_reduce_out_place(self, input_: torch.Tensor, open_fp8_quant: bool) -> torch.Tensor:
+    def _all_reduce_out_place(self, input_: torch.Tensor, open_fp8_quant: bool, block_limit: int) -> torch.Tensor:
         ca_comm = self.ca_comm
         assert ca_comm is not None
         assert not ca_comm.disabled
-        out = ca_comm.custom_all_reduce(input_, open_fp8_quant)
+        out = ca_comm.custom_all_reduce(input_, open_fp8_quant, block_limit)
         assert out is not None
         return out
 

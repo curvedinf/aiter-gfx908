@@ -77,7 +77,7 @@ bool _is_weak_contiguous(torch::Tensor &t)
 }
 
 void _all_reduce(fptr_t _fa, torch::Tensor &inp, torch::Tensor &out,
-                 cudaStream_t stream, bool open_fp8_quant)
+                 cudaStream_t stream, bool open_fp8_quant, int block_limit)
 {
   auto fa = reinterpret_cast<aiter::CustomAllreduce *>(_fa);
   TORCH_CHECK(_is_weak_contiguous(out));
@@ -113,7 +113,7 @@ void _all_reduce(fptr_t _fa, torch::Tensor &inp, torch::Tensor &out,
   {
     fa->allreduce<nv_bfloat16>(
         stream, reinterpret_cast<nv_bfloat16 *>(inp.data_ptr()),
-        reinterpret_cast<nv_bfloat16 *>(out.data_ptr()), out.numel());
+        reinterpret_cast<nv_bfloat16 *>(out.data_ptr()), out.numel(), 512, block_limit);
     break;
   }
 #endif
@@ -123,17 +123,17 @@ void _all_reduce(fptr_t _fa, torch::Tensor &inp, torch::Tensor &out,
   }
 }
 
-void all_reduce_reg(fptr_t _fa, torch::Tensor &inp, torch::Tensor &out, bool open_fp8_quant)
+void all_reduce_reg(fptr_t _fa, torch::Tensor &inp, torch::Tensor &out, bool open_fp8_quant, int block_limit)
 {
   const at::cuda::OptionalCUDAGuard device_guard(device_of(inp));
   auto stream = c10::cuda::getCurrentCUDAStream().stream();
   TORCH_CHECK_EQ(inp.scalar_type(), out.scalar_type());
   TORCH_CHECK_EQ(inp.numel(), out.numel());
-  _all_reduce(_fa, inp, out, stream, open_fp8_quant);
+  _all_reduce(_fa, inp, out, stream, open_fp8_quant, block_limit);
 }
 
 void all_reduce_unreg(fptr_t _fa, torch::Tensor &inp, torch::Tensor &reg_buffer,
-                      torch::Tensor &out)
+                      torch::Tensor &out, int block_limit)
 {
   const at::cuda::OptionalCUDAGuard device_guard(device_of(inp));
   auto stream = c10::cuda::getCurrentCUDAStream().stream();
@@ -145,7 +145,7 @@ void all_reduce_unreg(fptr_t _fa, torch::Tensor &inp, torch::Tensor &reg_buffer,
               "registered buffer is too small to contain the input");
   AT_CUDA_CHECK(cudaMemcpyAsync(reg_buffer.data_ptr(), inp.data_ptr(),
                                 input_size, cudaMemcpyDeviceToDevice, stream));
-  _all_reduce(_fa, reg_buffer, out, stream, false);
+  _all_reduce(_fa, reg_buffer, out, stream, false, block_limit);
 }
 
 void dispose(fptr_t _fa)

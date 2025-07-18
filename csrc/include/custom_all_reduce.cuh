@@ -764,6 +764,13 @@ namespace aiter
   static_assert(sizeof(IPC_KEY) == sizeof(cudaIpcMemHandle_t));
   static_assert(alignof(IPC_KEY) == alignof(cudaIpcMemHandle_t));
 
+  template <typename T>
+  struct Optimize16Byte
+  {
+    static constexpr bool on = sizeof(T) == 2;
+    static constexpr bool off = sizeof(T) != 2;
+  };
+
   class CustomAllreduce
   {
   public:
@@ -1034,7 +1041,7 @@ namespace aiter
      * Not quite sure the underlying reason, but my guess is that too many SMs
      * will cause contention on NVLink bus.
      */
-    template <typename T>
+    template <typename T, typename std::enable_if<Optimize16Byte<T>::off, void>::type* = nullptr>
     void allreduce(cudaStream_t stream, T *input, T *output, int size,
 #ifndef USE_ROCM
                    int threads = 512, int block_limit = 20){
@@ -1042,6 +1049,7 @@ namespace aiter
                    int threads = 512, int block_limit = 16)
     {
 #endif
+      printf("########## no optimize\n");
         auto d = packed_t<T>::P::size;
     if (size % d != 0)
       throw std::runtime_error(
@@ -1054,6 +1062,118 @@ namespace aiter
                                std::to_string(block_limit));
 
     RankData *ptrs = get_buffer_RD(stream, input);
+
+    size /= d;
+    auto bytes = size * sizeof(typename packed_t<T>::P);
+    int blocks = std::min(block_limit, (size + threads - 1) / threads);
+#define KL(ngpus, name)                                                       \
+  name<T, ngpus><<<blocks, threads, 0, stream>>>(ptrs, sg_, self_sg_, output, \
+                                                 rank_, size);
+#define REDUCE_CASE(ngpus)                            \
+  case ngpus:                                         \
+  {                                                   \
+    if (world_size_ == 2)                             \
+    {                                                 \
+      KL(ngpus, cross_device_reduce_1stage);          \
+    }                                                 \
+    else if (full_nvlink_)                            \
+    {                                                 \
+      if ((world_size_ <= 4 && bytes < 512 * 1024) || \
+          (world_size_ <= 8 && bytes < 256 * 1024))   \
+      {                                               \
+        KL(ngpus, cross_device_reduce_1stage);        \
+      }                                               \
+      else                                            \
+      {                                               \
+        KL(ngpus, cross_device_reduce_2stage);        \
+      }                                               \
+    }                                                 \
+    break;                                            \
+  }
+
+    switch (world_size_)
+    {
+      REDUCE_CASE(2)
+      REDUCE_CASE(4)
+      REDUCE_CASE(6)
+      REDUCE_CASE(8)
+    default:
+      throw std::runtime_error(
+          "custom allreduce only supports num gpus in (2,4,6,8). Actual num "
+          "gpus = " +
+          std::to_string(world_size_));
+    }
+#undef REDUCE_CASE
+#undef KL
+  }
+
+    // my optimize on bf16, half16
+    template <typename T, typename std::enable_if<Optimize16Byte<T>::on, void>::type* = nullptr>
+    void allreduce(cudaStream_t stream, T *input, T *output, int size,
+#ifndef USE_ROCM
+                   int threads = 512, int block_limit = 20){
+#else
+                   int threads = 512, int block_limit = 16)
+    {
+#endif
+      printf("===== run 16byte optimize allreduce =====\n");
+    auto d = packed_t<T>::P::size;
+    if (size % d != 0)
+      throw std::runtime_error(
+          "custom allreduce currently requires input length to be multiple "
+          "of " +
+          std::to_string(d));
+    if (block_limit > kMaxBlocks)
+      throw std::runtime_error("max supported block limit is " +
+                               std::to_string(kMaxBlocks) + ". Got " +
+                               std::to_string(block_limit));
+
+    RankData *ptrs = get_buffer_RD(stream, input);
+    if (block_limit == 1) {
+      printf("----- call old kernel -----\n");
+      size /= d;
+    auto bytes = size * sizeof(typename packed_t<T>::P);
+    int blocks = std::min(block_limit, (size + threads - 1) / threads);
+#define KL(ngpus, name)                                                       \
+  name<T, ngpus><<<blocks, threads, 0, stream>>>(ptrs, sg_, self_sg_, output, \
+                                                 rank_, size);
+#define REDUCE_CASE(ngpus)                            \
+  case ngpus:                                         \
+  {                                                   \
+    if (world_size_ == 2)                             \
+    {                                                 \
+      KL(ngpus, cross_device_reduce_1stage);          \
+    }                                                 \
+    else if (full_nvlink_)                            \
+    {                                                 \
+      if ((world_size_ <= 4 && bytes < 512 * 1024) || \
+          (world_size_ <= 8 && bytes < 256 * 1024))   \
+      {                                               \
+        KL(ngpus, cross_device_reduce_1stage);        \
+      }                                               \
+      else                                            \
+      {                                               \
+        KL(ngpus, cross_device_reduce_2stage);        \
+      }                                               \
+    }                                                 \
+    break;                                            \
+  }
+
+    switch (world_size_)
+    {
+      REDUCE_CASE(2)
+      REDUCE_CASE(4)
+      REDUCE_CASE(6)
+      REDUCE_CASE(8)
+    default:
+      throw std::runtime_error(
+          "custom allreduce only supports num gpus in (2,4,6,8). Actual num "
+          "gpus = " +
+          std::to_string(world_size_));
+    }
+    }
+    else {
+      printf("----- call new kernel -----\n");
     int blocks = kMaxBlocks;
 
     auto bytes = size * sizeof(T);
@@ -1184,6 +1304,7 @@ namespace aiter
           "custom allreduce only supports num gpus in (2,4,6,8). Actual num "
           "gpus = " +
           std::to_string(world_size_));
+    }
     }
 #undef REDUCE_CASE
 #undef KL

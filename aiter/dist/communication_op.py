@@ -23,9 +23,9 @@ import torch.distributed
 from .parallel_state import get_tp_group
 
 
-def tensor_model_parallel_all_reduce(input_: torch.Tensor, open_fp8_quant: bool = False) -> torch.Tensor:
+def tensor_model_parallel_all_reduce(input_: torch.Tensor, open_fp8_quant: bool = False, block_limit : int = 16) -> torch.Tensor:
     """All-reduce the input tensor across model parallel group."""
-    return get_tp_group().all_reduce(input_, open_fp8_quant)
+    return get_tp_group().all_reduce(input_, open_fp8_quant, block_limit)
 
 
 def tensor_model_parallel_all_gather(input_: torch.Tensor,

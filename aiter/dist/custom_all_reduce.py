@@ -289,26 +289,26 @@ class CustomAllreduce:
 
     # all reduce, assuming inp tensor is IPC registered with register_buffer,
     # or, in the context of cuda graphs, register_graph_buffers
-    def all_reduce_reg(self, inp: torch.Tensor, out: torch.Tensor = None, open_fp8_quant: bool = False):
+    def all_reduce_reg(self, inp: torch.Tensor, out: torch.Tensor = None, open_fp8_quant: bool = False, block_limit: int = 16):
         if out is None:
             out = torch.empty_like(inp)
-        ops.all_reduce_reg(self._ptr, inp, out, open_fp8_quant)
+        ops.all_reduce_reg(self._ptr, inp, out, open_fp8_quant, block_limit)
         return out
 
     # all reduce, assuming inp tensor is NOT IPC registered
-    def all_reduce_unreg(self, inp: torch.Tensor, out: torch.Tensor = None):
+    def all_reduce_unreg(self, inp: torch.Tensor, out: torch.Tensor = None, block_limit: int = 16):
         if out is None:
             out = torch.empty_like(inp)
-        ops.all_reduce_unreg(self._ptr, inp, self.buffer, out)
+        ops.all_reduce_unreg(self._ptr, inp, self.buffer, out, block_limit)
         return out
 
-    def custom_all_reduce(self, input: torch.Tensor, open_fp8_quant: bool) -> Optional[torch.Tensor]:
+    def custom_all_reduce(self, input: torch.Tensor, open_fp8_quant: bool, block_limit: int) -> Optional[torch.Tensor]:
         # when custom allreduce is disabled, this will be None
         if self.disabled or not self.should_custom_ar(input):
             return None
         if self._IS_CAPTURING:
             if torch.cuda.is_current_stream_capturing():
-                return self.all_reduce_reg(input, open_fp8_quant = open_fp8_quant)
+                return self.all_reduce_reg(input, open_fp8_quant = open_fp8_quant, block_limit = block_limit)
             else:
                 # if warm up, mimic the allocation pattern
                 # since custom allreduce is out-of-place
@@ -318,7 +318,7 @@ class CustomAllreduce:
             # custom allreduce incurs a cost of cudaMemcpy, which should
             # be small(<=1% of overall latency) compared to the performance
             # gains of using custom kernels
-            return self.all_reduce_unreg(input)
+            return self.all_reduce_unreg(input, block_limit = block_limit)
 
         return None
 

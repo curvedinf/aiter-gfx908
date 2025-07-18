@@ -23,13 +23,13 @@ def init_custom_ar(
 
 @compile_ops("module_custom_all_reduce")
 def all_reduce_reg(
-    _fa: int, inp: torch.Tensor, out: torch.Tensor, open_fp8_quant: bool
+    _fa: int, inp: torch.Tensor, out: torch.Tensor, open_fp8_quant: bool, block_limit: int
 ): ...
 
 
 @compile_ops("module_custom_all_reduce")
 def all_reduce_unreg(
-    _fa: int, inp: torch.Tensor, reg_buffer: torch.Tensor, out: torch.Tensor
+    _fa: int, inp: torch.Tensor, reg_buffer: torch.Tensor, out: torch.Tensor, block_limit: int
 ): ...
 
 

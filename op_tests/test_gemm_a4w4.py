@@ -55,6 +55,7 @@ def run_gemm_asm(
     x_scale,
     w_scale,
     out,
+    kernelName="",
     bias=None,
     dtype=dtypes.bf16,
     bpreshuffle=True,
@@ -72,6 +73,7 @@ def run_gemm_asm(
         x_scale,
         w_scale,
         out,
+        kernelName,
         bias,
         bpreshuffle=bpreshuffle,
         log2_k_split=log2_k_split,
@@ -113,6 +115,7 @@ def test_gemm(dtype, M, N, K):
         x_scales_shuffle,
         w_scales_shuffle,
         out2,
+        "_ZN5aiter45f4gemm_bf16_per1x32Fp4_tn_bpreshuffle_256x256E",  # kernelName
         bias_f32,
         bpreshuffle=True,
         log2_k_split=0,
@@ -132,6 +135,7 @@ def test_gemm(dtype, M, N, K):
         x_scales_shuffle,
         w_scales_shuffle,
         out3,
+        "_ZN5aiter45f4gemm_outBF16_128x512_scale_B_Shuffle_KSplitE",  # kernelName
         bias_f32,
         bpreshuffle=True,
         log2_k_split=4,

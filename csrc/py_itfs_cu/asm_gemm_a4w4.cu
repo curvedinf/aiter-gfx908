@@ -204,7 +204,8 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
                             torch::Tensor& A_scale, // A_scale:[M, K/32] e8m0 paded
                             torch::Tensor& B_scale, // B_scale:[N, K/32] e8m0 paded
                             torch::Tensor& out,     // Out:[M, N] bf16
-                            torch::Tensor& bias,    // bias:[M, N] f32
+                            std::string& kernelName,
+                            std::optional<torch::Tensor>& bias, // bias:[M, N] f32
                             std::optional<float> alpha      = 1.0,
                             std::optional<float> beta       = 0.0,
                             std::optional<bool> bpreshuffle = true,
@@ -248,17 +249,20 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     int gdz           = 1;
     args.log2_k_split = 0;
 
-    int selectedksplit     = get_heuristic_ksplit(Mdim, Ndim, Kdim, SUBM, SUBN, {2, 4, 8, 16});
-    selectedksplit         = std::log2(selectedksplit);
-    auto selectedTile      = get_heuristic_tilesize(Mdim, Ndim, {{256, 256}, {128, 512}});
-    int selectedMTile      = selectedTile.first;
-    std::string kernelName = "";
-    kernelName             = get_heuristic_kernel(selectedTile.first,
-                                      selectedTile.second,
-                                      log2_k_split,
-                                      selectedksplit,
-                                      bpreshuffle,
-                                      config_map);
+    int selectedksplit = get_heuristic_ksplit(Mdim, Ndim, Kdim, SUBM, SUBN, {2, 4, 8, 16});
+    selectedksplit     = std::log2(selectedksplit);
+    auto selectedTile  = get_heuristic_tilesize(Mdim, Ndim, {{256, 256}, {128, 512}});
+    int selectedMTile  = selectedTile.first;
+
+    if(kernelName.empty())
+    {
+        kernelName = get_heuristic_kernel(selectedTile.first,
+                                          selectedTile.second,
+                                          log2_k_split,
+                                          selectedksplit,
+                                          bpreshuffle,
+                                          config_map);
+    }
 
     AiterAsmKernel* impl_ptr = nullptr;
 

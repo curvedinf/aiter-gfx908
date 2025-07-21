@@ -228,7 +228,7 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
     {
         using namespace ck_tile;
 
-        using BlockGemm = remove_cvref_t<decltype(GetKVBlockGemm<Problem>())>;
+        using BlockGemm = remove_cvref_t<decltype(GetPVBlockGemm<Problem>())>;
 
         return BlockGemm::MakeBBlockTileDistribution();
     }
@@ -288,7 +288,7 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
     }
 
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto GetKVBlockGemm()
+    CK_TILE_HOST_DEVICE static constexpr auto GetPVBlockGemm()
     {
         using namespace ck_tile;
 
@@ -688,7 +688,7 @@ struct BlockFmhaPipelineQRKSVS
 
         // Block GEMM
         constexpr auto gemm_0 = Policy::template GetQKBlockGemm<Problem>();
-        constexpr auto gemm_1 = Policy::template GetKVBlockGemm<Problem>();
+        constexpr auto gemm_1 = Policy::template GetPVBlockGemm<Problem>();
 
         auto q_dram_window = make_tile_window(q_dram_block_window_tmp,
                                               Policy::template MakeQRegTileDistribution<Problem>());

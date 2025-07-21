@@ -71,7 +71,7 @@ def run_triton(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16, y=N
     return batched_gemm_a8w8(x, weight, x_scale, w_scale, bias, dtype, YQ=y)
 
 
-def get_test_params():
+class TestBatchedGEMMA8W8:
     full_shape_set = [(1024 * v, 1024 * v, 1024 * v) for v in range(1, 9)]
     full_shape_set += [(4864, 4096, 8192), (9728, 8192, 65000), (4864, 8192, 4160)]
     full_shape_set += [
@@ -123,24 +123,24 @@ def get_test_params():
         for dtype in ["bf16"]
     ]
 
-    return full_set + fast_set
+    test_params = full_set + fast_set
 
-@pytest.mark.parametrize(
-    "B, M, N, K, dtype_str, output",get_test_params())
-def test_batched_gemm_a8w8(B: int, M: int, N: int, K: int, dtype_str, output: bool):
+    @pytest.mark.parametrize(
+        "B, M, N, K, dtype_str, output",get_test_params())
+    def test_batched_gemm_a8w8(B: int, M: int, N: int, K: int, dtype_str, output: bool):
 
-    dtype = str_to_torch_dtype[dtype_str]
+        dtype = str_to_torch_dtype[dtype_str]
 
-    x = torch.randint(-20, 20, (B, M, K), dtype=torch.int8).cuda()
-    weight = torch.randint(-20, 20, (B, N, K), dtype=torch.int8).cuda()
-    x_scale = torch.rand([B, M, 1], dtype=torch.float32).cuda() + 1e-6
-    w_scale = torch.rand([B, 1, N], dtype=torch.float32).cuda() + 1e-6
-    bias = torch.rand([B, 1, N], dtype=dtype).cuda() * 10
+        x = torch.randint(-20, 20, (B, M, K), dtype=torch.int8).cuda()
+        weight = torch.randint(-20, 20, (B, N, K), dtype=torch.int8).cuda()
+        x_scale = torch.rand([B, M, 1], dtype=torch.float32).cuda() + 1e-6
+        w_scale = torch.rand([B, 1, N], dtype=torch.float32).cuda() + 1e-6
+        bias = torch.rand([B, 1, N], dtype=dtype).cuda() * 10
 
-    y = None
-    if output:
-        y = torch.empty((B, M, N), dtype=dtype, device=x.device)
-    a = run_torch(x, weight, x_scale, w_scale, bias, dtype)
-    b = run_triton(x, weight, x_scale, w_scale, bias, dtype, y)
+        y = None
+        if output:
+            y = torch.empty((B, M, N), dtype=dtype, device=x.device)
+        a = run_torch(x, weight, x_scale, w_scale, bias, dtype)
+        b = run_triton(x, weight, x_scale, w_scale, bias, dtype, y)
 
-    triton.testing.assert_close(a, b, atol=0.01, rtol=1e-2)
+        triton.testing.assert_close(a, b, atol=0.01, rtol=1e-2)

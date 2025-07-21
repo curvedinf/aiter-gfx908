@@ -834,15 +834,6 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto K_mem_load = [&](auto k_lds_write_idx) {
-#if ENABLE_TRACE
-            DEBUG_STMTS
-            {
-                auto origin = k_dram_block_window.get_window_origin();
-                printf("[POYENC] \tK_mem_load, write_idx = %d, origin = %d\n",
-                       k_lds_write_idx.value,
-                       origin.at(number<0>{}));
-            }
-#endif
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
             auto k_block_tile = load_tile(k_dram_window); // global read i
@@ -860,9 +851,6 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto K_lds_load = [&](auto k_lds_read_idx) {
-#if ENABLE_TRACE
-            DEBUG_STMTS { printf("[POYENC] \tK_lds_load, read_idx = %d\n", k_lds_read_idx.value); }
-#endif
             auto k_lds_window_for_load = make_tile_window(
                 k_lds_window(k_lds_read_idx), Policy::template MakeKRegTileDistribution<Problem>());
 
@@ -870,15 +858,6 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto V_mem_load = [&](auto v_lds_write_idx) {
-#if ENABLE_TRACE
-            DEBUG_STMTS
-            {
-                auto origin = v_dram_window.get_window_origin();
-                printf("[POYENC] \tV_mem_load, write_idx: %d, origin = %d\n",
-                       v_lds_write_idx.value,
-                       origin.at(number<1>{}));
-            }
-#endif
             const auto v_tile = load_tile(v_dram_window);
             __builtin_amdgcn_sched_barrier(0);
 
@@ -906,9 +885,6 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto V_lds_load = [&](auto v_lds_read_idx) {
-#if ENABLE_TRACE
-            DEBUG_STMTS { printf("[POYENC] \tV_lds_load, read_idx = %d\n", v_lds_read_idx.value); }
-#endif
             auto v_lds_window_for_load = make_tile_window(
                 v_lds_window(v_lds_read_idx), Policy::template MakeVRegTileDistribution<Problem>());
 
@@ -934,9 +910,6 @@ struct BlockFmhaPipelineQRKSVS
         decltype(m) m_old;
 
         auto fmha_alu0 = [&](auto sp_reg_idx) {
-#if ENABLE_TRACE
-            DEBUG_STMTS { printf("[POYENC] \tfmha_alu0, sp_reg_idx = %d\n", sp_reg_idx.value); }
-#endif
             // sp_compute{j} = sp_compute{j} * scale_s
             tile_elementwise_inout([&](auto& logits) { logits = logits * scale_s; },
                                    sp(sp_reg_idx).sp_compute);
@@ -971,9 +944,6 @@ struct BlockFmhaPipelineQRKSVS
             sp(number<0>{}).sp_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0})) rowsum_p;
 
         auto fmha_alu1 = [&](auto sp_reg_idx) {
-#if ENABLE_TRACE
-            DEBUG_STMTS { printf("[POYENC] \tfmha_alu1, sp_reg_idx = %d\n", sp_reg_idx.value); }
-#endif
             rowsum_p = block_tile_reduce<SMPLComputeDataType>(
                 sp(sp_reg_idx).sp_compute,
                 sequence<1>{},
@@ -998,14 +968,6 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto gemm = [&](auto sp_reg_idx, auto gemm_idx) {
-#if ENABLE_TRACE
-            DEBUG_STMTS
-            {
-                printf("[POYENC] \tgemm, gemm_idx = %d, sp_reg_idx = %d\n",
-                       gemm_idx.value,
-                       sp_reg_idx.value);
-            }
-#endif
             if constexpr(gemm_idx == 0)
             {
                 clear_tile(sp(sp_reg_idx).sp_compute); // initialize C
@@ -1030,14 +992,6 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto cl_calc = [&](auto sp_reg_idx, auto gemm_idx) {
-#if ENABLE_TRACE
-            DEBUG_STMTS
-            {
-                printf("[POYENC] \tcl_calc, gemm_idx = %d, sp_reg_idx = %d\n",
-                       gemm_idx.value,
-                       sp_reg_idx.value);
-            }
-#endif
             if constexpr(gemm_idx == 0)
             {
                 clear_tile(sp(sp_reg_idx).sp_compute); // initialize C
@@ -1063,9 +1017,6 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_alu_D_upd = [&] {
-#if ENABLE_TRACE
-            DEBUG_STMTS { printf("[POYENC] \tfmha_alu_D_upd\n"); }
-#endif
             // l{j}, Oacc{j}
             constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
             sweep_tile_span(o_spans[number<0>{}], [&](auto idx0) {
@@ -1086,14 +1037,6 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_mask = [&](auto sp_reg_idx) {
-#if ENABLE_TRACE
-            DEBUG_STMTS
-            {
-                printf("[POYENC] \tfmha_mask, sp_reg_idx = %d, kv_token_start: %d\n",
-                       sp_reg_idx.value,
-                       kv_token_start);
-            }
-#endif
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
             {
                 bool need_perpixel_check = mask.IsEdgeTile(
@@ -1126,9 +1069,6 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto core_loop = [&](auto cl_p) {
-#if ENABLE_TRACE
-            DEBUG_STMTS { printf("[POYENC] core_loop, cl_p = %d\n", cl_p.value); }
-#endif
             auto gemm0 = number<0>{};
             auto gemm1 = number<1>{};
 
@@ -1136,9 +1076,6 @@ struct BlockFmhaPipelineQRKSVS
             auto memK = number<1>{};
 
             auto iteration = [&](auto pi) {
-#if ENABLE_TRACE
-                DEBUG_STMTS { printf("[POYENC] \titeration, pi = %d\n", pi.value); }
-#endif
                 auto xdl_SP_p01_reg_idx = number<1>{} - pi;
                 auto xdl_SP_p23_reg_idx = pi;
 
@@ -1158,9 +1095,6 @@ struct BlockFmhaPipelineQRKSVS
                 {
                     __builtin_amdgcn_sched_barrier(0);
 // phase0
-#if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase0 Wave0-3\n"); }
-#endif
                     ASM_MARKER("phase0 Wave0-3");
                     s_waitcnt_lgkmcnt<0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1168,23 +1102,8 @@ struct BlockFmhaPipelineQRKSVS
                     fmha_alu1(xdl_SP_p23_reg_idx);
 
                     schedule_main_loop_gemm0();
-#if 0 && ENABLE_TENSOR_DUMP
-                    // print K1
-                    block_sync_lds();
-                    DEBUG_STMTS { print_lds(k_lds_window(xdl_SP_p01_reg_idx), "K"); }
-#endif
-#if 0 && ENABLE_TENSOR_DUMP
-                    // print S1
-                    block_sync_lds();
-                    store_tile(s_lds_window, sp(xdl_SP_p01_reg_idx).sp_compute);
-                    block_sync_lds();
-                    DEBUG_STMTS { print_lds(s_lds_window, "S"); }
-#endif
                     __builtin_amdgcn_sched_barrier(0);
 // phase1
-#if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase1 Wave0-3\n"); }
-#endif
                     ASM_MARKER("phase1 Wave0-3");
                     s_waitcnt_vmcnt<0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1194,9 +1113,6 @@ struct BlockFmhaPipelineQRKSVS
 
                     __builtin_amdgcn_sched_barrier(0);
 // phase2
-#if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase2 Wave0-3\n"); }
-#endif
                     ASM_MARKER("phase2 Wave0-3");
                     s_waitcnt_lgkmcnt<0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1208,9 +1124,6 @@ struct BlockFmhaPipelineQRKSVS
 
                     __builtin_amdgcn_sched_barrier(0);
 // phase3
-#if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase3 Wave0-3\n"); }
-#endif
                     ASM_MARKER("phase3 Wave0-3");
                     s_waitcnt_vmcnt<0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1227,17 +1140,11 @@ struct BlockFmhaPipelineQRKSVS
                 {
                     __builtin_amdgcn_sched_barrier(0);
 // phase0
-#if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase0 Wave4-7\n"); }
-#endif
                     ASM_MARKER("phase0 Wave4-7");
                     cl_load(memV, V_w4_lds_wr_idx, K_w4_lds_rd_idx);
 
                     __builtin_amdgcn_sched_barrier(0);
 // phase1
-#if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase1 Wave4-7\n"); }
-#endif
                     ASM_MARKER("phase1 Wave4-7");
                     s_waitcnt<0, 0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1246,34 +1153,8 @@ struct BlockFmhaPipelineQRKSVS
                     fmha_alu1(xdl_SP_p23_reg_idx);
 
                     schedule_main_loop_gemm0();
-#if 0
-                    // print K1 tile
-                    DEBUG_STMTS
-                    {
-                        printf("[POYENC] K1 tile (size=%d): %5.2f",
-                               decltype(k_tile.thread_buf_)::size(),
-                               ck_tile::type_convert<float>(k_tile.thread_buf_[0]));
-                        static_for<1, decltype(k_tile.thread_buf_)::size(), 1>{}(
-                            [&](auto i) {
-                                printf(
-                                    ", %5.2f",
-                                    ck_tile::type_convert<float>(kv_tile.k_tile.thread_buf_[i]));
-                            });
-                        printf("\n");
-                    }
-#endif
-#if 0 && ENABLE_TENSOR_DUMP
-                    // print S1
-                    block_sync_lds();
-                    store_tile(s_lds_window, sp(xdl_SP_p01_reg_idx).sp_compute);
-                    block_sync_lds();
-                    DEBUG_STMTS { print_lds(s_lds_window, "S"); }
-#endif
                     __builtin_amdgcn_sched_barrier(0);
 // phase2
-#if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase2 Wave4-7\n"); }
-#endif
                     ASM_MARKER("phase2 Wave4-7");
                     __builtin_amdgcn_s_barrier();
                     cl_load(memK, K_w4_lds_wr_idx, V_w4_lds_rd_idx);
@@ -1287,9 +1168,6 @@ struct BlockFmhaPipelineQRKSVS
 
                     __builtin_amdgcn_sched_barrier(0);
 // phase3
-#if ENABLE_TRACE
-                    DEBUG_STMTS { printf("[POYENC] phase3 Wave4-7\n"); }
-#endif
                     ASM_MARKER("phase3 Wave4-7");
                     s_waitcnt<0, 0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1305,74 +1183,11 @@ struct BlockFmhaPipelineQRKSVS
         };
 
         auto fmha_post_process = [&](auto d) {
-#if ENABLE_TRACE
-            DEBUG_STMTS { printf("[POYENC] fmha_post_process, d = %d\n", d.value); }
-#endif
             auto ps_pi        = number<1>{} - d;
             auto V_lds_rd_idx = ps_pi;
 
             V_lds_load(V_lds_rd_idx);
             fmha_alu1(ps_pi);
-
-#if 0
-            // if num_tool_loops is even, use SP[1]
-            //                      odd, use SP[0]
-            auto sp_reg_idx = number<0>{};
-#if 1
-            block_sync_lds();
-            store_tile(m_lds_window, m_old);
-            block_sync_lds();
-            DEBUG_STMTS { print_lds_1d(m_lds_window, "M_OLD"); }
-
-            block_sync_lds();
-            store_tile(m_lds_window, m);
-            block_sync_lds();
-            DEBUG_STMTS { print_lds_1d(m_lds_window, "M"); }
-
-            block_sync_lds();
-            store_tile(m_lds_window, rowsum_p);
-            block_sync_lds();
-            DEBUG_STMTS { print_lds_1d(m_lds_window, "R"); }
-
-            block_sync_lds();
-            store_tile(m_lds_window, l);
-            block_sync_lds();
-            DEBUG_STMTS { print_lds_1d(m_lds_window, "L"); }
-#endif
-#if 1
-            block_sync_lds();
-            store_tile(s_lds_window, s(sp_reg_idx));
-            block_sync_lds();
-            DEBUG_STMTS { print_lds(s_lds_window, "S"); }
-#endif
-
-#if 1
-            block_sync_lds();
-            store_tile(s_lds_window, sp(sp_reg_idx).sp_compute);
-            block_sync_lds();
-            DEBUG_STMTS { print_lds(s_lds_window, "P_COMPUTE"); }
-#endif
-
-#if 1
-            auto o_acc_fp16 = cast_tile<PDataType>(o_acc);
-            block_sync_lds();
-            store_tile(o_lds_window, o_acc_fp16);
-            block_sync_lds();
-
-            DEBUG_STMTS { print_lds(o_lds_window, "O_ACC(rescaled)"); }
-#endif
-#endif
-#if 0
-        block_sync_lds();
-        store_tile(p_lds_window, p(number<1>{}));
-        block_sync_lds();
-        DEBUG_STMTS { print_lds(p_lds_window, "P1"); }
-
-        block_sync_lds();
-        store_tile(p_lds_window, p(number<0>{}));
-        block_sync_lds();
-        DEBUG_STMTS { print_lds(p_lds_window, "P0"); }
-#endif
 
             auto xdl_SP_p23_reg_idx = ps_pi;
             gemm(xdl_SP_p23_reg_idx, /*gemm_idx=*/number<1>{});
@@ -1381,21 +1196,11 @@ struct BlockFmhaPipelineQRKSVS
         // pre-stage
         {
             ASM_MARKER("before pre-stage");
-#if ENABLE_TRACE
-            DEBUG_STMTS { printf("[POYENC] pre-stage\n"); }
-#endif
             const auto k_origin = k_dram_block_window.get_window_origin();
 
             // (1) load K0 to LDS & VGPR
             K_mem_load(number<0>{}); // mem_K0
             __builtin_amdgcn_s_barrier();
-
-#if 0 && ENABLE_TENSOR_DUMP
-            // print K0
-            block_sync_lds();
-            DEBUG_STMTS { print_lds(k_lds_window(number<0>{}), "K"); }
-            block_sync_lds();
-#endif
 
             K_lds_load(number<0>{}); // lds_K0
 
@@ -1406,41 +1211,10 @@ struct BlockFmhaPipelineQRKSVS
             }
             V_mem_load(number<0>{}); // mem_V0
 
-// print K0 tile
-#if 0
-            block_sync_lds();
-            DEBUG_STMTS
-            {
-                printf("[POYENC] K0 tile (size=%d): %5.2f",
-                       decltype(k_tile.thread_buf_)::size(),
-                       ck_tile::type_convert<float>(k_tile.thread_buf_[0]));
-                static_for<1, decltype(k_tile.thread_buf_)::size(), 1>{}([&](auto i) {
-                    printf(", %5.2f", ck_tile::type_convert<float>(k_tile.thread_buf_[i]));
-                });
-                printf("\n");
-            }
-#endif
-
             // (3) mfma (Q*K0) + softmax
             __builtin_amdgcn_s_barrier();
             gemm(number<0>{}, /*gemm_idx=*/number<0>{});
 
-#if 0
-            // clear s_lds_window
-            std::decay_t<decltype(sp(number<0>{}).sp_compute)> dummy;
-            clear_tile(dummy);
-            block_sync_lds();
-            store_tile(s_lds_window, dummy);
-            block_sync_lds();
-#endif
-
-#if 0 && ENABLE_TENSOR_DUMP
-            // print S0
-            block_sync_lds();
-            store_tile(s_lds_window, sp(number<0>{}).sp_compute);
-            block_sync_lds();
-            DEBUG_STMTS { print_lds(s_lds_window, "S"); }
-#endif
             fmha_mask(number<0>{});
             /// TODO: find better way to map fmha_alu(0,96) call
             fmha_alu0(number<0>{});

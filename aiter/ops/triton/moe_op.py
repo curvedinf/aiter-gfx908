@@ -832,7 +832,7 @@ def _fused_moe_persistent_kernel(
             pool_size = get_xcd_pool_size(
                 num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS
             )
-            pool_offset = get_xcd_pool_offset(num_tiles, xcd, NUM_XCDS)
+            pool_offset = get_xcd_pool_offset(num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS)
         else: # process the tile
             pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
 

@@ -1164,7 +1164,7 @@ if __name__ == "__main__":
     torch.manual_seed(20)
 
     # Parameters for moe test
-    M = 2048
+    M = 16384
     N = 2048
     K = 256
     top_k = 2

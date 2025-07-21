@@ -166,11 +166,9 @@ __device__ void moe_fused_gate_impl(
   // __syncthreads();
 
 ////////////////////// Sigmoid //////////////////////
-int scores_offset = tidx % params.THREADS_PER_ROW * params.VPT;
 #pragma unroll
   for (int ii = 0; ii < params.VPT; ++ii) {
     row_chunk[ii] = 1.0f / (1.0f + expf(-row_chunk[ii]));
-    // scores[scores_offset + ii] = row_chunk[ii];
   }
   // __syncthreads();
 
@@ -245,23 +243,20 @@ int scores_offset = tidx % params.THREADS_PER_ROW * params.VPT;
 
   ////////////////////// Topk //////////////////////
   float output_sum = 0.0f;
-  uint32_t expert_mask = 0xFFFFFFFF;
+  // uint32_t expert_mask = 0xFFFFFFFF;
   for (int k_idx = 0; k_idx < topk_excluding_share_expert_fusion; ++k_idx) {
     // local argmax
     float max_val = bias_chunk[0];
     int expert = first_elt_read_by_thread;
-    // float scale = row_chunk[0];
 
     if (!cmp_eq(max_val, FLT_MAX)) {
 #pragma unroll
       for (int ii = 1; ii < params.VPT; ++ii) {
         float val = bias_chunk[ii];
-        float scale_tmp = row_chunk[ii];
         // if (((expert_mask >> ii) & 1u) && cmp_gt(val, max_val)) {
         if (cmp_gt(val, max_val)) {
           max_val = val;
           expert = first_elt_read_by_thread + ii;
-          // scale = scale_tmp;
         }
       }
     } else {
@@ -414,7 +409,7 @@ __global__ void moe_fused_gate_kernel(
     constexpr int ROWS_PER_WARP = ((EXPERT_GROUP) <= WARP_SIZE) ? (WARP_SIZE / (EXPERT_GROUP)) : 1;      \
     constexpr int ROWS_PER_CTA = WARPS_PER_CTA * ROWS_PER_WARP;                                          \
     moe_fused_gate_kernel<T, VPT, (EXPERTS), (EXPERT_GROUP), ROWS_PER_WARP, ROWS_PER_CTA, WARPS_PER_CTA> \
-        <<<num_blocks, block_dim, shared_mem_size, stream>>>(                                                          \
+        <<<num_blocks, block_dim, shared_mem_size, stream>>>(                                            \
             input.data_ptr(),                                                                            \
             bias.data_ptr(),                                                                             \
             output.data_ptr<float>(),                                                                    \
@@ -422,7 +417,7 @@ __global__ void moe_fused_gate_kernel(
             num_rows,                                                                                    \
             topk_group,                                                                                  \
             topk,                                                                                        \
-            num_fused_shared_experts,                                                                      \
+            num_fused_shared_experts,                                                                    \
             routed_scaling_factor);                                                                      \
     dispatched = true;                                                                                   \
   } while (0)

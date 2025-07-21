@@ -17,8 +17,9 @@
     m.def("add_", &aiter_add_, "apply for add_ with transpose and broadcast."); \
     m.def("mul_", &aiter_mul_, "apply for mul_ with transpose and broadcast."); \
     m.def("sub_", &aiter_sub_, "apply for sub_ with transpose and broadcast."); \
-    m.def("div_", &aiter_div_, "apply for div_ with transpose and broadcast."); \
-    m.def("sigmoid", &aiter_sigmoid, "apply for sigmoid.");                     \
+    m.def("div_", &aiter_div_, "apply for div_ with transpose and broadcast.");
+#define AITER_UNARY_PYBIND                                  \
+    m.def("sigmoid", &aiter_sigmoid, "apply for sigmoid."); \
     m.def("tanh", &aiter_tanh, "apply for tanh.");
 
 #define ATTENTION_ASM_MLA_PYBIND        \
@@ -59,10 +60,13 @@
           py::arg("block_tables"),                  \
           py::arg("context_lens"),                  \
           py::arg("max_num_blocks"),                \
+          py::arg("max_qlen")       = 1,            \
           py::arg("K_QScale")       = std::nullopt, \
           py::arg("V_QScale")       = std::nullopt, \
           py::arg("out_")           = std::nullopt, \
-          py::arg("high_precision") = 1);
+          py::arg("qo_indptr")      = std::nullopt, \
+          py::arg("high_precision") = 1,            \
+          py::arg("kernelName")     = "");
 
 #define ATTENTION_CK_PYBIND            \
     m.def("pa_fwd_naive",              \
@@ -265,19 +269,19 @@
 
 #define CUSTOM_PYBIND                                                                           \
     m.def("wvSpltK",                                                                            \
-          &wvSpltK,                                                                             \
+          &aiter::wvSpltK,                                                                      \
           "wvSpltK(Tensor in_a, Tensor in_b, Tensor! out_c, int N_in,"                          \
           "        int CuCount) -> ()");                                                        \
     m.def("wv_splitk_small_fp16_bf16",                                                          \
-          &wv_splitk_small_fp16_bf16_wrapper,                                                   \
+          &aiter::wv_splitk_small_fp16_bf16_wrapper,                                            \
           "wv_splitk_small_fp16_bf16(Tensor in_a, Tensor in_b, Tensor! out_c, int N_in,"        \
           "        int CuCount) -> ()");                                                        \
     m.def("LLMM1",                                                                              \
-          &LLMM1,                                                                               \
+          &aiter::LLMM1,                                                                        \
           "LLMM1(Tensor in_a, Tensor in_b, Tensor! out_c, int rows_per_block) -> "              \
           "()");                                                                                \
     m.def("wvSplitKQ",                                                                          \
-          &wvSplitKQ,                                                                           \
+          &aiter::wvSplitKQ,                                                                    \
           "wvSplitKQ(Tensor in_a, Tensor in_b, Tensor! out_c, Tensor scale_a, Tensor scale_b, " \
           "int CuCount) -> ()");
 
@@ -298,18 +302,30 @@
           py::arg("pad_c")  = 0,                                        \
           py::arg("splitK") = 0);
 
-#define GEMM_A4W4_ASM_PYBIND      \
-    m.def("gemm_a4w4_asm",        \
-          &gemm_a4w4_asm,         \
-          "Asm gemm a4w4",        \
-          py::arg("A"),           \
-          py::arg("B"),           \
-          py::arg("A_scale"),     \
-          py::arg("B_scale"),     \
-          py::arg("out"),         \
-          py::arg("bias"),        \
-          py::arg("alpha") = 1.0, \
-          py::arg("beta")  = 0.0);
+#define GEMM_A4W4_ASM_PYBIND                     \
+    m.def("gemm_a4w4_asm",                       \
+          &gemm_a4w4_asm,                        \
+          "Asm gemm a4w4",                       \
+          py::arg("A"),                          \
+          py::arg("B"),                          \
+          py::arg("A_scale"),                    \
+          py::arg("B_scale"),                    \
+          py::arg("out"),                        \
+          py::arg("bias")        = std::nullopt, \
+          py::arg("alpha")       = 1.0,          \
+          py::arg("beta")        = 0.0,          \
+          py::arg("bpreshuffle") = true);
+
+#define GEMM_A4W4_BLOCKSCALE_PYBIND \
+    m.def("gemm_a4w4_blockscale",   \
+          &gemm_a4w4_blockscale,    \
+          "fp4 blockscale gemm",    \
+          py::arg("XQ"),            \
+          py::arg("WQ"),            \
+          py::arg("x_scale"),       \
+          py::arg("w_scale"),       \
+          py::arg("Out"),           \
+          py::arg("splitK") = 0);
 
 #define GEMM_A8W8_BLOCKSCALE_PYBIND \
     m.def("gemm_a8w8_blockscale",   \
@@ -325,6 +341,18 @@
     m.def("gemm_a8w8_blockscale_tune",   \
           &gemm_a8w8_blockscale_tune,    \
           "gemm_a8w8_blockscale_tune",   \
+          py::arg("XQ"),                 \
+          py::arg("WQ"),                 \
+          py::arg("x_scale"),            \
+          py::arg("w_scale"),            \
+          py::arg("Out"),                \
+          py::arg("kernelId") = 0,       \
+          py::arg("splitK")   = 0);
+
+#define GEMM_A4W4_BLOCKSCALE_TUNE_PYBIND \
+    m.def("gemm_a4w4_blockscale_tune",   \
+          &gemm_a4w4_blockscale_tune,    \
+          "gemm_a4w4_blockscale_tune",   \
           py::arg("XQ"),                 \
           py::arg("WQ"),                 \
           py::arg("x_scale"),            \
@@ -517,6 +545,39 @@
           py::arg("rng_state")    = std::nullopt, \
           py::arg("gen")          = std::nullopt);
 
+#define MOE_CK_2STAGES_PYBIND                        \
+    m.def("ck_moe_stage1",                           \
+          &ck_moe_stage1,                            \
+          py::arg("hidden_states"),                  \
+          py::arg("w1"),                             \
+          py::arg("w2"),                             \
+          py::arg("sorted_token_ids"),               \
+          py::arg("sorted_expert_ids"),              \
+          py::arg("num_valid_ids"),                  \
+          py::arg("out"),                            \
+          py::arg("topk"),                           \
+          py::arg("kernelName"),                     \
+          py::arg("w1_scale")       = std::nullopt,  \
+          py::arg("a1_scale")       = std::nullopt,  \
+          py::arg("block_m")        = 32,            \
+          py::arg("sorted_weights") = std::nullopt); \
+                                                     \
+    m.def("ck_moe_stage2",                           \
+          &ck_moe_stage2,                            \
+          py::arg("inter_states"),                   \
+          py::arg("w1"),                             \
+          py::arg("w2"),                             \
+          py::arg("sorted_token_ids"),               \
+          py::arg("sorted_expert_ids"),              \
+          py::arg("num_valid_ids"),                  \
+          py::arg("out"),                            \
+          py::arg("topk"),                           \
+          py::arg("kernelName"),                     \
+          py::arg("w2_scale")       = std::nullopt,  \
+          py::arg("a2_scale")       = std::nullopt,  \
+          py::arg("block_m")        = 32,            \
+          py::arg("sorted_weights") = std::nullopt);
+
 #define MHA_VARLEN_FWD_PYBIND                     \
     m.def("mha_varlen_fwd",                       \
           &aiter::torch_itfs::mha_varlen_fwd,     \
@@ -568,53 +629,6 @@
           py::arg("alibi_slopes") = std::nullopt, \
           py::arg("gen")          = std::nullopt);
 
-#define MOE_CK_2STAGES_PYBIND                       \
-    m.def("ck_moe_stage1",                          \
-          &ck_moe_stage1,                           \
-          py::arg("hidden_states"),                 \
-          py::arg("w1"),                            \
-          py::arg("w2"),                            \
-          py::arg("sorted_token_ids"),              \
-          py::arg("sorted_expert_ids"),             \
-          py::arg("num_valid_ids"),                 \
-          py::arg("out"),                           \
-          py::arg("topk"),                          \
-          py::arg("w1_scale")       = std::nullopt, \
-          py::arg("a1_scale")       = std::nullopt, \
-          py::arg("block_m")        = 32,           \
-          py::arg("sorted_weights") = std::nullopt, \
-          py::arg("act_op")         = 0);                   \
-                                                    \
-    m.def("ck_moe_stage2",                          \
-          &ck_moe_stage2,                           \
-          py::arg("inter_states"),                  \
-          py::arg("w1"),                            \
-          py::arg("w2"),                            \
-          py::arg("sorted_token_ids"),              \
-          py::arg("sorted_expert_ids"),             \
-          py::arg("num_valid_ids"),                 \
-          py::arg("out"),                           \
-          py::arg("topk"),                          \
-          py::arg("w2_scale")       = std::nullopt, \
-          py::arg("a2_scale")       = std::nullopt, \
-          py::arg("block_m")        = 32,           \
-          py::arg("sorted_weights") = std::nullopt);
-
-#define MOE_CK_PYBIND                            \
-    m.def("ck_moe",                              \
-          &ck_moe,                               \
-          py::arg("hidden_states"),              \
-          py::arg("w1"),                         \
-          py::arg("w2"),                         \
-          py::arg("topk_weights"),               \
-          py::arg("topk_ids"),                   \
-          py::arg("w1_scale")    = std::nullopt, \
-          py::arg("w2_scale")    = std::nullopt, \
-          py::arg("a1_scale")    = std::nullopt, \
-          py::arg("a2_scale")    = std::nullopt, \
-          py::arg("block_m")     = 32,           \
-          py::arg("expert_mask") = std::nullopt);
-
 #define MOE_OP_PYBIND                                                                         \
     m.def("topk_softmax", &aiter::topk_softmax, "Apply topk softmax to the gating outputs."); \
     m.def("grouped_topk",                                                                     \
@@ -639,12 +653,16 @@
           py::arg("need_renorm"),                                                             \
           py::arg("routed_scaling_factor") = 1.0f,                                            \
           "Apply biased grouped topk softmax to the gating outputs.");                        \
-      m.def("moe_fused_gate", &moe_fused_gate,                                   \
-            py::arg("input"), py::arg("bias"),                                   \
-            py::arg("num_expert_group"), py::arg("topk_group"),                  \
-            py::arg("topk"), py::arg("n_share_experts_fusion"),                  \
-            py::arg("routed_scaling_factor") = 1.0,                              \
-            "Apply biased grouped topk softmax to the gating outputs.");         \
+    m.def("moe_fused_gate",                                                                   \
+          &moe_fused_gate,                                                                    \
+          py::arg("input"),                                                                   \
+          py::arg("bias"),                                                                    \
+          py::arg("num_expert_group"),                                                        \
+          py::arg("topk_group"),                                                              \
+          py::arg("topk"),                                                                    \
+          py::arg("n_share_experts_fusion"),                                                  \
+          py::arg("routed_scaling_factor") = 1.0,                                             \
+          "Apply biased grouped topk softmax to the gating outputs.");                        \
     m.def("moe_align_block_size",                                                             \
           &aiter::moe_align_block_size,                                                       \
           "Aligning the number of tokens to be processed by each expert such "                \
@@ -738,19 +756,21 @@
           py::arg("sorted_weights") = std::nullopt);                                          \
     m.def("moe_sum", &aiter::moe_sum, "moe_sum(Tensor! input, Tensor output) -> ()");
 
-#define MOE_SORTING_PYBIND              \
-    m.def("moe_sorting_fwd",            \
-          &moe_sorting_fwd,             \
-          py::arg("topk_ids"),          \
-          py::arg("topk_weights"),      \
-          py::arg("sorted_token_ids"),  \
-          py::arg("sorted_weights"),    \
-          py::arg("sorted_expert_ids"), \
-          py::arg("num_valid_ids"),     \
-          py::arg("moe_buf"),           \
-          py::arg("num_experts"),       \
-          py::arg("unit_size"),         \
-          py::arg("local_expert_mask") = std::nullopt);
+#define MOE_SORTING_PYBIND                             \
+    m.def("moe_sorting_fwd",                           \
+          &moe_sorting_fwd,                            \
+          py::arg("topk_ids"),                         \
+          py::arg("topk_weights"),                     \
+          py::arg("sorted_token_ids"),                 \
+          py::arg("sorted_weights"),                   \
+          py::arg("sorted_expert_ids"),                \
+          py::arg("num_valid_ids"),                    \
+          py::arg("moe_buf"),                          \
+          py::arg("num_experts"),                      \
+          py::arg("unit_size"),                        \
+          py::arg("local_expert_mask") = std::nullopt, \
+          py::arg("num_local_tokens")  = std::nullopt, \
+          py::arg("dispatch_policy")   = 0);
 
 #define NORM_PYBIND                                               \
     m.def("layernorm2d_fwd",                                      \
@@ -828,6 +848,13 @@
           py::arg("input"),                                              \
           py::arg("scales"),                                             \
           py::arg("scale_ub")      = std::nullopt,                       \
+          py::arg("shuffle_scale") = true);                              \
+    m.def("dynamic_per_group_scaled_quant_fp4",                          \
+          &aiter::dynamic_per_group_scaled_quant_fp4,                    \
+          py::arg("out"),                                                \
+          py::arg("input"),                                              \
+          py::arg("scales"),                                             \
+          py::arg("group_size")    = 32,                                 \
           py::arg("shuffle_scale") = true);
 
 #define RMSNORM_PYBIND                                                                             \
@@ -836,8 +863,21 @@
           "Apply Root Mean Square (RMS) Normalization to the input tensor.");                      \
     m.def(                                                                                         \
         "fused_add_rms_norm_cu", &fused_add_rms_norm, "In-place fused Add and RMS Normalization"); \
-    m.def("rmsnorm2d_fwd", &rmsnorm2d);                                                            \
-    m.def("rmsnorm2d_fwd_with_add", &rmsnorm2d_with_add);                                          \
+    m.def("rmsnorm2d_fwd",                                                                         \
+          &rmsnorm2d,                                                                              \
+          py::arg("input"),                                                                        \
+          py::arg("weight"),                                                                       \
+          py::arg("epsilon"),                                                                      \
+          py::arg("use_model_sensitive_rmsnorm") = 0);                                             \
+    m.def("rmsnorm2d_fwd_with_add",                                                                \
+          &rmsnorm2d_with_add,                                                                     \
+          py::arg("out"),                                                                          \
+          py::arg("input"),                                                                        \
+          py::arg("residual_in"),                                                                  \
+          py::arg("residual_out"),                                                                 \
+          py::arg("weight"),                                                                       \
+          py::arg("epsilon"),                                                                      \
+          py::arg("use_model_sensitive_rmsnorm") = 0);                                             \
     m.def("rmsnorm2d_fwd_with_smoothquant", &rmsnorm2d_with_smoothquant);                          \
     m.def("rmsnorm2d_fwd_with_add_smoothquant",                                                    \
           &rmsnorm2d_with_add_smoothquant,                                                         \
@@ -849,7 +889,8 @@
           py::arg("yscale"),                                                                       \
           py::arg("weight"),                                                                       \
           py::arg("epsilon"),                                                                      \
-          py::arg("out_before_quant") = std::nullopt);                                             \
+          py::arg("out_before_quant")            = std::nullopt,                                   \
+          py::arg("use_model_sensitive_rmsnorm") = 0);                                             \
     m.def("rmsnorm2d_fwd_with_dynamicquant", &rmsnorm2d_with_dynamicquant);                        \
     m.def("rmsnorm2d_fwd_with_add_dynamicquant", &rmsnorm2d_with_add_dynamicquant);
 

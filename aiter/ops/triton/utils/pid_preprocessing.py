@@ -99,7 +99,7 @@ def get_tile_max_current_xcd(num_tiles: int, xcd: int, NUM_XCDS: tl.constexpr = 
     return max_tile_id
 
 @triton.jit
-def get_max_tile_id_from_xcd_pool(num_tiles: int, xcd: int, NUM_XCDS: tl.constexpr = 8):
+def get_xcd_pool_size(num_tiles: int, xcd: int, NUM_XCDS: tl.constexpr = 8):
     """
     num_tiles: total number of tiles all the pools combined
     xcd: current xcd id (pool id). 0-indexed.
@@ -113,17 +113,13 @@ def get_max_tile_id_from_xcd_pool(num_tiles: int, xcd: int, NUM_XCDS: tl.constex
     tall_xcds = num_tiles % NUM_XCDS
     tall_xcds = NUM_XCDS if tall_xcds == 0 else tall_xcds
     if xcd < tall_xcds:
-        max_tile_id = xcd * pids_per_xcd + pids_per_xcd
+        return pids_per_xcd
     else:
-        max_tile_id = (
-            tall_xcds * pids_per_xcd
-            + (xcd - tall_xcds) * (pids_per_xcd - 1) + (pids_per_xcd - 1)
-        )
-
-    return max_tile_id
+        return pids_per_xcd - 1
 
 
-def get_max_tile_id_from_xcd_pool_python(num_tiles: int, xcd: int, NUM_XCDS: tl.constexpr = 8):
+@triton.jit
+def get_xcd_pool_offset(num_tiles: int, xcd: int, NUM_XCDS: tl.constexpr = 8):
     """
     num_tiles: total number of tiles all the pools combined
     xcd: current xcd id (pool id). 0-indexed.
@@ -137,11 +133,11 @@ def get_max_tile_id_from_xcd_pool_python(num_tiles: int, xcd: int, NUM_XCDS: tl.
     tall_xcds = num_tiles % NUM_XCDS
     tall_xcds = NUM_XCDS if tall_xcds == 0 else tall_xcds
     if xcd < tall_xcds:
-        max_tile_id = xcd * pids_per_xcd + pids_per_xcd
+        pool_offset = xcd * pids_per_xcd  
     else:
-        max_tile_id = (
+        pool_offset = (
             tall_xcds * pids_per_xcd
-            + (xcd - tall_xcds) * (pids_per_xcd - 1) + (pids_per_xcd - 1)
+            + (xcd - tall_xcds) * (pids_per_xcd - 1)
         )
 
-    return max_tile_id
+    return pool_offset

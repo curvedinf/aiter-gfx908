@@ -6,8 +6,7 @@ import triton
 import triton.language as tl
 from typing import Any, Dict, Optional, List
 from aiter.ops.triton.quant import dynamic_per_tensor_quant_fp8_i8
-from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd, get_max_tile_id_from_xcd_pool, get_max_tile_id_from_xcd_pool_python
-from aiter.ops.triton.utils.moe_config_utils import get_optimal_moe_config
+from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd, get_xcd_pool_size, get_xcd_pool_offset
 from aiter.ops.triton.utils.moe_common import _write_zeros_to_output
 
 
@@ -816,21 +815,24 @@ def _fused_moe_persistent_kernel(
 
     xcd = workgroup_id % NUM_XCDS
     xcd_counter = 0 # to keep track of how many XCD pools have been checked
-    max_tile_id = get_max_tile_id_from_xcd_pool(num_tiles, xcd, NUM_XCDS)
+    pool_size = get_xcd_pool_size(num_tiles, xcd, NUM_XCDS)
+    pool_offset = get_xcd_pool_offset(num_tiles, xcd, NUM_XCDS)
 
-    pool_start_id = get_max_tile_id_from_xcd_pool(num_tiles, xcd - 1, NUM_XCDS) if xcd > 0 else 0
-    tile_id = pool_start_id + workgroup_id // NUM_XCDS
+    # pool_start_id = get_max_tile_id_from_xcd_pool(num_tiles, xcd - 1, NUM_XCDS) if xcd > 0 else 0
+    tile_id_local = workgroup_id // NUM_XCDS
+    tile_id = tile_id_local + pool_offset
 
     if tile_id >= num_tiles:
         return
 
     while xcd_counter < NUM_XCDS:
         # print("max_tile_id", max_tile_id)
-        if tile_id >= max_tile_id: # current pool is exhausted => move to the next pool
+        if tile_id_local >= pool_size: # current pool is exhausted => move to the next pool
             xcd_counter += 1
-            max_tile_id = get_max_tile_id_from_xcd_pool(
+            pool_size = get_xcd_pool_size(
                 num_tiles, (xcd + xcd_counter) % NUM_XCDS, NUM_XCDS
             )
+            pool_offset = get_xcd_pool_offset(num_tiles, xcd, NUM_XCDS)
         else: # process the tile
             pid_m, pid_n = pid_grid(tile_id, num_pid_m, num_pid_n, GROUP_SIZE_M)
 
@@ -957,7 +959,8 @@ def _fused_moe_persistent_kernel(
                 tl.store(c_ptrs, accumulator, mask=c_mask)
 
             # fetch the next tile id from the pool
-            tile_id = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
+            tile_id_local = tl.atomic_add(pool_counters + (xcd + xcd_counter) % NUM_XCDS, 1)
+            tile_id = tile_id_local + pool_offset
             
 
 
@@ -1122,12 +1125,10 @@ def fused_moe(
     else:
         if _USE_MOE_PERSISTENT_KERNEL:            
             NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
-            num_tiles = triton.cdiv(num_tokens_post_padded, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"])
-            # TODO: why can't we use the num_tokens_post_padded here? Maybe because it is a runtime variable and we need static variable as the grid size in the cuda graph?
             num_tiles_padded = triton.cdiv(EM, config["BLOCK_SIZE_M"]) * triton.cdiv(B.shape[1], config["BLOCK_SIZE_N"]) 
             grid = (min(num_tiles_padded, NUM_WGS),)
             NUM_XCDS = 8
-            pool_counters = torch.tensor([(get_max_tile_id_from_xcd_pool_python(num_tiles, xcd-1, NUM_XCDS) if xcd > 0 else 0) for xcd in range(NUM_XCDS)]).to(A.device).to(torch.int32)
+            pool_counters = torch.zeros([NUM_XCDS]).to(A.device).to(torch.int32)
 
             pool_counters += (NUM_WGS // NUM_XCDS)
             _fused_moe_persistent_kernel[grid](

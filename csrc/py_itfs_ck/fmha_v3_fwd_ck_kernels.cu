@@ -61,7 +61,12 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
         constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
 
-        constexpr index_t MaxVectorSize = 16 / sizeof(KDataType);
+#if defined(__gfx950__)
+        constexpr index_t MaxLoadSizeInBytes = 16;
+#else
+        constexpr index_t MaxLoadSizeInBytes = 4;
+#endif
+        constexpr index_t MaxVectorSize = MaxLoadSizeInBytes / sizeof(KDataType);
         constexpr index_t ElemPerThread = (kNPerBlock * kKPerBlock) / kBlockSize;
 
         constexpr index_t KPerThread     = ck_tile::min(MaxVectorSize, ElemPerThread);
@@ -323,6 +328,61 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
             typename Problem::BlockFmhaShape::Gemm1BlockWarps,
             WarpGemm>;
         return aiter::BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
+    }
+
+    template <typename Problem, ck_tile::index_t IBuf = 0>
+    CK_TILE_HOST_DEVICE static constexpr auto
+    MakeKLdsStoreBlockDescriptor(ck_tile::number<IBuf> = ck_tile::number<0>{})
+    {
+        using namespace ck_tile;
+
+        // K is always k-major, we use async-copy to load into LDS
+        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
+        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
+        constexpr index_t kBlockSize = Problem::kBlockSize;
+        constexpr index_t NumWarps   = Problem::BlockFmhaShape::NumWarps;
+        constexpr index_t WarpSize   = ck_tile::get_warp_size();
+
+        constexpr index_t KPack   = GetSmemKPackK<Problem>(); // this is for lds
+        constexpr index_t KVector = GetAlignmentK<Problem>(); // this is for global load
+        constexpr index_t kPad =
+            KPack; // for async-copy, this pad is between warps. Optimize this for lds_read speed
+
+        static_assert(WarpSize * KVector >= kKPerBlock && WarpSize * KVector % kKPerBlock == 0);
+        constexpr index_t LanesPerK =
+            kKPerBlock / KVector; // how many lane (within a wave) to load K
+        constexpr index_t LaneGroups =
+            WarpSize /
+            LanesPerK; // how many groups (within a wave), they may load different N, but same K
+        constexpr index_t NumIssues = kNPerBlock / (LaneGroups * NumWarps);
+        static_assert(NumIssues == kNPerBlock * kKPerBlock / (kBlockSize * KVector));
+
+        constexpr auto k_lds_block_desc_0 = make_naive_tensor_descriptor_with_offset(
+            make_tuple(number<NumIssues>{},  // n0
+                       number<LaneGroups>{}, // n1
+                       number<NumWarps>{},   // n2
+                       number<LanesPerK>{},  // k0
+                       number<KVector>{}),   // k1
+            make_tuple(number<NumWarps*(WarpSize * KVector + kPad)>{},
+                       number<kKPerBlock>{},
+                       number<WarpSize * KVector + kPad>{},
+                       number<KVector>{},
+                       number<1>{}),
+            number<IBuf * GetSingleSmemElementSpaceSize<Problem>()>{},
+            number<KVector>{},
+            number<1>{});
+
+        // (NumIssues, NumWarps, LaneGroups x LanesPerK x KVector)
+        constexpr auto k_lds_block_desc_issues_warps_lanes = transform_tensor_descriptor(
+            k_lds_block_desc_0,
+            make_tuple(make_pass_through_transform(number<NumIssues>{}),
+                       make_pass_through_transform(number<NumWarps>{}),
+                       make_merge_transform(make_tuple(
+                           number<LaneGroups>{}, number<LanesPerK>{}, number<KVector>{}))),
+            make_tuple(sequence<0>{}, sequence<2>{}, sequence<1, 3, 4>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}));
+
+        return k_lds_block_desc_issues_warps_lanes;
     }
 
     template <typename Problem>
@@ -629,12 +689,19 @@ struct BlockFmhaPipelineQRKSVS
         auto q_dram_window = make_tile_window(q_dram_block_window_tmp,
                                               Policy::template MakeQRegTileDistribution<Problem>());
 
+#define ASYNC_LOAD_K 1
         // reduction function for softmax
         const auto f_max = [](auto e0, auto e1) { return max(e0, e1); };
         const auto f_sum = [](auto e0, auto e1) { return e0 + e1; };
 
         statically_indexed_array<decltype(make_lds_tile_window<KDataType>(
-                                     nullptr, Policy::template MakeKLdsBlockDescriptor<Problem>())),
+                                     nullptr,
+#if ASYNC_LOAD_K
+                                     MakeSimpleLdsDesc<kN0, kK0>()
+#else
+                                     Policy::template MakeKLdsBlockDescriptor<Problem>()
+#endif
+                                         )),
                                  2>
             k_lds_window;
         statically_indexed_array<decltype(make_lds_tile_window<VDataType>(
@@ -680,7 +747,12 @@ struct BlockFmhaPipelineQRKSVS
             k_lds_window(idx) = make_lds_tile_window<KDataType>(
                 static_cast<char*>(smem_ptr) +
                     (2 * idx) * Policy::template GetSmemSizeKV<Problem>(),
-                Policy::template MakeKLdsBlockDescriptor<Problem>());
+#if ASYNC_LOAD_K
+                MakeSimpleLdsDesc<kN0, kK0>()
+#else
+                Policy::template MakeKLdsBlockDescriptor<Problem>()
+#endif
+            );
         });
         static_for<0, 2, 1>{}([&](auto idx) {
             v_lds_window(idx) = make_lds_tile_window<VDataType>(
@@ -836,17 +908,23 @@ struct BlockFmhaPipelineQRKSVS
         auto K_mem_load = [&](auto k_lds_write_idx) {
             auto k_dram_window = make_tile_window(
                 k_dram_block_window, Policy::template MakeKDramTileDistribution<Problem>());
+#if !ASYNC_LOAD_K
             auto k_block_tile = load_tile(k_dram_window); // global read i
+#else
+            async_load_tile(k_lds_window(k_lds_write_idx), k_dram_window);
 
+            static_assert(k_lds_window(k_lds_write_idx).NDimBottomTensor == 2);
+#endif
             __builtin_amdgcn_sched_barrier(0);
 
+#if !ASYNC_LOAD_K
             store_tile(k_lds_window(k_lds_write_idx),
                        tile_elementwise_in(k_element_func, k_block_tile));
-
+#endif
             /// FIXME: use the future-predicting method to move the window
             // move K tile windows
             move_tile_window(k_dram_block_window, {kN0, 0});
-
+            s_waitcnt_vmcnt<0>();
             s_waitcnt_lgkmcnt<0>();
         };
 
@@ -1094,7 +1172,7 @@ struct BlockFmhaPipelineQRKSVS
                 if constexpr(cl_p == 0)
                 {
                     __builtin_amdgcn_sched_barrier(0);
-// phase0
+                    // phase0
                     ASM_MARKER("phase0 Wave0-3");
                     s_waitcnt_lgkmcnt<0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1103,7 +1181,7 @@ struct BlockFmhaPipelineQRKSVS
 
                     schedule_main_loop_gemm0();
                     __builtin_amdgcn_sched_barrier(0);
-// phase1
+                    // phase1
                     ASM_MARKER("phase1 Wave0-3");
                     s_waitcnt_vmcnt<0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1112,7 +1190,7 @@ struct BlockFmhaPipelineQRKSVS
                     fmha_mask(xdl_SP_p01_reg_idx);
 
                     __builtin_amdgcn_sched_barrier(0);
-// phase2
+                    // phase2
                     ASM_MARKER("phase2 Wave0-3");
                     s_waitcnt_lgkmcnt<0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1123,7 +1201,7 @@ struct BlockFmhaPipelineQRKSVS
                     schedule_main_loop_gemm1();
 
                     __builtin_amdgcn_sched_barrier(0);
-// phase3
+                    // phase3
                     ASM_MARKER("phase3 Wave0-3");
                     s_waitcnt_vmcnt<0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1139,12 +1217,12 @@ struct BlockFmhaPipelineQRKSVS
                 else
                 {
                     __builtin_amdgcn_sched_barrier(0);
-// phase0
+                    // phase0
                     ASM_MARKER("phase0 Wave4-7");
                     cl_load(memV, V_w4_lds_wr_idx, K_w4_lds_rd_idx);
 
                     __builtin_amdgcn_sched_barrier(0);
-// phase1
+                    // phase1
                     ASM_MARKER("phase1 Wave4-7");
                     s_waitcnt<0, 0>();
                     __builtin_amdgcn_sched_barrier(0);
@@ -1154,7 +1232,7 @@ struct BlockFmhaPipelineQRKSVS
 
                     schedule_main_loop_gemm0();
                     __builtin_amdgcn_sched_barrier(0);
-// phase2
+                    // phase2
                     ASM_MARKER("phase2 Wave4-7");
                     __builtin_amdgcn_s_barrier();
                     cl_load(memK, K_w4_lds_wr_idx, V_w4_lds_rd_idx);
@@ -1167,7 +1245,7 @@ struct BlockFmhaPipelineQRKSVS
                     }
 
                     __builtin_amdgcn_sched_barrier(0);
-// phase3
+                    // phase3
                     ASM_MARKER("phase3 Wave4-7");
                     s_waitcnt<0, 0>();
                     __builtin_amdgcn_sched_barrier(0);

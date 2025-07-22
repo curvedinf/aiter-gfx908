@@ -17,6 +17,14 @@ jobs:
       - name: Clone sglang repo
         run: |
           git clone https://github.com/sgl-project/sglang.git
+        
+      # TODO: Currently, we use PAT, it should be replaced by repo management api
+      - name: Make authenticated API request
+        env:
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          curl -H "Authorization: token $PERSONAL_ACCESS_TOKEN" \
+               -sSfL https://api.github.com/repos/casey/just/releases/latest
 
       - name: Build sglang image
         run: |

@@ -79,77 +79,74 @@ static CFG* get_cfg(torch::Tensor& inp, torch::Tensor& out)
     }
 };
 
-std::string get_heuristic_kernel(int tile_m,
-                                 int tile_n,
+std::string get_heuristic_kernel(int M,
+                                 int N,
+                                 int K,
                                  std::optional<int> log2_k_split,
                                  int selectedksplit,
                                  std::optional<bool> bpreshuffle,
                                  CFG* cfgs)
 {
-    int log2_k_split_en  = (log2_k_split.has_value() && log2_k_split.value() != 0) ? 1 : 0;
-    int bpreshuffle_en   = (bpreshuffle.has_value() && !bpreshuffle) ? 0 : 1;
-    std::string selected = "";
-    for(const auto& el : *cfgs)
-    {
-        const auto& cfg = el.second;
-        if(cfg.splitK == 1 &&
-           (log2_k_split_en == 1 || (!log2_k_split.has_value() && selectedksplit > 0)))
-        {
-            return el.first;
-        }
-        else if(cfg.tile_M == tile_m && cfg.bpreshuffle == bpreshuffle_en &&
-                cfg.splitK == log2_k_split_en)
-        {
-            return el.first;
-        }
-    }
-
-    TORCH_CHECK(false,
-                __func__,
-                ": cannot get heuristic kernel!"
-                " tile_m:",
-                tile_m,
-                " tile_n:",
-                tile_n);
-    return "";
-}
-
-std::vector<std::pair<int, int>> get_heuristic_tile_list(CFG* cfgs)
-{
-    std::vector<std::pair<int, int>> tile_list;
-    for(const auto& el : *cfgs)
-    {
-        const auto& cfg = el.second;
-        tile_list.push_back({cfg.tile_M, cfg.tile_N});
-    }
-    return tile_list;
-}
-
-std::pair<int, int>
-get_heuristic_tilesize(int M, int N, const std::vector<std::pair<int, int>>& available_tiles)
-{
     hipDevice_t dev;
     hipDeviceProp_t dev_prop;
     HIP_CALL(hipGetDevice(&dev));
     HIP_CALL(hipGetDeviceProperties(&dev_prop, dev));
-    uint32_t num_cu                   = dev_prop.multiProcessorCount;
-    uint32_t empty_cu                 = num_cu;
-    uint32_t tg_num                   = 0;
-    uint32_t round                    = 0xffffffff;
-    std::pair<int, int> selectedtiles = {256, 256};
-    for(auto tile : available_tiles)
+    uint32_t num_cu     = dev_prop.multiProcessorCount;
+    uint32_t empty_cu   = num_cu;
+    uint32_t tg_num     = 0;
+    uint32_t round      = 0xffffffff;
+    int log2_k_split_en = (log2_k_split.has_value() && log2_k_split.value() != 0) ? 1 : 0;
+    int bpreshuffle_en  = (bpreshuffle.has_value() && !bpreshuffle) ? 0 : 1;
+    int selectedtileM   = 0;
+    int selectedtileN   = 0;
+
+    std::string selected = "";
+    for(const auto& el : *cfgs)
     {
-        if((N % tile.second) == 0)
+        const auto& cfg = el.second;
+        if(cfg.splitK == 1)
         {
-            int tg_num_M         = (M + tile.first - 1) / tile.first;
-            int tg_num_N         = (N + tile.second - 1) / tile.second;
+            for(auto& k : {2, 4, 8, 16})
+            {
+                int tg_num_M        = (M + cfg.tile_M - 1) / cfg.tile_M;
+                int tg_num_N        = (N + cfg.tile_N - 1) / cfg.tile_N;
+                tg_num              = tg_num_M * tg_num_N * k;
+                int32_t local_round = (tg_num + num_cu - 1) / num_cu;
+                if(local_round < round)
+                {
+                    round          = local_round;
+                    empty_cu       = local_round * num_cu - tg_num;
+                    selectedksplit = K;
+                }
+                else if(local_round == round)
+                {
+                    if(empty_cu > (local_round * num_cu - tg_num))
+                    {
+                        round          = local_round;
+                        empty_cu       = local_round * num_cu - tg_num;
+                        selectedksplit = K;
+                    }
+                }
+            }
+            selectedksplit    = std::log2(selectedksplit);
+            uint32_t num_cu   = dev_prop.multiProcessorCount;
+            uint32_t empty_cu = num_cu;
+            uint32_t tg_num   = 0;
+            uint32_t round    = 0xffffffff;
+        }
+
+        if((N % cfg.tile_N) == 0)
+        {
+            int tg_num_M         = (M + cfg.tile_M - 1) / cfg.tile_M;
+            int tg_num_N         = (N + cfg.tile_N - 1) / cfg.tile_N;
             tg_num               = tg_num_M * tg_num_N;
             uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
             if(local_round < round)
             {
                 round         = local_round;
                 empty_cu      = local_round * num_cu - tg_num;
-                selectedtiles = tile;
+                selectedtileM = cfg.tile_M;
+                selectedtileN = cfg.tile_N;
             }
             else if(local_round == round)
             {
@@ -157,55 +154,28 @@ get_heuristic_tilesize(int M, int N, const std::vector<std::pair<int, int>>& ava
                 {
                     round         = local_round;
                     empty_cu      = local_round * num_cu - tg_num;
-                    selectedtiles = tile;
+                    selectedtileM = cfg.tile_M;
+                    selectedtileN = cfg.tile_N;
                 }
             }
         }
-    }
-    return selectedtiles;
-}
 
-int get_heuristic_ksplit(
-    int M, int N, int K, int tileM, int tileN, const std::vector<int>& available_ksplit)
-{
-    hipDevice_t dev;
-    hipDeviceProp_t dev_prop;
-    HIP_CALL(hipGetDevice(&dev));
-    HIP_CALL(hipGetDeviceProperties(&dev_prop, dev));
-    uint32_t num_cu   = dev_prop.multiProcessorCount;
-    uint32_t empty_cu = num_cu;
-    uint32_t tg_num   = 0;
-    uint32_t round    = 0xffffffff;
-    int selectedK     = ((M * N) / tileM * tileN > num_cu) ? 1 : 0;
-    if(selectedK == 0)
-        return 0;
-
-    for(auto tile : available_ksplit)
-    {
-        if((K % tile) == 0)
+        if((log2_k_split_en == 1 || (!log2_k_split.has_value() && selectedksplit > 0)))
         {
-            int tg_num_M         = (M + tileM - 1) / tileM;
-            int tg_num_N         = (N + tileN - 1) / tileN;
-            tg_num               = tg_num_M * tg_num_N * tile;
-            uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
-            if(local_round < round)
-            {
-                round     = local_round;
-                selectedK = tile;
-                empty_cu  = local_round * num_cu - tg_num;
-            }
-            else if(local_round == round)
-            {
-                if(empty_cu > (local_round * num_cu - tg_num))
-                {
-                    round     = local_round;
-                    selectedK = tile;
-                    empty_cu  = local_round * num_cu - tg_num;
-                }
-            }
+            selected = el.first;
+        }
+        else if(cfg.tile_M == selectedtileM && cfg.bpreshuffle == bpreshuffle_en &&
+                cfg.splitK == log2_k_split_en)
+        {
+            selected = el.first;
         }
     }
-    return selectedK;
+
+    if(selected != "")
+        return selected;
+
+    TORCH_CHECK(false, __func__, ": cannot get heuristic kernel!");
+    return "";
 }
 
 // A4W4 asm gemm kernel
@@ -257,17 +227,8 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     int selectedksplit = 0;
     if(kernelName.empty())
     {
-        auto selectedTile = get_heuristic_tilesize(Mdim, Ndim, get_heuristic_tile_list(config_map));
-        selectedksplit    = get_heuristic_ksplit(
-            Mdim, Ndim, Kdim, selectedTile.first, selectedTile.second, {2, 4, 8, 16});
-        selectedksplit = std::log2(selectedksplit);
-
-        kernelName = get_heuristic_kernel(selectedTile.first,
-                                          selectedTile.second,
-                                          log2_k_split,
-                                          selectedksplit,
-                                          bpreshuffle,
-                                          config_map);
+        kernelName = get_heuristic_kernel(
+            Mdim, Ndim, Kdim, log2_k_split, selectedksplit, bpreshuffle, config_map);
     }
 
     AiterAsmKernel* impl_ptr = nullptr;

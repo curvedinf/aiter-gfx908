@@ -115,7 +115,7 @@ def test_gemm(dtype, M, N, K):
         x_scales_shuffle,
         w_scales_shuffle,
         out2,
-        "_ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_128x512E",  # kernelName
+        "",  # kernelName
         bias_f32,
         bpreshuffle=True,
         log2_k_split=0,

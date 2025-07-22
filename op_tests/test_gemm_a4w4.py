@@ -7,8 +7,6 @@ from aiter.test_common import checkAllclose, benchmark, perftest
 from aiter import dtypes
 from aiter.utility import fp4_utils
 from aiter.ops.shuffle import shuffle_weight
-import random
-import itertools
 import argparse
 import pandas as pd
 
@@ -83,7 +81,7 @@ def test_gemm(dtype, M, N, K):
     out1 = torch.empty(M, N, dtype=dtype)
     out2 = torch.empty((M + 255) // 256 * 256, N, dtype=dtype)
     out3 = torch.empty((M + 255) // 256 * 256, N, dtype=dtype)
-    bias_f32 = torch.zeros(M, N, dtype=dtype)
+    bias_f32 = None
     x_scales = x_scales.view(torch.uint8)
     w_scales = w_scales.view(torch.uint8)
 
@@ -202,7 +200,10 @@ l_mnk = [
     (51200, 16384, 16384),
 ]
 
-parser = argparse.ArgumentParser(description="config input of test")
+parser = argparse.ArgumentParser(
+    formatter_class=argparse.RawTextHelpFormatter,
+    description="config input of test",
+)
 parser.add_argument(
     "-d",
     "--dtype",
@@ -211,17 +212,18 @@ parser.add_argument(
     nargs="?",
     const=None,
     default=None,
-    help="data type",
+    help="""Data type.
+    e.g.: -d bf16""",
 )
 parser.add_argument(
-    "-s",
+    "-mnk",
     "--shape",
     type=dtypes.str2tuple,
-    choices=l_mnk,
     nargs="?",
     const=None,
     default=None,
-    help="shape",
+    help="""shape of mnk.
+    e.g. -mnk 1280,8192,1024""",
 )
 
 args = parser.parse_args()

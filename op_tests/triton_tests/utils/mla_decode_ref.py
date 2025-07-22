@@ -27,6 +27,7 @@ import triton
 import triton.language as tl
 from aiter.ops.triton.utils.arch_info import get_arch
 
+
 def is_hip():
     return triton.runtime.driver.active.get_current_target().backend == "hip"
 

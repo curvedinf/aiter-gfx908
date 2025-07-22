@@ -657,6 +657,8 @@
           &moe_fused_gate,                                                                    \
           py::arg("input"),                                                                   \
           py::arg("bias"),                                                                    \
+          py::arg("topk_weights"),                                                            \
+          py::arg("topk_ids"),                                                                \
           py::arg("num_expert_group"),                                                        \
           py::arg("topk_group"),                                                              \
           py::arg("topk"),                                                                    \

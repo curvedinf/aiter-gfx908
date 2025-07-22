@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 #include <torch/all.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -13,7 +13,7 @@ using MoeKernelMap = std::unordered_map<std::string, MoeKernel>;
 // API for user aiter.ck_moe_stage1(...)
 
 template <int stage = 1>
-MoeKernel moe_dispatch(std::string &kernelName, int block_m)
+MoeKernel moe_dispatch(std::string &kernelName, int block_m, int inter_dim)
 {
     static const auto lookup = []
     {
@@ -36,7 +36,7 @@ MoeKernel moe_dispatch(std::string &kernelName, int block_m)
     }
     else
     {
-        return moe_stage2_heuristic_dispatch(block_m);
+        return moe_stage2_heuristic_dispatch(block_m, inter_dim);
     }
 }
 
@@ -75,7 +75,7 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
     void *num_valid_ids_ptr = num_valid_ids.data_ptr();
     void *sorted_weights_ptr = sorted_weights.has_value() ? sorted_weights.value().data_ptr() : nullptr;
     void *out_ptr = out.data_ptr();
-    void *w1_scale_ptr = w1_scale.has_value() ? w1_scale.value().transpose(0, 1).data_ptr() : nullptr;
+    void *w1_scale_ptr = w1_scale.has_value() ? w1_scale.value().data_ptr() : nullptr;
     void *a1_scale_ptr = a1_scale.has_value() ? a1_scale.value().data_ptr() : nullptr;
     if (!hidden_states_ptr || !w1_ptr || !w2_ptr || !sorted_token_ids_ptr || !sorted_expert_ids_ptr || !num_valid_ids_ptr || !out_ptr)
     {
@@ -83,7 +83,12 @@ void ck_moe_stage1(torch::Tensor &hidden_states,     // [m, k], input token
         return;
     }
 
-    auto kernel = moe_dispatch<1>(kernelName, MPerBlock);
+    if (hidden_states.dtype() == at::ScalarType::Byte && w1.dtype() == at::ScalarType::Byte)
+    {
+        K *= 2;
+    }
+
+    auto kernel = moe_dispatch<1>(kernelName, MPerBlock, N);
 
     kernel(at::cuda::getCurrentCUDAStream().stream(),
            tokens, sorted_size, N, K, topk,
@@ -129,8 +134,11 @@ void ck_moe_stage2(torch::Tensor &inter_states,      // [m, k], input token
         std::cerr << "detect null ptr !" << std::endl;
         return;
     }
-
-    auto kernel = moe_dispatch<2>(kernelName, MPerBlock);
+    if (inter_states.dtype() == at::ScalarType::Byte && w2.dtype() == at::ScalarType::Byte)
+    {
+        K *= 2;
+    }
+    auto kernel = moe_dispatch<2>(kernelName, MPerBlock, K);
 
     kernel(at::cuda::getCurrentCUDAStream().stream(),
            tokens, sorted_size, N, K, topk,

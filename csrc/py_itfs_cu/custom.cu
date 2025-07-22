@@ -1,6 +1,6 @@
 /*
  * Copyright © Advanced Micro Devices, Inc. All rights reserved.
- * Copyright (c) 2024, The vLLM team.
+ * Copyright (C) 2024-2025, The vLLM team.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
 #include "py_itfs_common.h"
+
+namespace aiter {
 
 // declare templates for front (cpp) and back (cuda) sides of function:
 // template <typename T>
@@ -239,3 +241,4 @@ void MMCustomGPU(at::Tensor& in_a, at::Tensor& in_b, at::Tensor& out_c)
                 matO_sizes[1],
                 at::cuda::getCurrentCUDAStream());
 }
+} // namespace aiter

@@ -20,12 +20,12 @@ from aiter.fused_moe import (
 from aiter import ck_moe_stage1_fwd, ck_moe_stage2_fwd, dtype2str_dict
 from aiter.ops.shuffle import shuffle_weight
 from aiter.utility.mp_tuner import mp_tuner
-from aiter.test_common import checkAllclose
 from aiter.int4_utils import (
     rearrange_4bit_elements,
     convert_int8_to_uint32_int4,
 )
 from aiter import dtypes
+from aiter import ActivationType as ActivationType
 
 sys.path.insert(0, f"{AITER_CSRC_DIR}/ck_gemm_moe_2stages_codegen/")
 from gemm_moe_ck2stages_common import get_gemm1_kernels_list, get_gemm2_kernels_list
@@ -331,6 +331,9 @@ def go(
                                 sorted_weights if doweight_stage1 else None,
                             ),
                             {},
+                            None,
+                            (),
+                            {},
                             (ref1),
                             0.01,
                             0.01,
@@ -379,6 +382,9 @@ def go(
                                 act_type,
                             ),
                             {},
+                            None,
+                            (),
+                            {},
                             (ref1),
                             0.01,
                             0.01,
@@ -411,6 +417,9 @@ def go(
                                 act_type,
                             ),
                             {},
+                            None,
+                            (),
+                            {},
                             (ref2),
                             0.01,
                             0.01,
@@ -421,7 +430,9 @@ def go(
         if tasks is None and tasks_ck is None:
             print("no moe solution can tune for ", line)
             continue
-        rets = mp_tuner(tasks + tasks_ck)
+        print(f"tasks is {len(tasks)}, tasks_ck is {len(tasks_ck)}")
+        in_data = [(len(tasks) + len(tasks_ck), ())]
+        rets = mp_tuner(tasks + tasks_ck, in_data, 1, True)
 
         profileDF = []
         for (stage, kernelName, block_m), us, err in rets:
@@ -572,6 +583,7 @@ if __name__ == "__main__":
 
     tunedf = None
     # tunedf = pd.read_csv(args.tune_file)
+
     profiles, tunedf = go(untunedf, tunedf)
     if old_tunedf is not None and tunedf is not None:
         tunedf = pd.concat([old_tunedf, tunedf], axis=0)

@@ -1,6 +1,8 @@
 name: Sglang Downstream Test
 
 on:
+  push:
+    branches: [ "**" ]
   pull_request:
     branches: [main]  # Triggers on PRs targeting `main`
 
@@ -9,7 +11,7 @@ jobs:
     name: sglang integration
     runs-on: [self-hosted, linux, aiter-k8s-build, X64]
     env:
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN_TEST }}
     steps:
       - name: Checkout aiter repo
         uses: actions/checkout@v4
@@ -18,7 +20,7 @@ jobs:
         run: |
           git clone https://github.com/sgl-project/sglang.git
         
-      # TODO: Currently, we use PAT, it should be replaced by repo management api
+      # TODO: Currently, we use PAT, it should be replaced by repo token
       - name: Make authenticated API request
         env:
           PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -26,25 +28,34 @@ jobs:
           curl -H "Authorization: token $PERSONAL_ACCESS_TOKEN" \
                -sSfL https://api.github.com/repos/casey/just/releases/latest
 
-      - name: Build sglang image
-        run: |
-          cd sglang
-          docker build --no-cache -f docker/Dockerfile \
-            --build-arg AITER_BRANCH=main \
-            --build-arg PYTORCH_ROCM_ARCH=gfx942 \
-            -t sglang_aiter_base .
+      # - name: Build sglang image
+      #   run: |
+      #     cd sglang
+      #     docker build --build-arg SGL_BRANCH=v0.4.9.post3 -t sglang_aiter_test -f docker/Dockerfile.rocm .
+      #   
+        # docker build -f docker/Dockerfile.rocm --build-arg AITER_BRANCH=main --build-arg PYTORCH_ROCM_ARCH=gfx942 --build-arg SGL_BRANCH=v0.4.9.post2 -t sglang_aiter_base .
+        # docker build --no-cache -f docker/Dockerfile.rocm --build-arg BASE_IMAGE=sglang_aiter_base -t sglang_aiter_test ."
             
       - name: Start CI container
-        run: bash sglang/scripts/amd_ci_start_container.sh
-        #env:
-        #  GITHUB_WORKSPACE: ${{ github.workspace }}
+        run: |
+          cd sglang
+          sed -i 's|-v "${GITHUB_WORKSPACE:-$PWD}:/sglang-checkout"|-v "${GITHUB_WORKSPACE:-$PWD}/sglang:/sglang-checkout"|g' scripts/amd_ci_start_container.sh
+          docker ps -aq -f name=ci_sglang | xargs -r docker stop | xargs -r docker rm; bash scripts/amd_ci_start_container.sh
+        env:
+          GITHUB_WORKSPACE: ${{ github.workspace }}
 
       - name: Install dependencies
-        run: bash sglang/scripts/amd_ci_install_dependency.sh
+        run: cd sglang; bash scripts/amd_ci_install_dependency.sh
 
       - name: Evaluate Accuracy
         timeout-minutes: 30
         run: |
-          bash sglang/scripts/amd_ci_exec.sh -e SGLANG_USE_AITER=0 python3 test_eval_accuracy_large.py
-          bash sglang/scripts/amd_ci_exec.sh python3 test_eval_fp8_accuracy.py
-          bash sglang/scripts/amd_ci_exec.sh python3 models/test_qwen_models.py
+          cd sglang
+          bash scripts/amd_ci_exec.sh -e SGLANG_USE_AITER=0 python3 test_eval_accuracy_large.py
+          bash scripts/amd_ci_exec.sh python3 test_eval_fp8_accuracy.py
+          bash scripts/amd_ci_exec.sh python3 models/test_qwen_models.py
+        
+      - name: Clean Up
+        if: always()
+        run:
+          docker exec -u root ci_sglang bash -c "rm -rf /sglang-checkout/sglang; rm -rf /sglang-checkout/aiter"

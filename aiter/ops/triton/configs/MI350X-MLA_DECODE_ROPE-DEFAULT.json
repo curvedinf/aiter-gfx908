@@ -1,6 +1,6 @@
 {
     "fwd_grouped_kernel_stage1_rope": {
-        "BLOCK_N": 16,
+        "BLOCK_N": 32,
         "BLOCK_H": 16,
         "num_warps": 8,
         "num_stages": 4,

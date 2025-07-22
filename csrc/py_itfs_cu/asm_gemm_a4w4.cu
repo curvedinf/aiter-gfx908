@@ -270,7 +270,6 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
                                           config_map);
     }
 
-  
     AiterAsmKernel* impl_ptr = nullptr;
     int SUBM                 = 0;
     int SUBN                 = 0;
@@ -284,11 +283,10 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
         SUBM                = cfg.tile_M;
         SUBN                = cfg.tile_N;
 
-        if(cfg.splitK == 1)
+        if(cfg.splitK == 1 && log2_k_split.value() != 0)
         {
             args.log2_k_split = log2_k_split.has_value() ? log2_k_split.value() : selectedksplit;
             int k_num = 1 << (log2_k_split.has_value() ? log2_k_split.value() : selectedksplit);
-
             assert(Kdim % k_num == 0);
             int k_per_tg = Kdim / k_num;
             k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;

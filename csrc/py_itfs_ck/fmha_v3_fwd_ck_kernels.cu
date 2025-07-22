@@ -55,7 +55,11 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
         using namespace ck_tile;
         using KDataType = remove_cvref_t<typename Problem::KDataType>;
 #if defined(__gfx950__)
+#if USE_INLINE_ASM_ASYNC_LOAD_K
+        constexpr index_t MaxReadSizeInBytes = 16;
+#else
         constexpr index_t MaxReadSizeInBytes = 4;
+#endif
 #else
         constexpr index_t MaxReadSizeInBytes = 4;
 #endif

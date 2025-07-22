@@ -114,6 +114,17 @@ std::string get_heuristic_kernel(int tile_m,
     return "";
 }
 
+std::vector<std::pair<int, int>> get_heuristic_tile_list(CFG* cfgs)
+{
+    std::vector<std::pair<int, int>> tile_list;
+    for(const auto& el : *cfgs)
+    {
+        const auto& cfg = el.second;
+        tile_list.push_back({cfg.tile_M, cfg.tile_N});
+    }
+    return tile_list;
+}
+
 std::pair<int, int>
 get_heuristic_tilesize(int M, int N, const std::vector<std::pair<int, int>>& available_tiles)
 {
@@ -128,7 +139,7 @@ get_heuristic_tilesize(int M, int N, const std::vector<std::pair<int, int>>& ava
     std::pair<int, int> selectedtiles = {256, 256};
     for(auto tile : available_tiles)
     {
-        if((M * N % 65536) == 0)
+        if((N % tile.second) == 0)
         {
             int tg_num_M         = (M + tile.first - 1) / tile.first;
             int tg_num_N         = (N + tile.second - 1) / tile.second;
@@ -152,7 +163,7 @@ get_heuristic_tilesize(int M, int N, const std::vector<std::pair<int, int>>& ava
         }
     }
     return selectedtiles;
-};
+}
 
 int get_heuristic_ksplit(
     int M, int N, int K, int tileM, int tileN, const std::vector<int>& available_ksplit)
@@ -236,26 +247,21 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     args.ptr_ScaleB     = (void*)B_scale.data_ptr();
     args.stride_ScaleA0 = A_scale.stride(0);
     args.stride_ScaleB0 = B_scale.stride(0);
+    args.log2_k_split   = 0;
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(A));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     CFG* config_map           = get_cfg(A, out);
     static std::unordered_map<std::string, std::unique_ptr<AiterAsmKernel>> impl_ptr_map;
 
-    // TODO should get from kernel ; ini arg for 256x256 tiles
-    int tg_group_size = 32;
-    int SUBM          = 256;
-    int SUBN          = 256;
-    int gdz           = 1;
-    args.log2_k_split = 0;
-
-    int selectedksplit = get_heuristic_ksplit(Mdim, Ndim, Kdim, SUBM, SUBN, {2, 4, 8, 16});
-    selectedksplit     = std::log2(selectedksplit);
-    auto selectedTile  = get_heuristic_tilesize(Mdim, Ndim, {{256, 256}, {128, 512}});
-    int selectedMTile  = selectedTile.first;
-
+    int selectedksplit = 0;
     if(kernelName.empty())
     {
+        auto selectedTile = get_heuristic_tilesize(Mdim, Ndim, get_heuristic_tile_list(config_map));
+        selectedksplit    = get_heuristic_ksplit(
+            Mdim, Ndim, Kdim, selectedTile.first, selectedTile.second, {2, 4, 8, 16});
+        selectedksplit = std::log2(selectedksplit);
+
         kernelName = get_heuristic_kernel(selectedTile.first,
                                           selectedTile.second,
                                           log2_k_split,
@@ -264,55 +270,30 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
                                           config_map);
     }
 
+  
     AiterAsmKernel* impl_ptr = nullptr;
-
-    if(log2_k_split.has_value() && log2_k_split.value() != 0)
-    {
-        int k_num         = 1 << log2_k_split.value();
-        args.log2_k_split = log2_k_split.value();
-        SUBM              = 128;
-        SUBN              = 512;
-        assert(Kdim % k_num == 0);
-        int k_per_tg = Kdim / k_num;
-        k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;
-        gdz          = (Kdim + k_per_tg - 1) / k_per_tg;
-    }
-    else if(!log2_k_split.has_value() && selectedksplit > 0)
-    {
-        int k_num         = 1 << selectedksplit;
-        args.log2_k_split = selectedksplit;
-        SUBM              = 128;
-        SUBN              = 512;
-        assert(Kdim % k_num == 0);
-        int k_per_tg = Kdim / k_num;
-        k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;
-        gdz          = (Kdim + k_per_tg - 1) / k_per_tg;
-    }
-    else if(selectedMTile < 256)
-    {
-        SUBM = 128;
-        SUBN = 512;
-    }
-    else if(bpreshuffle.has_value() && !bpreshuffle)
-    {
-        SUBM = 256;
-        SUBN = 256;
-    }
-    else
-    {
-        SUBM = 256;
-        SUBN = 256;
-    }
-
-    int gdx = (Ndim + SUBN - 1) / SUBN;
-    int gdy = (Mdim + SUBM - 1) / SUBM;
-
-    auto it = config_map->find(kernelName);
+    int SUBM                 = 0;
+    int SUBN                 = 0;
+    int gdz                  = 1;
+    auto it                  = config_map->find(kernelName);
     if(it != config_map->end())
     {
         const auto& cfg     = it->second;
         const char* name    = cfg.name.c_str();
         const char* co_name = cfg.co_name.c_str();
+        SUBM                = cfg.tile_M;
+        SUBN                = cfg.tile_N;
+
+        if(cfg.splitK == 1)
+        {
+            args.log2_k_split = log2_k_split.has_value() ? log2_k_split.value() : selectedksplit;
+            int k_num = 1 << (log2_k_split.has_value() ? log2_k_split.value() : selectedksplit);
+
+            assert(Kdim % k_num == 0);
+            int k_per_tg = Kdim / k_num;
+            k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;
+            gdz          = (Kdim + k_per_tg - 1) / k_per_tg;
+        }
 
         auto result = impl_ptr_map.emplace(name, nullptr);
         if(result.second)
@@ -323,6 +304,9 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     }
     else
         TORCH_CHECK(false, __func__, " not find kernel " + kernelName);
+
+    int gdx = (Ndim + SUBN - 1) / SUBN;
+    int gdy = (Mdim + SUBM - 1) / SUBM;
 
     impl_ptr->launch_kernel({&args,
                              &arg_size,

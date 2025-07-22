@@ -6,7 +6,7 @@ on:
 
 jobs:
   sglang:
-    name: sglnag integration
+    name: sglang integration
     runs-on: [aiter-k8s-build]
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}

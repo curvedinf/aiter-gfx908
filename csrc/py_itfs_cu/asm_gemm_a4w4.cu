@@ -97,8 +97,8 @@ std::string get_heuristic_kernel(int M,
     uint32_t round      = 0xffffffff;
     int log2_k_split_en = (log2_k_split.has_value() && log2_k_split.value() != 0) ? 1 : 0;
     int bpreshuffle_en  = (bpreshuffle.has_value() && !bpreshuffle) ? 0 : 1;
-    int selectedtileM   = 0;
-    int selectedtileN   = 0;
+    int selectedtileM   = 256;
+    int selectedtileN   = 256;
 
     std::string selected = "";
     for(const auto& el : *cfgs)

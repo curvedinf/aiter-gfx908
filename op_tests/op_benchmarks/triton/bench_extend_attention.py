@@ -276,9 +276,9 @@ def model_benchmark_configs(args):
     x_vals_list = []
 
     for model_name, config in configs.items():
-        HQ = config["num_attention_heads"] // 8  # tp8 mode
-        prefix = args.prefix if args.prefix else 16324
-        extend = args.extend if args.extend else 8192
+        HQ = config["num_attention_heads"]
+        prefix = args.prefix
+        extend = args.extend
         attn_impl = args.attn_impl if args.attn_impl else "non-absorb"
         x_vals_list.append(
             (model_name, batch_size, HQ, prefix, extend, 512, 64, 128, attn_impl)
@@ -293,19 +293,20 @@ def benchmark(args):
 
     configs = []
 
+    causal = args.causal
+
     if args.model:
         x_names, x_vals_list = model_benchmark_configs(args)
+        causal = True  # Force causal=True for model benchmarks
     else:
         if args.mode == "extend":
             x_names, x_vals_list = get_extend_benchmark_configs()
         elif args.mode == "prefill":
             x_names, x_vals_list = get_prefill_benchmark_configs()
 
-    line_vals = ["extend_attention_fwd"]
+    line_vals = ["extend_attention"]
 
-    plot_name = (
-        args.plot_name + f"-causal-{args.causal}-equal_seqlens-{args.equal_seqlens}"
-    )
+    plot_name = args.plot_name + f"-causal-{causal}-equal_seqlens-{args.equal_seqlens}"
 
     configs.append(
         triton.testing.Benchmark(
@@ -365,48 +366,26 @@ def benchmark(args):
             v_head_dim,
             dtype,
             device,
+            attn_impl=args.attn_impl,
         )
 
-        if provider == "extend_attention_fwd":
-
-            def extend_attention():
-                return extend_forward(
-                    q_extend,
-                    k_extend,
-                    v_extend,
-                    k_buffer,
-                    v_buffer,
-                    kv_indptr,
-                    kv_indices,
-                    qo_indptr,
-                    custom_mask,
-                    mask_indptr,
-                    max_len_extend,
-                    args.causal,
-                    sm_scale,
-                    logit_cap,
-                )
-
-            def context_attention():
-                return extend_forward(
-                    q_extend,
-                    k_extend,
-                    v_extend,
-                    B_Start_Loc,
-                    B_Seqlen,
-                    max_len_extend,
-                    args.causal,
-                )
-
-            if provider == "extend_attention_fwd":
-                fn = extend_attention
-            elif provider == "context_attention_fwd":
-                assert (
-                    prefix == 0
-                ), "Prefix length must be 0 for context attention. Try setting -mode prefill."
-                fn = context_attention
-            else:
-                raise ValueError(f"Unknown provider: {provider}")
+        def fn():
+            return extend_forward(
+                q_extend,
+                k_extend,
+                v_extend,
+                k_buffer,
+                v_buffer,
+                kv_indptr,
+                kv_indices,
+                qo_indptr,
+                custom_mask,
+                mask_indptr,
+                max_len_extend,
+                causal,
+                sm_scale,
+                logit_cap,
+            )
 
         ms = triton.testing.do_bench(fn, warmup=warmup, rep=rep)
 

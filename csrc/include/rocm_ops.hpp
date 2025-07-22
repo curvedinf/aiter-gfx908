@@ -958,4 +958,6 @@
         .value("Gelu", ActivationType::Gelu)             \
         .export_values();
 
-#define MLA_METADATA_PYBIND m.def("get_mla_metadata_v0", &get_mla_metadata_v0);
+#define MLA_METADATA_PYBIND                             \
+    m.def("get_mla_metadata_v0", &get_mla_metadata_v0); \
+    m.def("get_mla_metadata_v1", &get_mla_metadata_v1);

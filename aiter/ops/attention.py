@@ -287,3 +287,38 @@ def get_mla_metadata_v0(
         max_num_splits: (1), dtype torch.int32.
     """
     ...
+
+
+@compile_ops("module_mla_metadata")
+def get_mla_metadata_v1(
+    seqlens_qo_indptr: torch.Tensor,
+    seqlens_kv_indptr: torch.Tensor,
+    num_heads_per_head_k: int,
+    num_heads_k: int,
+    is_causal: bool,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Arguments:
+        cumulated seqlens of q/o: (batch_size + 1), dtype torch.int32.
+        cumulated seqlens of k/v: (batch_size + 1), dtype torch.int32.
+        num_heads_per_head_k: Equals to num_heads_q // num_heads_k.
+        num_heads_k: num_heads_k.
+        is_causal: whether causal mask is enabled.
+    Returns:
+        [0] work_indptr:        (#cu_part + 1),      The IDs of work handled by each cu_part.
+        [1] work information    (#work, 8)
+        [1.0] bs_index:         (#work),             The index of batch handled by each work.
+        [1.1] partial_index:    (#work),             The index of tile in output buffer when splits. -1 means no split.
+        [1.2] q_start:          (#work),             The global index in seq where q/o starts. Use global index here can
+                                                     reduce memory access count in kernel.
+        [1.3] q_end:            (#work),             The global index in seq where q/o ends (not included).
+        [1.4] kv_start:         (#work),             The global index in seq where k/v starts.
+        [1.5] kv_end:           (#work),             The global index in seq where k/v ends (not included).
+        [1.6] pad               (#work, 2),          Pad to 8 DWs.
+        [2] reduce_indptr:      (#reduce_tiles + 1), The IDs in reduce_partial_map indicates the tiles should be merged
+                                                     together.
+        [3] reduce_final_map:   (#reduce_tiles),     The final output location of each group of tiles.
+        [4] reduce_partial_map: (#partial_tiles),    The locations in partial buffer of partial tiles waiting for being
+                                                     reduced.
+    """
+    ...

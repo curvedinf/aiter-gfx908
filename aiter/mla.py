@@ -135,6 +135,23 @@ def mla_decode_fwd(
     bs = qo_indptr.shape[0] - 1
     total_kv = kv_indices.shape[0]
 
+    test_v1 = False
+    if test_v1:
+        (
+            work_indptr,
+            work_info_set,
+            reduce_indptr,
+            reduce_final_map,
+            reduce_partial_map,
+        ) = aiter.get_mla_metadata_v1(
+            qo_indptr, kv_indptr, nhead // nhead_kv, nhead_kv, True
+        )
+        print(work_indptr)
+        print(work_info_set)
+        print(reduce_indptr)
+        print(reduce_final_map)
+        print(reduce_partial_map)
+
     if num_kv_splits is None:
         num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(
             num_kv_splits, kv_indptr, nhead, nhead_kv, max_seqlen_q

@@ -177,16 +177,16 @@ void m_grouped_flatmm_ck(torch::Tensor &XQ,
     // TORCH_CHECK(false, "solin----flatmm_ck ----");
     TORCH_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
     TORCH_CHECK(x_scale.dtype() == w_scale.dtype(), "Scales should have the same dtype!");
-    using ADataType   = typename GemmBasicTypeConfig<ck_tile::fp8_t>::ADataType;
-    using BDataType   = typename GemmBasicTypeConfig<ck_tile::fp8_t>::BDataType;
-    using CDataType   = typename GemmBasicTypeConfig<ck_tile::fp8_t>::CDataType;
-    using AccDataType = typename GemmBasicTypeConfig<ck_tile::fp8_t>::AccDataType;
+    using ADataType   = typename GemmBasicTypeConfig<ck_tile::bf16_t>::ADataType;
+    using BDataType   = typename GemmBasicTypeConfig<ck_tile::bf16_t>::BDataType;
+    using CDataType   = typename GemmBasicTypeConfig<ck_tile::bf16_t>::CDataType;
+    using AccDataType = typename GemmBasicTypeConfig<ck_tile::bf16_t>::AccDataType;
     using ALayout =  ck_tile::tensor_layout::gemm::RowMajor;
     using BLayout =  ck_tile::tensor_layout::gemm::ColumnMajor;
     using CLayout =  ck_tile::tensor_layout::gemm::RowMajor;
 
-    int group_count = XQ.size(0);
-    int M = out.size(1);
+    int group_count = out.size(0);
+    int M = XQ.size(1);
     int N = out.size(2);
     int K = XQ.size(2);
 
@@ -194,7 +194,7 @@ void m_grouped_flatmm_ck(torch::Tensor &XQ,
     int Stride_B = K;
     int Stride_C = N;
 
-    printf("Group_countxMxNxK=%dx%dx%dx%d", group_count, M, N, K);
+    printf("Group_countxMxNxK=%dx%dx%dx%d\n", group_count, M, N, K);
 
     ck_tile::MaskedGroupedFlatmmHostArgs kernel_args{
         reinterpret_cast<ck_tile::index_t *>(group_layout.data_ptr()),
@@ -202,11 +202,11 @@ void m_grouped_flatmm_ck(torch::Tensor &XQ,
         M,
         N,
         K,
-        reinterpret_cast<void *>(XQ.data_ptr()),
+        reinterpret_cast<const void*>(XQ.data_ptr()),
         Stride_A,
-        reinterpret_cast<void *>(WQ.data_ptr()),
+        reinterpret_cast<const void*>(WQ.data_ptr()),
         Stride_B,
-        reinterpret_cast<void *>(out.data_ptr()),
+        reinterpret_cast<void*>(out.data_ptr()),
         Stride_C,
         1, //KBatch
     };
@@ -214,16 +214,16 @@ void m_grouped_flatmm_ck(torch::Tensor &XQ,
     CDataType* c_ptr = reinterpret_cast<CDataType*>(out.data_ptr());
     size_t num_elements = out.numel(); 
     for (int i = 0; i < 8; ++i) {
-        printf(" cptr %.4f ", static_cast<float>(c_ptr[i]));
+        printf(" pre_cptr %.4f ", static_cast<float>(c_ptr[i]));
     }
     printf("\n");
 
-    const at::cuda::OptionalCUDAGuard device_guard(device_of(XQ));
+    // const at::cuda::OptionalCUDAGuard device_guard(device_of(XQ));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     ck_tile::stream_config naive_config{stream};
     grouped_flatmm<ADataType, BDataType, AccDataType, CDataType, ALayout, BLayout, CLayout>(kernel_args, naive_config);
-    for (int i = 0; i < 8; ++i) {
-        printf(" cptr %.4f ", static_cast<float>(c_ptr[i]));
-    }
-    printf("\n");
+    // for (int i = 0; i < 8; ++i) {
+    //     printf(" cptr %.4f ", static_cast<float>(c_ptr[i]));
+    // }
+    // printf("\n");
 }

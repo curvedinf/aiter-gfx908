@@ -165,9 +165,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         int batch_idx = reinterpret_cast<int32_t*>(params.p_batch_split_table)[blockIdx.z];
         int split_idx = reinterpret_cast<int32_t*>(params.p_split_table)[blockIdx.z];
         const auto p_num_kv_splits_indptr = reinterpret_cast<int32_t*>(params.p_num_kv_splits_indptr);
-		int num_splits_kv = p_num_kv_splits_indptr[batch_idx + 1] - p_num_kv_splits_indptr[batch_idx];
-        if (split_idx >= num_splits_kv)
-            return;
 
         register int num_splits asm("s92");
         asm volatile ("" : "=s"(num_splits));

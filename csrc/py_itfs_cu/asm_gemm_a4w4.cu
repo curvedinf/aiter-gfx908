@@ -100,6 +100,39 @@ std::string get_heuristic_kernel(int M,
     int selectedtileM   = 256;
     int selectedtileN   = 256;
 
+    for(const auto& el : *cfgs)
+    {
+        const auto& cfg = el.second;
+        if((N % cfg.tile_N) == 0)
+        {
+            int tg_num_M         = (M + cfg.tile_M - 1) / cfg.tile_M;
+            int tg_num_N         = (N + cfg.tile_N - 1) / cfg.tile_N;
+            tg_num               = tg_num_M * tg_num_N;
+            uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
+            if(local_round < round)
+            {
+                round         = local_round;
+                empty_cu      = local_round * num_cu - tg_num;
+                selectedtileM = cfg.tile_M;
+                selectedtileN = cfg.tile_N;
+            }
+            else if(local_round == round)
+            {
+                if(empty_cu > (local_round * num_cu - tg_num))
+                {
+                    round         = local_round;
+                    empty_cu      = local_round * num_cu - tg_num;
+                    selectedtileM = cfg.tile_M;
+                    selectedtileN = cfg.tile_N;
+                }
+            }
+        }
+    }
+
+    empty_cu = num_cu;
+    tg_num   = 0;
+    round    = 0xffffffff;
+
     std::string selected = "";
     for(const auto& el : *cfgs)
     {
@@ -129,35 +162,9 @@ std::string get_heuristic_kernel(int M,
                 }
             }
             selectedksplit = std::log2(selectedksplit);
-            num_cu         = dev_prop.multiProcessorCount;
             empty_cu       = num_cu;
             tg_num         = 0;
             round          = 0xffffffff;
-        }
-
-        if((N % cfg.tile_N) == 0)
-        {
-            int tg_num_M         = (M + cfg.tile_M - 1) / cfg.tile_M;
-            int tg_num_N         = (N + cfg.tile_N - 1) / cfg.tile_N;
-            tg_num               = tg_num_M * tg_num_N;
-            uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
-            if(local_round < round)
-            {
-                round         = local_round;
-                empty_cu      = local_round * num_cu - tg_num;
-                selectedtileM = cfg.tile_M;
-                selectedtileN = cfg.tile_N;
-            }
-            else if(local_round == round)
-            {
-                if(empty_cu > (local_round * num_cu - tg_num))
-                {
-                    round         = local_round;
-                    empty_cu      = local_round * num_cu - tg_num;
-                    selectedtileM = cfg.tile_M;
-                    selectedtileN = cfg.tile_N;
-                }
-            }
         }
 
         if((log2_k_split_en == 1 || (!log2_k_split.has_value() && selectedksplit > 0)))
@@ -172,7 +179,9 @@ std::string get_heuristic_kernel(int M,
     }
 
     if(selected != "")
+    {
         return selected;
+    }
 
     TORCH_CHECK(false, __func__, ": cannot get heuristic kernel!");
     return "";

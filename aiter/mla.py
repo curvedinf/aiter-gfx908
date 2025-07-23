@@ -222,7 +222,6 @@ def get_meta_param_balanced(bs, total_kv, kv_indptr, nhead, max_seqlen_q, device
     else:
         num_kv_splits_indptr_fixed = num_kv_splits_indptr
 
-    # import pdb; pdb.set_trace()
     for i in range(cu_num):
         if i < num_kv_splits_indptr_fixed[b_idx + 1]:
             batch_split_table[i] = b_idx
@@ -296,7 +295,7 @@ def mla_decode_fwd(
 
     if nhead == 16 and max_seqlen_q == 1:
         # special case for 16 heads and max_seqlen_q == 1
-        logits = torch.zeros(
+        logits = torch.empty(
             (total_s, num_kv_splits, nhead, v_head_dim),
             dtype=dtypes.fp32,
             device=device,
@@ -305,7 +304,7 @@ def mla_decode_fwd(
     elif nhead in [16, 128]:
         MAYBE_FINAL_OUT = True
         num_kv_splits = 16
-        logits = torch.zeros(
+        logits = torch.empty(
             (total_s, num_kv_splits, nhead, v_head_dim),
             dtype=dtypes.fp32,
             device=device,
@@ -313,7 +312,7 @@ def mla_decode_fwd(
     else:
         assert False, f"{nhead=} not supported"
 
-    attn_lse = torch.zeros(
+    attn_lse = torch.empty(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
 
@@ -321,7 +320,7 @@ def mla_decode_fwd(
     BLOCK_DV = triton.next_power_of_2(Lv)
 
     if varlen:
-        # if max_num_kv_splits <= 16:
+
         # q_nope = torch.empty_like(q[:, :, :512])
         # q_rope = torch.empty_like(q[:, :, 512:])
         # k_nope = torch.empty_like(kv_buffer[:, :, :, :512])
@@ -379,50 +378,50 @@ def mla_decode_fwd(
             num_stages=2,
             **extra_kargs,
         )
-    # else:
-    num_kv_splits_asm, num_kv_splits_indptr_asm, mgc = get_meta_param(
-        None, bs, total_kv, nhead, max_seqlen_q, device
-    )
-    aiter.mla_decode_stage1_asm_fwd(
-        q,
-        kv_buffer,
-        qo_indptr,
-        kv_indptr,
-        kv_indices,
-        kv_last_page_lens,
-        num_kv_splits_indptr_asm,
-        max_seqlen_q,
-        sm_scale,
-        logits,
-        attn_lse,
-    )
+    else:
+        num_kv_splits_asm, num_kv_splits_indptr_asm, mgc = get_meta_param(
+            None, bs, total_kv, nhead, max_seqlen_q, device
+        )
+        aiter.mla_decode_stage1_asm_fwd(
+            q,
+            kv_buffer,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            num_kv_splits_indptr_asm,
+            max_seqlen_q,
+            sm_scale,
+            logits,
+            attn_lse,
+        )
 
-    if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
-        return logits.view(total_s, nhead, v_head_dim), attn_lse
+        if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
+            return logits.view(total_s, nhead, v_head_dim), attn_lse
 
-    grid = (bs, nhead)
-    extra_kargs = {"waves_per_eu": 4}
-    _fwd_kernel_stage2_asm[grid](
-        logits,
-        attn_lse,
-        o,
-        qo_indptr,
-        kv_indptr,
-        num_kv_splits_indptr_asm,
-        attn_lse.stride(0),
-        attn_lse.stride(2),
-        attn_lse.stride(1),
-        o.stride(0),
-        o.stride(1),
-        MAYBE_FINAL_OUT=MAYBE_FINAL_OUT,
-        BATCH_NUM=bs,
-        BLOCK_DV=BLOCK_DV,
-        Lv=Lv,
-        mgc=mgc,
-        num_warps=4,
-        num_stages=2,
-        **extra_kargs,
-    )
+        grid = (bs, nhead)
+        extra_kargs = {"waves_per_eu": 4}
+        _fwd_kernel_stage2_asm[grid](
+            logits,
+            attn_lse,
+            o,
+            qo_indptr,
+            kv_indptr,
+            num_kv_splits_indptr_asm,
+            attn_lse.stride(0),
+            attn_lse.stride(2),
+            attn_lse.stride(1),
+            o.stride(0),
+            o.stride(1),
+            MAYBE_FINAL_OUT=MAYBE_FINAL_OUT,
+            BATCH_NUM=bs,
+            BLOCK_DV=BLOCK_DV,
+            Lv=Lv,
+            mgc=mgc,
+            num_warps=4,
+            num_stages=2,
+            **extra_kargs,
+        )
 
     return logits, attn_lse
 
@@ -454,7 +453,7 @@ def mla_prefill_fwd(
     # logits = torch.empty(
     #     (bs, num_kv_splits, nhead, v_head_dim), dtype=dtypes.fp32, device=device
     # )
-    attn_lse = torch.zeros(
+    attn_lse = torch.empty(
         (bs, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
 

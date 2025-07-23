@@ -17,8 +17,6 @@ def setup_seed(seed):
     torch.cuda.manual_seed_all(seed)
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
-
-
 # setup_seed(1)
 
 def ref_masked_attention(
@@ -390,7 +388,7 @@ v_head_dim = 128
 block_size = 1
 list_dtype = ["bf16"]
 l_kv_dtype = ["bf16"]
-list_nhead = [(16, 3)]
+list_nhead = [(16, 2)]
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,

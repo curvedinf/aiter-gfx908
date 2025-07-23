@@ -7,18 +7,14 @@
 #include "aiter_hip_common.h"
 #include "macro_utils.hpp"
 
-
-#define fp32output
+#define numsplit5
 
 #define VGPR2SHUFFLE(n_s, n_v)  shuffle##n_s = v##n_v
 #define SUFFFLE2LDS(n_lds, n_s) o_lds_ptr[n_lds] = shuffle##n_s
 #define LDS2VGPR(n_v, n_lds)    v##n_v = o_lds_ptr[n_lds]
 #define VGPR2DRAM(n_dram, n_v)  p_output[n_dram] = v##n_v
 
-
 #define B16_VGPR_2_SHUFFLEX(n_s, n_v)  (shuffle##n_s).x = float_to_bf16(v##n_v);
-
-
 
 #define VGPR2SHUFFLE(n_s, n_v)   \
 asm volatile (                   \
@@ -43,7 +39,6 @@ asm volatile (                  \
   : "v20", "v21", "v28", "v30", "v31", "s38", "s39"                      \
   );
 
-
 #define F32_SUFFFLEY_2_LDS_LOOP(n_lds)  \ 
         o_lds_ptr[n_lds]     = shuffle0;  \
         o_lds_ptr[n_lds + 1] = shuffle1;  \
@@ -55,18 +50,14 @@ asm volatile (                  \
 #define F32_VGPR_2_DRAM_LOOP_STRIDE1(func, dram_st_base) \
         F32_VGPR_2_DRAM_LOOP_STRIDE1_0_0_0(func, dram_st_base)
 
-        
-
 #define LOOP_STRIDE4_TAIL(...) \
 
 #define LOOP_STRIDE4(n_v_begin, func0, func1, ...) \
         LOOP_STRIDE4_##n_v_begin(func0); \
         func1(__VA_ARGS__);
 
-
 #define LOOP_STRIDE1(n_v_begin, fuc) \
         LOOP_STRIDE1_##n_v_begin(n_v_begin, fuc, ...);
-
 
 #define B16_SUFFFLEY_2_LDS_LOOP(n_lds)  \ 
     VGPR_F32_2_B16(0, 0, 1)        \
@@ -179,8 +170,7 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             return;
 
         register int num_splits asm("s92");
-        // asm volatile ("" : "=s"(num_splits));
-        asm volatile ("s_mov_b32 %0, %1" : "=s"(num_splits) : "s"(params.num_splits));
+        asm volatile ("" : "=s"(num_splits));
 
         register int max_seqlen_q asm("s94");
         asm volatile ("s_mov_b32 %0, %1" : "=s"(max_seqlen_q) : "s"(params.max_seqlen_q));
@@ -199,8 +189,7 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         constexpr int32_t q_dim = IsRopeSep ? Traits::kSizeNope : Traits::kSizeD;
         constexpr int32_t q_rope_dim = IsRopeSep ? Traits::kSizeRope : Traits::kSizeD;
 
-		bf16_t* q_nope_ptr = reinterpret_cast<bf16_t*>(params.p_query) +
-            batch_idx * q_dim * params.max_seqlen_q * params.size_h;
+		bf16_t* q_nope_ptr = reinterpret_cast<bf16_t*>(params.p_query) + batch_idx * q_dim * params.max_seqlen_q * params.size_h;
 
 		bf16_t* q_rope_ptr = IsRopeSep ?
             reinterpret_cast<bf16_t*>(params.p_query_rope) + batch_idx * Traits::kSizeRope * params.max_seqlen_q * params.size_h :
@@ -247,7 +236,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 
                 llvm_amdgcn_raw_buffer_load_lds(q_rope_src, lds_ptr + 256, 4, rope_offset + i * rope_stride, 0, 0, 0);
             }
-            // offset      += 18432;
             nope_offset += nope_stride * 4;
             rope_offset += rope_stride * 4;
             smem_offset += 20608;
@@ -289,7 +277,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         register int s98 asm("s98") = kv_rope_ptr[2];
         register int s99 asm("s99") = kv_rope_ptr[3];
 
-        // True-------------------------------
         register int s16 asm("s16") = q_ptr[0];
 		register int s17 asm("s17") = q_ptr[1];
 		register int s18 asm("s18") = q_ptr[2];
@@ -299,7 +286,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 		register int s13 asm("s13") = lse_ptr[1];
 		register int s14 asm("s14") = lse_ptr[2];
 		register int s15 asm("s15") = lse_ptr[3];
-		// True-------------------------------
 
 		register int s8 asm("s8") = o_ptr[0];
 		register int s9 asm("s9") = o_ptr[1];
@@ -309,9 +295,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 		register int s2 asm("s2") = blockIdx.x;
 		register int s3 asm("s3") = batch_idx;
 		register int s4 asm("s4") = split_idx;
-
-
-		// register int vthread asm("v0") = threadIdx.x;
 
 		register uint32_t v_lse asm("v172");
 
@@ -459,7 +442,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Winline-asm"
 		asm volatile(
-// #include "fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total_w.inc"
 #include "fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_split_w.inc"
 			:
 			 [smem_]"+r"(smem),
@@ -653,22 +635,14 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 			[blockIdxy]"+s"(s3),
 			[blockIdxz]"+s"(s4)
 
-
 			:
 			[s_scalar]"s"(s64),
 			[s_head_num_q]"s"(s65),
-			// [s_kv_splits]"s"(s67),
 			[s_stride_q_b]"s"(s66), //bytes
 			[s_page_block_size]"s"(s68),
 			[s_rope_page_block_size]"s"(s95),
 			[s_log2_plen]"s"(s69)
 
-			// [s_scalar]"s"(s_scalar)
-			// [s_head_num_q]"s"(s_head_num_q),
-			// [s_kv_splits]"s"(kv_splits),
-			// [s_stride_q_b]"s"(stride_q_b) //bytes
-			// [s_page_block_size]"s"(page_block_size),
-			// [s_log2_plen]"s"(s_log2_plen)
 			:
 		  "memory", "a0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9",
 		  "a10", "a11", "a12", "a13", "a14", "a15", "a16", "a17", "a18", "a19",
@@ -713,24 +687,7 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 		  "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18", "v19",
 		  "v20", "v21", "v22", "v23", "v24", "v25", "v26", "v27", "v28", "v29",
 		  "v30", "v31", "v32", "v33", "v34", "v35", "v36", "v37", "v38", "v39",
-		  // "v40", "v41", "v42", "v43", "v44", "v45", "v46", "v47", "v48", "v49",
-		  // "v50", "v51", "v52", "v53", "v54", "v55", "v56", "v57", "v58", "v59",
-		  // "v60", "v61", "v62", "v63", 
-		  // "v64","v65","v66","v67","v68","v69","v70","v71",
-		  // "v72","v73","v74","v75","v76","v77","v78","v79",
-		  // "v80","v81","v82","v83","v84","v85","v86","v87",
-		  // "v88","v89","v90","v91","v92","v93","v94","v95",
-		  // "v128", "v129", "v130", "v131",
-		  // "v132", "v133", "v134", "v135",
-	//       "v136", "v137", "v138", "v139",
-	//       "v140", "v141", "v142", "v143", "v144", "v145", "v146", "v147",
-	//       "v148", "v149", "v150", "v151", "v152", "v153", "v154", "v155",
-	//       "v156", "v157", "v158", "v159", "v160", "v161", "v162", "v163",
-	//       "v164", "v165", "v166", "v167",
-	//       "v168", "v169", "v170", "v171"
-		  // ,
-		  // "v172", "v173", "v174", "v175", "v176", "v177", "v178", "v179",
-		  /*"v180",*/ "v181", "v182", "v183", "v184", "v185", "v186", "v187",
+		  "v181", "v182", "v183", "v184", "v185", "v186", "v187",
 		  "v188", "v189", "v190", "v191", "v192", "v193", "v194", "v195",
 		  "v196", "v197", "v198", "v199", "v200", "v201", "v202", "v203",
 		  "v204", "v205", "v206", "v207", "v208", "v209", "v210", "v211",
@@ -743,7 +700,7 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 		);
 #pragma clang diagnostic pop
 
-#ifdef numsplit1
+#ifdef no_split
 		register uint32_t shuffle0 asm("v24");
 		register uint32_t shuffle1 asm("v25");
 		register uint32_t shuffle2 asm("v26");
@@ -850,11 +807,12 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 		B16_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index);
 #endif
 
-#ifdef fp32output 
+#ifdef numsplit5
         if (int(wave_id) >= max_seqlen_q)
         {
             return;
         }
+
         auto head_dim_size = Traits::kSizeNope * sizeof(float);
 
         if (int(num_splits) != 1)
@@ -884,12 +842,10 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             LOOP_STRIDE4(1, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 264);
             LOOP_STRIDE4(2, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 528);
             LOOP_STRIDE4(3, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 792);
-
             LOOP_STRIDE4(16, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1056);
             LOOP_STRIDE4(17, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1320);
             LOOP_STRIDE4(18, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
             LOOP_STRIDE4(19, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1848);
-
             F32_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx)
             F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
             copy_index += 128;
@@ -899,7 +855,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             LOOP_STRIDE4(33, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 264);
             LOOP_STRIDE4(34, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 528);
             LOOP_STRIDE4(35, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 792);
-
             LOOP_STRIDE4(48, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1056);
             LOOP_STRIDE4(49, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1320);
             LOOP_STRIDE4(50, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
@@ -912,7 +867,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             LOOP_STRIDE4(65, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 264);
             LOOP_STRIDE4(66, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 528);
             LOOP_STRIDE4(67, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 792);
-
             LOOP_STRIDE4(80, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1056);
             LOOP_STRIDE4(81, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1320);
             LOOP_STRIDE4(82, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
@@ -925,7 +879,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             LOOP_STRIDE4(97, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 264);
             LOOP_STRIDE4(98, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 528);
             LOOP_STRIDE4(99, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 792);
-
             LOOP_STRIDE4(112, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1056);
             LOOP_STRIDE4(113, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1320);
             LOOP_STRIDE4(114, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
@@ -954,7 +907,7 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             int lds_st_idx = (wave_id * 4608 + 288 * (vthread >> 4) + 8 * (vthread & 15)) >> 2;
             int lds_ld_idx = (wave_id * 4608 + 8 * (vthread >> 3) + 144 * (vthread & 7))  >> 2;
 
-            // to fp32 split tensor
+            // Attention: offset for fp32 split tensor
             // int copy_index = int((int((vthread & 7)  << 4) +
             //                      int(vthread >> 3) * Traits::kSizeNope * sizeof(bf16_t) +
             //                      int(s3) * max_seqlen_q * int(s65) * head_dim_size * params.num_splits +
@@ -1003,7 +956,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36);
             LOOP_STRIDE4(51, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
             B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36 + 288);
-
             B16_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx);
             B16_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM_DIR, copy_index);
             copy_index += 64;
@@ -1024,11 +976,9 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36);
             LOOP_STRIDE4(83, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
             B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36 + 288);
-
             B16_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx);
             B16_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM_DIR, copy_index);
             copy_index += 64;
-
 
             LOOP_STRIDE4(96, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
             B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx);
@@ -1046,7 +996,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36);
             LOOP_STRIDE4(115, VGPR2SHUFFLE, LOOP_STRIDE4_TAIL);
             B16_SUFFFLEY_2_LDS_LOOP(lds_st_idx + 576 + 36 + 288);
-
             B16_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx);
             B16_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM_DIR, copy_index);
         }

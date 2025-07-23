@@ -148,7 +148,7 @@ def _fwd_kernel(
             K_Buffer + offs_buf_k, mask=(mask_n[None, :]) & (mask_d[:, None]), other=0.0
         )
 
-        qk = tl.dot(q.to(k.dtype), k)
+        qk = tl.dot(q.to(k.dtype), k, out_dtype=tl.float32)
         if BLOCK_DPE > 0:
             offs_kpe = (
                 offs_kv_loc[None, :] * stride_buf_kbs
@@ -195,7 +195,7 @@ def _fwd_kernel(
             V_Buffer + offs_buf_v, mask=mask_n[:, None] & mask_dv[None, :], other=0.0
         )
         p = p.to(v.dtype)
-        acc = acc * re_scale[:, None] + tl.dot(p, v)
+        acc = acc * re_scale[:, None] + tl.dot(p, v, out_dtype=tl.float32)
 
         e_max = n_e_max
 
@@ -276,7 +276,7 @@ def _fwd_kernel(
             V_Extend + offs_v, mask=mask_n[:, None] & mask_dv[None, :], other=0.0
         )
         p = p.to(v.dtype)
-        acc = acc * re_scale[:, None] + tl.dot(p, v)
+        acc = acc * re_scale[:, None] + tl.dot(p, v, out_dtype=tl.float32)
 
         e_max = n_e_max
 

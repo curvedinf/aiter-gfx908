@@ -4,7 +4,11 @@
 import torch
 import pytest
 from aiter.ops.triton.extend_attention import extend_attention_fwd
-
+from aiter.test_mha_common import (
+    attention_ref,
+    generate_random_padding_mask,
+    generate_qkv,
+)
 
 def input_helper(
     B,
@@ -197,58 +201,90 @@ def test_op_fwd(
         logit_cap=logit_cap,
     )
 
-    ref_out = torch.empty_like(tri_out, dtype=q_extend.dtype, device=q_extend.device)
-    # ref implementation
-    for i in range(0, B):
-        start_q, start_k = qo_indptr[i], kv_indptr[i]
-        end_q, end_k = qo_indptr[i + 1], kv_indptr[i + 1]
+    # Number of sequences/B is inferred from the length of kv_indptr (which has B+1 entries)
+    B = kv_indptr.shape[0] - 1
 
-        # Get query, prefix key/values, and extend key/values
-        q = q_extend[start_q:end_q]  # [seq_len, H, C]
-        k_prefix = k_buffer[start_k:end_k]  # [prefix_len, 1, C]
-        v_prefix = v_buffer[start_k:end_k]  # [prefix_len, 1, C]
-        k_ext = k_extend[start_q:end_q]  # [seq_len, 1, C]
-        v_ext = v_extend[start_q:end_q]  # [seq_len, 1, C]
+    # Loop through each sequence, concatenate the prefix (from k_buffer) and extend part (from k_extend)
+    key_list = []
+    value_list = []
+    kv_lengths = []
 
-        prefix_len = end_k - start_k
-        seq_len = end_q - start_q
+    query_list = []
+    query_lengths = []
 
-        # Calculate attention scores for prefix tokens
-        scores_prefix = torch.einsum("qhc,khc->hqk", q, k_prefix)  # .float()
+    for i in range(B):
+        start_prefix = kv_indptr[i].item()
+        end_prefix = kv_indptr[i + 1].item()
+        start_extend = qo_indptr[i].item()
+        end_extend = qo_indptr[i + 1].item()
 
-        # Calculate attention scores for extend tokens
-        scores_extend = torch.einsum("qhc,khc->hqk", q, k_ext)  # .float()
+        key = torch.cat((k_buffer[start_prefix:end_prefix],
+                         k_extend[start_extend:end_extend]), dim=0) 
+        
+        value = torch.cat((v_buffer[start_prefix:end_prefix],
+                          v_extend[start_extend:end_extend]), dim=0) 
+        
+        query = q_extend[start_extend:end_extend] 
 
-        # Apply causal mask only to the extend part if needed
-        if causal:
-            causal_mask = torch.triu(
-                torch.ones(
-                    (seq_len, seq_len), dtype=torch.bool, device=scores_extend.device
-                ),
-                diagonal=1,
-            )
-            causal_mask = causal_mask.unsqueeze(0).expand(
-                scores_extend.shape[0], -1, -1
-            )
-            scores_extend = scores_extend.masked_fill(causal_mask, float("-inf"))
+        value_list.append(value)
+        key_list.append(key)
+        kv_lengths.append(value.shape[0])
 
-        # Combine scores and apply softmax
-        scores_combined = torch.cat([scores_prefix, scores_extend], dim=-1) * sm_scale
-        p_combined = torch.softmax(scores_combined, dim=-1).to(dtype)
+        query_list.append(query)
+        query_lengths.append(query.shape[0])
 
-        # Split the attention weights back
-        p_prefix = p_combined[:, :, :prefix_len]
-        p_extend = p_combined[:, :, prefix_len:]
+    # Determine the maximum kv sequence length
+    max_kv_length = max(kv_lengths)
+    max_query_length = max(query_lengths)
 
-        # Calculate output separately and combine
-        out_prefix = torch.einsum("hqk,khd->qhd", p_prefix, v_prefix)
-        out_extend = torch.einsum("hqk,khd->qhd", p_extend, v_ext)
+    # Pad each sequence along the sequence dimension (dim=0) to have the same length and stack into [B, max_total, ...]
+    padded_k = torch.zeros(
+        (B, max_kv_length, 1, k_extend.shape[-1]), dtype=k_extend.dtype, device=k_extend.device
+    )
+    padded_v = torch.zeros(
+        (B, max_kv_length, 1, v_extend.shape[-1]), dtype=k_extend.dtype, device=k_extend.device
+    )
+    padded_q = torch.zeros(
+        (B, max_query_length, H, q_extend.shape[-1]), dtype=q_extend.dtype, device=q_extend.device
+    )
 
-        ref_out[start_q:end_q] = out_prefix.to(dtype) + out_extend.to(dtype)
+    key_padding_mask = torch.zeros(
+        (B, max_kv_length), dtype=torch.bool, device=k_extend.device
+    )
+    query_padding_mask = torch.zeros(
+        (B, max_query_length), dtype=torch.bool, device=q_extend.device
+    )
+
+    for i in range(B):
+        padded_k[i, :kv_lengths[i]] = key_list[i]
+        padded_v[i, :kv_lengths[i]] = value_list[i]
+        padded_q[i, :query_lengths[i]] = query_list[i]
+
+        key_padding_mask[i, :kv_lengths[i]] = 1
+        query_padding_mask[i, :query_lengths[i]] = 1
+
+    padded_ref_out, _ = attention_ref(
+        padded_q,
+        padded_k,
+        padded_v,
+        query_padding_mask=query_padding_mask,
+        key_padding_mask=key_padding_mask,
+        causal=causal,
+        upcast=False,
+
+    )
+    # Unpad and flatten the reference output using the query_padding_mask.
+    ref_out = []
+    for i in range(query_padding_mask.shape[0]):
+        # Get indices of valid (unpadded) queries for sample i.
+        valid_indices = torch.nonzero(query_padding_mask[i], as_tuple=False).squeeze(-1)
+        ref_out.append(padded_ref_out[i, valid_indices])
+    ref_out = torch.cat(ref_out, dim=0)
 
     torch.testing.assert_close(ref_out, tri_out, rtol=2e-2, atol=2e-2)
 
-
 if __name__ == "__main__":
-    test_op_fwd(1, 2, 1024, 1024, 256, 0, 256, torch.float32, "normal", False)
-    test_op_fwd(3, 5, 110, 333, 18, 0, 17, torch.float32, "normal", True)
+    test_op_fwd(3, 5, 110, 333, 16, 0, 16, torch.float16, "normal", True)
+    print("Float16 test passed.")
+    # test_op_fwd(3, 5, 110, 333, 18, 0, 17, torch.bfloat16, "normal", True)
+    # print("BFloat16 test passed.")

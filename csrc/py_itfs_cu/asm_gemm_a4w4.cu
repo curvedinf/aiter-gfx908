@@ -106,7 +106,7 @@ std::string get_heuristic_kernel(int M,
         const auto& cfg = el.second;
         if(cfg.splitK == 1)
         {
-            for(auto& k : {2, 4, 8, 16})
+            for(auto& K : {2, 4, 8, 16})
             {
                 int tg_num_M        = (M + cfg.tile_M - 1) / cfg.tile_M;
                 int tg_num_N        = (N + cfg.tile_N - 1) / cfg.tile_N;
@@ -128,11 +128,11 @@ std::string get_heuristic_kernel(int M,
                     }
                 }
             }
-            selectedksplit    = std::log2(selectedksplit);
-            uint32_t num_cu   = dev_prop.multiProcessorCount;
-            uint32_t empty_cu = num_cu;
-            uint32_t tg_num   = 0;
-            uint32_t round    = 0xffffffff;
+            selectedksplit = std::log2(selectedksplit);
+            num_cu         = dev_prop.multiProcessorCount;
+            empty_cu       = num_cu;
+            tg_num         = 0;
+            round          = 0xffffffff;
         }
 
         if((N % cfg.tile_N) == 0)

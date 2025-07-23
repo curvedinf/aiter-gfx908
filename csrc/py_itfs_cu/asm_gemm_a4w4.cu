@@ -231,6 +231,14 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     const at::cuda::OptionalCUDAGuard device_guard(device_of(A));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     CFG* config_map           = get_cfg(A, out);
+    if(config_map->empty())
+    {
+        TORCH_CHECK(false,
+                    __func__,
+                    " no kernel support a4w4 for this gpu arch, check your "
+                    "hsa/gfxXXX/f4gemm/f4gemmXXX.csv");
+    }
+
     static std::unordered_map<std::string, std::unique_ptr<AiterAsmKernel>> impl_ptr_map;
 
     int selectedksplit = 0;

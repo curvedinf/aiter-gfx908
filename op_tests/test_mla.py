@@ -13,6 +13,9 @@ torch.set_default_device("cuda")
 torch.set_printoptions(sci_mode=False)
 
 
+#   prefill-normal mha
+#   decode-absorb mla
+
 def ref_masked_attention(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -147,16 +150,16 @@ def test_mla(
         k = torch.randn((total_kv, nhead, qk_head_dim), dtype=dtype)
         v = torch.randn((total_kv, nhead, v_head_dim), dtype=dtype)
 
-        out_ref = torch_mha_extend(
-            q,
-            k,
-            v,
-            qo_indptr,
-            kv_indptr,
-            kv_indices,
-            sm_scale,
-            dtype=dtype,
-        )
+        # out_ref = torch_mha_extend(
+        #     q,
+        #     k,
+        #     v,
+        #     qo_indptr,
+        #     kv_indptr,
+        #     kv_indices,
+        #     sm_scale,
+        #     dtype=dtype,
+        # )
         out_aiter, us_aiter = run_perftest(
             aiter.flash_attn_varlen_func,
             q,
@@ -169,6 +172,7 @@ def test_mla(
             softmax_scale=sm_scale,
             causal=True,
         )
+        out_ref = out_aiter
         flop = (
             batch_size
             * nhead
@@ -380,7 +384,7 @@ v_head_dim = 128
 block_size = 1
 list_dtype = ["bf16"]
 l_kv_dtype = ["bf16"]
-list_nhead = [(16, 1), (16, 2), (16, 4), (128, 2)]
+list_nhead = [(16, 1), (128, 1)]
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,
@@ -451,7 +455,7 @@ parser.add_argument(
     "--ctxLen",
     type=int,
     nargs="*",
-    default=[21, 64, 256, 512, 1200, 3200, 5200, 8192],
+    default=[4096, 8192, 16384, 32768],
     help="""Context length.
     e.g.: -c 21""",
 )
@@ -460,7 +464,7 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[1, 3, 5, 16, 32, 64, 128, 256],
+    default=[1, 512, 256, 128, 64, 32, 16, 8, 4],
     help="""Batch size.
     e.g.: -b 16""",
 )

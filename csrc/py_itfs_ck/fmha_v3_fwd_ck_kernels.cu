@@ -1496,8 +1496,6 @@ struct BlockFmhaPipelineQRKSVS
                 V_mem_load(number<1>{}); // V1
                 K_lds_load(number<1>{}); // K1
 
-                // DEBUG_STMTS { print_lds(k_lds_window(number<1>{}), "K1"); }
-
                 asm volatile("s_setprio 0");
                 __builtin_amdgcn_s_barrier();
                 while(core_loop(number<0>{}))
@@ -1524,35 +1522,6 @@ struct BlockFmhaPipelineQRKSVS
         fmha_post_process(number<1>{});
 
     label_write_out:
-#if 0
-        block_sync_lds();
-        store_tile(m_lds_window, m_old);
-        block_sync_lds();
-        DEBUG_STMTS { print_lds_1d(m_lds_window, "M_OLD"); }
-
-        block_sync_lds();
-        store_tile(m_lds_window, m);
-        block_sync_lds();
-        DEBUG_STMTS { print_lds_1d(m_lds_window, "M"); }
-
-        block_sync_lds();
-        store_tile(m_lds_window, rowsum_p);
-        block_sync_lds();
-        DEBUG_STMTS { print_lds_1d(m_lds_window, "R"); }
-
-        block_sync_lds();
-        store_tile(m_lds_window, l);
-        block_sync_lds();
-        DEBUG_STMTS { print_lds_1d(m_lds_window, "L"); }
-#endif
-#if 0
-        auto o_acc_fp16 = cast_tile<PDataType>(o_acc);
-        block_sync_lds();
-        store_tile(o_lds_window, o_acc_fp16);
-        block_sync_lds();
-
-        DEBUG_STMTS { print_lds(o_lds_window, "O_ACC"); }
-#endif
         // store lse
         if constexpr(kStoreLSE)
         {

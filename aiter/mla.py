@@ -207,20 +207,30 @@ def get_meta_param_balanced(bs, total_kv, kv_indptr, nhead, max_seqlen_q, device
     fix_size = num_kv_splits_indptr[-1] - cu_num
 
     fixed_size = 0
+    sign = 1 if fix_size > 0 else -1
     num_kv_splits_indptr_fixed[0] = 0
     if num_kv_splits_indptr[-1] != cu_num:
         if fix_size > 0:
             for i in range(1, bs + 1):
-                if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad <= split_size_pad / 3:
-                    fixed_size += 1
+                if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad <= split_size_pad / 2:
+                    fixed_size += sign
                 num_kv_splits_indptr_fixed[i] = num_kv_splits_indptr[i] - fixed_size
         else:
             for i in range(1, bs + 1):
-                if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad >= 2 * split_size_pad / 3:
-                    fixed_size -= 1
+                if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad > 2 * split_size_pad / 2:
+                    fixed_size += sign
                 num_kv_splits_indptr_fixed[i] = num_kv_splits_indptr[i] - fixed_size
     else:
         num_kv_splits_indptr_fixed = num_kv_splits_indptr
+
+    fixed_gap = fix_size - fixed_size
+
+    end_dim = bs 
+    while fixed_gap != 0:
+        num_kv_splits_indptr_fixed[end_dim] -= fixed_gap
+        if kv_seq_les[end_dim - 1] > 1:
+            fixed_gap -= sign 
+        end_dim -= 1
 
     for i in range(cu_num):
         if i < num_kv_splits_indptr_fixed[b_idx + 1]:

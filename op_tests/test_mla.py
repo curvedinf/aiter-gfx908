@@ -459,7 +459,7 @@ parser.add_argument(
     "--ctxLen",
     type=int,
     nargs="*",
-    default=[8192], #
+    default=[23000], #
     help="""Context length.
     e.g.: -c 21""",
 )
@@ -468,7 +468,7 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[32],
+    default=[i for i in range(16, 80)],
     help="""Batch size.
     e.g.: -b 16""",
 )

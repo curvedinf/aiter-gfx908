@@ -145,13 +145,11 @@ struct BlockFmhaPipelineQRKSVSDefaultPolicy
         static_assert(NumWarpGroups == 2);
 
         using VLayout = remove_cvref_t<typename Problem::BlockFmhaShape::VLayout>;
+        static_assert(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>);
 
-        // make distribution for a single warp-group and duplicate content in all groups
         constexpr index_t kBlockSize = Problem::kBlockSize;
         constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
-
-        static_assert(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>);
 
         constexpr index_t NPerThread = GetAlignmentV<Problem>();
         constexpr index_t NThreads   = kNPerBlock / NPerThread; // P

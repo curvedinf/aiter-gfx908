@@ -15,7 +15,6 @@ for loop in range(8):
         file_w.write("\n")
 
 
-
 for r in range(2):
     for i in range(2):
         for j in range(4):
@@ -28,30 +27,6 @@ for r in range(2):
             else:
                 line = f"#define B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j}(func, lds_ld_base)  func({r * 8 + i * 2 + j + j // 2 * 2}, lds_ld_base + {r * 576 + i * 288 + j + (j // 2) * 14})  LOOPEND() \n"
             file_w.write(line)
-        file_w.write("\n")
-        # for j in range(2):
-        #     if j == 0:
-        #         line = f"#define B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j}(func, lds_ld_base)  func({r * 8 + i * 2 + j + 4}, lds_ld_base + {r * 576 + i * 288 + j})  B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j + 1}(func, lds_ld_base) \n"
-        #     elif i == 0:
-        #         line = f"#define B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j}(func, lds_ld_base)  func({r * 8 + i * 2 + j + 4}, lds_ld_base + {r * 576 + i * 288 + j})  B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i + 1}_{0}(func, lds_ld_base) \n"
-        #     elif r == 0:
-        #         line = f"#define B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j}(func, lds_ld_base)  func({r * 8 + i * 2 + j + 4}, lds_ld_base + {r * 576 + i * 288 + j})  B16_LDS_2_VGPR_LOOP_STRIDE1_{r + 1}_{0}_{0}(func, lds_ld_base) \n"
-        #     else:
-        #         line = f"#define B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j}(func, lds_ld_base)  func({r * 8 + i * 2 + j + 4}, lds_ld_base + {r * 576 + i * 288 + j})  B16_LDS_2_VGPR_LOOP_STRIDE1_END() \n"
-        #     file_w.write(line)
-        # file_w.write("\n")
-        #
-        # for j in range(2):
-        #     if j == 0:
-        #         line = f"#define B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j + 2}(func, lds_ld_base)  func({r * 8 + i * 2 + j + 4}, lds_ld_base + {r * 576 + i * 288 + j + 16})  B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j + 1}(func, lds_ld_base) \n"
-        #     elif i == 0:
-        #         line = f"#define B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j + 2}(func, lds_ld_base)  func({r * 8 + i * 2 + j + 4}, lds_ld_base + {r * 576 + i * 288 + j + 16})  B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i + 1}_{0}(func, lds_ld_base) \n"
-        #     elif r == 0:
-        #         line = f"#define B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j + 2}(func, lds_ld_base)  func({r * 8 + i * 2 + j + 4}, lds_ld_base + {r * 576 + i * 288 + j + 16})  B16_LDS_2_VGPR_LOOP_STRIDE1_{r + 1}_{0}_{0}(func, lds_ld_base) \n"
-        #     else:
-        #         line = f"#define B16_LDS_2_VGPR_LOOP_STRIDE1_{r}_{i}_{j + 2}(func, lds_ld_base)  func({r * 8 + i * 2 + j + 4}, lds_ld_base + {r * 576 + i * 288 + j + 16})  B16_LDS_2_VGPR_LOOP_STRIDE1_END() \n"
-        #     file_w.write(line)
-        # file_w.write("\n")
 
 
 for r in range(2):
@@ -67,9 +42,6 @@ for r in range(2):
                 line = f"#define B16_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 8 + j}, dram_st_base + {r * 2048 + i * 32 + j})  LOOPEND() \n"
             file_w.write(line)
         file_w.write("\n")
-
-
-
 
 
 for r in range(2):

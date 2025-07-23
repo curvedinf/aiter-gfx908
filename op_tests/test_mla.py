@@ -384,9 +384,9 @@ def test_mla(
 
 
 kv_lora_rank = 512
-qk_nope_head_dim = 512
+qk_nope_head_dim = 128 
 qk_rope_head_dim = 64
-v_head_dim = 512
+v_head_dim = 128
 block_size = 1
 list_dtype = ["bf16"]
 l_kv_dtype = ["bf16"]

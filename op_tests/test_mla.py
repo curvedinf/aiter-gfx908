@@ -10,8 +10,16 @@ import itertools
 import argparse
 
 torch.set_default_device("cuda")
-torch.set_printoptions(sci_mode=False, threshold=torch.inf)
+# torch.set_printoptions(sci_mode=False, threshold=torch.inf)
 
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+
+
+# setup_seed(1)
 
 def ref_masked_attention(
     query: torch.Tensor,
@@ -119,6 +127,7 @@ def test_mla(
     if varlen:
         for i in range(batch_size):
             seq_lens_kv[i] = max(random.normalvariate(ctx_lens, ctx_lens / 2), ctx_lens)
+            # seq_lens_kv[i] = random.uniform(100, ctx_lens)
             seq_lens_qo[i] = max(
                 min(random.normalvariate(ctx_lens, ctx_lens / 2), ctx_lens), 1
             )
@@ -183,8 +192,8 @@ def test_mla(
         return us_aiter
 
     us_aiter = None
-    if batch_size * ctx_lens * nhead < 256 * 8192 * 16:
-        us_aiter = test_normal_prefill()
+    # if batch_size * ctx_lens * nhead < 256 * 8192 * 16:
+    #     us_aiter = test_normal_prefill()
     torch.cuda.empty_cache()
     # absorb init
     qk_head_dim = kv_lora_rank + qk_rope_head_dim
@@ -245,7 +254,7 @@ def test_mla(
         #     msg=f"mla_prefill-absorb    [torch vs    triton]:{us_torch:>8.2f} us vs {us_triton:>8.2f} us......",
         # )
 
-        out_asm = torch.empty((total_qo, nhead, v_head_dim), dtype=dtype).fill_(-1)
+        out_asm = torch.zeros((total_qo, nhead, v_head_dim), dtype=dtype).fill_(-1)
         (attn_logits, attn_lse), us_asm = run_perftest(
             aiter.mla.mla_prefill_fwd,
             q,
@@ -267,8 +276,8 @@ def test_mla(
         return us_asm
 
     us_asm = None
-    if batch_size * ctx_lens * nhead < 32 * 8192 * 16:
-        us_asm = test_absorb_prefill()
+    # if batch_size * ctx_lens * nhead < 32 * 8192 * 16:
+    #     us_asm = test_absorb_prefill()
     torch.cuda.empty_cache()
 
     # ############################## absorb: decode
@@ -332,7 +341,7 @@ def test_mla(
 
     # aiter implementation
     kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
-    out_asm = torch.empty((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
+    out_asm = torch.zeros((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
     (attn_logits, attn_lse), us_asm_decode = run_perftest(
         aiter.mla.mla_decode_fwd,
         q,
@@ -374,13 +383,13 @@ def test_mla(
 
 
 kv_lora_rank = 512
-qk_nope_head_dim = 128
+qk_nope_head_dim = 512
 qk_rope_head_dim = 64
-v_head_dim = 128
+v_head_dim = 512
 block_size = 1
 list_dtype = ["bf16"]
 l_kv_dtype = ["bf16"]
-list_nhead = [(16, 1), (16, 2), (16, 4), (128, 2)]
+list_nhead = [(16, 3)]
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,
@@ -398,9 +407,9 @@ parser.add_argument(
     "-qn",
     "--qk_nope_head_dim",
     type=int,
-    default=128,
+    default=512,
     help="""qk nope head dim.
-    e.g.: -qn 128""",
+    e.g.: -qn 512""",
 )
 parser.add_argument(
     "-qr",
@@ -414,9 +423,9 @@ parser.add_argument(
     "-vh",
     "--v_head_dim",
     type=int,
-    default=128,
+    default=512,
     help="""v head dim.
-    e.g.: -vh 128""",
+    e.g.: -vh 512""",
 )
 parser.add_argument(
     "-blk",
@@ -451,7 +460,7 @@ parser.add_argument(
     "--ctxLen",
     type=int,
     nargs="*",
-    default=[21, 64, 256, 512, 1200, 3200, 5200, 8192],
+    default=[8192], #
     help="""Context length.
     e.g.: -c 21""",
 )
@@ -460,7 +469,7 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[1, 3, 5, 16, 32, 64, 128, 256],
+    default=[32],
     help="""Batch size.
     e.g.: -b 16""",
 )
@@ -499,7 +508,7 @@ for nhead, mtp in list_nhead:
             dtype,
             kvtype,
             args.block_size,
-            varlen=False,
+            varlen=True,
             mtp=mtp,
         )
         df.append(ret)

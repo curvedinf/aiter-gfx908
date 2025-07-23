@@ -46,7 +46,10 @@ jobs:
           GITHUB_WORKSPACE: ${{ github.workspace }}
 
       - name: Install dependencies
-        run: cd sglang; bash scripts/amd_ci_install_dependency.sh
+        run: |
+          cd sglang
+          sed -i 's/ci_sglang/sglang_aiter_test/g' scripts/amd_ci_install_dependency.sh
+          bash scripts/amd_ci_install_dependency.sh
 
       - name: Evaluate Accuracy
         timeout-minutes: 30

@@ -464,18 +464,19 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
         cur_split_end - cur_split_start, ck_tile::integer_divide_ceil(cur_kv_seq_len, 16)
     );
 
-    // if (threadIdx.x) {
-    //     printf("batch: %d split:%d \n", cur_batch, num_valid_kv_splits);
-    // }
-
-
     bool FINAL_OUT = true && num_max_kv_splits == params.size_b; 
 
     auto oaccu_window_bf16 =
-        Policy::template MakeOaccuTileWindow<ck_tile::bf16_t>(params.p_output, cur_head, cur_qo_start * params.num_splits * params.size_h, params.num_splits * (cur_qo_end - cur_qo_start));
+        Policy::template MakeOaccuTileWindow<ck_tile::bf16_t>(params.p_output,
+                                                              cur_head,
+                                                              cur_qo_start * params.num_splits * params.size_h,
+                                                              params.num_splits * (cur_qo_end - cur_qo_start));
 
     auto oaccu_window =
-        Policy::template MakeOaccuTileWindow<float>(params.p_output, cur_head, cur_qo_start * params.num_splits * params.size_h, params.num_splits * (cur_qo_end - cur_qo_start));
+        Policy::template MakeOaccuTileWindow<float>(params.p_output,
+                                                    cur_head,
+                                                    cur_qo_start * params.num_splits * params.size_h,
+                                                    params.num_splits * (cur_qo_end - cur_qo_start));
 
     auto reg_out = ck_tile::make_static_distributed_tensor<in_t>(
         decltype(ck_tile::load_tile(oaccu_window))::get_tile_distribution());
@@ -503,10 +504,6 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
                     offs_oacc +
                     split_idx * params.stride_sp_lseacc
                 ];
-                // if (threadIdx.x == 0)
-                //     printf("cur_qo %d, split_id %d lse %f \n ", cur_qo, split_idx, tlogic);
-                // if (threadIdx.x == 0)
-                //     printf("cur_qo %d, split_id %d lse %f \n ", cur_qo, split_idx, tlogic);
                 float n_e_max = ck_tile::max(tlogic, e_max);
                 auto oaccu = ck_tile::load_tile(oaccu_window);
 
@@ -530,123 +527,6 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
             ck_tile::move_tile_window(oaccu_window, {params.num_splits - num_valid_kv_splits, 0});
         }
     }
-    //
-    // using index_t = int64_t;
-    //
-    // __shared__ in_t lds_lse_scale[kMaxSplits];
-    //
-    // const int32_t bidx = blockIdx.z;
-    //
-    // const int32_t num_splits   = params.num_splits;
-    // const int32_t split_offset = bidx * params.num_splits;
-    // assert((num_splits > 1) && (num_splits <= kMaxSplits));
-    //
-    // const int32_t lane_id          = ck_tile::get_lane_id();
-    // const int32_t hidx             = blockIdx.y;
-    // const int32_t sidx             = blockIdx.x;
-    // const int32_t hsidx            = hidx * params.size_s + sidx;
-    // const int32_t shidx            = hidx + sidx * params.size_h;
-    // const int32_t size_hs          = params.size_h * params.size_s;
-    // const index_t offset_lse_accum = split_offset * size_hs + hsidx; // offset to split 0
-    // const index_t offset_lse       = bidx * size_hs + hsidx;
-    //
-    // if (ck_tile::get_warp_id() == 0)
-    // {
-    //     const in_t* p_lse_accum = reinterpret_cast<in_t*>(params.p_softmax_lseaccum) + offset_lse_accum;
-    //     in_t* p_lse             = reinterpret_cast<in_t*>(params.p_softmax_lse) + offset_lse;
-    //
-    //     constexpr int32_t kNumLsePerThr = ck_tile::integer_divide_ceil(kMaxSplits, ck_tile::get_warp_size());
-    //     in_t local_lse[kNumLsePerThr];
-    //
-    //     // Load thread local LSE and get local max LSE
-    //     in_t max_lse = -ck_tile::numeric<in_t>::infinity();
-    //     #pragma unroll
-    //     for (int32_t i = 0; i < kNumLsePerThr; ++i)
-    //     {
-    //         const int32_t split_idx = i * ck_tile::get_warp_size() + lane_id;
-    //         const in_t lse =
-    //             (split_idx < num_splits) ? p_lse_accum[split_idx * size_hs] : -ck_tile::numeric<in_t>::infinity();
-    //         local_lse[i] = lse;
-    //         max_lse = ck_tile::max(max_lse, lse);
-    //     }
-    //
-    //     // Get global max LSE
-    //     #pragma unroll
-    //     for (int32_t offset = ck_tile::get_warp_size() / 2; offset > 0; offset /= 2)
-    //     {
-    //         max_lse = ck_tile::max(max_lse, __shfl_xor(max_lse, offset));
-    //     }
-    //
-    //     // Get sum of LSE
-    //     in_t sum_lse = 0.f;
-    //     #pragma unroll
-    //     for (int32_t i = 0; i < kNumLsePerThr; ++i)
-    //     {
-    //         static_assert(0, "have not figured out if need exp2 here");
-    //         sum_lse += ck_tile::exp(local_lse[i] - max_lse);
-    //     }
-    //     #pragma unroll
-    //     for (int32_t offset = ck_tile::get_warp_size() / 2; offset > 0; offset /= 2)
-    //     {
-    //         sum_lse += __shfl_xor(sum_lse, offset);
-    //     }
-    //
-    //     // Get global LSE
-    //     const auto [global_lse, output_lse] = [&]() {
-    //         if ((sum_lse == 0.f) || (sum_lse != sum_lse))
-    //         {
-    //             return ck_tile::make_tuple(ck_tile::numeric<in_t>::infinity(), -ck_tile::numeric<in_t>::infinity());
-    //         }
-    //         else
-    //         {
-    //             const in_t lse = ck_tile::log(sum_lse) + max_lse;
-    //             return ck_tile::make_tuple(lse, lse);
-    //         }
-    //     } ();
-    //
-    //     if (lane_id == 0)
-    //     {
-    //         *p_lse = output_lse;
-    //     }
-    //
-    //     // Write LSE to LDS
-    //     #pragma unroll
-    //     for (int32_t i = 0; i < kNumLsePerThr; ++i)
-    //     {
-    //         const int32_t split_idx = i * ck_tile::get_warp_size() + lane_id;
-    //         if (split_idx < num_splits)
-    //         {
-    //             lds_lse_scale[split_idx] = ck_tile::exp(local_lse[i] - global_lse);
-    //         }
-    //     }
-    // }
-    //
-    // __builtin_amdgcn_sched_barrier(0);
-    // ck_tile::block_sync_lds();
-    //
-    // static_assert(Traits::kSizeDV % Traits::kNumThreadsCombine == 0);
-    //
-    // auto oaccu_window =
-    //     Policy::MakeOaccuTileWindow(params.p_output_accum, shidx, size_hs, split_offset, num_splits);
-    //
-    // auto reg_out = ck_tile::make_static_distributed_tensor<in_t>(
-    //     decltype(ck_tile::load_tile(oaccu_window))::get_tile_distribution());
-    // ck_tile::set_tile(reg_out, 0.f);
-    //
-    // for (int32_t split_idx = 0; split_idx < num_splits; ++split_idx)
-    // {
-    //     const in_t lse_scale = lds_lse_scale[split_idx];
-    //     auto oaccu = ck_tile::load_tile(oaccu_window);
-    //     ck_tile::sweep_tile(oaccu, [&](auto idx) {
-    //         reg_out(idx) += lse_scale * oaccu(idx);
-    //     });
-    //     ck_tile::move_tile_window(oaccu_window, {size_hs, 0});
-    // }
-    //
-    // auto dram_out = Policy::MakeOutputTileWindow(
-    //     static_cast<out_t*>(params.p_output) +
-    //     bidx * params.stride_b_o + hidx * params.stride_h_o + sidx * params.stride_s_o);
-    // ck_tile::store_tile(dram_out, ck_tile::cast_tile<out_t>(reg_out));
 }
 
 // =====================================================================================================================
@@ -776,17 +656,15 @@ std::vector<torch::Tensor> flash_mla_fwd_inline_impl(
     params.stride_s_o = output.stride(0);
     params.stride_h_o = output.stride(1);
 
-    if(num_splits > 1)
-    {
-        // params.p_softmax_lseaccum = softmax_lse.data_ptr();
-        // params.p_output_accum     = output.data_ptr();
-        params.stride_b_oacc      = split_data.stride(0);
-        params.stride_h_oacc      = split_data.stride(2);
-        params.stride_sp_oacc     = split_data.stride(1);
-        params.stride_b_lseacc    = split_lse.stride(0);
-        params.stride_h_lseacc    = split_lse.stride(2);
-        params.stride_sp_lseacc   = split_lse.stride(1);
-    }
+    // if(num_splits > 1)
+    // {
+    //     params.stride_b_oacc      = split_data.stride(0);
+    //     params.stride_h_oacc      = split_data.stride(2);
+    //     params.stride_sp_oacc     = split_data.stride(1);
+    //     params.stride_b_lseacc    = split_lse.stride(0);
+    //     params.stride_h_lseacc    = split_lse.stride(2);
+    //     params.stride_sp_lseacc   = split_lse.stride(1);
+    // }
 
     if (query_rope.has_value())
     {

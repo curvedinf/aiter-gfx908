@@ -175,7 +175,7 @@ def get_kv_splits_indptr(num_kv_splits, bs, device):
 
 
 @functools.lru_cache()
-def get_meta_param_balanced(num_kv_splits, bs, total_kv, kv_indptr, nhead, max_seqlen_q, device):
+def get_meta_param_balanced(bs, total_kv, kv_indptr, nhead, max_seqlen_q, device):
     kv_seq_les = torch.tensor([kv_indptr[i + 1] - kv_indptr[i] for i in range(bs)], device = device)
     total_kv_pad = 0
 
@@ -184,16 +184,12 @@ def get_meta_param_balanced(num_kv_splits, bs, total_kv, kv_indptr, nhead, max_s
     for i in range(bs):
         total_kv_pad += (kv_seq_les[i] + 16 - 1) // 16 * 16 
 
-    split_size_pad = 0
-    if num_kv_splits is None:
-        split_size_pad = (total_kv_pad + cu_num - 1) // cu_num + 80 
+    split_size_pad = (total_kv_pad + cu_num - 1) // cu_num + 80 
 
     num_kv_splits_indptr = torch.empty_like(kv_indptr)
     num_kv_splits_indptr[0] = 0
-    max_num_kv_splits = 0
     for i in range(bs):
         num_kv_splits = (kv_seq_les[i] + split_size_pad - 1) // split_size_pad 
-        max_num_kv_splits = max(num_kv_splits, max_num_kv_splits)
         num_kv_splits_indptr[i + 1] = num_kv_splits_indptr[i] + num_kv_splits
 
     batch_split_table = torch.empty(
@@ -213,12 +209,13 @@ def get_meta_param_balanced(num_kv_splits, bs, total_kv, kv_indptr, nhead, max_s
     fixed_size = 0
     num_kv_splits_indptr_fixed[0] = 0
     if num_kv_splits_indptr[-1] != cu_num:
-        for i in range(1, bs + 1):
-            if fix_size > 0:
+        if fix_size > 0:
+            for i in range(1, bs + 1):
                 if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad <= split_size_pad / 3:
                     fixed_size += 1
                 num_kv_splits_indptr_fixed[i] = num_kv_splits_indptr[i] - fixed_size
-            if fix_size < 0:
+        else:
+            for i in range(1, bs + 1):
                 if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad >= 2 * split_size_pad / 3:
                     fixed_size -= 1
                 num_kv_splits_indptr_fixed[i] = num_kv_splits_indptr[i] - fixed_size
@@ -236,15 +233,10 @@ def get_meta_param_balanced(num_kv_splits, bs, total_kv, kv_indptr, nhead, max_s
             batch_split_table[i] = b_idx
             split_table[i] = split_idx
         split_idx += 1
-        
 
-    return num_kv_splits, num_kv_splits_indptr_fixed, max_num_kv_splits, batch_split_table, split_table, cu_num, num_kv_splits_indptr
+    return num_kv_splits, num_kv_splits_indptr_fixed, batch_split_table, split_table, cu_num
 
-"""
-qo_splits[i] * kv_splits[i] for i in range(batch)
-split->
-qo_index_splits_ind + kv_splits_ind
-"""
+
 @functools.lru_cache()
 def get_meta_param(num_kv_splits, bs, total_kv, nhead, max_seqlen_q, device):
     if num_kv_splits is None:
@@ -285,9 +277,12 @@ def mla_decode_fwd(
     kv_last_page_lens,
     max_seqlen_q,
     sm_scale=None,  # 1.0 / (qk_head_dim**0.5)
+    varlen=False,
     logit_cap=0.0,
     num_kv_splits=None,  # for experts only!!!
     num_kv_splits_indptr=None,  # for experts only!!!
+    q_rope=None,
+    k_rope=None, 
 ):
     device = q.device
     assert logit_cap <= 0, f"{logit_cap=} is not support yet"
@@ -299,31 +294,9 @@ def mla_decode_fwd(
     bs = qo_indptr.shape[0] - 1
     total_kv = kv_indices.shape[0]
 
-    max_num_kv_splits = 1 
-    num_kv_splits, num_kv_splits_indptr, max_num_kv_splits, batch_split_table, split_table, cu_num, num_kv_splits_indptr_b = get_meta_param_balanced(
-        num_kv_splits, bs, total_kv, kv_indptr, nhead, max_seqlen_q, device
-    )
-    # if num_kv_splits is None:
-    #     # num_kv_splits, num_kv_splits_indptr, mgc, max_num_kv_splits, batch_split_table, split_table = get_meta_param_balanced(
-    #     #     num_kv_splits, bs, total_kv, kv_indptr, nhead, max_seqlen_q, device
-    #     # )
-    #     # num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(
-    #     #     num_kv_splits, bs, total_kv, nhead, max_seqlen_q, device
-    #     # )
-    #     print(num_kv_splits_indptr)
-    # else:
-    #     assert (
-    #         num_kv_splits_indptr is not None
-    #     ), "num_kv_splits_indptr must be provided when num_kv_splits is specified"
-
     if nhead == 16 and max_seqlen_q == 1:
         # special case for 16 heads and max_seqlen_q == 1
         logits = torch.zeros(
-            (total_s, num_kv_splits, nhead, v_head_dim),
-            dtype=dtypes.fp32,
-            device=device,
-        )
-        logits_1 = torch.zeros(
             (total_s, num_kv_splits, nhead, v_head_dim),
             dtype=dtypes.fp32,
             device=device,
@@ -337,22 +310,76 @@ def mla_decode_fwd(
             dtype=dtypes.fp32,
             device=device,
         )
-        logits_1 = torch.zeros(
-            (total_s, num_kv_splits, nhead, v_head_dim),
-            dtype=dtypes.fp32,
-            device=device,
-        )
     else:
         assert False, f"{nhead=} not supported"
 
     attn_lse = torch.zeros(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
-    attn_lse_1 = torch.zeros(
-        (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
-    )
-    # import pdb; pdb.set_trace()
 
+    Lv = v_head_dim
+    BLOCK_DV = triton.next_power_of_2(Lv)
+
+    if varlen:
+        # if max_num_kv_splits <= 16:
+        # q_nope = torch.empty_like(q[:, :, :512])
+        # q_rope = torch.empty_like(q[:, :, 512:])
+        # k_nope = torch.empty_like(kv_buffer[:, :, :, :512])
+        # k_rope = torch.empty_like(kv_buffer[:, :, :, 512:])
+        #
+        # q_nope[:, :, :] = q[:, :, :512]
+        # q_rope[:, :, :] = q[:, :, 512:]
+        # k_nope[:, :, :, :] = kv_buffer[:, :, :, :512]
+        # k_rope[:, :, :, :] = kv_buffer[:, :, :, 512:]
+
+        num_kv_splits, num_kv_splits_indptr, batch_split_table, split_table, cu_num = get_meta_param_balanced(
+            bs, total_kv, kv_indptr, nhead, max_seqlen_q, device
+        )
+        # import pdb; pdb.set_trace()
+        aiter.flash_mla_fwd_inline_impl(
+            q,
+            kv_buffer,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            num_kv_splits_indptr,
+            max_seqlen_q,
+            sm_scale,
+            logits,
+            attn_lse,
+            q_rope,
+            k_rope,
+            batch_split_table,
+            split_table,
+            o,
+            cu_num,
+        )
+
+        grid = (bs, nhead)
+        extra_kargs = {"waves_per_eu": 4}
+        _fwd_kernel_stage2_asm_skip_1[grid](
+            logits,
+            attn_lse,
+            o,
+            qo_indptr,
+            kv_indptr,
+            num_kv_splits_indptr,
+            attn_lse.stride(0),
+            attn_lse.stride(2),
+            attn_lse.stride(1),
+            o.stride(0),
+            o.stride(1),
+            MAYBE_FINAL_OUT=MAYBE_FINAL_OUT,
+            BATCH_NUM=bs,
+            BLOCK_DV=BLOCK_DV,
+            Lv=Lv,
+            mgc=16,
+            num_warps=4,
+            num_stages=2,
+            **extra_kargs,
+        )
+    # else:
     num_kv_splits_asm, num_kv_splits_indptr_asm, mgc = get_meta_param(
         None, bs, total_kv, nhead, max_seqlen_q, device
     )
@@ -364,38 +391,24 @@ def mla_decode_fwd(
         kv_indices,
         kv_last_page_lens,
         num_kv_splits_indptr_asm,
-        # num_kv_splits_indptr,
         max_seqlen_q,
         sm_scale,
-        logits_1,
-        attn_lse_1,
+        logits,
+        attn_lse,
     )
-    # logits_backup = logits.clone()
-    # attn_lse_backup = attn_lse.clone()
-    #
 
-
-
-    # if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
-    #     return logits.view(total_s, nhead, v_head_dim), attn_lse
-    Lv = v_head_dim
-    BLOCK_DV = triton.next_power_of_2(Lv)
-
-
-    o_1 = torch.empty_like(o)
-
+    if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
+        return logits.view(total_s, nhead, v_head_dim), attn_lse
 
     grid = (bs, nhead)
     extra_kargs = {"waves_per_eu": 4}
     _fwd_kernel_stage2_asm[grid](
-        logits_1,
-        attn_lse_1,
-        # o,
-        o_1,
+        logits,
+        attn_lse,
+        o,
         qo_indptr,
         kv_indptr,
         num_kv_splits_indptr_asm,
-        # num_kv_splits_indptr,
         attn_lse.stride(0),
         attn_lse.stride(2),
         attn_lse.stride(1),
@@ -411,77 +424,6 @@ def mla_decode_fwd(
         **extra_kargs,
     )
 
-    print(num_kv_splits_indptr)
-    print(num_kv_splits_indptr_asm)
-
-    # if max_num_kv_splits <= 16:
-    q_nope = torch.empty_like(q[:, :, :512])
-    q_rope = torch.empty_like(q[:, :, 512:])
-    k_nope = torch.empty_like(kv_buffer[:, :, :, :512])
-    k_rope = torch.empty_like(kv_buffer[:, :, :, 512:])
-
-    q_nope[:, :, :] = q[:, :, :512]
-    q_rope[:, :, :] = q[:, :, 512:]
-    k_nope[:, :, :, :] = kv_buffer[:, :, :, :512]
-    k_rope[:, :, :, :] = kv_buffer[:, :, :, 512:]
-
-    # import pdb;pdb.set_trace()
-
-    aiter.flash_mla_fwd_inline_impl(
-        q_nope,
-        k_nope,
-        # q,
-        # kv_buffer,
-        qo_indptr,
-        kv_indptr,
-        kv_indices,
-        kv_last_page_lens,
-        num_kv_splits_indptr,
-        max_seqlen_q,
-        sm_scale,
-        logits,
-        attn_lse,
-        q_rope,
-        k_rope,
-        # None,
-        # None,
-        batch_split_table,
-        split_table,
-        o,
-        cu_num,
-    )
-    # print(max_num_kv_splits)
-    # o_2 = torch.zeros_like(o)
-
-    grid = (bs, nhead)
-    extra_kargs = {"waves_per_eu": 4}
-    _fwd_kernel_stage2_asm_skip_1[grid](
-        logits,
-        attn_lse,
-        o,
-        qo_indptr,
-        kv_indptr,
-        num_kv_splits_indptr,
-        attn_lse.stride(0),
-        attn_lse.stride(2),
-        attn_lse.stride(1),
-        o.stride(0),
-        o.stride(1),
-        MAYBE_FINAL_OUT=MAYBE_FINAL_OUT,
-        BATCH_NUM=bs,
-        BLOCK_DV=BLOCK_DV,
-        Lv=Lv,
-        mgc=mgc,
-        num_warps=4,
-        num_stages=2,
-        **extra_kargs,
-    )
-
-    from aiter.test_common import checkAllclose
-    # print(num_kv_splits_indptr)
-    # print(num_kv_splits_indptr_b)
-    checkAllclose(o_1, o)
-    # import pdb; pdb.set_trace()
     return logits, attn_lse
 
 

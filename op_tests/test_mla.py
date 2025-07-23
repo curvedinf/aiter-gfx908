@@ -353,6 +353,7 @@ def test_mla(
         kv_last_page_lens,
         max_seqlen_qo,
         sm_scale,
+        varlen,
     )
 
     # print(f"{out_ref.view(total_q, -1)=}")

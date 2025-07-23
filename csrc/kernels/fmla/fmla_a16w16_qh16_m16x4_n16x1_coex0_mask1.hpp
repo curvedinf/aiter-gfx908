@@ -8,7 +8,7 @@
 #include "macro_utils.hpp"
 
 
-#define numsplit5
+#define fp32output
 
 #define VGPR2SHUFFLE(n_s, n_v)  shuffle##n_s = v##n_v
 #define SUFFFLE2LDS(n_lds, n_s) o_lds_ptr[n_lds] = shuffle##n_s
@@ -43,8 +43,6 @@ asm volatile (                  \
   : "v20", "v21", "v28", "v30", "v31", "s38", "s39"                      \
   );
 
-// #define B16_VGPR_2_SHUFFLE(n_s, n_v)  (shuffle##n_s).y = float_to_bf16(v##n_v);
-
 
 #define F32_SUFFFLEY_2_LDS_LOOP(n_lds)  \ 
         o_lds_ptr[n_lds]     = shuffle0;  \
@@ -76,16 +74,6 @@ asm volatile (                  \
     o_lds_ptr[n_lds]     = shuffle0;  \
     o_lds_ptr[n_lds + 1] = shuffle1;
 
-
-
-// #define OFFSET_B16_LDS_2_VGPR_LDS(r, i, j)  (r * 576 + i * 288 + j + (j / 2) * 16)
-// #define OFFSET_B16_LDS_2_VGPR_VGPR(r, i, j) (r * 8 + i * 2 + j + (j / 2) * 4)
-//
-// #define OFFSET_B16_VGPR_2_DRAM_VGPR(r, i, j) (r * 4 + i * 8 + j)
-// #define OFFSET_B16_VGPR_2_DRAM_DRAM(r, i, j) (r * 2048 + i * 32 + j)
-
-
-
 #define B16_VGPR_2_DRAM_LOOP_STRIDE1(func, ptr_base) \
     B16_VGPR_2_DRAM_LOOP_STRIDE1_0_0_0(func, ptr_base)
 
@@ -96,7 +84,6 @@ asm volatile (                  \
 
 #define VGPR_2_DRAM(n_v, n_dram)   p_output[n_dram] = arr[n_v];
 #define VGPR_2_DRAM_DIR(n_v, n_dram)   p_output_com[n_dram] = arr[n_v];
-
 
 namespace ck_tile {
 
@@ -139,14 +126,14 @@ struct FlashMlaInlineFwdParams
     // spill table.
     using index_t = int32_t;
 
-    index_t stride_s_o;         //    ... in sequence ...
-    index_t stride_h_o;         //    ... in head ...
+    index_t stride_s_o;
+    index_t stride_h_o;
     index_t stride_b_lseacc;
     index_t stride_h_lseacc;
-    index_t stride_sp_lseacc;   //    ... in split ...
+    index_t stride_sp_lseacc;
     index_t stride_b_oacc;
     index_t stride_h_oacc;
-    index_t stride_sp_oacc;     //    ... in split ...
+    index_t stride_sp_oacc;
     index_t stride_s_oacc;
 };
 
@@ -192,7 +179,8 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             return;
 
         register int num_splits asm("s92");
-        asm volatile ("" : "=s"(num_splits));
+        // asm volatile ("" : "=s"(num_splits));
+        asm volatile ("s_mov_b32 %0, %1" : "=s"(num_splits) : "s"(params.num_splits));
 
         register int max_seqlen_q asm("s94");
         asm volatile ("s_mov_b32 %0, %1" : "=s"(max_seqlen_q) : "s"(params.max_seqlen_q));
@@ -211,23 +199,15 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         constexpr int32_t q_dim = IsRopeSep ? Traits::kSizeNope : Traits::kSizeD;
         constexpr int32_t q_rope_dim = IsRopeSep ? Traits::kSizeRope : Traits::kSizeD;
 
-        // printf("nope batch %d, offset  %d \n ", batch_idx, batch_idx * q_dim * params.max_seqlen_q * params.size_h);
-		bf16_t* q_nope_ptr = reinterpret_cast<bf16_t*>(params.p_query) + batch_idx * q_dim * params.max_seqlen_q * params.size_h;
+		bf16_t* q_nope_ptr = reinterpret_cast<bf16_t*>(params.p_query) +
+            batch_idx * q_dim * params.max_seqlen_q * params.size_h;
 
-        // printf("rope batch %d, offset  %d \n ", batch_idx, batch_idx * Traits::kSizeRope * params.max_seqlen_q * params.size_h);
 		bf16_t* q_rope_ptr = IsRopeSep ?
             reinterpret_cast<bf16_t*>(params.p_query_rope) + batch_idx * Traits::kSizeRope * params.max_seqlen_q * params.size_h :
             q_nope_ptr + Traits::kSizeNope;
-            // reinterpret_cast<bf16_t*>(params.p_query_rope) + Traits::kSizeNope;
-
-        // if(threadIdx.x == 0)
-        //     printf("batch %d, : [%f], %f \n ", batch_idx, bf16_to_float(q_nope_ptr[0]), bf16_to_float(q_rope_ptr[0]));
 
 		auto q_nope_src = ck_tile::make_wave_buffer_resource(reinterpret_cast<void*>(q_nope_ptr), tensor_len);
 		auto q_rope_src = ck_tile::make_wave_buffer_resource(reinterpret_cast<void*>(q_rope_ptr), tensor_len);
-		// auto q_nope_src = ck_tile::make_wave_buffer_resource(reinterpret_cast<void*>(q_nope_ptr), 64 * 576 * 2 * 32 * 3);
-		// auto q_rope_src = ck_tile::make_wave_buffer_resource(reinterpret_cast<void*>(q_rope_ptr), 64 * 576 * 2 * 32 * 3);
-
 
         auto q_ptr      = ck_tile::make_wave_buffer_resource(params.p_query);
         auto kv_ptr     = ck_tile::make_wave_buffer_resource(params.p_key);
@@ -249,8 +229,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         constexpr int32_t nope_stride = 4 * sizeof(bf16_t) * q_dim;
         constexpr int32_t rope_stride = 4 * sizeof(bf16_t) * q_rope_dim;
 
-
-        // int32_t smem_offset = wave_id * q_dim * sizeof(bf16_t) * Traits::kBlockM / 16; //+ r * 20608 + i * 1280
         int32_t smem_offset = wave_id * 5152;
 
 #pragma unroll
@@ -872,10 +850,7 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 		B16_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index);
 #endif
 
-#ifdef numsplit5
-
-        // printf("%d, %d, %d \n", int(s3), int(s4), int(num_splits));
-
+#ifdef fp32output 
         if (int(wave_id) >= max_seqlen_q)
         {
             return;
@@ -903,8 +878,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             int lds_st_idx = int(wave_id) * 2112 +
                              int(vthread << 2);
 
-
-            // printf("s3 %d, s4 %d,wave_id %d, copy_index :%d int(num_splits) %d\n", s3, s4, int(wave_id), int(copy_index), int(num_splits));
             std::array<uint32_t, 32> arr{};
 
             LOOP_STRIDE4(0, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx      );
@@ -970,15 +943,12 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         }
         else
         {
-            // printf("split_id %d, num_splits: %d \n", int(s3), int(num_splits));
-
             register uint32_t shuffle0 asm("v24");
             register uint32_t shuffle1 asm("v25");
             register uint32_t shuffle2 asm("v26");
             register uint32_t shuffle3 asm("v27");
 
             int s_perm = 0x07060302;
-
 
             int o_reg_idx = 0;
             int lds_st_idx = (wave_id * 4608 + 288 * (vthread >> 4) + 8 * (vthread & 15)) >> 2;

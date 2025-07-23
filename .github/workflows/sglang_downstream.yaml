@@ -64,4 +64,4 @@ jobs:
       - name: Clean Up
         if: always()
         run:
-          docker exec -u root ci_sglang bash -c "rm -rf /sglang-checkout/sgl-kernel; rm -rf /sglang-checkout/python"
+          docker exec -u root sglang_aiter_test bash -c "rm -rf /sglang-checkout/sgl-kernel; rm -rf /sglang-checkout/python"

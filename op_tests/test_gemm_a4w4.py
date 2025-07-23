@@ -13,7 +13,9 @@ import pandas as pd
 torch.set_default_device("cuda")
 torch.set_printoptions(sci_mode=False)
 SCALE_GROUP_SIZE = 32
-pd.set_option("display.max_columns", 200)
+pd.set_option("display.max_columns", 30)
+pd.set_option("display.width", 1000)
+pd.set_option("display.max_colwidth", 30)
 
 
 @perftest(num_iters=5)
@@ -124,7 +126,6 @@ def test_gemm(dtype, M, N, K):
     err_c = checkAllclose(a, c[:M], msg="asm no splitK  ")
     tflops_c = M * N * K * 2 / avg_c / 1e6
     tbs_c = (x.nbytes + w.nbytes) / avg_c / 1e6
-
     err_d = None
     avg_d = None
     tflops_d = None
@@ -149,9 +150,9 @@ def test_gemm(dtype, M, N, K):
     tflops_e = None
     tbs_e = None
     e, avg_e = run_gemm_ck(x, wshuffle, x_scales_shuffle, w_scales_shuffle, out3)
-    err_e = checkAllclose(a, d[:M], msg="ck            ")
-    tflops_e = M * N * K * 2 / avg_d / 1e6
-    tbs_e = (x.nbytes + w.nbytes) / avg_d / 1e6
+    err_e = checkAllclose(a, e[:M], msg="ck            ")
+    tflops_e = M * N * K * 2 / avg_e / 1e6
+    tbs_e = (x.nbytes + w.nbytes) / avg_e / 1e6
 
     return {
         "triton": avg_b,
@@ -162,9 +163,9 @@ def test_gemm(dtype, M, N, K):
         "asm no splitK err": err_c,
         "asm splitK err": err_d,
         "ck err": err_e,
-        "asm no splitK TFLPOS": tflops_c,
-        "asm splitK TFLPOS": tflops_d,
-        "ck TFLPOS": tflops_e,
+        "asm no splitK TFLOPS": tflops_c,
+        "asm splitK TFLOPS": tflops_d,
+        "ck TFLOPS": tflops_e,
         "asm no splitK TB/s": tbs_c,
         "asm splitK TB/s": tbs_d,
         "ck TB/s": tbs_e,

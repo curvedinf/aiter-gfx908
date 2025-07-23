@@ -10,6 +10,7 @@ from ..jit.core import (
     AITER_ROOT_DIR,
 )
 from ..jit.utils.chip_info import get_cu_num
+from ..jit.utils.chip_info import get_gfx
 import functools
 import pandas as pd
 
@@ -52,7 +53,11 @@ def gemm_a4w4(
     m = A.shape[0]
     n = B.shape[0]
     k = A.shape[-1] * 2
-
+    gfx_arch = get_gfx()
+    if gfx_arch in ["gfx942"]:
+        raise RuntimeError(
+            f"A4W4 GEMM kernel is not supported on gfx942, but got {gfx_arch}!"
+        )
     ck_config = get_CKGEMM_config(m, n, k)
     splitK = 0
     if ck_config is not None:

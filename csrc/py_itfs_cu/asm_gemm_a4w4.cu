@@ -63,8 +63,13 @@ struct __attribute__((packed)) KernelArgs
 
 static CFG* get_cfg(torch::Tensor& inp, torch::Tensor& out)
 {
+
+#if defined(__Float4_e2m1fn_x2)
     if((inp.dtype() == torch::kFloat4_e2m1fn_x2 || inp.dtype() == torch::kUInt8) &&
        out.scalar_type() == at::ScalarType::BFloat16)
+#else
+    if((inp.dtype() == torch::kUInt8) && out.scalar_type() == at::ScalarType::BFloat16)
+#endif
     {
         return &cfg_f4gemm_bf16_per1x32Fp4;
     }
@@ -79,13 +84,12 @@ static CFG* get_cfg(torch::Tensor& inp, torch::Tensor& out)
     }
 };
 
-std::string get_heuristic_kernel(int M,
-                                 int N,
-                                 int K,
-                                 std::optional<int> log2_k_split,
-                                 int selectedksplit,
-                                 std::optional<bool> bpreshuffle,
-                                 CFG* cfgs)
+std::tuple<std::string, int> get_heuristic_kernel(int M,
+                                                  int N,
+                                                  int K,
+                                                  std::optional<int> log2_k_split,
+                                                  std::optional<bool> bpreshuffle,
+                                                  CFG* cfgs)
 {
     hipDevice_t dev;
     hipDeviceProp_t dev_prop;
@@ -97,94 +101,55 @@ std::string get_heuristic_kernel(int M,
     uint32_t round      = 0xffffffff;
     int log2_k_split_en = (log2_k_split.has_value() && log2_k_split.value() != 0) ? 1 : 0;
     int bpreshuffle_en  = (bpreshuffle.has_value() && !bpreshuffle) ? 0 : 1;
-    int selectedtileM   = 256;
-    int selectedtileN   = 256;
+    std::string selectedKernelName = "";
+    int selectedsplitK             = 1;
 
     for(const auto& el : *cfgs)
     {
         const auto& cfg = el.second;
-        if((N % cfg.tile_N) == 0)
+        if(cfg.bpreshuffle == bpreshuffle_en &&
+           ((cfg.splitK == log2_k_split_en) || !log2_k_split_en))
         {
-            int tg_num_M         = (M + cfg.tile_M - 1) / cfg.tile_M;
-            int tg_num_N         = (N + cfg.tile_N - 1) / cfg.tile_N;
-            tg_num               = tg_num_M * tg_num_N;
-            uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
-            if(local_round < round)
+            if((N % cfg.tile_N) == 0)
             {
-                round         = local_round;
-                empty_cu      = local_round * num_cu - tg_num;
-                selectedtileM = cfg.tile_M;
-                selectedtileN = cfg.tile_N;
-            }
-            else if(local_round == round)
-            {
-                if(empty_cu > (local_round * num_cu - tg_num))
-                {
-                    round         = local_round;
-                    empty_cu      = local_round * num_cu - tg_num;
-                    selectedtileM = cfg.tile_M;
-                    selectedtileN = cfg.tile_N;
-                }
-            }
-        }
-    }
+                std::vector<int> splitK_list =
+                    (log2_k_split.has_value() && cfg.splitK)
+                        ? std::vector<int>{2 ^ log2_k_split.value()}
+                        : (cfg.splitK ? std::vector<int>{2, 4, 8, 16} : std::vector<int>{1});
 
-    empty_cu = num_cu;
-    tg_num   = 0;
-    round    = 0xffffffff;
-
-    std::string selected = "";
-    for(const auto& el : *cfgs)
-    {
-        const auto& cfg = el.second;
-        if(cfg.splitK == 1)
-        {
-            for(auto& K : {2, 4, 8, 16})
-            {
-                int tg_num_M        = (M + cfg.tile_M - 1) / cfg.tile_M;
-                int tg_num_N        = (N + cfg.tile_N - 1) / cfg.tile_N;
-                tg_num              = tg_num_M * tg_num_N * K;
-                int32_t local_round = (tg_num + num_cu - 1) / num_cu;
-                if(local_round < round)
+                for(auto& splitK : splitK_list)
                 {
-                    round          = local_round;
-                    empty_cu       = local_round * num_cu - tg_num;
-                    selectedksplit = K;
-                }
-                else if(local_round == round)
-                {
-                    if(empty_cu > (local_round * num_cu - tg_num))
+                    int tg_num_M         = (M + cfg.tile_M - 1) / cfg.tile_M;
+                    int tg_num_N         = (N + cfg.tile_N - 1) / cfg.tile_N;
+                    tg_num               = tg_num_M * tg_num_N * splitK;
+                    uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
+                    if(local_round < round)
                     {
-                        round          = local_round;
-                        empty_cu       = local_round * num_cu - tg_num;
-                        selectedksplit = K;
+                        round              = local_round;
+                        empty_cu           = local_round * num_cu - tg_num;
+                        selectedKernelName = el.first;
+                        selectedsplitK     = splitK;
+                    }
+                    else if(local_round == round)
+                    {
+                        if(empty_cu > (local_round * num_cu - tg_num))
+                        {
+                            round              = local_round;
+                            empty_cu           = local_round * num_cu - tg_num;
+                            selectedKernelName = el.first;
+                            selectedsplitK     = splitK;
+                        }
                     }
                 }
             }
-            selectedksplit = std::log2(selectedksplit);
-            empty_cu       = num_cu;
-            tg_num         = 0;
-            round          = 0xffffffff;
-        }
-
-        if((log2_k_split_en == 1 || (!log2_k_split.has_value() && selectedksplit > 0)))
-        {
-            selected = el.first;
-        }
-        else if(cfg.tile_M == selectedtileM && cfg.bpreshuffle == bpreshuffle_en &&
-                cfg.splitK == log2_k_split_en)
-        {
-            selected = el.first;
         }
     }
-
-    if(selected != "")
+    if(selectedKernelName == "")
     {
-        return selected;
+        TORCH_CHECK(false, __func__, ": cannot get heuristic kernel!");
     }
 
-    TORCH_CHECK(false, __func__, ": cannot get heuristic kernel!");
-    return "";
+    return std::make_tuple(selectedKernelName, std::log2(selectedsplitK));
 }
 
 // A4W4 asm gemm kernel
@@ -231,6 +196,18 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     const at::cuda::OptionalCUDAGuard device_guard(device_of(A));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     CFG* config_map           = get_cfg(A, out);
+    using DictKey             = std::tuple<int, int, int, std::optional<int>, std::optional<bool>>;
+    struct SimpleHash
+    {
+        size_t operator()(const DictKey& key) const
+        {
+            const auto& [m, n, k, log2, shuffle] = key;
+            return std::hash<int>()(m) ^ std::hash<int>()(n) ^ std::hash<int>()(k);
+        }
+    };
+    static std::unordered_map<DictKey, std::tuple<std::string, int>, SimpleHash>
+        heuristic_kernel_dict;
+
     if(config_map->empty())
     {
         TORCH_CHECK(false, __func__, " no kernel support a4w4 for this gpu arch");
@@ -241,15 +218,32 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     int selectedksplit = 0;
     if(kernelName.empty())
     {
-        kernelName = get_heuristic_kernel(
-            Mdim, Ndim, Kdim, log2_k_split, selectedksplit, bpreshuffle, config_map);
+        if(heuristic_kernel_dict.find(DictKey(Mdim, Ndim, Kdim, log2_k_split, bpreshuffle)) !=
+           heuristic_kernel_dict.end())
+        {
+            auto it =
+                heuristic_kernel_dict.find(DictKey(Mdim, Ndim, Kdim, log2_k_split, bpreshuffle));
+            auto res       = it->second;
+            kernelName     = std::get<0>(res);
+            selectedksplit = std::get<1>(res);
+        }
+        else
+        {
+            auto it = get_heuristic_kernel(Mdim, Ndim, Kdim, log2_k_split, bpreshuffle, config_map);
+
+            kernelName            = std::get<0>(it);
+            selectedksplit        = std::get<1>(it);
+            heuristic_kernel_dict = {{{Mdim, Ndim, Kdim, log2_k_split, bpreshuffle},
+                                      std::make_tuple(kernelName, std::log2(selectedksplit))}};
+        }
     }
 
     AiterAsmKernel* impl_ptr = nullptr;
     int SUBM                 = 0;
     int SUBN                 = 0;
     int gdz                  = 1;
-    auto it                  = config_map->find(kernelName);
+
+    auto it = config_map->find(kernelName);
     if(it != config_map->end())
     {
         const auto& cfg     = it->second;
@@ -257,7 +251,6 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
         const char* co_name = cfg.co_name.c_str();
         SUBM                = cfg.tile_M;
         SUBN                = cfg.tile_N;
-
         if(cfg.splitK == 1 && log2_k_split.value() != 0)
         {
             args.log2_k_split = log2_k_split.has_value() ? log2_k_split.value() : selectedksplit;

@@ -110,7 +110,7 @@ std::string get_heuristic_kernel(int M,
             {
                 int tg_num_M        = (M + cfg.tile_M - 1) / cfg.tile_M;
                 int tg_num_N        = (N + cfg.tile_N - 1) / cfg.tile_N;
-                tg_num              = tg_num_M * tg_num_N * k;
+                tg_num              = tg_num_M * tg_num_N * K;
                 int32_t local_round = (tg_num + num_cu - 1) / num_cu;
                 if(local_round < round)
                 {

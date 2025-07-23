@@ -103,8 +103,8 @@ def test_gemm(dtype, M, N, K):
     x_scales = x_scales.view(torch.uint8)
     w_scales = w_scales.view(torch.uint8)
     a, avg_a = run_torch(x, w, x_scales, w_scales, dtype)
-    # b, avg_b = run_triton(x, w.T, x_scales, w_scales, out1, dtype)
-    b, avg_b = a, 0
+    b, avg_b = run_triton(x, w.T, x_scales, w_scales, out1, dtype)
+    # b, avg_b = a, 0
     err_b = checkAllclose(a, b, msg="triton        ")
 
     err_c = None
@@ -120,7 +120,7 @@ def test_gemm(dtype, M, N, K):
         "",  # kernelName
         bias_f32,
         bpreshuffle=True,
-        #log2_k_split=0,
+        # log2_k_split=0,
     )
 
     err_c = checkAllclose(a, c[:M], msg="asm no splitK  ")

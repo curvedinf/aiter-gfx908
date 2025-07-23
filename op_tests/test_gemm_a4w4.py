@@ -120,7 +120,7 @@ def test_gemm(dtype, M, N, K):
         "",  # kernelName
         bias_f32,
         bpreshuffle=True,
-        log2_k_split=0,
+        #log2_k_split=0,
     )
 
     err_c = checkAllclose(a, c[:M], msg="asm no splitK  ")
@@ -139,7 +139,7 @@ def test_gemm(dtype, M, N, K):
         "_ZN5aiter49f4gemm_bf16_per1x32Fp4_BpreShuffle_KSplit_128x512E",  # kernelName
         bias_f32,
         bpreshuffle=True,
-        log2_k_split=1,
+        log2_k_split=2,
     )
     err_d = checkAllclose(a, d[:M], msg="asm splitK ")
     tflops_d = M * N * K * 2 / avg_d / 1e6

@@ -144,10 +144,7 @@ std::tuple<std::string, int> get_heuristic_kernel(int M,
             }
         }
     }
-    if(selectedKernelName == "")
-    {
-        TORCH_CHECK(false, __func__, ": cannot get heuristic kernel!");
-    }
+    TORCH_CHECK(selectedKernelName != "", __func__, ": cannot get heuristic kernel!");
 
     return std::make_tuple(selectedKernelName, std::log2(selectedsplitK));
 }
@@ -167,6 +164,7 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
                             std::optional<int> log2_k_split = std::nullopt)
 
 {
+
     TORCH_CHECK(
         out.dtype() == torch::ScalarType::BFloat16, __func__, " only support BFloat16 output now!");
     int Mdim = A.size(0);
@@ -202,7 +200,10 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
         size_t operator()(const DictKey& key) const
         {
             const auto& [m, n, k, log2, shuffle] = key;
-            return std::hash<int>()(m) ^ std::hash<int>()(n) ^ std::hash<int>()(k);
+            int log2_key                         = log2.has_value() ? log2.value() : -1;
+            bool shuffle_key                     = shuffle.has_value() ? shuffle.value() : false;
+            return std::hash<int>()(m) ^ std::hash<int>()(n) ^ std::hash<int>()(k) ^
+                   std::hash<int>()(log2_key) ^ std::hash<bool>()(shuffle_key);
         }
     };
     static std::unordered_map<DictKey, std::tuple<std::string, int>, SimpleHash>
@@ -215,7 +216,7 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
 
     static std::unordered_map<std::string, std::unique_ptr<AiterAsmKernel>> impl_ptr_map;
 
-    int selectedksplit = 0;
+    int selectedksplit = log2_k_split.has_value() ? log2_k_split.value() : 0;
     if(kernelName.empty())
     {
         if(heuristic_kernel_dict.find(DictKey(Mdim, Ndim, Kdim, log2_k_split, bpreshuffle)) !=
@@ -231,10 +232,10 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
         {
             auto it = get_heuristic_kernel(Mdim, Ndim, Kdim, log2_k_split, bpreshuffle, config_map);
 
-            kernelName            = std::get<0>(it);
-            selectedksplit        = std::get<1>(it);
-            heuristic_kernel_dict = {{{Mdim, Ndim, Kdim, log2_k_split, bpreshuffle},
-                                      std::make_tuple(kernelName, std::log2(selectedksplit))}};
+            kernelName     = std::get<0>(it);
+            selectedksplit = std::get<1>(it);
+            heuristic_kernel_dict[{Mdim, Ndim, Kdim, log2_k_split, bpreshuffle}] =
+                std::make_tuple(kernelName, std::log2(selectedksplit));
         }
     }
 
@@ -251,11 +252,12 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
         const char* co_name = cfg.co_name.c_str();
         SUBM                = cfg.tile_M;
         SUBN                = cfg.tile_N;
-        if(cfg.splitK == 1 && log2_k_split.value() != 0)
+
+        if(cfg.splitK == 1)
         {
-            args.log2_k_split = log2_k_split.has_value() ? log2_k_split.value() : selectedksplit;
-            int k_num = 1 << (log2_k_split.has_value() ? log2_k_split.value() : selectedksplit);
-            assert(Kdim % k_num == 0);
+            args.log2_k_split = selectedksplit;
+            int k_num         = 1 << args.log2_k_split;
+            TORCH_CHECK(Kdim % k_num == 0, __func__, " Kdim % (1 << args.log2_k_split) != 0 !");
             int k_per_tg = Kdim / k_num;
             k_per_tg     = ((k_per_tg + 256 - 1) / 256) * 256;
             gdz          = (Kdim + k_per_tg - 1) / k_per_tg;

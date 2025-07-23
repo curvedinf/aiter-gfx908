@@ -55,6 +55,7 @@ jobs:
         timeout-minutes: 30
         run: |
           cd sglang
+          sed -i 's/ci_sglang/sglang_aiter_test/g' scripts/amd_ci_exec.sh
           bash scripts/amd_ci_exec.sh -e SGLANG_USE_AITER=0 python3 test_eval_accuracy_large.py
           bash scripts/amd_ci_exec.sh python3 test_eval_fp8_accuracy.py
           bash scripts/amd_ci_exec.sh python3 models/test_qwen_models.py

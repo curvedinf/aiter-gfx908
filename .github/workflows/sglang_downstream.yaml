@@ -28,18 +28,19 @@ jobs:
           curl -H "Authorization: token $PERSONAL_ACCESS_TOKEN" \
                -sSfL https://api.github.com/repos/casey/just/releases/latest
 
-      # - name: Build sglang image
-      #   run: |
-      #     cd sglang
-      #     docker build --build-arg SGL_BRANCH=v0.4.9.post3 -t sglang_aiter_test -f docker/Dockerfile.rocm .
-      #   
-        # docker build -f docker/Dockerfile.rocm --build-arg AITER_BRANCH=main --build-arg PYTORCH_ROCM_ARCH=gfx942 --build-arg SGL_BRANCH=v0.4.9.post2 -t sglang_aiter_base .
-        # docker build --no-cache -f docker/Dockerfile.rocm --build-arg BASE_IMAGE=sglang_aiter_base -t sglang_aiter_test ."
+      - name: Build sglang_aiter_test image
+        run: |
+          cd sglang
+          docker build --build-arg SGL_BRANCH=v0.4.9.post3 --build-arg GPU_ARCH=gfx942 --build-arg AITER_COMMIT="v0.1.4" -t sglang_aiter_test -f docker/Dockerfile.rocm .
+        
+      # docker build -f docker/Dockerfile.rocm --build-arg AITER_BRANCH=main --build-arg PYTORCH_ROCM_ARCH=gfx942 --build-arg SGL_BRANCH=v0.4.9.post2 -t sglang_aiter_base .
+      # docker build --no-cache -f docker/Dockerfile.rocm --build-arg BASE_IMAGE=sglang_aiter_base -t sglang_aiter_test ."
             
       - name: Start CI container
         run: |
           cd sglang
           sed -i 's|-v "${GITHUB_WORKSPACE:-$PWD}:/sglang-checkout"|-v "${GITHUB_WORKSPACE:-$PWD}/sglang:/sglang-checkout"|g' scripts/amd_ci_start_container.sh
+          sed -i 's/ci_sglang/sglang_aiter_test/g' scripts/amd_ci_start_container.sh
           docker ps -aq -f name=ci_sglang | xargs -r docker stop | xargs -r docker rm; bash scripts/amd_ci_start_container.sh
         env:
           GITHUB_WORKSPACE: ${{ github.workspace }}

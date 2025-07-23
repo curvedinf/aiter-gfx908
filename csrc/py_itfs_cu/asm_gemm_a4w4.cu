@@ -79,7 +79,7 @@ static CFG* get_cfg(torch::Tensor& inp, torch::Tensor& out)
     }
 };
 
-std::string get_heuristic_kernel(int M,
+std::tuple<std::string, int> get_heuristic_kernel(int M,
                                  int N,
                                  int K,
                                  std::optional<int> log2_k_split,
@@ -97,90 +97,47 @@ std::string get_heuristic_kernel(int M,
     uint32_t round      = 0xffffffff;
     int log2_k_split_en = (log2_k_split.has_value() && log2_k_split.value() != 0) ? 1 : 0;
     int bpreshuffle_en  = (bpreshuffle.has_value() && !bpreshuffle) ? 0 : 1;
-    int selectedtileM   = 256;
-    int selectedtileN   = 256;
+    std::string selectedKernelName = "";
+    int selectedsplitK  = 1;
 
     for(const auto& el : *cfgs)
     {
         const auto& cfg = el.second;
-        if((N % cfg.tile_N) == 0)
+        if (cfg.bpreshuffle == bpreshuffle_en && ((cfg.splitK == log2_k_split_en) || !log2_k_split_en))
         {
-            int tg_num_M         = (M + cfg.tile_M - 1) / cfg.tile_M;
-            int tg_num_N         = (N + cfg.tile_N - 1) / cfg.tile_N;
-            tg_num               = tg_num_M * tg_num_N;
-            uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
-            if(local_round < round)
+            if((N % cfg.tile_N) == 0)
             {
-                round         = local_round;
-                empty_cu      = local_round * num_cu - tg_num;
-                selectedtileM = cfg.tile_M;
-                selectedtileN = cfg.tile_N;
-            }
-            else if(local_round == round)
-            {
-                if(empty_cu > (local_round * num_cu - tg_num))
+                vector<int> splitK_list = (log2_k_split.has_value() && cfg.splitK) ? {2^log2_k_split.value()} : (cfg.splitK ? vector<int>{2, 4, 8, 16} : vector<int>{1});
+                for (auto& splitK : splitK_list)
                 {
-                    round         = local_round;
-                    empty_cu      = local_round * num_cu - tg_num;
-                    selectedtileM = cfg.tile_M;
-                    selectedtileN = cfg.tile_N;
-                }
-            }
-        }
-    }
-
-    empty_cu = num_cu;
-    tg_num   = 0;
-    round    = 0xffffffff;
-
-    std::string selected = "";
-    for(const auto& el : *cfgs)
-    {
-        const auto& cfg = el.second;
-        if(cfg.splitK == 1)
-        {
-            for(auto& K : {2, 4, 8, 16})
-            {
-                int tg_num_M        = (M + cfg.tile_M - 1) / cfg.tile_M;
-                int tg_num_N        = (N + cfg.tile_N - 1) / cfg.tile_N;
-                tg_num              = tg_num_M * tg_num_N * K;
-                int32_t local_round = (tg_num + num_cu - 1) / num_cu;
-                if(local_round < round)
-                {
-                    round          = local_round;
-                    empty_cu       = local_round * num_cu - tg_num;
-                    selectedksplit = K;
-                }
-                else if(local_round == round)
-                {
-                    if(empty_cu > (local_round * num_cu - tg_num))
+                    int tg_num_M         = (M + cfg.tile_M - 1) / cfg.tile_M;
+                    int tg_num_N         = (N + cfg.tile_N - 1) / cfg.tile_N;
+                    tg_num               = tg_num_M * tg_num_N * splitK;
+                    uint32_t local_round = (tg_num + num_cu - 1) / num_cu;
+                    if(local_round < round)
                     {
-                        round          = local_round;
-                        empty_cu       = local_round * num_cu - tg_num;
-                        selectedksplit = K;
+                        round         = local_round;
+                        empty_cu      = local_round * num_cu - tg_num;
+                        selectedKernelName = el.first;
+                        selectedsplitK= splitK;
+                    }
+                    else if(local_round == round)
+                    {
+                        if(empty_cu > (local_round * num_cu - tg_num))
+                        {
+                            round         = local_round;
+                            empty_cu      = local_round * num_cu - tg_num;
+                            selectedKernelName = el.first;
+                            selectedsplitK= splitK;
+                        }
                     }
                 }
             }
-            selectedksplit = std::log2(selectedksplit);
-            empty_cu       = num_cu;
-            tg_num         = 0;
-            round          = 0xffffffff;
-        }
-
-        if((log2_k_split_en == 1 || (!log2_k_split.has_value() && selectedksplit > 0)))
-        {
-            selected = el.first;
-        }
-        else if(cfg.tile_M == selectedtileM && cfg.bpreshuffle == bpreshuffle_en &&
-                cfg.splitK == log2_k_split_en)
-        {
-            selected = el.first;
         }
     }
-
-    if(selected != "")
+    if(selectedKernelName != "")
     {
-        return selected;
+        return std::make_tuple(selectedKernelName, selectedsplitK);
     }
 
     TORCH_CHECK(false, __func__, ": cannot get heuristic kernel!");
@@ -241,8 +198,10 @@ torch::Tensor gemm_a4w4_asm(torch::Tensor& A,       // A:[M, K/2] f4x2
     int selectedksplit = 0;
     if(kernelName.empty())
     {
-        kernelName = get_heuristic_kernel(
+        auto res = get_heuristic_kernel(
             Mdim, Ndim, Kdim, log2_k_split, selectedksplit, bpreshuffle, config_map);
+        kernelName = std::get<0>(res);
+        selectedksplit = std::get<1>(res);
     }
 
     AiterAsmKernel* impl_ptr = nullptr;

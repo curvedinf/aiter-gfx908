@@ -1115,22 +1115,12 @@ struct BlockFmhaPipelineQRKSVS
             const auto v_tile = load_tile(v_dram_window);
             __builtin_amdgcn_sched_barrier(0);
 
-            if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
-            {
-                auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
-                    Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
-                shuffle_tile(v_shuffle_tmp, v_tile);
-                __builtin_amdgcn_sched_barrier(0);
-                store_tile(
-                    v_lds_window(v_lds_write_idx),
-                    tile_elementwise_in(v_element_func, v_shuffle_tmp)); // store the prefetch
-            }
-            else
-            {
-                __builtin_amdgcn_sched_barrier(0);
-                store_tile(v_lds_window(v_lds_write_idx),
-                           tile_elementwise_in(v_element_func, v_tile)); // store the prefetch
-            }
+            auto v_shuffle_tmp = make_static_distributed_tensor<VDataType>(
+                Policy::template MakeShuffledVRegBlockDescriptor<Problem>());
+            shuffle_tile(v_shuffle_tmp, v_tile);
+            __builtin_amdgcn_sched_barrier(0);
+            store_tile(v_lds_window(v_lds_write_idx),
+                       tile_elementwise_in(v_element_func, v_shuffle_tmp));
 
             /// FIXME: use the future-predicting method to move the window
             move_tile_window(v_dram_window, {0, kK1});
@@ -1625,6 +1615,7 @@ struct FmhaFwdKernel
     using SaccDataType = ck_tile::remove_cvref_t<typename FmhaPipeline::SaccDataType>;
 
     using VLayout = ck_tile::remove_cvref_t<typename FmhaPipeline::VLayout>;
+    static_assert(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>);
 
     static constexpr bool kIsGroupMode      = FmhaPipeline::kIsGroupMode;
     static constexpr bool kPadSeqLenQ       = FmhaPipeline::kPadSeqLenQ;
@@ -2763,43 +2754,25 @@ struct FmhaFwdKernel
                 sequence<kPadSeqLenK_, kPadHeadDimQ>{});
         }();
         const auto v_dram = [&]() {
-            if constexpr(std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor>)
-            {
-                const auto v_dram_naive = make_naive_tensor_view<address_space_enum::global>(
-                    v_ptr,
-                    make_tuple(kargs.seqlen_k, kargs.hdim_v),
-                    make_tuple(kargs.stride_v, 1),
-                    number<FmhaPipeline::kAlignmentV>{},
-                    number<1>{});
+            const auto v_dram_naive = make_naive_tensor_view<address_space_enum::global>(
+                v_ptr,
+                make_tuple(kargs.seqlen_k, kargs.hdim_v),
+                make_tuple(kargs.stride_v, 1),
+                number<FmhaPipeline::kAlignmentV>{},
+                number<1>{});
 
-                const auto v_dram_transposed =
-                    transform_tensor_view(v_dram_naive,
-                                          make_tuple(make_pass_through_transform(kargs.hdim_v),
-                                                     make_pass_through_transform(kargs.seqlen_k)),
-                                          make_tuple(sequence<1>{}, sequence<0>{}),
-                                          make_tuple(sequence<0>{}, sequence<1>{}));
+            const auto v_dram_transposed =
+                transform_tensor_view(v_dram_naive,
+                                      make_tuple(make_pass_through_transform(kargs.hdim_v),
+                                                 make_pass_through_transform(kargs.seqlen_k)),
+                                      make_tuple(sequence<1>{}, sequence<0>{}),
+                                      make_tuple(sequence<0>{}, sequence<1>{}));
 
-                constexpr bool kPadSeqLenK_ = kUseAsyncCopy ? kPadSeqLenK : false;
-                return pad_tensor_view(
-                    v_dram_transposed,
-                    make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
-                    sequence<kPadHeadDimV, kPadSeqLenK_>{});
-            }
-            else
-            {
-                const auto v_dram_naive = make_naive_tensor_view<address_space_enum::global>(
-                    v_ptr,
-                    make_tuple(kargs.hdim_v, kargs.seqlen_k),
-                    make_tuple(kargs.stride_v, 1),
-                    number<FmhaPipeline::kAlignmentV>{},
-                    number<1>{});
-
-                constexpr bool kPadHeadDimV_ = kUseAsyncCopy ? kPadHeadDimV : false;
-                return pad_tensor_view(
-                    v_dram_naive,
-                    make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
-                    sequence<kPadHeadDimV_, kPadSeqLenK>{});
-            }
+            constexpr bool kPadSeqLenK_ = kUseAsyncCopy ? kPadSeqLenK : false;
+            return pad_tensor_view(
+                v_dram_transposed,
+                make_tuple(number<FmhaPipeline::kN1>{}, number<FmhaPipeline::kK1>{}),
+                sequence<kPadHeadDimV, kPadSeqLenK_>{});
         }();
 
         auto q_dram_window = make_tile_window(

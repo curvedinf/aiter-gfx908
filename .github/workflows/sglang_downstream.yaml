@@ -41,7 +41,7 @@ jobs:
           cd sglang
           sed -i 's|-v "${GITHUB_WORKSPACE:-$PWD}:/sglang-checkout"|-v "${GITHUB_WORKSPACE:-$PWD}/sglang:/sglang-checkout"|g' scripts/amd_ci_start_container.sh
           sed -i 's/ci_sglang/sglang_aiter_test/g' scripts/amd_ci_start_container.sh
-          docker ps -aq -f name=ci_sglang | xargs -r docker stop | xargs -r docker rm; bash scripts/amd_ci_start_container.sh
+          docker ps -aq -f name=sglang_aiter_test | xargs -r docker stop | xargs -r docker rm; bash scripts/amd_ci_start_container.sh
         env:
           GITHUB_WORKSPACE: ${{ github.workspace }}
 

@@ -55,7 +55,8 @@ jobs:
           bash scripts/amd_ci_exec.sh python3 test_eval_fp8_accuracy.py
           bash scripts/amd_ci_exec.sh python3 models/test_qwen_models.py
         
+      # TODO: Clean up because some dependencies are installed under root user which can't be removed by runner, these dependencies should be installed as a non-root user
       - name: Clean Up
         if: always()
         run:
-          docker exec -u root ci_sglang bash -c "rm -rf /sglang-checkout/sglang; rm -rf /sglang-checkout/aiter"
+          docker exec -u root ci_sglang bash -c "rm -rf /sglang-checkout/sgl-kernel; rm -rf /sglang-checkout/python"

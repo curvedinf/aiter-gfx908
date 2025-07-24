@@ -52,14 +52,18 @@ __global__ void kn_get_mla_metadata(
         total_kv_pad = CEIL(kv_len, cu_num);
     }
 
+    __syncthreads();
     // warp_reduce_sum(total_kv_pad, batch_size);
     for (int stride = batch_size/ 2; stride > 0; stride >>= 1)
     {
         int tmp = __shfl_xor(total_kv_pad, stride);
         total_kv_pad += tmp;
     }
+    if (threadIdx.x == 0)
+        printf("total_kv_pad%d \n", total_kv_pad);
 
-    int32_t split_size_pad = CEIL(total_kv_pad, cu_num) + fixed_blocked_len;
+    __syncthreads();
+    int32_t split_size_pad      = CEIL(total_kv_pad, cu_num) + fixed_blocked_len;
     int32_t split_size_pad_half = split_size_pad / 2;
 
     if (tidx < batch_size) 
@@ -67,6 +71,8 @@ __global__ void kn_get_mla_metadata(
         int32_t num_kv_splits_cur_batch = CEIL(kv_seq_les[tidx], split_size_pad);
         num_kv_splits_shard[tidx] = num_kv_splits_cur_batch;
     }
+
+    __syncthreads();
 
     if (tidx == 0)
     {
@@ -77,15 +83,19 @@ __global__ void kn_get_mla_metadata(
             split_shift++;
         }
 
+        printf("split_shift%d \n", split_shift);
+
         template_data_local[0] = 0;
         for (int i = 1; i < batch_size + 1; ++i)
         {
-            template_data_local[i] = template_data_local[i - 1] + num_kv_splits_shard[i];
+            template_data_local[i] = template_data_local[i - 1] + num_kv_splits_shard[i - 1];
+            printf("i %d template_data_local%d \n", template_data_local[i],num_kv_splits_shard[i - 1]);
         }
 
         int32_t fix_size = template_data_local[batch_size] - cu_num;
         int32_t sign = fix_size > 0 ? 1 : -1;
 
+        printf("fix_size %d \n", fix_size);
         if (fix_size != 0)
         {
             for (int i = 1; i < batch_size + 1; ++i)
@@ -99,6 +109,8 @@ __global__ void kn_get_mla_metadata(
                 template_data_local[i] -= fix_size;
             }
         }
+
+        printf("fix_size222 %d \n", fix_size);
 
         int32_t end_dim = batch_size;
         while (fix_size != 0)
@@ -140,6 +152,8 @@ __global__ void kn_get_mla_metadata(
         //      split_table_shared[i] = split_table_local[i];
         // }
     }
+
+    __syncthreads();
 
     if (tidx < batch_size) 
     {
@@ -194,6 +208,7 @@ std::vector<torch::Tensor> get_mla_metadata_impl(
         torch::empty({cu_num}, kv_indptr.options());
 
     constexpr int32_t fixed_blocked_len = 80;
+	printf("batch_size: %d", batch_size);
 
     // launch kernel
     const dim3 grid = dim3(1, 1, 1);

@@ -299,6 +299,11 @@ def mla_decode_fwd(
     bs = qo_indptr.shape[0] - 1
     total_kv = kv_indices.shape[0]
 
+    if num_kv_splits_indptr is None:
+        num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(
+            None, bs, total_kv, nhead, max_seqlen_q, device
+        )
+
     if nhead == 16 and max_seqlen_q == 1:
         # special case for 16 heads and max_seqlen_q == 1
         logits = torch.empty(
@@ -325,10 +330,6 @@ def mla_decode_fwd(
     Lv = v_head_dim
     BLOCK_DV = triton.next_power_of_2(Lv)
 
-    if num_kv_splits_indptr is None:
-        num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(
-            None, bs, total_kv, nhead, max_seqlen_q, device
-        )
     aiter.mla_decode_stage1_asm_fwd(
         q,
         kv_buffer,
@@ -384,7 +385,7 @@ def mla_decode_fwd_balenced(
     max_seqlen_q,
     sm_scale=None,  # 1.0 / (qk_head_dim**0.5)
     logit_cap=0.0,
-    num_kv_splits=None,
+    num_kv_splits=16,
     num_kv_splits_indptr=None,
     batch_split_table=None,  # for experts only!!!
     split_table=None,

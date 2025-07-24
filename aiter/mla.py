@@ -217,7 +217,7 @@ def get_meta_param_balanced(bs, total_kv, kv_indptr, nhead, max_seqlen_q, device
                 num_kv_splits_indptr_fixed[i] = num_kv_splits_indptr[i] - fixed_size
         else:
             for i in range(1, bs + 1):
-                if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad > 2 * split_size_pad / 2:
+                if fixed_size != fix_size and kv_seq_les[i-1] > 3 * split_size_pad and kv_seq_les[i-1] % split_size_pad > split_size_pad / 2:
                     fixed_size += sign
                 num_kv_splits_indptr_fixed[i] = num_kv_splits_indptr[i] - fixed_size
     else:
@@ -348,6 +348,8 @@ def mla_decode_fwd(
         aiter.flash_mla_fwd_inline_impl(
             q,
             kv_buffer,
+            # q_nope,
+            # k_nope,
             qo_indptr,
             kv_indptr,
             kv_indices,
@@ -388,50 +390,52 @@ def mla_decode_fwd(
             num_stages=2,
             **extra_kargs,
         )
-    else:
-        num_kv_splits_asm, num_kv_splits_indptr_asm, mgc = get_meta_param(
-            None, bs, total_kv, nhead, max_seqlen_q, device
-        )
-        aiter.mla_decode_stage1_asm_fwd(
-            q,
-            kv_buffer,
-            qo_indptr,
-            kv_indptr,
-            kv_indices,
-            kv_last_page_lens,
-            num_kv_splits_indptr_asm,
-            max_seqlen_q,
-            sm_scale,
-            logits,
-            attn_lse,
-        )
+    # else:
 
-        if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
-            return logits.view(total_s, nhead, v_head_dim), attn_lse
+    o_1 = torch.empty_like(o)
+    num_kv_splits_asm, num_kv_splits_indptr_asm, mgc = get_meta_param(
+        None, bs, total_kv, nhead, max_seqlen_q, device
+    )
+    aiter.mla_decode_stage1_asm_fwd(
+        q,
+        kv_buffer,
+        qo_indptr,
+        kv_indptr,
+        kv_indices,
+        kv_last_page_lens,
+        num_kv_splits_indptr_asm,
+        max_seqlen_q,
+        sm_scale,
+        logits,
+        attn_lse,
+    )
 
-        grid = (bs, nhead)
-        extra_kargs = {"waves_per_eu": 4}
-        _fwd_kernel_stage2_asm[grid](
-            logits,
-            attn_lse,
-            o,
-            qo_indptr,
-            kv_indptr,
-            num_kv_splits_indptr_asm,
-            attn_lse.stride(0),
-            attn_lse.stride(2),
-            attn_lse.stride(1),
-            o.stride(0),
-            o.stride(1),
-            MAYBE_FINAL_OUT=MAYBE_FINAL_OUT,
-            BATCH_NUM=bs,
-            BLOCK_DV=BLOCK_DV,
-            Lv=Lv,
-            mgc=mgc,
-            num_warps=4,
-            num_stages=2,
-            **extra_kargs,
-        )
+    # if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
+    #     return logits.view(total_s, nhead, v_head_dim), attn_lse
+
+    grid = (bs, nhead)
+    extra_kargs = {"waves_per_eu": 4}
+    _fwd_kernel_stage2_asm[grid](
+        logits,
+        attn_lse,
+        o_1,
+        qo_indptr,
+        kv_indptr,
+        num_kv_splits_indptr_asm,
+        attn_lse.stride(0),
+        attn_lse.stride(2),
+        attn_lse.stride(1),
+        o.stride(0),
+        o.stride(1),
+        MAYBE_FINAL_OUT=MAYBE_FINAL_OUT,
+        BATCH_NUM=bs,
+        BLOCK_DV=BLOCK_DV,
+        Lv=Lv,
+        mgc=mgc,
+        num_warps=4,
+        num_stages=2,
+        **extra_kargs,
+    )
 
     return logits, attn_lse
 

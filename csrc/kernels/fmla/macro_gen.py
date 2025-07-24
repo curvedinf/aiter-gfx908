@@ -1,5 +1,5 @@
 
-file_w = open("./macro_utils.hpp", mode="w")
+file_w = open("./macro_utils_b.hpp", mode="w")
 
 file_w.write("#define LOOPEND()\n")
 
@@ -59,16 +59,30 @@ for r in range(2):
         file_w.write("\n")
 
 
-for r in range(4):
-    for i in range(2):
+# for r in range(4):
+#     for i in range(2):
+#         for j in range(4):
+#             if j != 3:
+#                 line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16 + j}, dram_st_base + {r * 2048 + i * 64 + j})  F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j + 1}(func, dram_st_base) \n"
+#             elif i == 0:
+#                 line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16 + j}, dram_st_base + {r * 2048 + i * 64 + j})  F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i + 1}_{0}(func, dram_st_base) \n"
+#             elif r != 3:
+#                 line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16 + j}, dram_st_base + {r * 2048 + i * 64 + j})  F32_VGPR_2_DRAM_LOOP_STRIDE1_{r + 1}_{0}_{0}(func, dram_st_base) \n"
+#             else:
+#                 line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16 + j}, dram_st_base + {r * 2048 + i * 64 + j})  LOOPEND() \n"
+#             file_w.write(line)
+#         file_w.write("\n")
+
+for i in range(2):
+    for r in range(4):
         for j in range(4):
             if j != 3:
-                line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16 + j}, dram_st_base + {r * 2048 + i * 64 + j})  F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j + 1}(func, dram_st_base) \n"
+                line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16} + {j}, dram_st_base + {r * 2048 + i * 64} + {j})  F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j + 1}(func, dram_st_base) \n"
             elif i == 0:
-                line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16 + j}, dram_st_base + {r * 2048 + i * 64 + j})  F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i + 1}_{0}(func, dram_st_base) \n"
+                line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16} + {j}, dram_st_base + {r * 2048 + i * 64} + {j})  F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i + 1}_{0}(func, dram_st_base) \n"
             elif r != 3:
-                line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16 + j}, dram_st_base + {r * 2048 + i * 64 + j})  F32_VGPR_2_DRAM_LOOP_STRIDE1_{r + 1}_{0}_{0}(func, dram_st_base) \n"
+                line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16} + {j}, dram_st_base + {r * 2048 + i * 64} + {j})  F32_VGPR_2_DRAM_LOOP_STRIDE1_{r + 1}_{0}_{0}(func, dram_st_base) \n"
             else:
-                line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16 + j}, dram_st_base + {r * 2048 + i * 64 + j})  LOOPEND() \n"
+                line = f"#define F32_VGPR_2_DRAM_LOOP_STRIDE1_{r}_{i}_{j}(func, dram_st_base)  func({r * 4 + i * 16} + {j}, dram_st_base + {r * 2048 + i * 64} + {j})  LOOPEND() \n"
             file_w.write(line)
         file_w.write("\n")

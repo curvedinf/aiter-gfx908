@@ -81,51 +81,60 @@ namespace ck_tile {
 struct FlashMlaInlineFwdParams 
 {
     void* __restrict__ p_output;
-
-    int32_t* __restrict__ p_seqlens_k;      // [b]
-    int32_t* __restrict__ p_block_table;    // [b, max_seqlen_pad // block_size]
-    int32_t* __restrict__ p_qo_indptr;      // [b]
-    int32_t* __restrict__ p_num_kv_splits_indptr;      // [b]
-    int32_t* __restrict__ p_batch_split_table;      // [num_splits]
-    int32_t* __restrict__ p_split_table;      // [num_splits]
-    
-    void* __restrict__ p_query;
-    void* __restrict__ p_key;
-    void* __restrict__ p_value;
+    p2 _p0;
     void* __restrict__ p_softmax_lse;
-    void* __restrict__ p_softmax_lseaccum;
+    p2 _p1;
+    void* __restrict__ p_query;
+    p2 _p2;
+    void* __restrict__ p_key;
+    p2 _p3;
+    void* __restrict__ p_seqlens_k;      // [b]
+    p2 _p4;
+    void* __restrict__ p_block_table;    // [b, max_seqlen_pad // block_size]
+    p2 _p5;
     void* __restrict__ p_output_com;
-    void* __restrict__ p_query_rope;
-    void* __restrict__ p_key_rope;
-
+    p2 _p6;
+    float   scale_softmax;
+    p3 _p12;
+    int32_t max_seqlen_q;
+    p3 _p13;
+    int32_t size_h;         // head count of q
+    p3 _p14;
     int32_t stride_q_b;     // q batch stride
-    int32_t stride_page;    // page stride 
+    p3 _p15;
+    int32_t stride_page;    // page stride
+    p3 _p16;
+    int32_t num_splits;
+    p3 _p17;
+    void* __restrict__ p_qo_indptr;      // [b]
+    p2 _p18;
+    void* __restrict__ p_num_kv_splits_indptr;      // [b]
+    p2 _p19;
+    void* __restrict__ p_query_rope;
+    p2 _p20;
+    void* __restrict__ p_key_rope;
+    p2 _p21;
+
+    void* __restrict__ p_batch_split_table;      // [num_splits]
+    void* __restrict__ p_split_table;      // [num_splits]
+
     int32_t stride_page_rope;    // page stride 
     int32_t size_b;         // batch count
     int32_t size_s;         // seqlen of q
-    int32_t size_h;         // head count of q
     int32_t hq_hk_ratio;    // head count of q / head count of kv
-    int32_t num_splits;
-    int64_t block_table_batch_stride;
-    int32_t max_seqlen_q;
     int32_t num_page_blocks;
     int32_t page_block_size;
-    float   scale_softmax;
     int32_t cu_nums;
 
-    // Use int64_t if there is int32 overflow case. For now, just use int32 to save sgpr and prevent using
-    // spill table.
-    using index_t = int32_t;
-
-    index_t stride_s_o;
-    index_t stride_h_o;
-    index_t stride_b_lseacc;
-    index_t stride_h_lseacc;
-    index_t stride_sp_lseacc;
-    index_t stride_b_oacc;
-    index_t stride_h_oacc;
-    index_t stride_sp_oacc;
-    index_t stride_s_oacc;
+    int32_t stride_s_o;
+    int32_t stride_h_o;
+    int32_t stride_b_lseacc;
+    int32_t stride_h_lseacc;
+    int32_t stride_sp_lseacc;
+    int32_t stride_b_oacc;
+    int32_t stride_h_oacc;
+    int32_t stride_sp_oacc;
+    int32_t stride_s_oacc;
 };
 
 
@@ -157,9 +166,8 @@ template<typename Traits, typename scalar_t, typename acc_t, bool IsRopeSep>
 struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
 {
     CK_TILE_DEVICE auto
-    operator()(const FlashMlaInlineFwdParams  &params,
-               CK_TILE_LDS_ADDR void* smem
-               )
+    operator()(const FlashMlaInlineFwdParams &params,
+               CK_TILE_LDS_ADDR void* smem)
     {
 		auto o_lds_ptr   = reinterpret_cast<uint32_t*>(smem);
         int batch_idx = reinterpret_cast<int32_t*>(params.p_batch_split_table)[blockIdx.z];
@@ -172,8 +180,7 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         register int max_seqlen_q asm("s94");
         asm volatile ("s_mov_b32 %0, %1" : "=s"(max_seqlen_q) : "s"(params.max_seqlen_q));
 
-		auto o_bf16_lds_ptr   = reinterpret_cast<bf16_t*>(smem);
-
+		auto o_bf16_lds_ptr   = reinterpret_cast<scalar_t*>(smem);
 		auto res_kv_indptr  = make_wave_ptr_resource(params.p_seqlens_k);
 		auto res_qo         = make_wave_ptr_resource(params.p_qo_indptr);
 		auto res_num_kv_splits = make_wave_ptr_resource(params.p_num_kv_splits_indptr);
@@ -181,15 +188,13 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         const int32_t tensor_len = Traits::kBlockM * Traits::kSizeD * sizeof(scalar_t) *
                                params.size_b * params.max_seqlen_q;
 
-		float s_scalar_1 = 0.f;
-
         constexpr int32_t q_dim = IsRopeSep ? Traits::kSizeNope : Traits::kSizeD;
         constexpr int32_t q_rope_dim = IsRopeSep ? Traits::kSizeRope : Traits::kSizeD;
 
-		bf16_t* q_nope_ptr = reinterpret_cast<bf16_t*>(params.p_query) + batch_idx * q_dim * params.max_seqlen_q * params.size_h;
+		scalar_t* q_nope_ptr = reinterpret_cast<scalar_t*>(params.p_query) + batch_idx * q_dim * params.max_seqlen_q * params.size_h;
 
-		bf16_t* q_rope_ptr = IsRopeSep ?
-            reinterpret_cast<bf16_t*>(params.p_query_rope) + batch_idx * Traits::kSizeRope * params.max_seqlen_q * params.size_h :
+		scalar_t* q_rope_ptr = IsRopeSep ?
+            reinterpret_cast<scalar_t*>(params.p_query_rope) + batch_idx * Traits::kSizeRope * params.max_seqlen_q * params.size_h :
             q_nope_ptr + Traits::kSizeNope;
 
 		auto q_nope_src = ck_tile::make_wave_buffer_resource(reinterpret_cast<void*>(q_nope_ptr), tensor_len);
@@ -201,24 +206,24 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         auto lse_ptr    = ck_tile::make_wave_buffer_resource(params.p_softmax_lse);
         auto kv_indices = ck_tile::make_wave_buffer_resource(params.p_block_table);
 
-		bf16_t* k_rope_ptr = IsRopeSep ?
-            reinterpret_cast<bf16_t*>(params.p_key_rope) :
-            reinterpret_cast<bf16_t*>(params.p_key) + Traits::kSizeNope;
+		scalar_t* k_rope_ptr = IsRopeSep ?
+            reinterpret_cast<scalar_t*>(params.p_key_rope) :
+            reinterpret_cast<scalar_t*>(params.p_key) + Traits::kSizeNope;
         auto kv_rope_ptr = ck_tile::make_wave_buffer_resource(reinterpret_cast<void*>(k_rope_ptr));
 
         register int wave_id asm("s7") = __builtin_amdgcn_readfirstlane(threadIdx.x / get_warp_size());
         register int vthread asm("v0") = int(threadIdx.x & 63);
 
-        int32_t nope_offset = int(vthread << 2) + wave_id * q_dim * sizeof(bf16_t);
-        int32_t rope_offset = int(vthread << 2) + wave_id * q_rope_dim * sizeof(bf16_t);
+        int32_t nope_offset = int(vthread << 2) + wave_id * q_dim * sizeof(scalar_t);
+        // int32_t rope_offset = int(vthread << 2) + wave_id * q_rope_dim * sizeof(scalar_t);
+        int32_t rope_offset = int((vthread & 31) << 2) + wave_id * q_rope_dim * sizeof(scalar_t);
 
-        constexpr int32_t nope_stride = 4 * sizeof(bf16_t) * q_dim;
-        constexpr int32_t rope_stride = 4 * sizeof(bf16_t) * q_rope_dim;
+        constexpr int32_t nope_stride = 4 * sizeof(scalar_t) * q_dim;
+        constexpr int32_t rope_stride = 4 * sizeof(scalar_t) * q_rope_dim;
 
         int32_t smem_offset = wave_id * 5152;
 
-#pragma unroll
-        for (int r = 0; r < int(max_seqlen_q); ++r)
+        for (int r = 0; r < ck_tile::min(int(max_seqlen_q), 3); ++r)
         {
 #pragma unroll
             for (int i = 0; i < 4; ++i) {
@@ -238,13 +243,12 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             smem_offset += 20608;
         }
 
-        auto p_output     = reinterpret_cast<uint32_t*>(params.p_output);
-        auto p_lse        = reinterpret_cast<uint32_t*>(params.p_softmax_lse);
-        auto p_output_com = reinterpret_cast<uint32_t*>(params.p_output_com);
+        uint32_t* p_output     = reinterpret_cast<uint32_t*>(params.p_output);
+        uint32_t* p_lse        = reinterpret_cast<uint32_t*>(params.p_softmax_lse);
+        uint32_t* p_output_com = reinterpret_cast<uint32_t*>(params.p_output_com);
 
         register float s64 asm("s64") = params.scale_softmax;
         register int s65 asm("s65")   = params.size_h;
-        register int s67 asm("s92")   = params.num_splits;
         register int s66 asm("s66")   = params.stride_q_b;
         register int s68 asm("s68")   = params.stride_page;
         register int s69 asm("s69")   = 0;
@@ -844,7 +848,17 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             LOOP_STRIDE4(18, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
             LOOP_STRIDE4(19, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1848);
             F32_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx)
-            F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+            // F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+#pragma unroll
+            for (int r = 0; r < 4; ++r) {
+#pragma unroll
+                for (int i = 0; i < 2; ++i) {
+                    p_output[copy_index + r * 2048 + i * 64 + 0] = arr[r * 4 + i * 16 + 0];
+                    p_output[copy_index + r * 2048 + i * 64 + 1] = arr[r * 4 + i * 16 + 1];
+                    p_output[copy_index + r * 2048 + i * 64 + 2] = arr[r * 4 + i * 16 + 2];
+                    p_output[copy_index + r * 2048 + i * 64 + 3] = arr[r * 4 + i * 16 + 3];
+                }
+            }
             copy_index += 128;
 
 
@@ -857,7 +871,17 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             LOOP_STRIDE4(50, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
             LOOP_STRIDE4(51, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1848);
             F32_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx)
-            F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+            // F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+#pragma unroll
+            for (int r = 0; r < 4; ++r) {
+#pragma unroll
+                for (int i = 0; i < 2; ++i) {
+                    p_output[copy_index + r * 2048 + i * 64 + 0] = arr[r * 4 + i * 16 + 0];
+                    p_output[copy_index + r * 2048 + i * 64 + 1] = arr[r * 4 + i * 16 + 1];
+                    p_output[copy_index + r * 2048 + i * 64 + 2] = arr[r * 4 + i * 16 + 2];
+                    p_output[copy_index + r * 2048 + i * 64 + 3] = arr[r * 4 + i * 16 + 3];
+                }
+            }
             copy_index += 128;
 
             LOOP_STRIDE4(64, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx      );
@@ -869,7 +893,17 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             LOOP_STRIDE4(82, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
             LOOP_STRIDE4(83, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1848);
             F32_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx)
-            F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+            // F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+#pragma unroll
+            for (int r = 0; r < 4; ++r) {
+#pragma unroll
+                for (int i = 0; i < 2; ++i) {
+                    p_output[copy_index + r * 2048 + i * 64 + 0] = arr[r * 4 + i * 16 + 0];
+                    p_output[copy_index + r * 2048 + i * 64 + 1] = arr[r * 4 + i * 16 + 1];
+                    p_output[copy_index + r * 2048 + i * 64 + 2] = arr[r * 4 + i * 16 + 2];
+                    p_output[copy_index + r * 2048 + i * 64 + 3] = arr[r * 4 + i * 16 + 3];
+                }
+            }
             copy_index += 128;
 
             LOOP_STRIDE4(96, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx      );
@@ -881,7 +915,17 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             LOOP_STRIDE4(114, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1584);
             LOOP_STRIDE4(115, VGPR2SHUFFLE, F32_SUFFFLEY_2_LDS_LOOP, lds_st_idx + 1848);
             F32_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx)
-            F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+            // F32_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM, copy_index)
+#pragma unroll
+            for (int r = 0; r < 4; ++r) {
+#pragma unroll
+                for (int i = 0; i < 2; ++i) {
+                    p_output[copy_index + r * 2048 + i * 64 + 0] = arr[r * 4 + i * 16 + 0];
+                    p_output[copy_index + r * 2048 + i * 64 + 1] = arr[r * 4 + i * 16 + 1];
+                    p_output[copy_index + r * 2048 + i * 64 + 2] = arr[r * 4 + i * 16 + 2];
+                    p_output[copy_index + r * 2048 + i * 64 + 3] = arr[r * 4 + i * 16 + 3];
+                }
+            }
 
             int lse_index = int((int((vthread & 15) << 2) +
                                 int(s3) * max_seqlen_q * 16 * params.num_splits * 4 +
@@ -889,7 +933,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
                                 int(wave_id) * params.num_splits * 16 * 4) >> 2);
 
             p_lse[lse_index] = v_lse;
-#endif
         }
         else
         {
@@ -996,8 +1039,8 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             B16_LDS_2_VGPR_LOOP_STRIDE1(LDS_2_VGPR, lds_ld_idx);
             B16_VGPR_2_DRAM_LOOP_STRIDE1(VGPR_2_DRAM_DIR, copy_index);
         }
+#endif
     }
-
 };
 
 } // namespace ck_tile

@@ -273,7 +273,7 @@ def find_group(x, MASKED_BLOCKS: tl.constexpr, num_m_blocks: tl.constexpr):
         task_size = (q_block_idx + 1) * MASKED_BLOCKS
 
         # Check if the global tile `x` falls within this task's range
-        if total_blocks_processed + task_size > x and found == False:
+        if total_blocks_processed + task_size > x and not found:
             # We found it. Return the Q index, the size of its workload, and its starting tile.
             final_q_block_idx, final_task_size, final_total_blocks = (
                 q_block_idx,
@@ -654,7 +654,7 @@ def la_persistent_inner(
             + offs_m[:, None] * stride_om
             + offs_k[None, :] * stride_on
         )
-        o_ptrs = Out + o_h_offs
+        #o_ptrs = Out + o_h_offs
 
         if not finishing_block:
             # if host not finishing_block: # another CTA is processing the end of the output tile and store partial results

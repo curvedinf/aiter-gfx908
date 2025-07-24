@@ -17,7 +17,7 @@ torch.set_default_device("cuda")
 torch.set_printoptions(sci_mode=False)
 
 
-@perftest()
+@perftest(num_iters=2, num_warmup=1)
 def test_nofuse(
     hidden_states: torch.Tensor,
     gating_output: torch.Tensor,
@@ -28,21 +28,21 @@ def test_nofuse(
 
     M, _ = hidden_states.shape
 
-    topk_weights = torch.empty(M, topk, dtype=dtypes.fp32, device=hidden_states.device)
-    topk_ids = torch.empty(M, topk, dtype=dtypes.i32, device=hidden_states.device)
-    token_expert_indicies = torch.empty(
-        M, topk, dtype=dtypes.i32, device=hidden_states.device
+    gating_output = torch.nn.functional.softmax(
+        gating_output.float(),
+        dim=-1,
     )
-
-    aiter.topk_softmax(
-        topk_weights, topk_ids, token_expert_indicies, gating_output.float(), False
+    topk_weights, topk_ids = gating_output.topk(
+        k=topk,
+        dim=-1,
+        largest=True,
+        sorted=True,
     )
-    del token_expert_indicies  # Not used. Will be used in the future.
 
     if renormalize:
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
 
-    return topk_weights, topk_ids
+    return topk_weights, topk_ids.to(dtypes.i32)
 
 
 @perftest()
@@ -68,8 +68,12 @@ def test_topk_softmax(dtype, token, E, topk):
     (topk_weights_b, topk_ids_b), avg_b = test_fuse(
         hidden_states, gating_output, topk, True
     )
-    err = checkAllclose(topk_weights_a, topk_weights_b, atol=0.03)
-    checkAllclose(topk_ids_a, topk_ids_b, atol=0, msg="topk_ids")
+    id_ref, _ref = torch.sort(topk_ids_a)
+    w_ref = topk_weights_a.gather(1, _ref)
+    id_aiter, _aiter = torch.sort(topk_ids_b)
+    w_aiter = topk_weights_b.gather(1, _aiter)
+    err = checkAllclose(w_ref, w_aiter)
+    checkAllclose(id_ref, id_aiter, msg="topk_ids")
     return {"err": err, "us": avg_b}
 
 
@@ -95,7 +99,7 @@ def test_biased_grouped_topk(
     w_aiter = torch.empty_strided((token, topk), (topk + 10, 1), dtype=dtypes.fp32)
     id_aiter = torch.empty_strided((token, topk), (topk + 10, 1), dtype=dtypes.i32)
     _, us_aiter = run_perftest(
-        aiter.biased_grouped_topk,
+        aiter.biased_grouped_topk_hip,
         gating_output,
         correction_bias,
         w_aiter,
@@ -119,7 +123,41 @@ def test_biased_grouped_topk(
         id_aiter,
         msg=f"topk_ids     [golden vs aiter]:{us_ref:>8.2f} us vs {us_aiter:>8.2f} us......",
     )
-    return {"err": err, "us": us_aiter}
+    # return {"err": err, "us": us_aiter}
+
+    w_sglang = torch.empty_strided((token, topk), (topk, 1), dtype=dtypes.fp32)
+    id_sglang = torch.empty_strided((token, topk), (topk, 1), dtype=dtypes.i32)
+    _, us_sglang = run_perftest(
+        aiter.moe_fused_gate,
+        gating_output,
+        correction_bias,
+        w_sglang,
+        id_sglang,
+        group,
+        topk_group,
+        topk,
+        0,
+        scale_factor,
+    )
+
+    w_sglang = _[0]
+    id_sglang = _[1]
+
+    id_sglang, _sglang = torch.sort(id_sglang)
+    w_sglang = w_sglang.gather(1, _sglang)
+
+    # print(f"{w_ref=}")
+    # print(f"{w_sglang=}")
+    # print(f"{id_ref=}")
+    # print(f"{id_sglang=}")
+
+    checkAllclose(w_ref, w_sglang, msg="topk_weights [golden vs sglang]")
+    checkAllclose(
+        id_ref,
+        id_sglang,
+        msg=f"topk_ids     [aiter vs sglang]:{us_aiter:>8.2f} us vs {us_sglang:>8.2f} us......",
+    )
+    return {"us_aiter": us_aiter, "us_sglang": us_sglang}
 
 
 @benchmark()
@@ -177,7 +215,7 @@ def test_grouped_topk(
     return {"err": err, "us": us_aiter}
 
 
-l_dtype = ["bf16", "fp16"]
+l_dtype = ["fp32", "bf16", "fp16"]
 l_expert = [64, 256]
 l_m = [1, 8, 16, 32, 64, 128, 256, 65536, 163840]
 l_token = [1, 2, 5, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 10000, 16384]

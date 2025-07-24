@@ -134,6 +134,9 @@ def test_triton_unified_attn(
         num_blocks, block_size, num_kv_heads, head_size, dtype=dtype
     )
     value_cache = torch.randn_like(key_cache)
+    # first block is used for masking for certain cases (load and ignore rather than masked load)
+    # for better testing, but nan there to make sure those values do not propagate during attn. calc.
+    # if it propagates to the results, tests will fail for sure when done this way 
     key_cache[0] = float("nan")
     value_cache[0] = float("nan")
     cu_query_lens = torch.tensor([0] + query_lens, dtype=torch.int32).cumsum(

@@ -4,6 +4,6 @@ on: [push, pull_request]
 
 jobs:
   test:
-    runs-on: arc-custom-runners-type1
+    runs-on: aiter-k8s-build
     steps:
       - run: echo "Hello, world!"

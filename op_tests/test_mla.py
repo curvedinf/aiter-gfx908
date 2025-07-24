@@ -342,7 +342,7 @@ def test_mla(
     # aiter implementation
     kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
     out_asm = torch.zeros((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
-    if varlen == False:
+    if varlen == False or mtp == 1:
         (attn_logits, attn_lse), us_asm_decode = run_perftest(
             aiter.mla.mla_decode_fwd,
             q,

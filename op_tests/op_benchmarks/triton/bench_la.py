@@ -7,7 +7,6 @@ import triton
 
 from aiter.ops.triton.lean_atten import persistent_lean_attention
 
-import collections
 from bisect import bisect_right
 
 

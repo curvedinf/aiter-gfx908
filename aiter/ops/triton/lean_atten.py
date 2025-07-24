@@ -648,13 +648,13 @@ def la_persistent_inner(
         acc_permuted = tl.permute(acc_reshaped, (0, 2, 1))
         acc0, acc1 = tl.split(acc_permuted)
 
-        o_h_offs = (
-            q_idx * BLOCK_M * stride_om
-            + tile_head_idx * stride_oh
-            + offs_m[:, None] * stride_om
-            + offs_k[None, :] * stride_on
-        )
-        #o_ptrs = Out + o_h_offs
+        # o_h_offs = (
+        #    q_idx * BLOCK_M * stride_om
+        #    + tile_head_idx * stride_oh
+        #    + offs_m[:, None] * stride_om
+        #    + offs_k[None, :] * stride_on
+        # )
+        # o_ptrs = Out + o_h_offs
 
         if not finishing_block:
             # if host not finishing_block: # another CTA is processing the end of the output tile and store partial results

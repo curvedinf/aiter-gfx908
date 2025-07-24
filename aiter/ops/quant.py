@@ -192,7 +192,7 @@ def per_token_quant_hip(
         raise ValueError("unsupported: static per token quant")
 
     if 1:
-        y = torch.zeros(shape, dtype=quant_dtype, device=device)
+        y = torch.empty(shape, dtype=quant_dtype, device=device)
         dynamic_per_token_scaled_quant(
             y, x, scale, num_rows=num_rows, num_rows_factor=num_rows_factor
         )

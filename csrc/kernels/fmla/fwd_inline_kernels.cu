@@ -437,96 +437,96 @@ __global__ void kn_fmla_fwd_splictkv_prefill_inline(
 
     ck_tile::Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total<Traits, scalar_t, acc_t, IsRopeSep> fmla_inline{};
 
-    fmla_inline(
-        params,
-        smem);
+    fmla_inline(params, smem);
 }
 
 template <typename Traits, int32_t kMaxSplits, typename out_t, typename in_t>
 __global__ void kn_fmla_fwd_splictkv_prefill_combine(
     const ck_tile::FlashMlaInlineFwdParams params)
 {
-  //   using Policy  = FlashMlaCombineKernelPolicy<Traits, out_t, in_t>;
-  //   int32_t cur_batch = blockIdx.x;
-  //   int32_t cur_head  = blockIdx.y;
-		//
-  //   int32_t cur_qo_start = params.p_qo_indptr[cur_batch];
-  //   int32_t cur_qo_end   = params.p_qo_indptr[cur_batch + 1];
-		//
-  //   int32_t cur_split_start   = params.p_num_kv_splits_indptr[cur_batch];
-  //   int32_t cur_split_end     = params.p_num_kv_splits_indptr[cur_batch + 1];
-  //   int32_t num_max_kv_splits = params.p_num_kv_splits_indptr[params.size_b];
-  //   int32_t cur_kv_seq_len    = params.p_seqlens_k[cur_batch + 1] - params.p_seqlens_k[cur_batch];
-		//
-  //   int32_t offs_oacc = cur_head * params.stride_h_lseacc;
-		//
-  //   int32_t num_valid_kv_splits = ck_tile::min(
-  //       cur_split_end - cur_split_start, ck_tile::integer_divide_ceil(cur_kv_seq_len, 16)
-  //   );
-		//
-  //   bool FINAL_OUT = true && num_max_kv_splits == params.size_b; 
-		//
-  //   auto oaccu_window_bf16 =
-  //       Policy::template MakeOaccuTileWindow<ck_tile::bf16_t>(params.p_output,
-  //                                                             cur_head,
-  //                                                             cur_qo_start * params.num_splits * params.size_h,
-  //                                                             params.num_splits * (cur_qo_end - cur_qo_start));
-		//
-  //   auto oaccu_window =
-  //       Policy::template MakeOaccuTileWindow<float>(params.p_output,
-  //                                                   cur_head,
-  //                                                   cur_qo_start * params.num_splits * params.size_h,
-  //                                                   params.num_splits * (cur_qo_end - cur_qo_start));
-		//
-  //   auto reg_out = ck_tile::make_static_distributed_tensor<in_t>(
-  //       decltype(ck_tile::load_tile(oaccu_window))::get_tile_distribution());
-  //   ck_tile::set_tile(reg_out, 0.f);
-		//
-  //   float e_sum = 0.0;
-  //   float e_max = -ck_tile::numeric<in_t>::infinity();
-  //   for (int32_t cur_qo = cur_qo_start; cur_qo < cur_qo_end; ++cur_qo)
-  //   {
-		// auto dram_out = Policy::MakeOutputTileWindow(
-		// 	static_cast<out_t*>(params.p_output_com) +
-		// 	cur_head * params.stride_h_o + cur_qo * params.stride_s_o);
-  //       if (num_valid_kv_splits == 1) 
-  //       {
-  //           auto oaccu = ck_tile::load_tile(oaccu_window_bf16);
-  //           ck_tile::store_tile(dram_out, oaccu);
-  //           ck_tile::move_tile_window(oaccu_window_bf16, {2 * params.num_splits, 0});
-  //       }
-  //       else
-  //       {
-  //           for (int32_t split_idx = 0; split_idx < num_valid_kv_splits; ++split_idx)
-  //           {
-  //               float tlogic = reinterpret_cast<float*>(params.p_softmax_lse)[
-  //                   cur_qo * params.stride_b_lseacc +
-  //                   offs_oacc +
-  //                   split_idx * params.stride_sp_lseacc
-  //               ];
-  //               float n_e_max = ck_tile::max(tlogic, e_max);
-  //               auto oaccu = ck_tile::load_tile(oaccu_window);
-		//
-  //               float old_scale = ck_tile::exp(e_max - n_e_max);
-  //               float exp_logic = ck_tile::exp(tlogic - n_e_max);
-  //               ck_tile::sweep_tile(oaccu, [&](auto idx) {
-  //                   reg_out(idx) *= old_scale;
-  //                   reg_out(idx) += exp_logic * oaccu(idx);
-  //               });
-		//
-  //               e_sum = e_sum * old_scale + exp_logic;
-  //               e_max = n_e_max;
-  //               ck_tile::move_tile_window(oaccu_window, {1, 0});
-  //           }
-  //           ck_tile::sweep_tile(reg_out, [&](auto idx) {
-  //               reg_out(idx) /= e_sum;
-  //           });
-  //           ck_tile::store_tile(dram_out, ck_tile::cast_tile<out_t>(reg_out));
-  //           ck_tile::set_tile(reg_out, 0.f);
-  //           e_sum = 0.f;
-  //           ck_tile::move_tile_window(oaccu_window, {params.num_splits - num_valid_kv_splits, 0});
-  //       }
-  //   }
+#ifdef DO_COMBINE_IN_HIP
+    using Policy  = FlashMlaCombineKernelPolicy<Traits, out_t, in_t>;
+    int32_t cur_batch = blockIdx.x;
+    int32_t cur_head  = blockIdx.y;
+
+    int32_t cur_qo_start = params.p_qo_indptr[cur_batch];
+    int32_t cur_qo_end   = params.p_qo_indptr[cur_batch + 1];
+
+    int32_t cur_split_start   = params.p_num_kv_splits_indptr[cur_batch];
+    int32_t cur_split_end     = params.p_num_kv_splits_indptr[cur_batch + 1];
+    int32_t num_max_kv_splits = params.p_num_kv_splits_indptr[params.size_b];
+    int32_t cur_kv_seq_len    = params.p_seqlens_k[cur_batch + 1] - params.p_seqlens_k[cur_batch];
+
+    int32_t offs_oacc = cur_head * params.stride_h_lseacc;
+
+    int32_t num_valid_kv_splits = ck_tile::min(
+        cur_split_end - cur_split_start, ck_tile::integer_divide_ceil(cur_kv_seq_len, 16)
+    );
+
+    bool FINAL_OUT = true && num_max_kv_splits == params.size_b; 
+
+    auto oaccu_window_bf16 =
+        Policy::template MakeOaccuTileWindow<ck_tile::bf16_t>(params.p_output,
+                                                              cur_head,
+                                                              cur_qo_start * params.num_splits * params.size_h,
+                                                              params.num_splits * (cur_qo_end - cur_qo_start));
+
+    auto oaccu_window =
+        Policy::template MakeOaccuTileWindow<float>(params.p_output,
+                                                    cur_head,
+                                                    cur_qo_start * params.num_splits * params.size_h,
+                                                    params.num_splits * (cur_qo_end - cur_qo_start));
+
+    auto reg_out = ck_tile::make_static_distributed_tensor<in_t>(
+        decltype(ck_tile::load_tile(oaccu_window))::get_tile_distribution());
+    ck_tile::set_tile(reg_out, 0.f);
+
+    float e_sum = 0.0;
+    float e_max = -ck_tile::numeric<in_t>::infinity();
+    for (int32_t cur_qo = cur_qo_start; cur_qo < cur_qo_end; ++cur_qo)
+    {
+		auto dram_out = Policy::MakeOutputTileWindow(
+			static_cast<out_t*>(params.p_output_com) +
+			cur_head * params.stride_h_o + cur_qo * params.stride_s_o);
+        if (num_valid_kv_splits == 1) 
+        {
+            auto oaccu = ck_tile::load_tile(oaccu_window_bf16);
+            ck_tile::store_tile(dram_out, oaccu);
+            ck_tile::move_tile_window(oaccu_window_bf16, {2 * params.num_splits, 0});
+        }
+        else
+        {
+            for (int32_t split_idx = 0; split_idx < num_valid_kv_splits; ++split_idx)
+            {
+                float tlogic = reinterpret_cast<float*>(params.p_softmax_lse)[
+                    cur_qo * params.stride_b_lseacc +
+                    offs_oacc +
+                    split_idx * params.stride_sp_lseacc
+                ];
+                float n_e_max = ck_tile::max(tlogic, e_max);
+                auto oaccu = ck_tile::load_tile(oaccu_window);
+
+                float old_scale = ck_tile::exp(e_max - n_e_max);
+                float exp_logic = ck_tile::exp(tlogic - n_e_max);
+                ck_tile::sweep_tile(oaccu, [&](auto idx) {
+                    reg_out(idx) *= old_scale;
+                    reg_out(idx) += exp_logic * oaccu(idx);
+                });
+
+                e_sum = e_sum * old_scale + exp_logic;
+                e_max = n_e_max;
+                ck_tile::move_tile_window(oaccu_window, {1, 0});
+            }
+            ck_tile::sweep_tile(reg_out, [&](auto idx) {
+                reg_out(idx) /= e_sum;
+            });
+            ck_tile::store_tile(dram_out, ck_tile::cast_tile<out_t>(reg_out));
+            ck_tile::set_tile(reg_out, 0.f);
+            e_sum = 0.f;
+            ck_tile::move_tile_window(oaccu_window, {params.num_splits - num_valid_kv_splits, 0});
+        }
+    }
+#endif
 }
 
 // =====================================================================================================================
@@ -648,15 +648,17 @@ std::vector<torch::Tensor> flash_mla_fwd_inline_impl(
     params.stride_s_o = output.stride(0);
     params.stride_h_o = output.stride(1);
 
-    // if(num_splits > 1)
-    // {
-    //     params.stride_b_oacc      = split_data.stride(0);
-    //     params.stride_h_oacc      = split_data.stride(2);
-    //     params.stride_sp_oacc     = split_data.stride(1);
-    //     params.stride_b_lseacc    = split_lse.stride(0);
-    //     params.stride_h_lseacc    = split_lse.stride(2);
-    //     params.stride_sp_lseacc   = split_lse.stride(1);
-    // }
+#ifdef DO_COMBINE_IN_HIP
+    if(num_splits > 1)
+    {
+        params.stride_b_oacc      = split_data.stride(0);
+        params.stride_h_oacc      = split_data.stride(2);
+        params.stride_sp_oacc     = split_data.stride(1);
+        params.stride_b_lseacc    = split_lse.stride(0);
+        params.stride_h_lseacc    = split_lse.stride(2);
+        params.stride_sp_lseacc   = split_lse.stride(1);
+    }
+#endif
 
     if (query_rope.has_value())
     {

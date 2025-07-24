@@ -48,7 +48,7 @@ def _fwd_kernel_stage2_asm(
     num_valid_kv_splits = tl.minimum(
         cur_split_end - cur_split_start, tl.cdiv(cur_kv_seq_len, mgc)
     )
-    FINAL_OUT = MAYBE_FINAL_OUT and num_valid_kv_splits == 1
+    FINAL_OUT = MAYBE_FINAL_OUT and num_max_kv_splits == BATCH_NUM
 
     for cur_qo in range(cur_qo_start, cur_qo_end):
         if FINAL_OUT:

@@ -1,0 +1,13 @@
+name: Test ARC
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: arc-custom-runners-type1
+    steps:
+      - run: echo "Hello, world!"

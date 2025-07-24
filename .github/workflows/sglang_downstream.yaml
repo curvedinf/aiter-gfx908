@@ -48,6 +48,7 @@ jobs:
       - name: Install dependencies
         run: |
           cd sglang
+          docker exec sglang_aiter_test apt-get update && apt-get install -y wget 
           sed -i 's/ci_sglang/sglang_aiter_test/g' scripts/amd_ci_install_dependency.sh
           bash scripts/amd_ci_install_dependency.sh
 

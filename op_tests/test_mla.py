@@ -368,17 +368,11 @@ def test_mla(
             (batch_size + 1), dtype=torch.int32, device="cuda"
         )
 
-        # aiter.get_mla_metadata_impl(
-        #     kv_indptr,
-        #     num_kv_splits_indptr,
-        #     batch_split_table,
-        #     split_table,
-        # )
-
-        num_kv_splits_indptr, batch_split_table, split_table, cu_num = aiter.mla.get_meta_param_balanced(
-            batch_size, 
+        aiter.get_mla_metadata_impl(
             kv_indptr,
-            "cuda",
+            num_kv_splits_indptr,
+            batch_split_table,
+            split_table,
         )
 
         (attn_logits, attn_lse), us_asm_decode = run_perftest(
@@ -434,7 +428,7 @@ v_head_dim = 128
 block_size = 1
 list_dtype = ["bf16"]
 l_kv_dtype = ["bf16"]
-list_nhead = [(16, 1)]
+list_nhead = [(16, 2)]
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,
@@ -514,7 +508,7 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[i for i in range(17, 64)],
+    default=[i for i in range(16, 64)],
     help="""Batch size.
     e.g.: -b 16""",
 )

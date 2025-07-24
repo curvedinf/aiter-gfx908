@@ -215,11 +215,13 @@ def get_meta_param_balanced(bs, kv_indptr, device):
                 if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad <= split_size_pad / 2:
                     fixed_size += sign
                 num_kv_splits_indptr_fixed[i] = num_kv_splits_indptr[i] - fixed_size
+                # print(i, num_kv_splits_indptr[i])
         else:
             for i in range(1, bs + 1):
                 if fixed_size != fix_size and kv_seq_les[i-1] > 3 * split_size_pad and kv_seq_les[i-1] % split_size_pad > split_size_pad / 2:
                     fixed_size += sign
                 num_kv_splits_indptr_fixed[i] = num_kv_splits_indptr[i] - fixed_size
+                # print(i, num_kv_splits_indptr[i])
     else:
         num_kv_splits_indptr_fixed = num_kv_splits_indptr
 
@@ -437,10 +439,6 @@ def mla_decode_fwd_balenced(
     # q_rope[:, :, :] = q[:, :, 512:]
     # k_nope[:, :, :, :] = kv_buffer[:, :, :, :512]
     # k_rope[:, :, :, :] = kv_buffer[:, :, :, 512:]
-
-    # if num_kv_splits_indptr is None:
-
-    # num_kv_splits_indptr_1, batch_split_table_1, split_table_1, split = get_meta_param_balanced(bs, kv_indptr, "cuda")
 
     if num_kv_splits_indptr is None:
         aiter.get_mla_metadata_impl(

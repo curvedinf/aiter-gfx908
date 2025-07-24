@@ -242,6 +242,7 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
             rope_offset += rope_stride * 4;
             smem_offset += 20608;
         }
+        block_sync_lds();
 
         uint32_t* p_output     = reinterpret_cast<uint32_t*>(params.p_output);
         uint32_t* p_lse        = reinterpret_cast<uint32_t*>(params.p_softmax_lse);

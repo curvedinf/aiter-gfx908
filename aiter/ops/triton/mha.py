@@ -236,7 +236,9 @@ def _attn_fwd_inner(
     ENABLE_PIPELINING: tl.constexpr,
 ):
     RCP_LN2: tl.constexpr = 1.4426950408889634
-    num_stages: tl.constexpr = None if ENABLE_PIPELINING else 1  # Set num_stages==1 if we want to disable pipelining
+    num_stages: tl.constexpr = (
+        None if ENABLE_PIPELINING else 1
+    )  # Set num_stages==1 if we want to disable pipelining
 
     # loop over k, v, and update accumulator
 

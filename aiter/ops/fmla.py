@@ -37,6 +37,5 @@ def get_mla_metadata_impl(
     num_kv_splits_indptr: Tensor,
     batch_split_table: Tensor,
     split_table: Tensor,
-    # cu_num: int,
 ):
     ...

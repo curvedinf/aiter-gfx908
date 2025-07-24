@@ -389,7 +389,6 @@ def mla_decode_fwd_balenced(
     num_kv_splits_indptr=None,
     batch_split_table=None,  # for experts only!!!
     split_table=None,
-    split_num=None,
     q_rope=None,
     k_rope=None, 
 ):
@@ -439,10 +438,18 @@ def mla_decode_fwd_balenced(
     # k_nope[:, :, :, :] = kv_buffer[:, :, :, :512]
     # k_rope[:, :, :, :] = kv_buffer[:, :, :, 512:]
 
+    # if num_kv_splits_indptr is None:
+
+    # num_kv_splits_indptr_1, batch_split_table_1, split_table_1, split = get_meta_param_balanced(bs, kv_indptr, "cuda")
+
     if num_kv_splits_indptr is None:
-        num_kv_splits_indptr, batch_split_table, split_table, split_num = get_meta_param_balanced(
-            bs, kv_indptr, device
+        aiter.get_mla_metadata_impl(
+            kv_indptr,
+            num_kv_splits_indptr,
+            batch_split_table,
+            split_table,
         )
+
     aiter.flash_mla_fwd_inline_impl(
         q,
         kv_buffer,
@@ -462,7 +469,7 @@ def mla_decode_fwd_balenced(
         batch_split_table,
         split_table,
         o,
-        split_num,
+        num_kv_splits_indptr[bs].item(),
     )
 
     grid = (bs, nhead)
@@ -506,7 +513,7 @@ def mla_decode_fwd_dispatch(
     logit_cap=0.0,
     num_kv_splits=None,
     num_kv_splits_indptr=None,
-    batch_split_table=None,  # for experts only!!!
+    batch_split_table=None,
     split_table=None,
     q_rope=None,
     k_rope=None, 

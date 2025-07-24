@@ -27,9 +27,7 @@
  #include <limits>
  #include <numeric>
  #include <tuple>
- 
- #include "math.cuh"
- #include "utils.cuh"
+
  #include "vec_dtypes.cuh"
  
  namespace aiter {
@@ -94,9 +92,6 @@
  constexpr BlockScanAlgorithm SCAN_ALGO = BLOCK_SCAN_WARP_SCANS;
  constexpr BlockReduceAlgorithm REDUCE_ALGO = BLOCK_REDUCE_WARP_REDUCTIONS;
  
- #if (__CUDACC_VER_MAJOR__ * 10000 + __CUDACC_VER_MINOR__ * 100 >= 120100)
- #define FLASHINFER_CUB_SUBTRACTLEFT_DEFINED
- #endif
  
  template <typename T>
  struct ValueCount {
@@ -303,13 +298,13 @@
      }
  
      bool greater_than_u_diff[VEC_SIZE];
- #ifdef FLASHINFER_CUB_SUBTRACTLEFT_DEFINED
+
      BlockAdjacentDifference<bool, BLOCK_THREADS>(temp_storage->block_prim.adj_diff)
          .SubtractLeft<VEC_SIZE>(greater_than_u, greater_than_u_diff, BoolDiffOp());
- #else
-     BlockAdjacentDifference<bool, BLOCK_THREADS>(temp_storage->block_prim.adj_diff)
-         .FlagHeads<VEC_SIZE>(greater_than_u_diff, greater_than_u, BoolDiffOp(), 0);
- #endif
+
+    //  BlockAdjacentDifference<bool, BLOCK_THREADS>(temp_storage->block_prim.adj_diff)
+    //      .FlagHeads<VEC_SIZE>(greater_than_u_diff, greater_than_u, BoolDiffOp(), 0);
+
      __syncthreads();
  
  #pragma unroll
@@ -1082,7 +1077,7 @@
      }
    } while (min_gt_low != max_le_high);
  
-   float normalizer = math::ptx_rcp(max(sum_low, 1e-8));
+   float normalizer = __frcp_rn(max(sum_low, 1e-8));
  
    // normalize
  #pragma unroll 2
@@ -1204,7 +1199,7 @@
        }
      } while (min_gt_low != max_le_high);
  
-     normalizer = math::ptx_rcp(max(sum_low, 1e-8));
+     normalizer = __frcp_rn(max(sum_low, 1e-8));
      pivot = low;
    }
  

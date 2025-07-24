@@ -1,0 +1,3 @@
+M,N,K,kernelId,splitK,us,kernelName
+4096,4096,4096,0,0,479.7922,a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_128x128x128_1x4x1_16x16x64_default
+2048,4096,5120,0,0,328.4076,a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_128x128x128_1x4x1_16x16x64_default

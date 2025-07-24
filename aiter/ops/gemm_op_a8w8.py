@@ -36,6 +36,14 @@ def gemm_a8w8_bpreshuffle_ck(
     Out: torch.Tensor,
 ) -> torch.Tensor: ...
 
+@compile_ops("module_gemm_a8w8_bpreshuffle_cktile", fc_name="gemm_a8w8_bpreshuffle_cktile")
+def gemm_a8w8_bpreshuffle_cktile(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    out: Tensor,
+): ...
 
 @compile_ops("module_gemm_a8w8_asm", fc_name="gemm_a8w8_asm")
 def gemm_a8w8_asm(
@@ -310,3 +318,30 @@ def gemm_a8w8_bpreshuffle_tune(
     kernelId: int = 0,
     splitK: int = 0,
 ) -> torch.Tensor: ...
+
+def gemm_a8w8_bpreshuffle_CKTILE(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    dtype=torch.float16,
+):
+    assert dtype in [
+        torch.float16,
+    ], f"Output {dtype=} is currently not supported in gemm_a8w8"
+    m = XQ.shape[0]
+    n = WQ.shape[0]
+    k = XQ.shape[-1]
+    Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
+    return gemm_a8w8_bpreshuffle_cktile(XQ, WQ, x_scale, w_scale, Y)
+
+@compile_ops("module_gemm_a8w8_bpreshuffle_cktile_tune", fc_name="gemm_a8w8_bpreshuffle_cktile_tune")
+def gemm_a8w8_bpreshuffle_cktile_tune(
+    XQ: Tensor,
+    WQ: Tensor,
+    x_scale: Tensor,
+    w_scale: Tensor,
+    out: Tensor,
+    kernelId: int,
+    splitK=0,
+): ...

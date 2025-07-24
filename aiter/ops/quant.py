@@ -365,14 +365,14 @@ def dynamic_per_tensor_quant(out: Tensor, input: Tensor, scale: Tensor): ...
 
 @compile_ops("module_quant")
 def dynamic_per_token_scaled_quant(
-    out: Tensor,
-    input: Tensor,
-    scales: Tensor,
-    scale_ub: Optional[Tensor] = None,
-    shuffle_scale=False,
-    num_rows: Optional[Tensor] = None,
+    out: torch.Tensor,
+    input: torch.Tensor,
+    scales: torch.Tensor,
+    scale_ub: Optional[torch.Tensor] = None,
+    shuffle_scale: bool = False,
+    num_rows: Optional[torch.Tensor] = None,
     num_rows_factor: int = 1,
-): ...
+) -> None: ...
 
 
 @compile_ops("module_quant")

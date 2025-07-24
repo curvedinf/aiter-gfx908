@@ -3,12 +3,14 @@
 
 import torch
 import os
-from typing import Optional
+from typing import Optional, Callable
+from dataclasses import dataclass
 import functools
 import aiter
 from aiter import logger
 from aiter import ActivationType, QuantType, dtypes
 from aiter.utility import fp4_utils
+from aiter.jit.utils.chip_info import get_gfx
 
 # from aiter import get_torch_quant as get_quant
 from aiter import get_hip_quant as get_quant
@@ -114,25 +116,22 @@ def fused_moe(
     q_dtype_a = w1.dtype if w1.dtype != torch.uint32 else dtypes.fp8
     q_dtype_a = dtypes.fp4x2 if quant_type == QuantType.per_1x32 else q_dtype_a
 
-    if block_size_M is None:
-        _, _, block_size_M, *_ = get_2stage_cfgs(
-            min(1024, M),  # consider token_num > 1024 as prefill
-            model_dim,
-            inter_dim,
-            E,
-            topk,
-            dtype,
-            q_dtype_a,
-            q_dtype_w,
-            quant_type,
-            isG1U1,
-            activation,
-            doweight_stage1,
-        )
-    run_1stage = M < 256
-    # run_1stage = quant_type in [QuantType.per_128x128, QuantType.per_1x32]
-    run_1stage = quant_type in [QuantType.per_128x128]
-    block_size_M = 32 if run_1stage else block_size_M
+    metadata = get_2stage_cfgs(
+        min(1024, M),  # consider token_num > 1024 as prefill
+        model_dim,
+        inter_dim,
+        E,
+        topk,
+        dtype,
+        q_dtype_a,
+        q_dtype_w,
+        quant_type,
+        isG1U1,
+        activation,
+        doweight_stage1,
+    )
+
+    block_size_M = metadata.block_m if block_size_M is None else block_size_M
 
     sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf = moe_sorting(
         topk_ids,
@@ -146,7 +145,7 @@ def fused_moe(
         moe_sorting_dispatch_policy,
     )
 
-    if run_1stage:
+    if metadata.run_1stage:
         assert (
             doweight_stage1 == False
         ), "doweight_stage1 not support in fused_moe_1stage"
@@ -170,6 +169,7 @@ def fused_moe(
             w2_scale=w2_scale,
             a1_scale=a1_scale,
             a2_scale=a2_scale,
+            num_local_tokens=num_local_tokens,
         )
     else:
         return fused_moe_2stages(
@@ -193,6 +193,7 @@ def fused_moe(
             w2_scale=w2_scale,
             a1_scale=a1_scale,
             a2_scale=a2_scale,
+            num_local_tokens=num_local_tokens,
         )
 
 
@@ -217,8 +218,9 @@ def fused_moe_1stage(
     w2_scale=None,  # [expert(local_expert:EP), model_dim, 1]
     a1_scale=None,  # [expert(local_expert:EP), 1, model_dim]
     a2_scale=None,  # [expert(local_expert:EP), 1, inter_dim]
+    num_local_tokens: Optional[torch.tensor] = None,
 ):
-    if quant_type == QuantType.No and ActivationType.Silu and not isG1U1:
+    if quant_type == QuantType.No and activation == ActivationType.Silu and not isG1U1:
         # pure bf16
         aiter.fmoe(
             moe_buf,
@@ -238,14 +240,23 @@ def fused_moe_1stage(
         )
         quant_func = get_quant(quant_type)
         if hidden_states.dtype != q_dtype_a:
+            if quant_type == QuantType.per_1x128:
+                quant_func = functools.partial(quant_func, transpose_scale=True)
             a1, a1_scale = quant_func(
-                hidden_states, scale=a1_scale, quant_dtype=q_dtype_a
+                hidden_states,
+                scale=a1_scale,
+                quant_dtype=q_dtype_a,
+                num_rows=num_local_tokens,
             )
         else:
             assert (
                 a1_scale is not None or quant_type == QuantType.No
             ), "a1_scale must be provided for quantized input for fused_moe"
             a1 = hidden_states
+            if quant_type == QuantType.per_1x128:
+                scale_t = torch.empty_like(a1_scale)
+                aiter.partial_transpose(scale_t, a1_scale, num_rows=num_local_tokens)
+                a1_scale = scale_t
 
         token_num = hidden_states.shape[0]
         E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
@@ -261,8 +272,6 @@ def fused_moe_1stage(
             w2_scale = w2_scale.view(E, -1)
 
         if quant_type == QuantType.per_1x128:
-            a1 = a1.view_as(hidden_states)
-            a1_scale = a1_scale.view(hidden_states.shape[0], -1).t().contiguous()
             fmoe_func = functools.partial(
                 aiter.fmoe_fp8_blockscale_g1u1,
                 fc_scale_blkn=128,
@@ -310,6 +319,39 @@ def get_block_size_M(token, topk, expert, inter_dim):
 
 
 cfg_2stages = None
+# fmt: off
+fused_moe_1stage_dict = {
+    "gfx942":
+    {
+        # activation,                    quant_type,        dtype,    q_dtype_a,    q_dtype_w,   isG1U1,      API
+        (ActivationType.Silu,          QuantType.No,  dtypes.bf16,   dtypes.bf16,   dtypes.bf16,   False) : aiter.fmoe,
+        (ActivationType.Silu,          QuantType.No,  dtypes.fp16,   dtypes.fp16,   dtypes.fp16,   False) : aiter.fmoe,
+        (ActivationType.Gelu,   QuantType.per_Token,  dtypes.bf16,    dtypes.fp8,   dtypes.i4x2,    True) : aiter.fmoe_g1u1,
+        (ActivationType.Silu,    QuantType.per_1x32,  dtypes.bf16,  dtypes.fp4x2,  dtypes.fp4x2,    True) : aiter.fmoe_g1u1,
+        (ActivationType.Silu,   QuantType.per_Token,  dtypes.bf16,     dtypes.i8,     dtypes.i8,    True) : aiter.fmoe_g1u1,
+        (ActivationType.Gelu,   QuantType.per_Token,  dtypes.bf16,     dtypes.i8,     dtypes.i8,    True) : aiter.fmoe_g1u1,
+        (ActivationType.Silu,   QuantType.per_Token,  dtypes.bf16,    dtypes.fp8,    dtypes.fp8,    True) : aiter.fmoe_g1u1,
+        (ActivationType.Gelu,   QuantType.per_Token,  dtypes.bf16,    dtypes.fp8,    dtypes.fp8,    True) : aiter.fmoe_g1u1,
+        (ActivationType.Silu,   QuantType.per_1x128,  dtypes.bf16,    dtypes.fp8,    dtypes.fp8,    True) : aiter.fmoe_g1u1,
+        (ActivationType.Silu,   QuantType.per_Token,  dtypes.bf16,     dtypes.i8,     dtypes.i8,   False) : aiter.fmoe_int8_g1u0,
+        (ActivationType.Gelu,   QuantType.per_Token,  dtypes.bf16,     dtypes.i8,     dtypes.i8,   False) : aiter.fmoe_int8_g1u0,
+    },
+    "gfx950":
+    {
+        (ActivationType.Silu,    QuantType.per_1x32,   dtypes.bf16,   dtypes.fp4x2,  dtypes.fp4x2,    True) : aiter.fmoe_g1u1,
+        (ActivationType.Silu,   QuantType.per_1x128,   dtypes.bf16,     dtypes.fp8,    dtypes.fp8,    True) : aiter.fmoe_fp8_blockscale_g1u1,
+    }
+}
+# fmt: on
+
+
+@dataclass
+class MOEMetadata:
+    stage1: Callable
+    stage2: Callable
+    block_m: int
+    ksplit: int
+    run_1stage: bool = False
 
 
 @functools.lru_cache(maxsize=1024)
@@ -395,18 +437,39 @@ def get_2stage_cfgs(
             logger.warning(f"Fmoe tuning not support for {keys}")
 
     if cfg is None:
-        block_m = get_block_size_M(token, topk, expert, inter_dim)
         ksplit = 0
         kernelName1 = ""
         kernelName2 = ""
+        if q_type == QuantType.per_Token and q_dtype_w in [dtypes.i8, dtypes.fp8]:
+            run_1stage = (
+                token > 32
+                and (activation, q_type, dtype, q_dtype_a, q_dtype_w, use_g1u1)
+                in fused_moe_1stage_dict[get_gfx()]
+                and not doweight_stage1
+            )
+        else:
+            run_1stage = (
+                token < 256
+                and (activation, q_type, dtype, q_dtype_a, q_dtype_w, use_g1u1)
+                in fused_moe_1stage_dict[get_gfx()]
+                and not doweight_stage1
+            )
+        block_m = (
+            get_block_size_M(token, topk, expert, inter_dim)
+            if not run_1stage
+            else BLOCK_SIZE_M
+        )
     else:
         block_m = cfg["block_m"]
         ksplit = cfg["ksplit"]
         kernelName1 = cfg["kernelName1"]
         kernelName2 = cfg["kernelName2"]
+        run_1stage = cfg["run_1stage"]
 
     tag = f"({kernelName1=}, {kernelName2=})"
-    logger.info(f"[fused_moe] using {'default' if cfg is None else tag} for {keys} ")
+    logger.info(
+        f"[fused_moe] using {'1stage' if run_1stage else '2stage'} {'default' if cfg is None else tag} for {keys} "
+    )
 
     if "ck" in kernelName1 or q_dtype_w in [
         dtypes.bf16,
@@ -414,7 +477,7 @@ def get_2stage_cfgs(
         torch.uint32,
         torch.uint8,
     ]:
-        return (
+        return MOEMetadata(
             functools.partial(
                 aiter.ck_moe_stage1_fwd,
                 kernelName=kernelName1,
@@ -429,6 +492,7 @@ def get_2stage_cfgs(
             ),
             block_m,
             ksplit,
+            run_1stage,
         )
 
     # TODO: remove when stage2 support more size
@@ -437,7 +501,7 @@ def get_2stage_cfgs(
         tag = ""
         block_m = ([el for el in tmpList if block_m < el] + [128])[0]
 
-    return (
+    return MOEMetadata(
         functools.partial(
             asm_stage1,
             kernelName=kernelName1,
@@ -452,6 +516,7 @@ def get_2stage_cfgs(
         ),
         block_m,
         ksplit,
+        run_1stage,
     )
 
 
@@ -477,6 +542,7 @@ def fused_moe_2stages(
     w2_scale=None,  # [expert(local_expert:EP), model_dim, 1]
     a1_scale=None,  # [expert(local_expert:EP), 1, model_dim]
     a2_scale=None,  # [expert(local_expert:EP), 1, inter_dim]
+    num_local_tokens: Optional[torch.tensor] = None,
 ):
 
     quant_func = get_quant(quant_type)
@@ -486,7 +552,7 @@ def fused_moe_2stages(
     dtype = moe_out.dtype
     device = hidden_states.device
 
-    stage1, stage2, block_m, ksplit = get_2stage_cfgs(
+    metadata = get_2stage_cfgs(
         min(1024, token_num),  # consider token_num > 1024 as prefill
         model_dim,
         inter_dim,
@@ -502,7 +568,12 @@ def fused_moe_2stages(
     )
 
     if quant_type == QuantType.per_1x32:
-        a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a)
+        a1, a1_scale = quant_func(
+            hidden_states,
+            scale=a1_scale,
+            quant_dtype=q_dtype_a,
+            num_rows=num_local_tokens,
+        )
         a1_scale = moe_mxfp4_sort(
             a1_scale,
             sorted_ids=sorted_ids,
@@ -511,7 +582,12 @@ def fused_moe_2stages(
             block_size=block_size_M,
         )
     elif hidden_states.dtype != q_dtype_a:
-        a1, a1_scale = quant_func(hidden_states, scale=a1_scale, quant_dtype=q_dtype_a)
+        a1, a1_scale = quant_func(
+            hidden_states,
+            scale=a1_scale,
+            quant_dtype=q_dtype_a,
+            num_rows=num_local_tokens,
+        )
     else:
         assert (
             a1_scale is not None or quant_type == QuantType.No
@@ -531,7 +607,7 @@ def fused_moe_2stages(
             device=device,
         )
 
-    a2 = stage1(
+    a2 = metadata.stage1(
         a1,
         w1,
         w2,
@@ -548,7 +624,13 @@ def fused_moe_2stages(
 
     if quant_type == QuantType.per_1x32:
         a2 = a2.view(-1, inter_dim)
-        a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
+        a2, a2_scale = quant_func(
+            a2,
+            scale=a2_scale,
+            quant_dtype=q_dtype_a,
+            num_rows=num_local_tokens,
+            num_rows_factor=topk,
+        )
         a2 = a2.view(token_num, topk, -1)
         a2_scale = moe_mxfp4_sort(
             a2_scale[: token_num * topk, :].view(token_num, topk, -1),
@@ -559,7 +641,13 @@ def fused_moe_2stages(
         )
 
     elif quant_type != QuantType.per_128x128:
-        a2, a2_scale = quant_func(a2, scale=a2_scale, quant_dtype=q_dtype_a)
+        a2, a2_scale = quant_func(
+            a2,
+            scale=a2_scale,
+            quant_dtype=q_dtype_a,
+            num_rows=num_local_tokens,
+            num_rows_factor=topk,
+        )
         a2 = a2.view(token_num, topk, inter_dim)
     else:
         a2_v = a2[:token_num, :, :]
@@ -571,7 +659,7 @@ def fused_moe_2stages(
         )
         a2 = a2_v
 
-    stage2(
+    metadata.stage2(
         a2,
         w1,
         w2,

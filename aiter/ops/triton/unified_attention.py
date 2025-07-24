@@ -184,7 +184,9 @@ def kernel_unified_attention_2d(
     else:
         num_blocks_start = 0
 
-    if BLOCK_N == BLOCK_SIZE:
+    USE_SINGLE_KV_LOAD: tl.constexpr = BLOCK_N == BLOCK_SIZE
+
+    if USE_SINGLE_KV_LOAD:
         # calculate the number of tiles (blocks) that need to be processed to
         # cover the longest sequence prefix (due to causal masking, blocks beyond
         # this prefix can be skipped)
@@ -200,7 +202,7 @@ def kernel_unified_attention_2d(
     for j in range(loop_start, loop_end, loop_step):
         offs_n = tl.arange(0, BLOCK_N)
         # to reduce the overhead when BLOCK_N = BLOCK_SIZE
-        if BLOCK_N == BLOCK_SIZE:
+        if USE_SINGLE_KV_LOAD:
             physical_block_idx = tl.load(block_tables_ptr + block_table_offset + j)
 
             v_offset = (
@@ -224,19 +226,20 @@ def kernel_unified_attention_2d(
                 mask=dim_mask[:, None],
                 other=0.0,
             )
-
             # V : (BLOCK_N, HEAD_SIZE_PADDED)
             V_load = tl.load(
                 value_cache_ptr + v_offset,
                 mask=dim_mask[None, :],
                 other=0.0,
             )
+
         else:
             j = tl.multiple_of(j, BLOCK_N)
             seq_offset = j + offs_n
+            load_mask = seq_offset < max_seq_prefix_len
             physical_block_idx = tl.load(
                 block_tables_ptr + block_table_offset + seq_offset // BLOCK_SIZE,
-                mask=(j + offs_n) < max_seq_prefix_len,
+                mask=load_mask,
                 other=0,
             )
 
@@ -253,11 +256,14 @@ def kernel_unified_attention_2d(
                 + offs_d[:, None] * stride_k_cache_3
                 + (offs_n[None, :] % BLOCK_SIZE) * stride_k_cache_1
             )
-            load_mask = seq_offset < max_seq_prefix_len
+            # Cagri: load masking is not needed even when we load multiple block sizes
+            # as the later masks, should get rid of the effect.
+            # This increases the overhead, but keeping it for now as it leads to issues e2e somehow
+
             # K : (HEAD_SIZE_PADDED, BLOCK_N)
             K_load = tl.load(
                 key_cache_ptr + k_offset,
-                mask=dim_mask[:, None] & load_mask[None, :],
+                mask=dim_mask[:, None],  # & load_mask[None, :],
                 other=0.0,
             )
 
@@ -270,9 +276,6 @@ def kernel_unified_attention_2d(
 
         # seq_mask: (BLOCK_M, BLOCK_N)
         seq_mask = seq_offset[None, :] < context_len + query_pos[:, None] + 1
-        # Cagri: load masking is not needed even when we load multiple block sizes
-        # as the later masks, get rid of the effect.
-        # This increases the overhead, hence removed.
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -743,25 +746,23 @@ def unified_attention(
     #    = floor(q.shape[0] / BLOCK_Q) + num_seqs
 
     total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
-    target_num_prgms = get_num_sms() * 2
+    target_num_prgms = get_num_sms() * 4
     num_2d_prgms = total_num_q_blocks * num_kv_heads
 
     # Original condition:
     # if max_seqlen_q > 1 or total_num_q_blocks * num_kv_heads > 128:
     # call 2d if sliding window is used
-    if (
-        SLIDING_WINDOW > 0
-        or num_2d_prgms >= target_num_prgms * 2
-        or max_seqlen_k <= 1024
-    ):
+    if SLIDING_WINDOW > 0 or num_2d_prgms >= target_num_prgms or max_seqlen_k <= 1024:
         # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         # q.shape[0] is sum(query_lens) which is dynamic so it shouldnt be used in the heuristic
         num_stages_2d = 4
         BLOCK_N = block_size
+        num_warps = 2
         # make the block_m bigger if we already have enough parallelism
-        if num_2d_prgms >= 4 * target_num_prgms:
-            if num_2d_prgms <= 8 * target_num_prgms:
-                BLOCK_M = 32
+        if num_2d_prgms >= 2 * target_num_prgms:
+            num_warps = 4
+            if num_2d_prgms <= 4 * target_num_prgms:
+                BLOCK_M = 64
                 num_stages_2d = 2 if SLIDING_WINDOW > 0 else 4
             else:
                 BLOCK_M = 64
@@ -771,12 +772,12 @@ def unified_attention(
         # if there is prefill with relatively large amount of computation,
         # increases the tile sizes to improve math perf.
         if max_seqlen_q >= 256 and max_seqlen_k >= 256 and SLIDING_WINDOW == 0:
+            num_warps = 4
             BLOCK_M = 128
             num_stages_2d = 1
             BLOCK_N = 64
             BLOCK_Q = BLOCK_M // num_queries_per_kv
             total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
-
         kernel_unified_attention_2d[
             (
                 num_kv_heads,
@@ -821,7 +822,7 @@ def unified_attention(
             num_seqs=num_seqs,
             BLOCK_M=BLOCK_M,
             waves_per_eu=2,
-            num_warps=4,
+            num_warps=num_warps,
             num_stages=num_stages_2d,
             BLOCK_N=BLOCK_N,
         )
@@ -830,8 +831,10 @@ def unified_attention(
         # q.shape[0] is sum(query_lens) which becomes same as batch size
         # so it is static dim. for decode, should be okay to use it in heuristics
         # make the block_m bigger if we already have enough parallelism
-        NUM_SEGMENTS = math.ceil(target_num_prgms / (total_num_q_blocks * num_kv_heads))
-        NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS) * 2
+        NUM_SEGMENTS = math.ceil(
+            (target_num_prgms) / (total_num_q_blocks * num_kv_heads)
+        )
+        NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
         NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
         NUM_SEGMENTS = max(NUM_SEGMENTS, 16)
 

@@ -90,7 +90,7 @@ def ref_paged_attn(
     "seq_lens",
     [
         [(1, 1328), (5, 18), (129, 463)],
-        [(1, 523), (1, 37), (1, 2011), (1, 16384), (4096, 4096), (512, 4096)],
+        [(1, 523), (1, 37), (1, 2011), (1, 16384), (1024, 1024), (512, 1024)],
         [(11, 13142), (1065, 6712)],
     ],
 )
@@ -134,6 +134,8 @@ def test_triton_unified_attn(
         num_blocks, block_size, num_kv_heads, head_size, dtype=dtype
     )
     value_cache = torch.randn_like(key_cache)
+    key_cache[0] = float("nan")
+    value_cache[0] = float("nan")
     cu_query_lens = torch.tensor([0] + query_lens, dtype=torch.int32).cumsum(
         dim=0, dtype=torch.int32
     )
@@ -141,7 +143,7 @@ def test_triton_unified_attn(
 
     max_num_blocks_per_seq = (max_kv_len + block_size - 1) // block_size
     block_tables = torch.randint(
-        0, num_blocks, (num_seqs, max_num_blocks_per_seq), dtype=torch.int32
+        1, num_blocks, (num_seqs, max_num_blocks_per_seq), dtype=torch.int32
     )
 
     sinks = torch.randn(num_query_heads, dtype=torch.bfloat16)

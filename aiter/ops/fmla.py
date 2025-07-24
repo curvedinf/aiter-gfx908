@@ -30,3 +30,13 @@ def flash_mla_fwd_inline_impl(
     num_splits: Optional[int] = 0,
 ):
     ...
+
+@compile_ops("module_fmla_fwd")
+def get_mla_metadata_impl(
+    kv_indptr: Tensor,
+    num_kv_splits_indptr: Tensor,
+    batch_split_table: Tensor,
+    split_table: Tensor,
+    # cu_num: int,
+):
+    ...

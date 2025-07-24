@@ -959,4 +959,5 @@
         .export_values();
 
 #define FLASH_MLA_FWD_PYBIND                                                        \
-      m.def("flash_mla_fwd_inline_impl", &flash_mla_fwd_inline_impl);
+      m.def("flash_mla_fwd_inline_impl", &flash_mla_fwd_inline_impl);               \
+      m.def("get_mla_metadata_impl", &get_mla_metadata_impl);

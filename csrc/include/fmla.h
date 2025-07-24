@@ -25,3 +25,9 @@ std::vector<torch::Tensor> flash_mla_fwd_inline_impl(
     const std::optional<torch::Tensor>& split_table,
     std::optional<torch::Tensor>&       out,
     const int            num_splits_ = 1);
+
+std::vector<torch::Tensor> get_mla_metadata_impl(
+    const torch::Tensor& kv_indptr,            // [batch size + 1]
+    torch::Tensor&       num_kv_splits_indptr, // [batch size + 1]
+    torch::Tensor&       batch_split_table,    // [max_cu_num]
+    torch::Tensor&       split_table);         // [max_cu_num]

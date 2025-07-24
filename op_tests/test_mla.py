@@ -342,19 +342,63 @@ def test_mla(
     # aiter implementation
     kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
     out_asm = torch.zeros((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
-    (attn_logits, attn_lse), us_asm_decode = run_perftest(
-        aiter.mla.mla_decode_fwd,
-        q,
-        kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
-        out_asm,
-        qo_indptr,
-        kv_indptr,
-        kv_indices,
-        kv_last_page_lens,
-        max_seqlen_qo,
-        sm_scale,
-        varlen,
-    )
+    if varlen == False:
+        (attn_logits, attn_lse), us_asm_decode = run_perftest(
+            aiter.mla.mla_decode_fwd,
+            q,
+            kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
+            out_asm,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            max_seqlen_qo,
+            sm_scale,
+            varlen,
+        )
+    else:
+        max_cu_num = 400
+        # batch_split_table = torch.empty(
+        #     (max_cu_num), dtype=torch.int32, device="cuda"
+        # )
+        # split_table = torch.empty(
+        #     (max_cu_num), dtype=torch.int32, device="cuda"
+        # )
+        # num_kv_splits_indptr = torch.empty(
+        #     (batch_size), dtype=torch.int32, device="cuda"
+        # )
+        # aiter.get_mla_metadata_impl(
+        #     kv_indptr,
+        #     num_kv_splits_indptr,
+        #     batch_split_table,
+        #     split_table,
+        # )
+        num_kv_splits_indptr, batch_split_table, split_table, cu_num = aiter.mla.get_meta_param_balanced(
+            batch_size, 
+            kv_indptr,
+            "cuda",
+        )
+        import pdb; pdb.set_trace()
+
+        (attn_logits, attn_lse), us_asm_decode = run_perftest(
+            aiter.mla.mla_decode_fwd_dispatch,
+            q,
+            kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
+            out_asm,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            max_seqlen_qo,
+            sm_scale,
+            varlen,
+            0.0,
+            1,
+            num_kv_splits_indptr,
+            batch_split_table,
+            split_table,
+            batch_split_table.shape[0],
+        )
 
     # print(f"{out_ref.view(total_q, -1)=}")
     # print(f"{out_asm.view(total_q, -1)=}")
@@ -390,7 +434,7 @@ v_head_dim = 128
 block_size = 1
 list_dtype = ["bf16"]
 l_kv_dtype = ["bf16"]
-list_nhead = [(16, 2)]
+list_nhead = [(16, 3)]
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,
@@ -509,7 +553,7 @@ for nhead, mtp in list_nhead:
             dtype,
             kvtype,
             args.block_size,
-            varlen=True,
+            varlen=False,
             mtp=mtp,
         )
         df.append(ret)

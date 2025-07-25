@@ -43,8 +43,7 @@ asm volatile (                  \
         o_lds_ptr[n_lds]     = shuffle0;  \
         o_lds_ptr[n_lds + 1] = shuffle1;  \
         o_lds_ptr[n_lds + 2] = shuffle2;  \
-        o_lds_ptr[n_lds + 3] = shuffle3;  \
-		block_sync_lds();
+        o_lds_ptr[n_lds + 3] = shuffle3;
 
 #define F32_LDS_2_VGPR_LOOP_STRIDE1(func, lds_st_base) \
         F32_LDS_2_VGPR_LOOP_STRIDE1_0_0_0(func, lds_st_base)

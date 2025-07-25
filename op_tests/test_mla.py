@@ -412,17 +412,6 @@ def test_mla(
         out_asm,
         msg=f"mla_decode-absorb    [golden vs aiter_asm]: {us_asm_decode:>8.2f} us......",
     )
-    err = [checkAllclose(
-        out_ref[i],
-        out_asm[i],
-        msg=f"{i}mla_decode-absorb    [golden vs aiter_asm]: {us_asm_decode:>8.2f} us......",
-    ) for i in range(112)]
-    err = [checkAllclose(
-        out_ref[0][i],
-        out_asm[0][i],
-        msg=f"{i}mla_decode-absorb    [golden vs aiter_asm]: {us_asm_decode:>8.2f} us......",
-    ) for i in range(16)]
-    import pdb;pdb.set_trace()
     return {
         "prefill:ck_192": us_aiter,
         "prefill:asm_576": us_asm,

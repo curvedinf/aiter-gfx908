@@ -76,16 +76,16 @@ def _batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant_ker
     - Bias: Bias batch tensor with shape (B, 1, N).
     """
 
-    stride_ab = tl.cast(stride_in_ab, tl.int64) 
-    stride_am = tl.cast(stride_in_am, tl.int64) 
-    stride_ak = tl.cast(stride_in_ak, tl.int64) 
-    stride_bb = tl.cast(stride_in_bb, tl.int64) 
-    stride_bk = tl.cast(stride_in_bk, tl.int64) 
-    stride_bn = tl.cast(stride_in_bn, tl.int64) 
-    stride_cb = tl.cast(stride_in_cb, tl.int64) 
-    stride_cm = tl.cast(stride_in_cm, tl.int64) 
-    stride_cn = tl.cast(stride_in_cn, tl.int64) 
-    stride_biasb  = tl.cast(stride_in_biasb, tl.int64)
+    stride_ab = tl.cast(stride_in_ab, tl.int64)
+    stride_am = tl.cast(stride_in_am, tl.int64)
+    stride_ak = tl.cast(stride_in_ak, tl.int64)
+    stride_bb = tl.cast(stride_in_bb, tl.int64)
+    stride_bk = tl.cast(stride_in_bk, tl.int64)
+    stride_bn = tl.cast(stride_in_bn, tl.int64)
+    stride_cb = tl.cast(stride_in_cb, tl.int64)
+    stride_cm = tl.cast(stride_in_cm, tl.int64)
+    stride_cn = tl.cast(stride_in_cn, tl.int64)
+    stride_biasb = tl.cast(stride_in_biasb, tl.int64)
 
     tl.assume(stride_ab > 0)
     tl.assume(stride_am > 0)
@@ -118,7 +118,6 @@ def _batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant_ker
         pid_m = first_pid_m + (pid % group_size_m)
         pid_n = (pid % num_pid_in_group) // group_size_m
 
-    
     batch_id = tl.cast(batch_id, tl.int64)
     pid_m = tl.cast(pid_m, tl.int64)
     pid_n = tl.cast(pid_n, tl.int64)
@@ -203,16 +202,14 @@ def _get_config(
     key = f"{N}_{K}"
     if key not in _get_config._config_dict.keys():
         dev = arch_info.get_device()
-        fpath = (
-            f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-BATCHED_GEMM-A8W8-A_PER_TOKEN_GROUP_PREQUANT_W_PER_BATCHED_TENSOR_QUANT-N={N}-K={K}.json"
-        )
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-BATCHED_GEMM-A8W8-A_PER_TOKEN_GROUP_PREQUANT_W_PER_BATCHED_TENSOR_QUANT-N={N}-K={K}.json"
         if os.path.exists(fpath):
             with open(fpath, "r") as file:
                 config = json.load(file)
                 _get_config._config_dict[key] = config
         else:
             key = "default"  # fall back to default config
-    
+
     if M < 16:
         return _get_config._config_dict[key]["small"]
     elif M < 32:
@@ -228,7 +225,7 @@ def _get_config(
     elif M <= 256:
         return _get_config._config_dict[key]["large"]
     else:
-        return _get_config._config_dict[key]["xlarge"]    
+        return _get_config._config_dict[key]["xlarge"]
     return _get_config._config_dict[key]["any"]
 
 
@@ -281,14 +278,17 @@ def batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant(
     if YQ is None:
         if transpose_bm:
             YQ = torch.empty((M, B, N), dtype=dtype, device=X.device)
-        else:        
+        else:
             YQ = torch.empty((B, M, N), dtype=dtype, device=X.device)
     else:
         if transpose_bm:
-            assert YQ.shape[0] == M and YQ.shape[1] == B and YQ.shape[2] == N, "Output dimension error"
-        else:        
-            assert YQ.shape[0] == B and YQ.shape[1] == M and YQ.shape[2] == N, "Output dimension error"
-
+            assert (
+                YQ.shape[0] == M and YQ.shape[1] == B and YQ.shape[2] == N
+            ), "Output dimension error"
+        else:
+            assert (
+                YQ.shape[0] == B and YQ.shape[1] == M and YQ.shape[2] == N
+            ), "Output dimension error"
 
     if config is None:
         config = _get_config(M, N, K)
@@ -299,12 +299,14 @@ def batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant(
     )
 
     DTYPE_MAX = (
-            torch.finfo(WQ.dtype).max
-            if torch.is_floating_point(WQ)
-            else torch.iinfo(WQ.dtype).max
-        )
-    
-    _batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant_kernel[grid](
+        torch.finfo(WQ.dtype).max
+        if torch.is_floating_point(WQ)
+        else torch.iinfo(WQ.dtype).max
+    )
+
+    _batched_gemm_a8w8_a_per_token_group_prequant_w_per_batched_tensor_quant_kernel[
+        grid
+    ](
         X,
         WQ,
         YQ,

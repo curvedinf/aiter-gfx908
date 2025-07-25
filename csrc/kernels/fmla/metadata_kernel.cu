@@ -197,7 +197,7 @@ std::vector<torch::Tensor> get_mla_metadata_impl(
 
     const int32_t batch_size = kv_indptr.size(0) - 1;
     const int32_t cu_num =
-        max(80, ROUND(batch_size, 16) * dev_prop.multiProcessorCount);
+        max(40, ROUND(batch_size, 16) * dev_prop.multiProcessorCount);
         // !!!!!!!!JUST FOR MI300!!!!!!!!!!!!!!
         // ROUND(batch_size, 16) * 80;
     auto opt = kv_indptr.options();

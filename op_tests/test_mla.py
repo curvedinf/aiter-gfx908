@@ -511,7 +511,7 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[i for i in range(16, 64)], # [41],
+    default=[64],#[i for i in range(16, 64)], # [41],
     help="""Batch size.
     e.g.: -b 16""",
 )

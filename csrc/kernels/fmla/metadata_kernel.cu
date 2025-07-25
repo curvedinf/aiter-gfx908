@@ -123,11 +123,15 @@ __global__ void kn_get_mla_metadata(
         while (fixed_gap != 0)
         {
             template_data_local[end_dim] -= fixed_gap;
-            if (kv_seq_les[end_dim - 1] > double_split_size_pad)
+            if (kv_seq_les[end_dim - 1] > double_split_size_pad || fixed_gap < 0)
             {
                 fixed_gap -= sign;
             }
             end_dim -= 1;
+            if (end_dim == 0)
+            {
+                end_dim = batch_size;
+            }
         }
 
         for (int i = 0; i < batch_size + 1; ++i)

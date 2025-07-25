@@ -180,18 +180,18 @@ def get_meta_param_balanced(kv_indptr,
                             batch_split_table,
                             split_table,
                             kv_seq_les,
+                            cu_num,
                             ):
-
     bs = kv_indptr.shape[0] - 1
     for i in range(bs):
         kv_seq_les[i] = kv_indptr[i + 1] - kv_indptr[i]
     # kv_seq_les = torch.tensor([kv_indptr[i + 1] - kv_indptr[i] for i in range(bs)], device = device)
     total_kv_pad = 0
 
-    cu_num = int(get_cu_num()) * int(bs / 16 + 0.5)
-
     for i in range(bs):
         total_kv_pad += (kv_seq_les[i] + 16 - 1) // 16 * 16 
+    # print(total_kv_pad 37424 / bs * 2000)
+    cu_num = int(get_cu_num()) * int((bs / 16) + 0.5)
 
     split_size_pad = (total_kv_pad + cu_num - 1) // cu_num + 80 
 
@@ -208,26 +208,34 @@ def get_meta_param_balanced(kv_indptr,
 
     fixed_size = 0
     sign = 1 if fix_size > 0 else -1
-    if fix_size > 0:
-        for i in range(1, bs + 1):
-            if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad <= split_size_pad / 2:
-                fixed_size += sign
-            num_kv_splits_indptr[i] -= fixed_size
-    elif fix_size < 0:
-        for i in range(1, bs + 1):
-            if fixed_size != fix_size and kv_seq_les[i-1] > 4 * split_size_pad and kv_seq_les[i-1] % split_size_pad > split_size_pad / 2:
-                fixed_size += sign
-            num_kv_splits_indptr[i] -=  fixed_size
+    num_kv_splits_indptr[0] = 0
+    if num_kv_splits_indptr[-1] != cu_num:
+        if fix_size > 0:
+            for i in range(1, bs + 1):
+                if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad <= split_size_pad / 2:
+                    fixed_size += sign
+                num_kv_splits_indptr[i] = num_kv_splits_indptr[i] - fixed_size
+        else:
+            for i in range(1, bs + 1):
+                if fixed_size != fix_size and kv_seq_les[i-1] > 2 * split_size_pad and kv_seq_les[i-1] % split_size_pad > split_size_pad / 2:
+                    fixed_size += sign
+                num_kv_splits_indptr[i] = num_kv_splits_indptr[i] - fixed_size
+    else:
+        num_kv_splits_indptr = num_kv_splits_indptr
 
     fixed_gap = fix_size - fixed_size
 
     end_dim = bs 
-    while fixed_gap != 0:
+    loops = 0
+    while fixed_gap > 0:
         num_kv_splits_indptr[end_dim] -= fixed_gap
-        if kv_seq_les[end_dim - 1] > 1:
+        if (kv_seq_les[end_dim - 1] > total_kv_pad and fixed_gap > 0) or fixed_gap < 0:
             fixed_gap -= sign 
         end_dim -= 1
+        if end_dim == 0:
+            return
 
+    cu_num += fixed_gap
     for i in range(cu_num):
         if i < num_kv_splits_indptr[b_idx + 1]:
             batch_split_table[i] = b_idx
@@ -238,8 +246,8 @@ def get_meta_param_balanced(kv_indptr,
             batch_split_table[i] = b_idx
             split_table[i] = split_idx
         split_idx += 1
+    return num_kv_splits, num_kv_splits_indptr, batch_split_table, split_table, cu_num
 
-    return num_kv_splits_indptr, batch_split_table, split_table
 
 
 @functools.lru_cache()
@@ -387,6 +395,7 @@ def mla_decode_fwd_balenced(
     split_table=None,
     q_rope=None,
     k_rope=None, 
+    cu_num=None, 
 ):
     device = q.device
     assert logit_cap <= 0, f"{logit_cap=} is not support yet"
@@ -461,7 +470,7 @@ def mla_decode_fwd_balenced(
         batch_split_table,
         split_table,
         o,
-        num_kv_splits_indptr[bs].item(),
+        cu_num.item(),
     )
 
     grid = (bs, nhead)
@@ -507,6 +516,7 @@ def mla_decode_fwd_dispatch(
     num_kv_splits_indptr=None,
     batch_split_table=None,
     split_table=None,
+    cu_num=None, 
     q_rope=None,
     k_rope=None, 
 ):
@@ -542,6 +552,7 @@ def mla_decode_fwd_dispatch(
             split_table,
             q_rope,
             k_rope, 
+            cu_num,
         )
 
 

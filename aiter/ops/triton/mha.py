@@ -192,10 +192,15 @@ def _compute_alibi_block(
 
 
 @triton.jit
-def compute_window_bounds(q_start, q_end, diag, seqlen_k,
-                         WINDOW_SIZE_LEFT: tl.constexpr, 
-                         WINDOW_SIZE_RIGHT: tl.constexpr,
-                         IS_CAUSAL: tl.constexpr):
+def compute_window_bounds(
+    q_start,
+    q_end,
+    diag,
+    seqlen_k,
+    WINDOW_SIZE_LEFT: tl.constexpr,
+    WINDOW_SIZE_RIGHT: tl.constexpr,
+    IS_CAUSAL: tl.constexpr,
+):
     """Calculate the window boundaries for a query block."""
     # Left boundary
     if WINDOW_SIZE_LEFT < 0:
@@ -204,8 +209,8 @@ def compute_window_bounds(q_start, q_end, diag, seqlen_k,
     else:
         left_min = tl.maximum(0, q_start + diag - WINDOW_SIZE_LEFT)
         left_max = tl.maximum(0, q_end + diag - WINDOW_SIZE_LEFT)
-    
-    # Right boundary  
+
+    # Right boundary
     if IS_CAUSAL:
         # Causal cap: col ≤ row + diag
         right_min = tl.minimum(seqlen_k - 1, q_start + diag)
@@ -218,44 +223,57 @@ def compute_window_bounds(q_start, q_end, diag, seqlen_k,
             # Non-causal doesn't have the diagonal constraint
             right_min = tl.minimum(seqlen_k - 1, q_start + diag + WINDOW_SIZE_RIGHT)
             right_max = tl.minimum(seqlen_k - 1, q_end + diag + WINDOW_SIZE_RIGHT)
-    
+
     return left_min, left_max, right_min, right_max
 
+
 @triton.jit
-def classify_window_blocks(left_min, left_max, right_min, right_max,
-                          BLOCK_N: tl.constexpr):
+def classify_window_blocks(
+    left_min, left_max, right_min, right_max, BLOCK_N: tl.constexpr
+):
     """Classify blocks based on window boundaries."""
     # First and last blocks that have ANY overlap with window
     first_block = left_min // BLOCK_N
     last_block = right_max // BLOCK_N
-    
+
     # First block that is FULLY visible for all rows in Q block
     full_left_block = left_max // BLOCK_N + (left_max % BLOCK_N != 0)
     clipped_left = tl.minimum(full_left_block, last_block + 1)
-    
+
     # Last block that is FULLY visible for all rows in Q block
     last_full_block_candidate = right_min // BLOCK_N
     if (last_full_block_candidate + 1) * BLOCK_N - 1 > right_min:
         last_full_block_candidate -= 1
     full_right_block = tl.maximum(last_full_block_candidate, clipped_left - 1)
-    
+
     # Calculate counts
     n_front_skip_blocks = first_block
     n_front_masked_blocks = tl.maximum(0, clipped_left - first_block)
     n_full_blocks = tl.maximum(0, full_right_block - clipped_left + 1)
     n_back_masked_blocks = tl.maximum(0, last_block - full_right_block)
-    
-    return (n_front_skip_blocks, n_front_masked_blocks, 
-            n_full_blocks, n_back_masked_blocks,
-            clipped_left)
+
+    return (
+        n_front_skip_blocks,
+        n_front_masked_blocks,
+        n_full_blocks,
+        n_back_masked_blocks,
+        clipped_left,
+    )
+
 
 @triton.jit
-def handle_padded_last_block(n_extra_tokens, last_block, total_k_blocks,
-                           clipped_left, n_front_masked_blocks,
-                           n_full_blocks, n_back_masked_blocks):
+def handle_padded_last_block(
+    n_extra_tokens,
+    last_block,
+    total_k_blocks,
+    clipped_left,
+    n_front_masked_blocks,
+    n_full_blocks,
+    n_back_masked_blocks,
+):
     """Adjust block counts when last K block has padding."""
     padded_last_k = (n_extra_tokens != 0) & (last_block == total_k_blocks - 1)
-    
+
     if padded_last_k & (n_back_masked_blocks == 0):
         last_block_in_front = clipped_left > last_block
         if last_block_in_front:
@@ -263,8 +281,9 @@ def handle_padded_last_block(n_extra_tokens, last_block, total_k_blocks,
         else:
             n_full_blocks = tl.maximum(0, n_full_blocks - 1)
         n_back_masked_blocks = 1
-    
+
     return n_front_masked_blocks, n_full_blocks, n_back_masked_blocks
+
 
 @triton.jit
 def compute_padding_info(seqlen_k, BLOCK_N: tl.constexpr):
@@ -277,49 +296,75 @@ def compute_padding_info(seqlen_k, BLOCK_N: tl.constexpr):
         n_extra_tokens = 0
     return n_extra_tokens
 
+
 @triton.jit
-def compute_block_masking(seqlen_k, seqlen_q, start_m,
-                      IS_CAUSAL: tl.constexpr, USE_SLIDING_WINDOW: tl.constexpr,
-                      WINDOW_SIZE_LEFT: tl.constexpr, WINDOW_SIZE_RIGHT: tl.constexpr,
-                      BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+def compute_block_masking(
+    seqlen_k,
+    seqlen_q,
+    start_m,
+    IS_CAUSAL: tl.constexpr,
+    USE_SLIDING_WINDOW: tl.constexpr,
+    WINDOW_SIZE_LEFT: tl.constexpr,
+    WINDOW_SIZE_RIGHT: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+):
     """
     Classify K blocks for attention computation with sliding window support.
     """
     # common
     q_start = start_m * BLOCK_M
-    q_end   = tl.minimum((start_m + 1) * BLOCK_M - 1, seqlen_q - 1)
-    diag    = seqlen_k - seqlen_q
+    q_end = tl.minimum((start_m + 1) * BLOCK_M - 1, seqlen_q - 1)
+    diag = seqlen_k - seqlen_q
     total_k_blocks = _cdiv_fn(seqlen_k, BLOCK_N)
     n_extra_tokens = compute_padding_info(seqlen_k, BLOCK_N)
-    
+
     if USE_SLIDING_WINDOW:
         # get window bounds
         left_min, left_max, right_min, right_max = compute_window_bounds(
-            q_start, q_end, diag, seqlen_k,
-            WINDOW_SIZE_LEFT, WINDOW_SIZE_RIGHT, IS_CAUSAL
+            q_start,
+            q_end,
+            diag,
+            seqlen_k,
+            WINDOW_SIZE_LEFT,
+            WINDOW_SIZE_RIGHT,
+            IS_CAUSAL,
         )
 
         # window vanishes → early exit
         if right_max < left_min:
             return 0, 0, 0, 0, n_extra_tokens
-        
+
         # classify blocks
-        (n_front_skip_blocks, n_front_masked_blocks, 
-        n_full_blocks, n_back_masked_blocks, 
-        clipped_left) = classify_window_blocks(
-            left_min, left_max, right_min, right_max, BLOCK_N
-        )
-        
+        (
+            n_front_skip_blocks,
+            n_front_masked_blocks,
+            n_full_blocks,
+            n_back_masked_blocks,
+            clipped_left,
+        ) = classify_window_blocks(left_min, left_max, right_min, right_max, BLOCK_N)
+
         # handle padded last block if needed
         if n_extra_tokens != 0:
             last_block = right_max // BLOCK_N
-            n_front_masked_blocks, n_full_blocks, n_back_masked_blocks = handle_padded_last_block(
-                n_extra_tokens, last_block, total_k_blocks,
-                clipped_left, n_front_masked_blocks,
-                n_full_blocks, n_back_masked_blocks
+            n_front_masked_blocks, n_full_blocks, n_back_masked_blocks = (
+                handle_padded_last_block(
+                    n_extra_tokens,
+                    last_block,
+                    total_k_blocks,
+                    clipped_left,
+                    n_front_masked_blocks,
+                    n_full_blocks,
+                    n_back_masked_blocks,
+                )
             )
-        return (n_front_skip_blocks, n_front_masked_blocks,
-                n_full_blocks, n_back_masked_blocks, n_extra_tokens)
+        return (
+            n_front_skip_blocks,
+            n_front_masked_blocks,
+            n_full_blocks,
+            n_back_masked_blocks,
+            n_extra_tokens,
+        )
     else:
         # Original causal/non-causal logic
         if IS_CAUSAL:
@@ -327,22 +372,22 @@ def compute_block_masking(seqlen_k, seqlen_q, start_m,
                 (start_m + 1) * BLOCK_M + seqlen_k - seqlen_q, BLOCK_N
             )
             n_blocks = min(total_k_blocks, n_blocks_seqlen)
-            
+
             if n_blocks <= 0:
                 return 0, 0, 0, 0, n_extra_tokens
-                
+
             padded_last_k = n_extra_tokens != 0
-            is_modulo_mn  = (not padded_last_k) & (seqlen_q % BLOCK_M == 0)
-            
+            is_modulo_mn = (not padded_last_k) & (seqlen_q % BLOCK_M == 0)
+
             n_back_masked_blocks = BLOCK_M // BLOCK_N + tl.where(is_modulo_mn, 0, 1)
             n_back_masked_blocks = tl.minimum(n_back_masked_blocks, n_blocks)
-            
-            n_front_skip_blocks   = 0
+
+            n_front_skip_blocks = 0
             n_front_masked_blocks = 0
-            n_full_blocks         = n_blocks - n_back_masked_blocks
+            n_full_blocks = n_blocks - n_back_masked_blocks
         else:
             # Non-causal mode
-            n_front_skip_blocks   = 0
+            n_front_skip_blocks = 0
             n_front_masked_blocks = 0
             if n_extra_tokens != 0:
                 n_back_masked_blocks = 1
@@ -350,27 +395,53 @@ def compute_block_masking(seqlen_k, seqlen_q, start_m,
             else:
                 n_back_masked_blocks = 0
                 n_full_blocks = total_k_blocks
-    
-    return n_front_skip_blocks, n_front_masked_blocks, n_full_blocks, n_back_masked_blocks, n_extra_tokens
+
+    return (
+        n_front_skip_blocks,
+        n_front_masked_blocks,
+        n_full_blocks,
+        n_back_masked_blocks,
+        n_extra_tokens,
+    )
+
 
 @triton.jit
 def _attn_fwd_inner_no_mask(
-    acc, l_i, m_i,
-    q, k_ptrs, v_ptrs,
-    stride_kn, stride_vk, stride_sn,
-    start_m, seqlen_k, seqlen_q,
-    dropout_p, sd_mask_ptrs, dropout_mask_ptrs,
-    philox_seed, philox_ptrs,
-    block_min, block_max,
+    acc,
+    l_i,
+    m_i,
+    q,
+    k_ptrs,
+    v_ptrs,
+    stride_kn,
+    stride_vk,
+    stride_sn,
+    start_m,
+    seqlen_k,
+    seqlen_q,
+    dropout_p,
+    sd_mask_ptrs,
+    dropout_mask_ptrs,
+    philox_seed,
+    philox_ptrs,
+    block_min,
+    block_max,
     alibi_slope,
-    descale_q, descale_k, descale_v,
-    OFFS_M: tl.constexpr, OFFS_N: tl.constexpr,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
-    BLOCK_DMODEL: tl.constexpr, BLOCK_DMODEL_POW2: tl.constexpr,
+    descale_q,
+    descale_k,
+    descale_v,
+    OFFS_M: tl.constexpr,
+    OFFS_N: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_DMODEL: tl.constexpr,
+    BLOCK_DMODEL_POW2: tl.constexpr,
     SM_SCALE: tl.constexpr,
-    ENABLE_DROPOUT: tl.constexpr, RETURN_SCORES: tl.constexpr,
+    ENABLE_DROPOUT: tl.constexpr,
+    RETURN_SCORES: tl.constexpr,
     PADDED_HEAD: tl.constexpr,
-    IS_FP8: tl.constexpr, FP8_MAX: tl.constexpr,
+    IS_FP8: tl.constexpr,
+    FP8_MAX: tl.constexpr,
 ):
     """Fast path for blocks that don't need masking"""
     RCP_LN2: tl.constexpr = 1.4426950408889634
@@ -378,14 +449,14 @@ def _attn_fwd_inner_no_mask(
     for start_n in range(block_min, block_max, BLOCK_N):
         k_offs_k = None if not PADDED_HEAD else tl.arange(0, BLOCK_DMODEL_POW2)
         k = _load_fn(k_ptrs, k_offs_k, None, BLOCK_DMODEL, seqlen_k)
-        
+
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
-        
+
         if IS_FP8:
             qk += tl.dot(q, k) * descale_q * descale_k
         else:
             qk += tl.dot(q, k)
-        
+
         if alibi_slope is not None:
             global_m_positions = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
@@ -393,19 +464,19 @@ def _attn_fwd_inner_no_mask(
                 alibi_slope, seqlen_q, seqlen_k, global_m_positions, global_n_positions
             )
             qk += alibi_block / SM_SCALE
-            
+
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         m_ij_scaled = m_ij * SM_SCALE * RCP_LN2
         q_shifted = qk * SM_SCALE * RCP_LN2 - m_ij_scaled[:, None]
         p = tl.math.exp2(q_shifted)
-        
+
         l_ij = tl.sum(p, 1)
-        
+
         if ENABLE_DROPOUT:
             q_mask = OFFS_M[:, None] < seqlen_q
             k_mask = (start_n + tl.arange(0, BLOCK_N))[None, :] < seqlen_k
             p_mask = q_mask & k_mask
-            
+
             rng_output = tl.rand(philox_seed, philox_ptrs)
             dropout_mask = rng_output > dropout_p
             tl.store(dropout_mask_ptrs, dropout_mask, mask=p_mask)
@@ -417,23 +488,25 @@ def _attn_fwd_inner_no_mask(
             k_mask = (start_n + tl.arange(0, BLOCK_N))[None, :] < seqlen_k
             p_mask = q_mask & k_mask
             tl.store(sd_mask_ptrs, p, mask=p_mask)
-        
+
         m_diff_scaled = m_i * SM_SCALE * RCP_LN2 - m_ij_scaled
         alpha = tl.math.exp2(m_diff_scaled)
         acc = acc * alpha[:, None]
-        
+
         v_offs_k = None if not PADDED_HEAD else tl.arange(0, BLOCK_DMODEL_POW2)
         v = _load_fn(v_ptrs, None, v_offs_k, seqlen_k, BLOCK_DMODEL)
-        
+
         l_i = l_i * alpha + l_ij
         m_i = m_ij
-        
+
         if IS_FP8:
             scale_p, descale_p = _compute_fp8_scaling_factors(p, FP8_MAX)
-            acc += tl.dot((p * scale_p).to(v.type.element_ty), v) * descale_p * descale_v
+            acc += (
+                tl.dot((p * scale_p).to(v.type.element_ty), v) * descale_p * descale_v
+            )
         else:
             acc += tl.dot(p.to(v.type.element_ty), v)
-        
+
         k_ptrs += BLOCK_N * stride_kn
         v_ptrs += BLOCK_N * stride_vk
         if RETURN_SCORES:
@@ -441,31 +514,53 @@ def _attn_fwd_inner_no_mask(
         if ENABLE_DROPOUT:
             dropout_mask_ptrs += BLOCK_N * stride_sn
             philox_ptrs += BLOCK_N * stride_sn
-    
+
     return acc, l_i, m_i
+
 
 @triton.jit
 def _attn_fwd_inner_mask(
-    acc, l_i, m_i,
-    q, k_ptrs, v_ptrs,
-    stride_kn, stride_vk, stride_sn,
-    start_m, seqlen_k, seqlen_q,
-    dropout_p, sd_mask_ptrs, dropout_mask_ptrs,
-    philox_seed, philox_ptrs,
-    block_min, block_max,
-    offs_n_causal, n_extra_tokens,
+    acc,
+    l_i,
+    m_i,
+    q,
+    k_ptrs,
+    v_ptrs,
+    stride_kn,
+    stride_vk,
+    stride_sn,
+    start_m,
+    seqlen_k,
+    seqlen_q,
+    dropout_p,
+    sd_mask_ptrs,
+    dropout_mask_ptrs,
+    philox_seed,
+    philox_ptrs,
+    block_min,
+    block_max,
+    offs_n_causal,
+    n_extra_tokens,
     alibi_slope,
-    descale_q, descale_k, descale_v,
-    OFFS_M: tl.constexpr, OFFS_N: tl.constexpr,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr,
-    BLOCK_DMODEL: tl.constexpr, BLOCK_DMODEL_POW2: tl.constexpr,
+    descale_q,
+    descale_k,
+    descale_v,
+    OFFS_M: tl.constexpr,
+    OFFS_N: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    BLOCK_DMODEL: tl.constexpr,
+    BLOCK_DMODEL_POW2: tl.constexpr,
     SM_SCALE: tl.constexpr,
     IS_CAUSAL: tl.constexpr,
-    ENABLE_DROPOUT: tl.constexpr, RETURN_SCORES: tl.constexpr,
+    ENABLE_DROPOUT: tl.constexpr,
+    RETURN_SCORES: tl.constexpr,
     PADDED_HEAD: tl.constexpr,
-    IS_FP8: tl.constexpr, FP8_MAX: tl.constexpr,
+    IS_FP8: tl.constexpr,
+    FP8_MAX: tl.constexpr,
     USE_SLIDING_WINDOW: tl.constexpr,
-    WINDOW_SIZE_LEFT: tl.constexpr, WINDOW_SIZE_RIGHT: tl.constexpr,
+    WINDOW_SIZE_LEFT: tl.constexpr,
+    WINDOW_SIZE_RIGHT: tl.constexpr,
 ):
     """Path for blocks that need masking (causal, padding, or sliding window)"""
     RCP_LN2: tl.constexpr = 1.4426950408889634
@@ -474,22 +569,22 @@ def _attn_fwd_inner_mask(
         k_offs_n = start_n + tl.arange(0, BLOCK_N)
         k_offs_k = None if not PADDED_HEAD else tl.arange(0, BLOCK_DMODEL_POW2)
         k = _load_fn(k_ptrs, k_offs_k, k_offs_n, BLOCK_DMODEL, seqlen_k)
-        
+
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         mask = tl.full([BLOCK_M, BLOCK_N], True, dtype=tl.int1)
-        
+
         # Padding mask for last block
         bound_cond = (start_n + BLOCK_N == block_max) and (n_extra_tokens != 0)
         boundary_m = tl.full([BLOCK_M], seqlen_k, dtype=tl.int32)
         size_n = start_n + OFFS_N[None, :]
         mask_partial = size_n < boundary_m[:, None]
         mask = tl.where(bound_cond, mask_partial, mask)
-        
+
         if IS_FP8:
             qk += tl.dot(q, k) * descale_q * descale_k
         else:
             qk += tl.dot(q, k)
-        
+
         # Apply masking based on mode
         if USE_SLIDING_WINDOW:
             if IS_CAUSAL:
@@ -498,17 +593,21 @@ def _attn_fwd_inner_mask(
                 col_idx = k_offs_n
                 row_idx_expanded = row_idx[:, None]
                 col_idx_expanded = col_idx[None, :]
-                
+
                 causal_offset = seqlen_k - seqlen_q
                 causal_mask = col_idx_expanded > (row_idx_expanded + causal_offset)
-                
+
                 if WINDOW_SIZE_LEFT < 0:
-                    window_mask = col_idx_expanded > (row_idx_expanded + causal_offset + WINDOW_SIZE_RIGHT)
+                    window_mask = col_idx_expanded > (
+                        row_idx_expanded + causal_offset + WINDOW_SIZE_RIGHT
+                    )
                 else:
                     left_bound = row_idx_expanded + causal_offset - WINDOW_SIZE_LEFT
                     right_bound = row_idx_expanded + causal_offset + WINDOW_SIZE_RIGHT
-                    window_mask = (col_idx_expanded < left_bound) | (col_idx_expanded > right_bound)
-                
+                    window_mask = (col_idx_expanded < left_bound) | (
+                        col_idx_expanded > right_bound
+                    )
+
                 mask = mask & ~(causal_mask | window_mask)
             else:
                 # Non-causal sliding window
@@ -516,28 +615,32 @@ def _attn_fwd_inner_mask(
                 col_idx = k_offs_n
                 row_idx_expanded = row_idx[:, None]
                 col_idx_expanded = col_idx[None, :]
-                
+
                 sk = seqlen_k
                 sq = seqlen_q
-                
+
                 if WINDOW_SIZE_LEFT < 0:
-                    window_mask = col_idx_expanded > (row_idx_expanded + sk - sq + WINDOW_SIZE_RIGHT)
+                    window_mask = col_idx_expanded > (
+                        row_idx_expanded + sk - sq + WINDOW_SIZE_RIGHT
+                    )
                 else:
                     sk_full = tl.full((1, BLOCK_N), sk, dtype=tl.int32)
                     right_bound_val = row_idx_expanded + sk - sq + WINDOW_SIZE_RIGHT
                     right_bound = tl.minimum(right_bound_val, sk_full)
                     left_bound = row_idx_expanded + sk - sq - WINDOW_SIZE_LEFT
-                    window_mask = (col_idx_expanded > right_bound) | (col_idx_expanded < left_bound)
-                
+                    window_mask = (col_idx_expanded > right_bound) | (
+                        col_idx_expanded < left_bound
+                    )
+
                 mask = mask & ~window_mask
         else:
             if IS_CAUSAL:
                 causal_boundary = start_n + offs_n_causal
                 causal_mask = OFFS_M[:, None] >= causal_boundary[None, :]
                 mask = mask and causal_mask
-        
+
         qk = tl.where(mask, qk, float("-inf"))
-        
+
         if alibi_slope is not None:
             global_m_positions = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
             global_n_positions = start_n + tl.arange(0, BLOCK_N)
@@ -545,25 +648,27 @@ def _attn_fwd_inner_mask(
                 alibi_slope, seqlen_q, seqlen_k, global_m_positions, global_n_positions
             )
             qk += alibi_block / SM_SCALE
-            
+
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
         m_ij_scaled = m_ij * SM_SCALE * RCP_LN2
-        
+
         # Handle -inf cases for sliding window
         if USE_SLIDING_WINDOW:
-            q_shifted = tl.where(m_ij[:, None] == float("-inf"), 
-                                float("-inf"), 
-                                qk * SM_SCALE * RCP_LN2 - m_ij_scaled[:, None])
+            q_shifted = tl.where(
+                m_ij[:, None] == float("-inf"),
+                float("-inf"),
+                qk * SM_SCALE * RCP_LN2 - m_ij_scaled[:, None],
+            )
         else:
             q_shifted = qk * SM_SCALE * RCP_LN2 - m_ij_scaled[:, None]
-            
+
         p = tl.math.exp2(q_shifted)
         l_ij = tl.sum(p, 1)
-        
+
         q_mask = OFFS_M[:, None] < seqlen_q
         k_mask = k_offs_n[None, :] < seqlen_k
         p_mask = q_mask & k_mask
-        
+
         if ENABLE_DROPOUT:
             rng_output = tl.rand(philox_seed, philox_ptrs)
             dropout_mask = rng_output > dropout_p
@@ -573,29 +678,33 @@ def _attn_fwd_inner_mask(
             p = tl.where(dropout_mask, p, 0.0)
         elif RETURN_SCORES:
             tl.store(sd_mask_ptrs, p, mask=p_mask)
-        
+
         # Handle -inf cases for sliding window
         if USE_SLIDING_WINDOW:
-            m_diff_scaled = tl.where(m_ij == float("-inf"), 
-                                    float("-inf"), 
-                                    m_i * SM_SCALE * RCP_LN2 - m_ij_scaled)
+            m_diff_scaled = tl.where(
+                m_ij == float("-inf"),
+                float("-inf"),
+                m_i * SM_SCALE * RCP_LN2 - m_ij_scaled,
+            )
         else:
             m_diff_scaled = m_i * SM_SCALE * RCP_LN2 - m_ij_scaled
-            
+
         alpha = tl.math.exp2(m_diff_scaled)
         acc = acc * alpha[:, None]
-        
+
         v = _load_fn(v_ptrs, k_offs_n, k_offs_k, seqlen_k, BLOCK_DMODEL)
-        
+
         l_i = l_i * alpha + l_ij
         m_i = m_ij
-        
+
         if IS_FP8:
             scale_p, descale_p = _compute_fp8_scaling_factors(p, FP8_MAX)
-            acc += tl.dot((p * scale_p).to(v.type.element_ty), v) * descale_p * descale_v
+            acc += (
+                tl.dot((p * scale_p).to(v.type.element_ty), v) * descale_p * descale_v
+            )
         else:
             acc += tl.dot(p.to(v.type.element_ty), v)
-        
+
         k_ptrs += BLOCK_N * stride_kn
         v_ptrs += BLOCK_N * stride_vk
         if RETURN_SCORES:
@@ -603,7 +712,7 @@ def _attn_fwd_inner_mask(
         if ENABLE_DROPOUT:
             dropout_mask_ptrs += BLOCK_N * stride_sn
             philox_ptrs += BLOCK_N * stride_sn
-    
+
     return acc, l_i, m_i
 
 
@@ -923,9 +1032,22 @@ def _attn_fwd(
         descale_q, descale_k, descale_v = 1.0, 1.0, 1.0
 
     # figure out block masking
-    n_front_skip_blocks, n_front_masked_blocks, n_full_blocks, n_back_masked_blocks, n_extra_tokens = compute_block_masking(
-        seqlen_k, seqlen_q, start_m, IS_CAUSAL, USE_SLIDING_WINDOW, 
-        WINDOW_SIZE_LEFT, WINDOW_SIZE_RIGHT, BLOCK_M, BLOCK_N
+    (
+        n_front_skip_blocks,
+        n_front_masked_blocks,
+        n_full_blocks,
+        n_back_masked_blocks,
+        n_extra_tokens,
+    ) = compute_block_masking(
+        seqlen_k,
+        seqlen_q,
+        start_m,
+        IS_CAUSAL,
+        USE_SLIDING_WINDOW,
+        WINDOW_SIZE_LEFT,
+        WINDOW_SIZE_RIGHT,
+        BLOCK_M,
+        BLOCK_N,
     )
 
     ## Check if all blocks are skipped
@@ -942,7 +1064,7 @@ def _attn_fwd(
         acc = tl.zeros([BLOCK_M, BLOCK_DMODEL_POW2], dtype=out_ptr.type.element_ty)
         out_mask = (offs_m[:, None] < seqlen_q) & (offs_d[None, :] < BLOCK_DMODEL)
         tl.store(out_ptr + offs_out, acc, mask=out_mask)
-        
+
         if softmax_lse_ptr is not None:
             offs_lse = (
                 off_z * stride_lse_z
@@ -961,27 +1083,52 @@ def _attn_fwd(
         block_max = (n_front_skip_blocks + n_front_masked_blocks) * BLOCK_N
         k_ptrs_front = k_ptrs + block_min * stride_kn
         v_ptrs_front = v_ptrs + block_min * stride_vn
-        s_dmask_ptrs_front = s_dmask_ptrs + block_min * stride_sd_n if RETURN_SCORES else None
-        dropout_mask_ptrs_front = dropout_mask_ptrs + block_min * stride_sd_n if ENABLE_DROPOUT else None
-        
+        s_dmask_ptrs_front = (
+            s_dmask_ptrs + block_min * stride_sd_n if RETURN_SCORES else None
+        )
+        dropout_mask_ptrs_front = (
+            dropout_mask_ptrs + block_min * stride_sd_n if ENABLE_DROPOUT else None
+        )
+
         acc, l_i, m_i = _attn_fwd_inner_mask(
-            acc, l_i, m_i,
-            q, k_ptrs_front, v_ptrs_front,
-            stride_kn, stride_vn, stride_sd_n,
-            start_m, seqlen_k, seqlen_q,
-            dropout_p, s_dmask_ptrs_front, dropout_mask_ptrs_front,
-            philox_seed, philox_ptrs,
-            block_min, block_max,
+            acc,
+            l_i,
+            m_i,
+            q,
+            k_ptrs_front,
+            v_ptrs_front,
+            stride_kn,
+            stride_vn,
+            stride_sd_n,
+            start_m,
+            seqlen_k,
+            seqlen_q,
+            dropout_p,
+            s_dmask_ptrs_front,
+            dropout_mask_ptrs_front,
+            philox_seed,
+            philox_ptrs,
+            block_min,
+            block_max,
             offs_n + (seqlen_q - seqlen_k) if IS_CAUSAL else 0,
             0,  # n_extra_tokens (not relevant for front blocks)
             alibi_slope,
-            descale_q, descale_k, descale_v,
-            offs_m, offs_n,
-            BLOCK_M, BLOCK_N, BLOCK_DMODEL, BLOCK_DMODEL_POW2, sm_scale,
+            descale_q,
+            descale_k,
+            descale_v,
+            offs_m,
+            offs_n,
+            BLOCK_M,
+            BLOCK_N,
+            BLOCK_DMODEL,
+            BLOCK_DMODEL_POW2,
+            sm_scale,
             IS_CAUSAL,
-            ENABLE_DROPOUT, RETURN_SCORES,
+            ENABLE_DROPOUT,
+            RETURN_SCORES,
             PADDED_HEAD=BLOCK_DMODEL != BLOCK_DMODEL_POW2,
-            IS_FP8=IS_FP8, FP8_MAX=FP8_MAX,
+            IS_FP8=IS_FP8,
+            FP8_MAX=FP8_MAX,
             USE_SLIDING_WINDOW=USE_SLIDING_WINDOW,
             WINDOW_SIZE_LEFT=WINDOW_SIZE_LEFT,
             WINDOW_SIZE_RIGHT=WINDOW_SIZE_RIGHT,
@@ -990,56 +1137,115 @@ def _attn_fwd(
     # Process full blocks (no masking needed)
     if n_full_blocks > 0:
         block_min = (n_front_skip_blocks + n_front_masked_blocks) * BLOCK_N
-        block_max = (n_front_skip_blocks + n_front_masked_blocks + n_full_blocks) * BLOCK_N
+        block_max = (
+            n_front_skip_blocks + n_front_masked_blocks + n_full_blocks
+        ) * BLOCK_N
         k_ptrs_full = k_ptrs + block_min * stride_kn
         v_ptrs_full = v_ptrs + block_min * stride_vn
-        s_dmask_ptrs_full = s_dmask_ptrs + block_min * stride_sd_n if RETURN_SCORES else None
-        dropout_mask_ptrs_full = dropout_mask_ptrs + block_min * stride_sd_n if ENABLE_DROPOUT else None
-        
+        s_dmask_ptrs_full = (
+            s_dmask_ptrs + block_min * stride_sd_n if RETURN_SCORES else None
+        )
+        dropout_mask_ptrs_full = (
+            dropout_mask_ptrs + block_min * stride_sd_n if ENABLE_DROPOUT else None
+        )
+
         acc, l_i, m_i = _attn_fwd_inner_no_mask(
-            acc, l_i, m_i,
-            q, k_ptrs_full, v_ptrs_full,
-            stride_kn, stride_vn, stride_sd_n,
-            start_m, seqlen_k, seqlen_q,
-            dropout_p, s_dmask_ptrs_full, dropout_mask_ptrs_full,
-            philox_seed, philox_ptrs,
-            block_min, block_max,
+            acc,
+            l_i,
+            m_i,
+            q,
+            k_ptrs_full,
+            v_ptrs_full,
+            stride_kn,
+            stride_vn,
+            stride_sd_n,
+            start_m,
+            seqlen_k,
+            seqlen_q,
+            dropout_p,
+            s_dmask_ptrs_full,
+            dropout_mask_ptrs_full,
+            philox_seed,
+            philox_ptrs,
+            block_min,
+            block_max,
             alibi_slope,
-            descale_q, descale_k, descale_v,
-            offs_m, offs_n,
-            BLOCK_M, BLOCK_N, BLOCK_DMODEL, BLOCK_DMODEL_POW2, sm_scale,
-            ENABLE_DROPOUT, RETURN_SCORES,
+            descale_q,
+            descale_k,
+            descale_v,
+            offs_m,
+            offs_n,
+            BLOCK_M,
+            BLOCK_N,
+            BLOCK_DMODEL,
+            BLOCK_DMODEL_POW2,
+            sm_scale,
+            ENABLE_DROPOUT,
+            RETURN_SCORES,
             PADDED_HEAD=BLOCK_DMODEL != BLOCK_DMODEL_POW2,
-            IS_FP8=IS_FP8, FP8_MAX=FP8_MAX,
+            IS_FP8=IS_FP8,
+            FP8_MAX=FP8_MAX,
         )
 
     # Process back masked blocks
     if n_back_masked_blocks > 0:
-        block_min = (n_front_skip_blocks + n_front_masked_blocks + n_full_blocks) * BLOCK_N
-        block_max = (n_front_skip_blocks + n_front_masked_blocks + n_full_blocks + n_back_masked_blocks) * BLOCK_N
+        block_min = (
+            n_front_skip_blocks + n_front_masked_blocks + n_full_blocks
+        ) * BLOCK_N
+        block_max = (
+            n_front_skip_blocks
+            + n_front_masked_blocks
+            + n_full_blocks
+            + n_back_masked_blocks
+        ) * BLOCK_N
         k_ptrs_back = k_ptrs + block_min * stride_kn
         v_ptrs_back = v_ptrs + block_min * stride_vn
-        s_dmask_ptrs_back = s_dmask_ptrs + block_min * stride_sd_n if RETURN_SCORES else None
-        dropout_mask_ptrs_back = dropout_mask_ptrs + block_min * stride_sd_n if ENABLE_DROPOUT else None
-        
+        s_dmask_ptrs_back = (
+            s_dmask_ptrs + block_min * stride_sd_n if RETURN_SCORES else None
+        )
+        dropout_mask_ptrs_back = (
+            dropout_mask_ptrs + block_min * stride_sd_n if ENABLE_DROPOUT else None
+        )
+
         acc, l_i, m_i = _attn_fwd_inner_mask(
-            acc, l_i, m_i,
-            q, k_ptrs_back, v_ptrs_back,
-            stride_kn, stride_vn, stride_sd_n,
-            start_m, seqlen_k, seqlen_q,
-            dropout_p, s_dmask_ptrs_back, dropout_mask_ptrs_back,
-            philox_seed, philox_ptrs,
-            block_min, block_max,
+            acc,
+            l_i,
+            m_i,
+            q,
+            k_ptrs_back,
+            v_ptrs_back,
+            stride_kn,
+            stride_vn,
+            stride_sd_n,
+            start_m,
+            seqlen_k,
+            seqlen_q,
+            dropout_p,
+            s_dmask_ptrs_back,
+            dropout_mask_ptrs_back,
+            philox_seed,
+            philox_ptrs,
+            block_min,
+            block_max,
             offs_n + (seqlen_q - seqlen_k) if IS_CAUSAL else 0,
             n_extra_tokens,
             alibi_slope,
-            descale_q, descale_k, descale_v,
-            offs_m, offs_n,
-            BLOCK_M, BLOCK_N, BLOCK_DMODEL, BLOCK_DMODEL_POW2, sm_scale,
+            descale_q,
+            descale_k,
+            descale_v,
+            offs_m,
+            offs_n,
+            BLOCK_M,
+            BLOCK_N,
+            BLOCK_DMODEL,
+            BLOCK_DMODEL_POW2,
+            sm_scale,
             IS_CAUSAL,
-            ENABLE_DROPOUT, RETURN_SCORES,
+            ENABLE_DROPOUT,
+            RETURN_SCORES,
             PADDED_HEAD=BLOCK_DMODEL != BLOCK_DMODEL_POW2,
-            IS_FP8=IS_FP8, FP8_MAX=FP8_MAX,
+            IS_FP8=IS_FP8,
+            FP8_MAX=FP8_MAX,
             USE_SLIDING_WINDOW=USE_SLIDING_WINDOW,
             WINDOW_SIZE_LEFT=WINDOW_SIZE_LEFT,
             WINDOW_SIZE_RIGHT=WINDOW_SIZE_RIGHT,

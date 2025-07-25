@@ -1,3 +1,5 @@
+#pragma once
+
 #include "hip/hip_runtime.h"
 /*
  * Copyright (C) 2024-2025 by FlashInfer team.
@@ -14,16 +16,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- #ifndef FLASHINFER_SAMPLING_CUH_
- #define FLASHINFER_SAMPLING_CUH_
  
- #include <hiprand.h>
- #include <hiprand/hiprand_kernel.h>
+ #include <hiprand/hiprand.h>
  #include <hiprand/hiprand_kernel.h>
  
- #include <hipcub/block/block_adjacent_difference.cuh>
- #include <hipcub/block/block_reduce.cuh>
- #include <hipcub/block/block_scan.cuh>
+ #include <hipcub/block/block_adjacent_difference.hpp>
+ #include <hipcub/block/block_reduce.hpp>
+ #include <hipcub/block/block_scan.hpp>
  #include <limits>
  #include <numeric>
  #include <tuple>
@@ -36,6 +35,12 @@
  
  using namespace hipcub;
  
+ constexpr uint32_t BLOCK_THREADS = 1024; 
+ 
+ constexpr BlockScanAlgorithm SCAN_ALGO = BLOCK_SCAN_WARP_SCANS;
+ constexpr BlockReduceAlgorithm REDUCE_ALGO = BLOCK_REDUCE_WARP_REDUCTIONS; 
+  
+
  #define DISPATCH_ALIGNED_VEC_SIZE(aligned_vec_size, ALIGNED_VEC_SIZE, ...) \
  switch (aligned_vec_size) {                                              \
    case 16: {                                                             \
@@ -78,13 +83,7 @@
    } else {                                                        \
      constexpr bool DETERMINISTIC = false;                         \
      __VA_ARGS__                                                   \
-   }
-   
- #define BLOCK_THREADS 1024 
-
- constexpr BlockScanAlgorithm SCAN_ALGO = BLOCK_SCAN_WARP_SCANS;
- constexpr BlockReduceAlgorithm REDUCE_ALGO = BLOCK_REDUCE_WARP_REDUCTIONS;
- 
+   } 
  
  template <typename T>
  struct ValueCount {
@@ -107,6 +106,11 @@
    }
  };
  
+ template <typename T1, typename T2>
+ __forceinline__ __device__ __host__ T1 ceil_div(const T1 x, const T2 y) {
+   return (x + y - 1) / y;
+ }
+
  template <uint32_t BLOCK_THREADS, BlockScanAlgorithm SCAN_ALGORITHM,
            BlockReduceAlgorithm REDUCE_ALGORITHM>
  struct SamplingTempStorage {
@@ -157,20 +161,20 @@
  
  #pragma unroll
    for (uint32_t offset = 1; offset < 32; offset *= 2) {
-     float tmp = __shfl_up_sync(0xffffffff, thread_exclusive_prefix_sum, offset);
+     float tmp = __shfl_up(thread_exclusive_prefix_sum, offset);
      if ((threadIdx.x + 1) % (offset * 2) == 0) {
        thread_exclusive_prefix_sum += tmp;
      }
    }
  
-   float warp_sum = __shfl_sync(0xffffffff, thread_exclusive_prefix_sum, threadIdx.x | 0xffffffff);
+   float warp_sum = __shfl(thread_exclusive_prefix_sum, threadIdx.x | 0xffffffff);
    if (threadIdx.x % 32 == 31) {
      thread_exclusive_prefix_sum = 0;
    }
  
  #pragma unroll
    for (uint32_t offset = 16; offset >= 1; offset /= 2) {
-     float tmp = __shfl_xor_sync(0xffffffff, thread_exclusive_prefix_sum, offset);
+     float tmp = __shfl_xor(thread_exclusive_prefix_sum, offset);
      if ((threadIdx.x + 1) % (offset * 2) == 0) {
        thread_exclusive_prefix_sum = tmp + thread_exclusive_prefix_sum;
      }
@@ -188,7 +192,7 @@
  
  #pragma unroll
      for (uint32_t offset = 1; offset < 32; offset *= 2) {
-       float tmp = __shfl_up_sync(0xffffffff, warp_exclusive_prefix_sum, offset);
+       float tmp = __shfl_up(warp_exclusive_prefix_sum, offset);
        if ((threadIdx.x + 1) % (offset * 2) == 0) {
          warp_exclusive_prefix_sum += tmp;
        }
@@ -200,7 +204,7 @@
  
  #pragma unroll
      for (uint32_t offset = 16; offset >= 1; offset /= 2) {
-       float tmp = __shfl_xor_sync(0xffffffff, warp_exclusive_prefix_sum, offset);
+       float tmp = __shfl_xor(warp_exclusive_prefix_sum, offset);
        if ((threadIdx.x + 1) % (offset * 2) == 0) {
          warp_exclusive_prefix_sum = tmp + warp_exclusive_prefix_sum;
        }
@@ -240,7 +244,7 @@
      }
      max_val = max(
          max_val, BlockReduce<float, BLOCK_THREADS, REDUCE_ALGORITHM>(temp_storage.block_prim.reduce)
-                      .Reduce<VEC_SIZE>(in_data_, hipcub::Max()));
+                      .Reduce(in_data_, hipcub::Max()));
      __syncthreads();
    }
    if (tx == 0) {
@@ -267,7 +271,7 @@
    }
    float aggregate_local =
        BlockReduce<float, BLOCK_THREADS, REDUCE_ALGORITHM>(temp_storage->block_prim.reduce)
-           .Sum<VEC_SIZE>(prob_greater_than_threshold);
+           .Sum(prob_greater_than_threshold);
    if (tx == 0) {
      temp_storage->block_aggregate.value = aggregate_local;
    }
@@ -293,10 +297,10 @@
      bool greater_than_u_diff[VEC_SIZE];
 
      BlockAdjacentDifference<bool, BLOCK_THREADS>(temp_storage->block_prim.adj_diff)
-         .SubtractLeft<VEC_SIZE>(greater_than_u, greater_than_u_diff, BoolDiffOp());
+          .SubtractLeft(greater_than_u, greater_than_u_diff, BoolDiffOp{});
 
-    //  BlockAdjacentDifference<bool, BLOCK_THREADS>(temp_storage->block_prim.adj_diff)
-    //      .FlagHeads<VEC_SIZE>(greater_than_u_diff, greater_than_u, BoolDiffOp(), 0);
+    // BlockAdjacentDifference<bool, BLOCK_THREADS>(temp_storage->block_prim.adj_diff)
+    //      .FlagHeads<VEC_SIZE>(greater_than_u_diff, greater_than_u, BoolDiffOp{}, 0);
 
      __syncthreads();
  
@@ -432,7 +436,7 @@
  
      max_data +=
          BlockReduce<DataAndIndex<DType, IdType>, BLOCK_THREADS, REDUCE_ALGORITHM>(temp_storage)
-             .Sum<VEC_SIZE>(cur_data);
+             .Sum(cur_data);
    }
    if (tx == 0) {
      output[bx] = max_data.index;
@@ -564,7 +568,7 @@
  
        aggregate_gt_pivot_0 += BlockReduce<ValueCount<float>, BLOCK_THREADS, REDUCE_ALGORITHM>(
                                    temp_storage.block_prim.reduce_value_count)
-                                   .Sum<VEC_SIZE>(probs_gt_pivot_0);
+                                   .Sum(probs_gt_pivot_0);
        if (tx == 0) {
          temp_storage.block_aggregate.pair = aggregate_gt_pivot_0;
        }
@@ -573,7 +577,7 @@
  
        aggregate_gt_pivot_1 += BlockReduce<ValueCount<float>, BLOCK_THREADS, REDUCE_ALGORITHM>(
                                    temp_storage.block_prim.reduce_value_count)
-                                   .Sum<VEC_SIZE>(probs_gt_pivot_1);
+                                   .Sum(probs_gt_pivot_1);
        if (tx == 0) {
          temp_storage.block_aggregate.pair = aggregate_gt_pivot_1;
        }
@@ -672,7 +676,7 @@
        }
  
        aggregate_gt_pivot_0 += BlockReduce<float, BLOCK_THREADS>(temp_storage.block_prim.reduce)
-                                   .Sum<VEC_SIZE>(probs_gt_pivot_0);
+                                   .Sum(probs_gt_pivot_0);
        if (tx == 0) {
          temp_storage.block_aggregate.value = aggregate_gt_pivot_0;
        }
@@ -680,7 +684,7 @@
        aggregate_gt_pivot_0 = temp_storage.block_aggregate.value;
  
        aggregate_gt_pivot_1 += BlockReduce<float, BLOCK_THREADS>(temp_storage.block_prim.reduce)
-                                   .Sum<VEC_SIZE>(probs_gt_pivot_1);
+                                   .Sum(probs_gt_pivot_1);
        if (tx == 0) {
          temp_storage.block_aggregate.value = aggregate_gt_pivot_1;
        }
@@ -722,14 +726,14 @@
    const uint32_t row_idx = indices == nullptr ? bx : indices[bx];
    const uint32_t k = top_k_arr == nullptr ? top_k_val : top_k_arr[row_idx];
    const float p = top_p_arr == nullptr ? top_p_val : top_p_arr[row_idx];
- 
+
    extern __shared__ __align__(
        alignof(SamplingTempStorage<BLOCK_THREADS, SCAN_ALGORITHM, REDUCE_ALGORITHM>))
        uint8_t smem_sampling[];
    auto& temp_storage =
        reinterpret_cast<SamplingTempStorage<BLOCK_THREADS, SCAN_ALGORITHM, REDUCE_ALGORITHM>&>(
            smem_sampling);
- 
+
    vec_t<float, VEC_SIZE> probs_vec;
    float aggregate;
    float q = 1;
@@ -764,7 +768,7 @@
      }
      double pivot_0 = probs[row_idx * d + sampled_id];
      double pivot_1 = (pivot_0 + high) / 2;
- 
+
      ValueCount<float> aggregate_gt_pivot_0{0, 0}, aggregate_gt_pivot_1{0, 0};
  #pragma unroll 2
      for (uint32_t i = 0; i < ceil_div(d, BLOCK_THREADS * VEC_SIZE); ++i) {
@@ -786,7 +790,7 @@
  
        aggregate_gt_pivot_0 +=
            BlockReduce<ValueCount<float>, BLOCK_THREADS>(temp_storage.block_prim.reduce_value_count)
-               .Sum<VEC_SIZE>(probs_gt_pivot_0);
+               .Sum(probs_gt_pivot_0);
        if (tx == 0) {
          temp_storage.block_aggregate.pair = aggregate_gt_pivot_0;
        }
@@ -795,7 +799,7 @@
  
        aggregate_gt_pivot_1 +=
            BlockReduce<ValueCount<float>, BLOCK_THREADS>(temp_storage.block_prim.reduce_value_count)
-               .Sum<VEC_SIZE>(probs_gt_pivot_1);
+               .Sum(probs_gt_pivot_1);
        if (tx == 0) {
          temp_storage.block_aggregate.pair = aggregate_gt_pivot_1;
        }
@@ -827,7 +831,7 @@
  hipError_t SamplingFromLogits(T* logits, IdType* output, IdType* indices, uint32_t batch_size,
                                 uint32_t d, bool deterministic, uint64_t philox_seed,
                                 uint64_t philox_offset, hipStream_t stream = 0) {
-   constexpr uint32_t BLOCK_THREADS = 1024;
+
    const uint32_t vec_size = std::gcd(16 / sizeof(T), d);
    dim3 nblks(batch_size);
    dim3 nthrs(BLOCK_THREADS);
@@ -848,7 +852,6 @@
  hipError_t SamplingFromProb(T* probs, IdType* output, IdType* indices, uint32_t batch_size,
                               uint32_t d, bool deterministic, uint64_t philox_seed,
                               uint64_t philox_offset, hipStream_t stream = 0) {
-   constexpr uint32_t BLOCK_THREADS = 1024;
    const uint32_t vec_size = std::gcd(16 / sizeof(T), d);
    dim3 nblks(batch_size);
    dim3 nthrs(BLOCK_THREADS);
@@ -894,7 +897,7 @@
                                   uint32_t batch_size, T top_p_val, uint32_t d, bool deterministic,
                                   uint64_t philox_seed, uint64_t philox_offset,
                                   hipStream_t stream = 0) {
-   constexpr uint32_t BLOCK_THREADS = 1024;
+
    const uint32_t vec_size = std::gcd(16 / sizeof(T), d);
  
    const uint32_t smem_size = sizeof(SamplingTempStorage<BLOCK_THREADS, SCAN_ALGO, REDUCE_ALGO>);
@@ -915,31 +918,31 @@
    return hipSuccess;
  }
 
- template <typename T, typename IdType>
- hipError_t TopKTopPSamplingFromProb(T* probs, IdType* top_k_arr, T* top_p_arr, IdType* output,
-                                      IdType* indices, uint32_t batch_size, IdType top_k_val,
-                                      T top_p_val, uint32_t d, bool deterministic,
-                                      uint64_t philox_seed, uint64_t philox_offset,
-                                      hipStream_t stream = 0) {
-    const uint32_t vec_size = std::gcd(16 / sizeof(T), d);
+//  template <typename T, typename IdType>
+//  hipError_t TopKTopPSamplingFromProb(T* probs, IdType* top_k_arr, T* top_p_arr, IdType* output,
+//                                       IdType* indices, uint32_t batch_size, IdType top_k_val,
+//                                       T top_p_val, uint32_t d, bool deterministic,
+//                                       uint64_t philox_seed, uint64_t philox_offset,
+//                                       hipStream_t stream = 0) {
+//     const uint32_t vec_size = std::gcd(16 / sizeof(T), d);
  
-    const uint32_t smem_size = sizeof(SamplingTempStorage<BLOCK_THREADS, SCAN_ALGO, REDUCE_ALGO>);
-    dim3 nblks(batch_size);
-    dim3 nthrs(BLOCK_THREADS);
-    void* args[] = {&probs,     &top_k_arr, &top_p_arr, &output,      &indices,
-                    &top_k_val, &top_p_val, &d,         &philox_seed, &philox_offset};
+//     const uint32_t smem_size = sizeof(SamplingTempStorage<BLOCK_THREADS, SCAN_ALGO, REDUCE_ALGO>);
+//     dim3 nblks(batch_size);
+//     dim3 nthrs(BLOCK_THREADS);
+//     void* args[] = {&probs,     &top_k_arr, &top_p_arr, &output,      &indices,
+//                     &top_k_val, &top_p_val, &d,         &philox_seed, &philox_offset};
 
-    DISPATCH_ALIGNED_VEC_SIZE(
-        vec_size, VEC_SIZE, {DISPATCH_DETERMINISTIC(deterministic, DETERMINISTIC, {
-        auto kernel = TopKTopPSamplingFromProbKernel<BLOCK_THREADS, SCAN_ALGO, REDUCE_ALGO,
-                                                    VEC_SIZE, DETERMINISTIC, T, IdType>;
+//     DISPATCH_ALIGNED_VEC_SIZE(
+//         vec_size, VEC_SIZE, {DISPATCH_DETERMINISTIC(deterministic, DETERMINISTIC, {
+//         auto kernel = TopKTopPSamplingFromProbKernel<BLOCK_THREADS, SCAN_ALGO, REDUCE_ALGO,
+//                                                     VEC_SIZE, DETERMINISTIC, T, IdType>;
 
-            hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize, smem_size);
+//             hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize, smem_size);
         
-            hipLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream);
-        })});
-    return hipSuccess;
- }
+//             hipLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream);
+//         })});
+//     return hipSuccess;
+//  }
  
  template <uint32_t BLOCK_THREADS, BlockReduceAlgorithm REDUCE_ALGORITHM>
  struct RenormTempStorage {
@@ -1025,12 +1028,12 @@
  
        aggregate_gt_pivot_0 +=
            BlockReduce<float, BLOCK_THREADS, REDUCE_ALGORITHM>(temp_storage.block_prim.reduce)
-               .Sum<VEC_SIZE>(probs_gt_pivot_0);
+               .Sum(probs_gt_pivot_0);
        __syncthreads();
  
        aggregate_gt_pivot_1 +=
            BlockReduce<float, BLOCK_THREADS, REDUCE_ALGORITHM>(temp_storage.block_prim.reduce)
-               .Sum<VEC_SIZE>(probs_gt_pivot_1);
+               .Sum(probs_gt_pivot_1);
        __syncthreads();
      }
      min_gt_low = BlockReduce<float, BLOCK_THREADS, REDUCE_ALGORITHM>(temp_storage.block_prim.reduce)
@@ -1146,12 +1149,12 @@
  
          aggregate_gt_pivot_0 += BlockReduce<ValueCount<float>, BLOCK_THREADS, REDUCE_ALGORITHM>(
                                      temp_storage.block_prim.reduce_value_count)
-                                     .Sum<VEC_SIZE>(probs_gt_pivot_0_pair);
+                                     .Sum(probs_gt_pivot_0_pair);
          __syncthreads();
  
          aggregate_gt_pivot_1 += BlockReduce<ValueCount<float>, BLOCK_THREADS, REDUCE_ALGORITHM>(
                                      temp_storage.block_prim.reduce_value_count)
-                                     .Sum<VEC_SIZE>(probs_gt_pivot_1_pair);
+                                     .Sum(probs_gt_pivot_1_pair);
          __syncthreads();
        }
        min_gt_low =
@@ -1210,7 +1213,7 @@
  hipError_t TopPRenormProb(DType* probs, DType* renormed_prob, float* top_p_arr,
                             uint32_t batch_size, float top_p_val, uint32_t d,
                             hipStream_t stream = 0) {
-   constexpr uint32_t BLOCK_THREADS = 1024;
+
    const uint32_t vec_size = std::gcd(16 / sizeof(DType), d);
  
    const uint32_t smem_size = sizeof(RenormTempStorage<BLOCK_THREADS, REDUCE_ALGO>);
@@ -1236,16 +1239,13 @@
     dim3 nthrs(BLOCK_THREADS);
     void* args[] = {&probs, &renormed_prob, &top_k_arr, &top_k_val, &d};
     DISPATCH_ALIGNED_VEC_SIZE(vec_size, VEC_SIZE, {
-    auto kernel = TopKRenormProbKernel<BLOCK_THREADS, REDUCE_ALGO, VEC_SIZE, DType, IdType>;
-    
+        auto kernel = TopKRenormProbKernel<BLOCK_THREADS, REDUCE_ALGO, VEC_SIZE, DType, IdType>;
         hipFuncSetAttribute(reinterpret_cast<const void*>(kernel), hipFuncAttributeMaxDynamicSharedMemorySize, smem_size);
-    hipLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream);
+        hipLaunchKernel((void*)kernel, nblks, nthrs, args, smem_size, stream);
     });
     return hipSuccess;
  }
  
  }  // namespace sampling
  
- }  // namespace flashinfer
- 
- #endif  // FLASHINFER_SAMPLING_CUH_
+ }  // namespace aiter

@@ -44,11 +44,11 @@ __global__ void kn_get_mla_metadata(
     __shared__ int32_t split_table_shared[max_cu_num];
 
     int64_t total_kv_pad = 0;
-    if (tidx < batch_size) 
+    for (int i = tidx; i < batch_size; i += blockDim.x)
     {
-        int32_t kv_len = kv_indptr[tidx + 1] - kv_indptr[tidx];
-        kv_seq_les[tidx] = kv_len;
-        total_kv_pad = static_cast<int64_t>(CEIL(kv_len, 16) * 16);
+        int32_t kv_len = kv_indptr[i + 1] - kv_indptr[i];
+        kv_seq_les[i] = kv_len;
+        total_kv_pad += static_cast<int64_t>(CEIL(kv_len, 16) * 16);
     }
 
     __syncthreads();
@@ -63,10 +63,10 @@ __global__ void kn_get_mla_metadata(
     int32_t split_size_pad      = static_cast<int32_t>(CEIL(total_kv_pad, cu_num) + fixed_blocked_len);
     int32_t split_size_pad_half = split_size_pad / 2;
 
-    if (tidx < batch_size) 
+    for (int i = tidx; i < batch_size; i += blockDim.x)
     {
-        int32_t num_kv_splits_cur_batch = CEIL(kv_seq_les[tidx], split_size_pad);
-        num_kv_splits_shard[tidx] = num_kv_splits_cur_batch;
+        int32_t num_kv_splits_cur_batch = CEIL(kv_seq_les[i], split_size_pad);
+        num_kv_splits_shard[i] = num_kv_splits_cur_batch;
     }
 
     __syncthreads();
@@ -197,9 +197,9 @@ std::vector<torch::Tensor> get_mla_metadata_impl(
 
     const int32_t batch_size = kv_indptr.size(0) - 1;
     const int32_t cu_num =
-        // ROUND(batch_size, 16) * dev_prop.multiProcessorCount;
+        max(80, ROUND(batch_size, 16) * dev_prop.multiProcessorCount);
         // !!!!!!!!JUST FOR MI300!!!!!!!!!!!!!!
-        ROUND(batch_size, 16) * 80;
+        // ROUND(batch_size, 16) * 80;
     auto opt = kv_indptr.options();
 
     // declare outputs

@@ -11,7 +11,7 @@ import triton.language as tl
 from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 import aiter.ops.triton.utils.arch_info as arch_info
 from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
-
+from aiter.ops.triton.activation import _get_activation_from_str
 
 @triton.heuristics(
     {
@@ -42,6 +42,9 @@ def _gemm_a16_w16_kernel(
     EVEN_K: tl.constexpr,
     GRID_MN: tl.constexpr,
     cache_modifier: tl.constexpr,
+    activation: tl.constexpr,
+    use_activation: tl.constexpr,
+    use_gating: tl.constexpr,
 ):
     """Kernel for computing the matmul C = A x B.
     A has shape (M, K), B has shape (K, N) and C has shape (M, N)
@@ -71,42 +74,103 @@ def _gemm_a16_w16_kernel(
     # Create pointers for first block of A and B input matrices
     offs_k = tl.arange(0, BLOCK_SIZE_K)
     offs_am = (pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-    offs_bn = (pid_n.to(tl.int64) * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
     a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
-    b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
 
     acc_dtype = tl.float32 if c_ptr.type.element_ty != tl.int8 else tl.int32
-    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
+    
+    if use_gating:
+        """
+        In the use_gating = True case, our effective block size is actually BLOCK_N // 2.
+        Per Triton program, we compute the matmul for TWO tiles of C of shape (BLOCK_M, BLOCK_N // 2) -
+        one on the left side of C and one on the right side.
+        """
+        offs_bn0 = (pid_n.to(tl.int64) * BLOCK_SIZE_N // 2 + tl.arange(0, BLOCK_SIZE_N // 2)) % (N // 2)
+        offs_bn1 = (pid_n.to(tl.int64) * BLOCK_SIZE_N // 2 + tl.arange(0, BLOCK_SIZE_N // 2) + N // 2) % N
+        b0_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn0[None, :] * stride_bn)
+        b1_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn1[None, :] * stride_bn)
+        acc0 = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N // 2), dtype=acc_dtype)
+        acc1 = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N // 2), dtype=acc_dtype)
+    else:
+        offs_bn = (pid_n.to(tl.int64) * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+        b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
 
-    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-        # Load the next block of A and B, generate a mask by checking the K dimension.
-        # If it is out of bounds, set it to 0.
-        if EVEN_K:
-            a = tl.load(a_ptrs)
-            b = tl.load(b_ptrs, cache_modifier=cache_modifier)
-        else:
-            a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-            b = tl.load(
-                b_ptrs,
-                mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
-                other=0.0,
-                cache_modifier=cache_modifier,
-            )
+    if use_gating:
+        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+            # Load the next block of A and B, generate a mask by checking the K dimension.
+            # If it is out of bounds, set it to 0.
+            if EVEN_K:
+                a = tl.load(a_ptrs)
+                b0 = tl.load(b0_ptrs, cache_modifier=cache_modifier)
+                b1 = tl.load(b1_ptrs, cache_modifier=cache_modifier)
+            else:
+                a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+                b0 = tl.load(
+                    b0_ptrs,
+                    mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
+                    other=0.0,
+                    cache_modifier=cache_modifier,
+                )
+                b1 = tl.load(
+                    b1_ptrs,
+                    mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
+                    other=0.0,
+                    cache_modifier=cache_modifier,
+                )
 
-        accumulator += tl.dot(a, b, input_precision="ieee")
+            acc0 += tl.dot(a, b0, input_precision="ieee")
+            acc1 += tl.dot(a, b1, input_precision="ieee")
 
-        # Advance the ptrs to the next K block.
-        a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
+            # Advance the ptrs to the next K block.
+            a_ptrs += BLOCK_SIZE_K * stride_ak
+            b0_ptrs += BLOCK_SIZE_K * stride_bk
+            b1_ptrs += BLOCK_SIZE_K * stride_bk
 
-    c = accumulator.to(c_ptr.type.element_ty)
+        if use_activation:
+            acc0 = activation(acc0)
+            acc1 = activation(acc1)
 
-    # Write back the block of the output matrix C with masks.
-    offs_cm = pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    offs_cn = pid_n.to(tl.int64) * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-    c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
-    c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-    tl.store(c_ptrs, c, mask=c_mask)
+        acc_gated = acc0 * acc1
+        c = acc_gated.to(c_ptr.type.element_ty)
+
+        # Write back the block of the output matrix C with masks.
+        offs_cm = pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        offs_cn = pid_n.to(tl.int64) * BLOCK_SIZE_N // 2 + tl.arange(0, BLOCK_SIZE_N // 2)
+        c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+        c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < BLOCK_SIZE_N // 2)
+        tl.store(c_ptrs, c, mask=c_mask)
+    else:
+        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+            # Load the next block of A and B, generate a mask by checking the K dimension.
+            # If it is out of bounds, set it to 0.
+            if EVEN_K:
+                a = tl.load(a_ptrs)
+                b = tl.load(b_ptrs, cache_modifier=cache_modifier)
+            else:
+                a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+                b = tl.load(
+                    b_ptrs,
+                    mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
+                    other=0.0,
+                    cache_modifier=cache_modifier,
+                )
+
+            accumulator += tl.dot(a, b, input_precision="ieee")
+
+            # Advance the ptrs to the next K block.
+            a_ptrs += BLOCK_SIZE_K * stride_ak
+            b_ptrs += BLOCK_SIZE_K * stride_bk
+
+        if use_activation:
+            accumulator = activation(accumulator)
+        c = accumulator.to(c_ptr.type.element_ty)
+
+        # Write back the block of the output matrix C with masks.
+        offs_cm = pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        offs_cn = pid_n.to(tl.int64) * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
+        c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+        tl.store(c_ptrs, c, mask=c_mask)
 
 
 @functools.lru_cache(maxsize=1024)
@@ -146,6 +210,8 @@ def gemm_a16w16(
     dtype: Optional[float] = torch.bfloat16,
     y: Optional[torch.Tensor] = None,
     config: Optional[dict] = None,
+    activation: Optional[str] = None,
+    use_gating: bool = False,
 ):
     """
     Computes the 16 bit matmul Y = X x W
@@ -154,38 +220,46 @@ def gemm_a16w16(
     - X: Matrix X with shape (M, K).
     - W: Matrix W with shape (N, K).
     - dtype: Optional parameter to specifcy bf16 or fp16 datatype. Default is bf16
-    - Y: Output Matrix Y with shape (M, N). If this is none, then it's created by this API and returned as output
+    - Y: Output Matrix Y with shape (M, N) or shape (M, N//2) if use_gating is True. 
+    If this is none, then it's created by this API and returned as output.
+    - activation: Optional activation function to apply to the output. One of ("gelu", "gelu_tanh", "silu", "silu_exp2")
+    - use_gating: Uses the first half of the output as a gate for the second half (e.g for SwiGLU)
 
     Returns:
-    - Y: The output matrix with shape (M, N).
+    - Y: The output matrix with shape (M, N) or (M, N//2) if use_gating is True.
     """
 
+    # Shape checks
+    assert x.shape[1] == w.shape[1], "Incompatible matrix shapes."
     M, K = x.shape
     N, K = w.shape
+    if use_gating:
+        assert N % 2 == 0, "Weight shape incompatible with gating (N not divisible by 2)"
+
     w = w.T
 
     if y is None:
-        y = torch.empty((M, N), dtype=dtype, device=x.device)
+        if use_gating:
+            y = torch.empty((M, N // 2), dtype=dtype, device=x.device)
+        else:
+            y = torch.empty((M, N), dtype=dtype, device=x.device)
 
     if config is None:
         config = _get_config(M, N, K)
+
 
     grid = lambda META: (  # noqa: E731
         triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
     )
     _gemm_a16_w16_kernel[grid](
-        x,
-        w,
-        y,
-        M,
-        N,
-        K,
-        x.stride(0),
-        x.stride(1),
-        w.stride(0),
-        w.stride(1),
-        y.stride(0),
-        y.stride(1),
+        x, w, y,
+        M, N, K,
+        x.stride(0), x.stride(1),
+        w.stride(0), w.stride(1),
+        y.stride(0), y.stride(1),
+        activation=_get_activation_from_str(activation) if activation else "",
+        use_activation=activation is not None,
+        use_gating=use_gating,
         **config,
     )
 

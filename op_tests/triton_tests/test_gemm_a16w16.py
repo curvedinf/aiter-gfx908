@@ -69,6 +69,7 @@ def get_x_vals():
         (16384, 8192, 1024),
     ]
     x_vals += [(1, 1, 1)]  # minimal case
+    x_vals += [(3, 5, 2)]  # irregular shape
     return x_vals
 
 

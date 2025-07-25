@@ -44,6 +44,7 @@ def _get_activation_from_str(activation: str):
         "gelu": _gelu,
         "gelu_tanh": _gelu_tanh,
         "silu": _silu,
+        "silu_exp2": _silu_exp2,
     }
     return mapping[activation]
 

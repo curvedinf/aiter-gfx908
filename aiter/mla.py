@@ -175,8 +175,17 @@ def get_kv_splits_indptr(num_kv_splits, bs, device):
 
 
 @functools.lru_cache()
-def get_meta_param_balanced(bs, kv_indptr, device):
-    kv_seq_les = torch.tensor([kv_indptr[i + 1] - kv_indptr[i] for i in range(bs)], device = device)
+def get_meta_param_balanced(kv_indptr,
+                            num_kv_splits_indptr,
+                            batch_split_table,
+                            split_table,
+                            kv_seq_les,
+                            ):
+
+    bs = kv_indptr.shape[0] - 1
+    for i in range(bs):
+        kv_seq_les[i] = kv_indptr[i + 1] - kv_indptr[i]
+    # kv_seq_les = torch.tensor([kv_indptr[i + 1] - kv_indptr[i] for i in range(bs)], device = device)
     total_kv_pad = 0
 
     cu_num = int(get_cu_num()) * int(bs / 16 + 0.5)
@@ -186,56 +195,41 @@ def get_meta_param_balanced(bs, kv_indptr, device):
 
     split_size_pad = (total_kv_pad + cu_num - 1) // cu_num + 80 
 
-    num_kv_splits_indptr = torch.empty_like(kv_indptr)
     num_kv_splits_indptr[0] = 0
     for i in range(bs):
         num_kv_splits = (kv_seq_les[i] + split_size_pad - 1) // split_size_pad 
         num_kv_splits_indptr[i + 1] = num_kv_splits_indptr[i] + num_kv_splits
 
-    batch_split_table = torch.empty(
-        (cu_num), dtype=torch.int32, device="cuda"
-    )
-    split_table = torch.empty(
-        (cu_num), dtype=torch.int32, device="cuda"
-    )
-
     b_idx = 0
     split_idx = 0
     cur_idx = 0
-    num_kv_splits_indptr_fixed = torch.empty_like(num_kv_splits_indptr)
 
     fix_size = num_kv_splits_indptr[-1] - cu_num
 
     fixed_size = 0
     sign = 1 if fix_size > 0 else -1
-    num_kv_splits_indptr_fixed[0] = 0
-    if num_kv_splits_indptr[-1] != cu_num:
-        if fix_size > 0:
-            for i in range(1, bs + 1):
-                if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad <= split_size_pad / 2:
-                    fixed_size += sign
-                num_kv_splits_indptr_fixed[i] = num_kv_splits_indptr[i] - fixed_size
-                # print(i, num_kv_splits_indptr[i])
-        else:
-            for i in range(1, bs + 1):
-                if fixed_size != fix_size and kv_seq_les[i-1] > 3 * split_size_pad and kv_seq_les[i-1] % split_size_pad > split_size_pad / 2:
-                    fixed_size += sign
-                num_kv_splits_indptr_fixed[i] = num_kv_splits_indptr[i] - fixed_size
-                # print(i, num_kv_splits_indptr[i])
-    else:
-        num_kv_splits_indptr_fixed = num_kv_splits_indptr
+    if fix_size > 0:
+        for i in range(1, bs + 1):
+            if fixed_size != fix_size and kv_seq_les[i-1] > split_size_pad and kv_seq_les[i-1] % split_size_pad <= split_size_pad / 2:
+                fixed_size += sign
+            num_kv_splits_indptr[i] -= fixed_size
+    elif fix_size < 0:
+        for i in range(1, bs + 1):
+            if fixed_size != fix_size and kv_seq_les[i-1] > 4 * split_size_pad and kv_seq_les[i-1] % split_size_pad > split_size_pad / 2:
+                fixed_size += sign
+            num_kv_splits_indptr[i] -=  fixed_size
 
     fixed_gap = fix_size - fixed_size
 
     end_dim = bs 
     while fixed_gap != 0:
-        num_kv_splits_indptr_fixed[end_dim] -= fixed_gap
+        num_kv_splits_indptr[end_dim] -= fixed_gap
         if kv_seq_les[end_dim - 1] > 1:
             fixed_gap -= sign 
         end_dim -= 1
 
     for i in range(cu_num):
-        if i < num_kv_splits_indptr_fixed[b_idx + 1]:
+        if i < num_kv_splits_indptr[b_idx + 1]:
             batch_split_table[i] = b_idx
             split_table[i] = split_idx
         else:
@@ -245,7 +239,7 @@ def get_meta_param_balanced(bs, kv_indptr, device):
             split_table[i] = split_idx
         split_idx += 1
 
-    return num_kv_splits_indptr_fixed, batch_split_table, split_table, cu_num
+    return num_kv_splits_indptr, batch_split_table, split_table
 
 
 @functools.lru_cache()

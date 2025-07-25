@@ -43,7 +43,8 @@ asm volatile (                  \
         o_lds_ptr[n_lds]     = shuffle0;  \
         o_lds_ptr[n_lds + 1] = shuffle1;  \
         o_lds_ptr[n_lds + 2] = shuffle2;  \
-        o_lds_ptr[n_lds + 3] = shuffle3;
+        o_lds_ptr[n_lds + 3] = shuffle3;  \
+		block_sync_lds();
 
 #define F32_LDS_2_VGPR_LOOP_STRIDE1(func, lds_st_base) \
         F32_LDS_2_VGPR_LOOP_STRIDE1_0_0_0(func, lds_st_base)
@@ -191,15 +192,6 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         constexpr int32_t q_dim = IsRopeSep ? Traits::kSizeNope : Traits::kSizeD;
         constexpr int32_t q_rope_dim = IsRopeSep ? Traits::kSizeRope : Traits::kSizeD;
 
-        scalar_t* q_nope_ptr = reinterpret_cast<scalar_t*>(params.p_query) + batch_idx * q_dim * params.max_seqlen_q * params.size_h;
-
-        scalar_t* q_rope_ptr = IsRopeSep ?
-            reinterpret_cast<scalar_t*>(params.p_query_rope) + batch_idx * Traits::kSizeRope * params.max_seqlen_q * params.size_h :
-            q_nope_ptr + Traits::kSizeNope;
-
-        auto q_nope_src = ck_tile::make_wave_buffer_resource(reinterpret_cast<void*>(q_nope_ptr), tensor_len);
-        auto q_rope_src = ck_tile::make_wave_buffer_resource(reinterpret_cast<void*>(q_rope_ptr), tensor_len);
-
         auto q_ptr      = ck_tile::make_wave_buffer_resource(params.p_query);
         auto kv_ptr     = ck_tile::make_wave_buffer_resource(params.p_key);
         auto o_ptr      = ck_tile::make_wave_buffer_resource(params.p_output);
@@ -214,35 +206,46 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
         register int wave_id asm("s7") = __builtin_amdgcn_readfirstlane(threadIdx.x / get_warp_size());
         register int vthread asm("v0") = int(threadIdx.x & 63);
 
-        int32_t nope_offset = int(vthread << 2) + wave_id * q_dim * sizeof(scalar_t);
-        // int32_t rope_offset = int(vthread << 2) + wave_id * q_rope_dim * sizeof(scalar_t);
-        int32_t rope_offset = int((vthread & 31) << 2) + wave_id * q_rope_dim * sizeof(scalar_t);
-
-        constexpr int32_t nope_stride = 4 * sizeof(scalar_t) * q_dim;
-        constexpr int32_t rope_stride = 4 * sizeof(scalar_t) * q_rope_dim;
-
-        int32_t smem_offset = wave_id * 5152;
-
-        for (int r = 0; r < ck_tile::min(int(max_seqlen_q), 3); ++r)
-        {
-#pragma unroll
-            for (int i = 0; i < 4; ++i) {
-                __attribute__((address_space(3))) uint32_t* lds_ptr =
-                    reinterpret_cast<__attribute__((address_space(3))) uint32_t*>(
-                        reinterpret_cast<size_t>(
-                            reinterpret_cast<uint8_t*>(smem) + smem_offset + i * 1280));
-
-                ck_tile::static_for<0, 4, 1>{}([&](auto k_repeat){
-                    llvm_amdgcn_raw_buffer_load_lds(q_nope_src, lds_ptr, 4, nope_offset + i * nope_stride, 0, k_repeat * 256, 0);
-                });
-
-                llvm_amdgcn_raw_buffer_load_lds(q_rope_src, lds_ptr + 256, 4, rope_offset + i * rope_stride, 0, 0, 0);
-            }
-            nope_offset += nope_stride * 4;
-            rope_offset += rope_stride * 4;
-            smem_offset += 20608;
-        }
-        block_sync_lds();
+        // scalar_t* q_nope_ptr = reinterpret_cast<scalar_t*>(params.p_query) + batch_idx * q_dim * params.max_seqlen_q * params.size_h;
+        //
+        // scalar_t* q_rope_ptr = IsRopeSep ?
+        //     reinterpret_cast<scalar_t*>(params.p_query_rope) + batch_idx * Traits::kSizeRope * params.max_seqlen_q * params.size_h :
+        //     q_nope_ptr + Traits::kSizeNope;
+        //
+        // auto q_nope_src = ck_tile::make_wave_buffer_resource(reinterpret_cast<void*>(q_nope_ptr), tensor_len);
+        // auto q_rope_src = ck_tile::make_wave_buffer_resource(reinterpret_cast<void*>(q_rope_ptr), tensor_len);
+        //
+//         int32_t nope_offset = int(vthread << 2) + wave_id * q_dim * sizeof(scalar_t);
+//         // int32_t rope_offset = int(vthread << 2) + wave_id * q_rope_dim * sizeof(scalar_t);
+//         int32_t rope_offset = int((vthread & 31) << 2) + wave_id * q_rope_dim * sizeof(scalar_t);
+//
+//         constexpr int32_t nope_stride = 4 * sizeof(scalar_t) * q_dim;
+//         constexpr int32_t rope_stride = 4 * sizeof(scalar_t) * q_rope_dim;
+//
+//         int32_t smem_offset = wave_id * 5152;
+//
+//         for (int r = 0; r < ck_tile::min(int(max_seqlen_q), 3); ++r)
+//         {
+// #pragma unroll
+//             for (int i = 0; i < 4; ++i) {
+//                 __attribute__((address_space(3))) uint32_t* lds_ptr =
+//                     reinterpret_cast<__attribute__((address_space(3))) uint32_t*>(
+//                         reinterpret_cast<size_t>(
+//                             reinterpret_cast<uint8_t*>(smem) + smem_offset + i * 1280));
+//
+//                 ck_tile::static_for<0, 4, 1>{}([&](auto k_repeat){
+//                     llvm_amdgcn_raw_buffer_load_lds(q_nope_src, lds_ptr, 4, nope_offset + i * nope_stride, 0, k_repeat * 256, 0);
+// 					block_sync_lds();
+//                 });
+//
+//                 llvm_amdgcn_raw_buffer_load_lds(q_rope_src, lds_ptr + 256, 4, rope_offset + i * rope_stride, 0, 0, 0);
+// 				block_sync_lds();
+//             }
+//             nope_offset += nope_stride * 4;
+//             rope_offset += rope_stride * 4;
+//             smem_offset += 20608;
+//         }
+//         block_sync_lds();
 
         uint32_t* p_output     = reinterpret_cast<uint32_t*>(params.p_output);
         uint32_t* p_lse        = reinterpret_cast<uint32_t*>(params.p_softmax_lse);

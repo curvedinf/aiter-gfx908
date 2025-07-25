@@ -86,13 +86,12 @@ def _gemm_a16_w16_kernel(
         one on the left side of C and one on the right side.
         """
         offs_bn0 = (
-            pid_n.to(tl.int64) * BLOCK_SIZE_N // 2 + tl.arange(0, BLOCK_SIZE_N // 2)
+            pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(0, BLOCK_SIZE_N // 2)
         ) % (N // 2)
         offs_bn1 = (
-            pid_n.to(tl.int64) * BLOCK_SIZE_N // 2
-            + tl.arange(0, BLOCK_SIZE_N // 2)
-            + N // 2
-        ) % N
+            (pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(0, BLOCK_SIZE_N // 2))
+            % (N // 2)
+        ) + (N // 2)
         b0_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn0[None, :] * stride_bn)
         b1_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn1[None, :] * stride_bn)
         acc0 = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N // 2), dtype=acc_dtype)
@@ -137,18 +136,17 @@ def _gemm_a16_w16_kernel(
 
         if use_activation:
             acc0 = activation(acc0)
-            acc1 = activation(acc1)
 
         acc_gated = acc0 * acc1
         c = acc_gated.to(c_ptr.type.element_ty)
 
         # Write back the block of the output matrix C with masks.
         offs_cm = pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-        offs_cn = pid_n.to(tl.int64) * BLOCK_SIZE_N // 2 + tl.arange(
+        offs_cn = pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(
             0, BLOCK_SIZE_N // 2
         )
         c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
-        c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < BLOCK_SIZE_N // 2)
+        c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < (N // 2))
         tl.store(c_ptrs, c, mask=c_mask)
     else:
         for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):

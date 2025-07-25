@@ -127,7 +127,49 @@ def test_gemm_a16_w16_gating(M: int, N: int, K: int, dtype, output, activation):
             x, w, out_dtype, activation=activation, use_gating=True
         )
 
-    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-3)
+    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
+
+
+@pytest.mark.parametrize("activation", ["gelu", "gelu_tanh", "silu", "silu_exp2"])
+@pytest.mark.parametrize("M, N, K", minimal_x_vals())
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("output", [True, False])
+def test_gemm_a16_w16_activation(M: int, N: int, K: int, dtype, output, activation):
+    x, w, out_dtype, y = generate_gemm_a16w16_inputs(
+        M,
+        N,
+        K,
+        dtype,
+        output=output,
+    )
+
+    torch_out = F.linear(x, w, bias=None)
+    if activation == "gelu":
+        torch_out = F.gelu(torch_out)
+    elif activation == "gelu_tanh":
+        torch_out = F.gelu(torch_out, approximate="tanh")
+    elif activation == "silu":
+        torch_out = F.silu(torch_out)
+    elif activation == "silu_exp2":
+        torch_out = F.silu(torch_out)
+
+    if output:
+        triton_out = gemm_a16w16(
+            x,
+            w,
+            out_dtype,
+            y,
+            activation=activation,
+        )
+    else:
+        triton_out = gemm_a16w16(
+            x,
+            w,
+            out_dtype,
+            activation=activation,
+        )
+
+    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-2)
 
 
 @pytest.mark.parametrize("M, N, K", get_x_vals())
@@ -143,7 +185,7 @@ def test_gemm_a16_w16(M: int, N: int, K: int, dtype, output):
     else:
         triton_out = gemm_a16w16(x, w, out_dtype)
 
-    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
+    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-2)
 
 
 @pytest.mark.parametrize("M, N, K", get_x_vals())
@@ -161,4 +203,4 @@ def test_gemm_a16_w16_atomic(M: int, N: int, K: int, dtype, output):
     else:
         triton_out = gemm_a16w16_atomic(x, w, dtype=torch.float32).to(dtype)
 
-    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
+    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-2)

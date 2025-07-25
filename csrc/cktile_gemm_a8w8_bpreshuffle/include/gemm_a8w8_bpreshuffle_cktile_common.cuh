@@ -50,9 +50,12 @@ template <typename FlatmmConfig,
           typename BLayout,
           typename DsLayout,
           typename ELayout,
+          typename ScaleM,
+          typename ScaleN,
           bool persistent,
           typename CDEElementWise>
-float flatmm_calc(const ck_tile::FlatmmHostArgs<>& args, const ck_tile::stream_config& s)
+float flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
+                  const ck_tile::stream_config& s)
 {
     using CodegenFlatmmShape = ck_tile::TileGemmShape<
         ck_tile::sequence<FlatmmConfig::M_Tile, FlatmmConfig::N_Tile, FlatmmConfig::K_Tile>,
@@ -90,7 +93,7 @@ float flatmm_calc(const ck_tile::FlatmmHostArgs<>& args, const ck_tile::stream_c
     using GemmPipelineProblem =
         ck_tile::GemmPipelineProblem<ADataType, BDataType, AccDataType, CodegenFlatmmShape, Traits>;
 
-    using BaseGemmPipeline = ck_tile::BaseFlatmmPipelineAGmemBGmemCRegV0<GemmPipelineProblem>;
+    using BaseGemmPipeline = ck_tile::BaseFlatmmPipelineAGmemBGmemCRegV1<GemmPipelineProblem>;
 
     const ck_tile::index_t k_grain     = args.k_batch * FlatmmConfig::K_Tile;
     const ck_tile::index_t K_split     = (args.K + k_grain - 1) / k_grain * FlatmmConfig::K_Tile;
@@ -117,7 +120,7 @@ float flatmm_calc(const ck_tile::FlatmmHostArgs<>& args, const ck_tile::stream_c
                                                                       tail_number_v>;
 
         using CodegenFlatmmPipeline =
-            ck_tile::FlatmmPipelineAGmemBGmemCRegV0<CodegenPipelineProblem>;
+            ck_tile::FlatmmPipelineAGmemBGmemCRegV1<CodegenPipelineProblem>;
 
         using GemmEpilogue = ck_tile::CShuffleEpilogue<
             ck_tile::CShuffleEpilogueProblem<ADataType,
@@ -231,34 +234,48 @@ float flatmm_calc(const ck_tile::FlatmmHostArgs<>& args, const ck_tile::stream_c
     return ave_time;
 }
 
-template <bool sTransposeC, bool sUseStructuredSparsity, int sTileParitionerGroupNum, 
-          int sTileParitionerM01, ck_tile::index_t sNumWaveGroups, bool sDoubleSmemBuffer,
-          bool PadM, bool PadN, bool PadK, int BlockPerCu, 
-          int MTile, int NTile, int KTile,
-          int MWarp, int NWarp , int KWarp,
-          int MWTile, int NWTile, int KWTile,
+template <bool sTransposeC,
+          bool sUseStructuredSparsity,
+          int sTileParitionerGroupNum,
+          int sTileParitionerM01,
+          ck_tile::index_t sNumWaveGroups,
+          bool sDoubleSmemBuffer,
+          bool PadM,
+          bool PadN,
+          bool PadK,
+          int BlockPerCu,
+          int MTile,
+          int NTile,
+          int KTile,
+          int MWarp,
+          int NWarp,
+          int KWarp,
+          int MWTile,
+          int NWTile,
+          int KWTile,
           ck_tile::GemmPipelineScheduler sScheduler = ck_tile::GemmPipelineScheduler::Default>
-struct CreateTileConfig {
-    static constexpr bool TransposeC = sTransposeC;
-    static constexpr bool UseStructuredSparsity = sUseStructuredSparsity;
-    static constexpr int TileParitionerGroupNum = sTileParitionerGroupNum;
-    static constexpr int TileParitionerM01 = sTileParitionerM01;
+struct CreateTileConfig
+{
+    static constexpr bool TransposeC                = sTransposeC;
+    static constexpr bool UseStructuredSparsity     = sUseStructuredSparsity;
+    static constexpr int TileParitionerGroupNum     = sTileParitionerGroupNum;
+    static constexpr int TileParitionerM01          = sTileParitionerM01;
     static constexpr ck_tile::index_t NumWaveGroups = sNumWaveGroups;
-    static constexpr bool DoubleSmemBuffer = sDoubleSmemBuffer;
-    static constexpr bool kPadM = PadM;
-    static constexpr bool kPadN = PadN;
-    static constexpr bool kPadK = PadK;
-    static constexpr int kBlockPerCu = BlockPerCu;
-    static constexpr int M_Tile = MTile;
-    static constexpr int N_Tile = NTile;
-    static constexpr int K_Tile = KTile;
-    static constexpr int M_Warp = MWarp;
-    static constexpr int N_Warp = NWarp;
-    static constexpr int K_Warp = KWarp;
-    static constexpr int M_Warp_Tile = MWTile;
-    static constexpr int N_Warp_Tile = NWTile;
-    static constexpr int K_Warp_Tile = KWTile;
-    static constexpr auto Scheduler  = sScheduler;
+    static constexpr bool DoubleSmemBuffer          = sDoubleSmemBuffer;
+    static constexpr bool kPadM                     = PadM;
+    static constexpr bool kPadN                     = PadN;
+    static constexpr bool kPadK                     = PadK;
+    static constexpr int kBlockPerCu                = BlockPerCu;
+    static constexpr int M_Tile                     = MTile;
+    static constexpr int N_Tile                     = NTile;
+    static constexpr int K_Tile                     = KTile;
+    static constexpr int M_Warp                     = MWarp;
+    static constexpr int N_Warp                     = NWarp;
+    static constexpr int K_Warp                     = KWarp;
+    static constexpr int M_Warp_Tile                = MWTile;
+    static constexpr int N_Warp_Tile                = NWTile;
+    static constexpr int K_Warp_Tile                = KWTile;
+    static constexpr auto Scheduler                 = sScheduler;
 };
 
 template <typename AccDataType,
@@ -303,35 +320,14 @@ using CustomConfig = CreateTileConfig<sTransposeC,
                                       NWTile,
                                       KWTile,
                                       Scheduler>;
-// using CustomConfig = CreateTileConfig<
-//         0,
-//         0,
-//         8,
-//         4,
-//         1,
-//         0,
-//         0,//kPadM
-//         0,//kPadN
-//         0,//kPadK
-//         2,   // BlockPerCu
-//         128,   // MTile
-//         128,   // NTile
-//         128,   // KTile
-//         1,     // MWarp
-//         4,     // NWarp
-//         1,     // KWarp
-//         16,    // MWTile
-//         16,    // NWTile
-//         64,      // KWTile
-//         Scheduler
-//       >;
 
 template <typename DDataType, typename EDataType, typename FlatmmInstance>
-__forceinline__ torch::Tensor gemm_a8w8_bpreshuffle_cktile_impl(torch::Tensor& XQ,
-                                             torch::Tensor& WQ,
-                                             torch::Tensor& x_scale,
-                                             torch::Tensor& w_scale,
-                                             torch::Tensor& out // Out:[M, N] fp16
+__forceinline__ torch::Tensor
+gemm_a8w8_bpreshuffle_cktile_impl(torch::Tensor& XQ,
+                                  torch::Tensor& WQ,
+                                  torch::Tensor& x_scale,
+                                  torch::Tensor& w_scale,
+                                  torch::Tensor& out // Out:[M, N] fp16
 )
 {
     TORCH_CHECK(XQ.dtype() == WQ.dtype(), "Weights and activations should have the same dtype!");
@@ -350,9 +346,14 @@ __forceinline__ torch::Tensor gemm_a8w8_bpreshuffle_cktile_impl(torch::Tensor& X
     int n                = out.size(1);
     int k                = XQ.size(1);
 
-    ck_tile::FlatmmHostArgs args;
+    using ScaleM       = typename ck_tile::FlatmmScalePointer<1>;
+    using ScaleN       = typename ck_tile::FlatmmScalePointer<1>;
+
+    ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN> args;
     args.a_ptr = (void*)XQ.data_ptr();
     args.b_ptr = (void*)WQ.data_ptr();
+    args.scale_m = reinterpret_cast<AccDataType *> (x_scale.data_ptr());
+    args.scale_n = reinterpret_cast<AccDataType *> (w_scale.data_ptr());
     args.e_ptr = (void*)out.data_ptr();
 
     args.k_batch  = 1;
@@ -376,6 +377,8 @@ __forceinline__ torch::Tensor gemm_a8w8_bpreshuffle_cktile_impl(torch::Tensor& X
                 BLayout,
                 DsLayout,
                 CLayout,
+                ScaleM,
+                ScaleN,
                 false,
                 CDEElementWise>(args, naive_config);
 

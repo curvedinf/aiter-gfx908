@@ -324,6 +324,7 @@ def gemm_a8w8_bpreshuffle_CKTILE(
     WQ: Tensor,
     x_scale: Tensor,
     w_scale: Tensor,
+    bias: Optional[Tensor] = None,
     dtype=torch.float16,
 ):
     assert dtype in [

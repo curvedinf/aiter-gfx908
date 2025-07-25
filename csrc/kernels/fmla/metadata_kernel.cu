@@ -20,14 +20,15 @@ __device__ constexpr int32_t get_warp_size()
 #endif
 }
 
-__launch_bounds__(64, 2)
+__launch_bounds__(64)
 __global__ void kn_get_mla_metadata(
     const int32_t* kv_indptr,
     int32_t*       num_kv_splits,
     int32_t*       batch_split_table,
     int32_t*       split_table,
+    int32_t*       split,
     const int32_t  batch_size,
-    const int32_t  cu_num,
+    int32_t  cu_num,
     const int32_t  fixed_blocked_len
     )
 {
@@ -42,6 +43,7 @@ __global__ void kn_get_mla_metadata(
     int32_t template_data_local[max_local_arr_size];
     __shared__ int32_t batch_split_table_shared[max_cu_num];
     __shared__ int32_t split_table_shared[max_cu_num];
+    __shared__ int32_t cu_num_share;
 
     int64_t total_kv_pad = 0;
     for (int i = tidx; i < batch_size; i += blockDim.x)
@@ -120,19 +122,22 @@ __global__ void kn_get_mla_metadata(
         int32_t end_dim = batch_size;
         int32_t fixed_gap = template_data_local[batch_size] - cu_num;
 
-        while (fixed_gap != 0)
+        while (fixed_gap > 0)
         {
             template_data_local[end_dim] -= fixed_gap;
             if (kv_seq_les[end_dim - 1] > double_split_size_pad || fixed_gap < 0)
             {
-                fixed_gap -= sign;
+                fixed_gap = fixed_gap - sign;
             }
             end_dim -= 1;
             if (end_dim == 0)
             {
-                end_dim = batch_size;
+                break;
             }
         }
+        cu_num = template_data_local[batch_size];
+        split[0] = cu_num;
+        cu_num_share = cu_num;
 
         for (int i = 0; i < batch_size + 1; ++i)
             num_kv_splits_shard[i] = template_data_local[i];
@@ -159,16 +164,14 @@ __global__ void kn_get_mla_metadata(
             split_idx += 1;
         }
     }
-
     __syncthreads();
-
 
     for (int i = tidx; i < batch_size + 1; i += blockDim.x)
     {
         num_kv_splits[i] = num_kv_splits_shard[i];
     }
 
-    for (int i = tidx; i < cu_num; i += blockDim.x)
+    for (int i = tidx; i < cu_num_share; i += blockDim.x)
     {
         batch_split_table[i] = batch_split_table_shared[i];
         split_table[i] = split_table_shared[i];
@@ -187,7 +190,8 @@ std::vector<torch::Tensor> get_mla_metadata_impl(
     const torch::Tensor& kv_indptr,            // [batch size + 1]
     torch::Tensor&       num_kv_splits_indptr, // [batch size + 1]
     torch::Tensor&       batch_split_table,    // [max_cu_num]
-    torch::Tensor&       split_table)          // [max_cu_num]
+    torch::Tensor&       split_table,          // [max_cu_num]
+    torch::Tensor&       splits)               // [max_cu_num]
 {
     TORCH_CHECK(kv_indptr.scalar_type() == at::ScalarType::Int, __func__, ": kv_indptr's element type should be int!");
 
@@ -229,10 +233,11 @@ std::vector<torch::Tensor> get_mla_metadata_impl(
         num_kv_splits.data_ptr<int32_t>(),
         batch_split_table_ptr.data_ptr<int32_t>(),
         split_table_ptr.data_ptr<int32_t>(),
+        splits.data_ptr<int32_t>(),
         batch_size,
         cu_num,
         fixed_blocked_len);
 
-    return {num_kv_splits_indptr, batch_split_table, split_table};
+    return {num_kv_splits_indptr, batch_split_table, split_table, splits};
 }
 

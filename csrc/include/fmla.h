@@ -30,4 +30,5 @@ std::vector<torch::Tensor> get_mla_metadata_impl(
     const torch::Tensor& kv_indptr,            // [batch size + 1]
     torch::Tensor&       num_kv_splits_indptr, // [batch size + 1]
     torch::Tensor&       batch_split_table,    // [max_cu_num]
-    torch::Tensor&       split_table);         // [max_cu_num]
+    torch::Tensor&       split_table,          // [max_cu_num]
+    torch::Tensor&       splits);              // [max_cu_num]

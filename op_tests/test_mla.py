@@ -132,8 +132,8 @@ def test_mla(
     else:
         seq_lens_kv.fill_(ctx_lens)
         seq_lens_qo.fill_(ctx_lens)
-    # seq_lens_kv = torch.tensor([3819,9978,784,530,8062,1390,287,1008,5090,5304,7396,2288,2104,4063,3644,5091,6470,4732,7237,430,2777,956,1357,5478,1292,521,6802,1347,2388,5062,443,8560,5049,7235,927,9580,623,4913,2511,8120,1638,4859,600,7289,8278,6693,136,1021,1465,5859,1278,7123,7839,2459,1090,6333,812,9358,6345,8616,2313,6115,6059,4963], device="cuda")
-    # seq_lens_kv = seq_lens_kv[:batch_size]
+    seq_lens_kv = torch.tensor([3819,9978,784,530,8062,1390,287,1008,5090,5304,7396,2288,2104,4063,3644,5091,6470,4732,7237,430,2777,956,1357,5478,1292,521,6802,1347,2388,5062,443,8560,5049,7235,927,9580,623,4913,2511,8120,1638,4859,600,7289,8278,6693,136,1021,1465,5859,1278,7123,7839,2459,1090,6333,812,9358,6345,8616,2313,6115,6059,4963], device="cuda")
+    seq_lens_kv = seq_lens_kv[:batch_size]
     kv_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens_kv, dim=0)
     kv_indices = torch.randint(0, num_page, (kv_indptr[-1].item(),), dtype=torch.int)
     qo_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens_qo, dim=0)
@@ -342,7 +342,7 @@ def test_mla(
     # aiter implementation
     kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
     out_asm = torch.zeros((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
-    if varlen == False or mtp == 1:
+    if varlen == False or mtp == 1 or kv_indptr[-1] < 128 * 1024:
 
         (attn_logits, attn_lse), us_asm_decode = run_perftest(
             aiter.mla.mla_decode_fwd,
@@ -369,28 +369,24 @@ def test_mla(
     kv_seq_les = torch.empty(
         (batch_size + 1), dtype=torch.int32, device="cuda"
     )
+    num_splits = torch.empty(
+        (1), dtype=torch.int32, device="cuda"
+    )
 
-    # aiter.get_mla_metadata_impl(
-    #     kv_indptr,
-    #     num_kv_splits_indptr,
-    #     batch_split_table,
-    #     split_table,
-    # )
     # if varlen == False or mtp == 1 or batch_size < 32 or kv_indptr[batch_size] < 128 * 160:
-    cu_num = 0
-    if varlen == False or mtp == 1 or batch_size < 16 or kv_indptr[batch_size] < 10000:
+    cu_num = torch.ones((1), dtype=torch.int32, device="cuda")
+    if varlen == False or mtp == 1 or kv_indptr[-1] < 128 * 1024:
         split_table = None
         batch_split_table = None
     else:
         # import pdb;pdb.set_trace()
-        num_kv_splits, num_kv_splits_indptr, batch_split_table, split_table, cu_num = aiter.mla.get_meta_param_balanced(
-        # aiter.get_mla_metadata_impl(
+        # num_kv_splits, num_kv_splits_indptr, batch_split_table, split_table, cu_num = aiter.mla.get_meta_param_balanced(
+        aiter.get_mla_metadata_impl(
             kv_indptr,
             num_kv_splits_indptr,
             batch_split_table,
             split_table,
-            kv_seq_les,
-            cu_num,
+            num_splits,
         )
 
     (attn_logits, attn_lse), us_asm_decode = run_perftest(
@@ -410,7 +406,7 @@ def test_mla(
         num_kv_splits_indptr,
         batch_split_table,
         split_table,
-        cu_num
+        num_splits,
     )
 
     # print(f"{out_ref.view(total_q, -1)=}")
@@ -518,7 +514,7 @@ parser.add_argument(
     "--ctxLen",
     type=int,
     nargs="*",
-    default=[2048, 4096], #
+    default=[512], #
     help="""Context length.
     e.g.: -c 21""",
 )
@@ -527,7 +523,7 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[i for i in range(32, 80)], # [41],
+    default=[i for i in range(4, 64)], # [41],
     help="""Batch size.
     e.g.: -b 16""",
 )

@@ -166,7 +166,10 @@
 "  s_mov_b32     %[q_res_2], s56                                 \n" // 000000000374: BE920038
 "  s_mul_i32     s56, %[wave_id], 0x00000480                      \n" // 000000000378: 9238FF07 00000480
 "  v_lshlrev_b32  v30, 2, %[threadIdxx]                             \n" // 000000000380: 243C0082
+"  v_and_b32     v101, 31, %[threadIdxx]                 \n" // 000000000304: 262A2881
+"  v_lshlrev_b32  v101, 2, v101                             \n" // 000000000380: 243C0082
 "  v_add_u32     v30, s56, v30                            \n" // 000000000384: 683C3C38
+"  v_add_u32     v101, s56, v101                            \n" // 000000000384: 683C3C38
 "  s_mul_i32     s56, %[wave_id], 0x00001420                      \n" // 000000000388: 9238FF07 00001420
 "  s_add_u32     s34, 0, s56                              \n" // 000000000390: 80223880
 "  s_add_u32     s35, 0x00005080, s34                     \n" // 000000000394: 802322FF 00005080
@@ -183,94 +186,106 @@
 "  v_lshlrev_b32  v29, 2, v21                             \n" // 0000000003D0: 243A2A82
 "  s_mov_b32     m0, s34                                  \n" // 0000000003D4: BEFC0022
 "  v_add_u32     v28, 0, v30                              \n" // 0000000003D8: 68383C80
+"  v_add_u32     v102, 0, v101                              \n" // 0000000003D8: 68383C80
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 0000000003DC: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 0000000003E4: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 0000000003EC: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 0000000003F4: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 0000000003FC: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 0000000003FC: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 000000000404: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 00000000040C: 683838FF 00001200
+"  v_add_u32     v102, 0x00001200, v102                     \n" // 00000000040C: 683838FF 00001200
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 000000000414: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 00000000041C: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 000000000424: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 00000000042C: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000434: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000434: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 00000000043C: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 000000000444: 683838FF 00001200
+"  v_add_u32     v102, 0x00001200, v102                     \n" // 00000000040C: 683838FF 00001200
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 00000000044C: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 000000000454: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 00000000045C: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 000000000464: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 00000000046C: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 00000000046C: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 000000000474: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 00000000047C: 683838FF 00001200
+"  v_add_u32     v102, 0x00001200, v102                     \n" // 00000000040C: 683838FF 00001200
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 000000000484: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 00000000048C: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 000000000494: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 00000000049C: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 0000000004A4: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 0000000004A4: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 0000000004AC: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 0000000004B4: 683838FF 00001200
 "  s_mov_b32     m0, s35                                  \n" // 0000000004BC: BEFC0023
 "  v_add_u32     v28, 0x00004800, v30                     \n" // 0000000004C0: 68383CFF 00004800
+"  v_add_u32     v102, 0x00004800, v101                              \n" // 0000000003D8: 68383C80
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 0000000004C8: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 0000000004D0: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 0000000004D8: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 0000000004E0: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 0000000004E8: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 0000000004E8: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 0000000004F0: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 0000000004F8: 683838FF 00001200
+"  v_add_u32     v102, 0x00001200, v102                     \n" // 00000000040C: 683838FF 00001200
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 000000000500: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 000000000508: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 000000000510: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 000000000518: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000520: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000520: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 000000000528: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 000000000530: 683838FF 00001200
+"  v_add_u32     v102, 0x00001200, v102                     \n" // 00000000040C: 683838FF 00001200
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 000000000538: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 000000000540: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 000000000548: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 000000000550: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000558: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000558: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 000000000560: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 000000000568: 683838FF 00001200
+"  v_add_u32     v102, 0x00001200, v102                     \n" // 00000000040C: 683838FF 00001200
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 000000000570: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 000000000578: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 000000000580: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 000000000588: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000590: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000590: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 000000000598: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 0000000005A0: 683838FF 00001200
 "  s_waitcnt     vmcnt(20)                                \n" // 0000000005A8: BF8C4F74
 "  s_barrier                                              \n" // 0000000005AC: BF8A0000
 "  s_mov_b32     m0, s36                                  \n" // 0000000005B0: BEFC0024
 "  v_add_u32     v28, 0x00009000, v30                     \n" // 0000000005B4: 68383CFF 00009000
+"  v_add_u32     v102, 0x00009000, v101                     \n" // 0000000005B4: 68383CFF 00009000
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 0000000005BC: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 0000000005C4: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 0000000005CC: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 0000000005D4: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 0000000005DC: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 0000000005DC: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 0000000005E4: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 0000000005EC: 683838FF 00001200
+"  v_add_u32     v102, 0x00001200, v102                     \n" // 00000000040C: 683838FF 00001200
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 0000000005F4: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 0000000005FC: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 000000000604: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 00000000060C: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000614: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000614: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 00000000061C: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 000000000624: 683838FF 00001200
+"  v_add_u32     v102, 0x00001200, v102                     \n" // 00000000040C: 683838FF 00001200
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 00000000062C: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 000000000634: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 00000000063C: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 000000000644: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 00000000064C: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 00000000064C: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 000000000654: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 00000000065C: 683838FF 00001200
+"  v_add_u32     v102, 0x00001200, v102                     \n" // 00000000040C: 683838FF 00001200
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen lds      \n" // 000000000664: E0511000 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:256 lds  \n" // 00000000066C: E0511100 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:512 lds  \n" // 000000000674: E0511200 8004001C
 "  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:768 lds  \n" // 00000000067C: E0511300 8004001C
-"  buffer_load_dword   v28, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000684: E0511400 8004001C
+"  buffer_load_dword   v102, [%[q_res_0], %[q_res_1], %[q_res_2], %[q_res_3]], 0 offen offset:1024 lds  \n" // 000000000684: E0511400 8004001C
 "  s_add_u32     m0, m0, 0x00000500                       \n" // 00000000068C: 807CFF7C 00000500
 "  v_add_u32     v28, 0x00001200, v28                     \n" // 000000000694: 683838FF 00001200
 "  s_cmp_eq_i32  %[wave_id], 0                                    \n" // 00000000069C: BF008007

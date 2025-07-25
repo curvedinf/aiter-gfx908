@@ -166,6 +166,14 @@ __global__ void kn_get_mla_metadata(
     }
     __syncthreads();
 
+    int split0 = num_kv_splits_shard[0];
+    int splitn = num_kv_splits_shard[batch_size];
+    if (split0 != 0 && splitn != cu_num)
+    {
+        num_kv_splits[0] = -1;
+        return;
+    }
+
     for (int i = tidx; i < batch_size + 1; i += blockDim.x)
     {
         num_kv_splits[i] = num_kv_splits_shard[i];
@@ -205,7 +213,7 @@ std::vector<torch::Tensor> get_mla_metadata_impl(
 
     const int32_t batch_size = kv_indptr.size(0) - 1;
     const int32_t cu_num =
-        max(40, ROUND(batch_size, 16) * dev_prop.multiProcessorCount);
+        max(40, (batch_size / 16) * dev_prop.multiProcessorCount);
         // !!!!!!!!JUST FOR MI300!!!!!!!!!!!!!!
         // ROUND(batch_size, 16) * 80;
     auto opt = kv_indptr.options();

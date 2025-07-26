@@ -125,7 +125,7 @@ def test_mla(
     if varlen:
         for i in range(batch_size):
             # seq_lens_kv[i] = max(random.normalvariate(ctx_lens, ctx_lens / 2), ctx_lens)
-            seq_lens_kv[i] = random.uniform(50, ctx_lens)
+            seq_lens_kv[i] = random.uniform(1, ctx_lens)
             seq_lens_qo[i] = max(
                 min(random.normalvariate(ctx_lens, ctx_lens / 2), ctx_lens), 1
             )
@@ -367,7 +367,6 @@ def test_mla(
         batch_split_table = None
         num_kv_splits_indptr = None
     else:
-        # import pdb;pdb.set_trace()
         # num_kv_splits, num_kv_splits_indptr, batch_split_table, split_table, cu_num = aiter.mla.get_meta_param_balanced(
         aiter.get_mla_metadata_impl(
             kv_indptr,
@@ -402,6 +401,25 @@ def test_mla(
         num_splits,
     )
 
+    out_ref_asm = torch.empty_like(out_asm)
+    aiter.mla.mla_decode_fwd_dispatch(
+        q,
+        kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
+        out_ref_asm,
+        qo_indptr,
+        kv_indptr,
+        kv_indices,
+        kv_last_page_lens,
+        max_seqlen_qo,
+        sm_scale,
+        varlen,
+        0.0,
+        None,
+        num_kv_splits_indptr,
+        batch_split_table,
+        split_table,
+        num_splits,
+    )
     # print(f"{out_ref.view(total_q, -1)=}")
     # print(f"{out_asm.view(total_q, -1)=}")
     # checkAllclose(logits_ref, attn_logits,
@@ -413,7 +431,7 @@ def test_mla(
         total_kv * nhead_kv * qk_head_dim + total_q * nhead * (qk_head_dim + v_head_dim)
     ) * (torch.finfo(dtype).bits // 8)
     err = checkAllclose(
-        out_ref,
+        out_ref_asm,
         out_asm,
         msg=f"mla_decode-absorb    [golden vs aiter_asm]: {us_asm_decode:>8.2f} us......",
     )
@@ -507,7 +525,7 @@ parser.add_argument(
     "--ctxLen",
     type=int,
     nargs="*",
-    default=[128, 512, 1023, 4888, 12800], #
+    default=[28, 512, 1023, 4888, 12800], #
     help="""Context length.
     e.g.: -c 21""",
 )

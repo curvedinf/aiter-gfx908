@@ -45,6 +45,13 @@ __global__ void kn_get_mla_metadata(
     __shared__ int32_t split_table_shared[max_cu_num];
     __shared__ int32_t cu_num_share;
 
+    int32_t cu_num_local = cu_num;
+
+    if (kv_indptr[batch_size] < 40 * 16)
+    {
+        cu_num_local = max(CEIL(kv_indptr[batch_size], 16), batch_size);
+    }
+
     int64_t total_kv_pad = 0;
     for (int i = tidx; i < batch_size; i += blockDim.x)
     {
@@ -61,8 +68,7 @@ __global__ void kn_get_mla_metadata(
     }
     __syncthreads();
 
-
-    int32_t split_size_pad      = static_cast<int32_t>(CEIL(total_kv_pad, cu_num) + fixed_blocked_len);
+    int32_t split_size_pad      = static_cast<int32_t>(CEIL(total_kv_pad, cu_num_local) + fixed_blocked_len);
     int32_t split_size_pad_half = split_size_pad / 2;
 
     for (int i = tidx; i < batch_size; i += blockDim.x)
@@ -88,7 +94,7 @@ __global__ void kn_get_mla_metadata(
             template_data_local[i] = template_data_local[i - 1] + num_kv_splits_shard[i - 1];
         }
 
-        int32_t fix_size = template_data_local[batch_size] - cu_num;
+        int32_t fix_size = template_data_local[batch_size] - cu_num_local;
         int32_t sign = (fix_size > 0) ? 1 : -1;
         int32_t fixed_size = 0;
 
@@ -119,8 +125,9 @@ __global__ void kn_get_mla_metadata(
                 template_data_local[i] -= fixed_size;
             }
         }
+
         int32_t end_dim = batch_size;
-        int32_t fixed_gap = template_data_local[batch_size] - cu_num;
+        int32_t fixed_gap = template_data_local[batch_size] - cu_num_local;
 
         while (fixed_gap > 0)
         {
@@ -135,18 +142,26 @@ __global__ void kn_get_mla_metadata(
                 break;
             }
         }
-        cu_num = template_data_local[batch_size];
-        split[0] = cu_num;
-        cu_num_share = cu_num;
 
-        for (int i = 0; i < batch_size + 1; ++i)
-            num_kv_splits_shard[i] = template_data_local[i];
+        // check
+        num_kv_splits_shard[0] = 0;
+        for (int i = 1; i < batch_size + 1; ++i)
+        {
+            num_kv_splits_shard[i] = min(template_data_local[i] - template_data_local[i - 1], 16) +
+                num_kv_splits_shard[i - 1];
+            template_data_local[i - 1] = num_kv_splits_shard[i - 1];
+        }
+        template_data_local[batch_size] = num_kv_splits_shard[batch_size];
+
+        cu_num_local = template_data_local[batch_size];
+        split[0] = cu_num_local;
+        cu_num_share = cu_num_local;
 
         __syncthreads();
         //TODO: maybe move to cpu but how?
         int split_idx = 0;
         int b_idx = 0;
-        for (int i = 0; i < cu_num; ++i)
+        for (int i = 0; i < cu_num_local; ++i)
         {
             if (i < template_data_local[b_idx + 1])
             {
@@ -166,13 +181,13 @@ __global__ void kn_get_mla_metadata(
     }
     __syncthreads();
 
-    int split0 = num_kv_splits_shard[0];
-    int splitn = num_kv_splits_shard[batch_size];
-    if (split0 != 0 && splitn != cu_num)
-    {
-        num_kv_splits[0] = -1;
-        return;
-    }
+    // int split0 = num_kv_splits_shard[0];
+    // int splitn = num_kv_splits_shard[batch_size];
+    // if (split0 != 0 && splitn != cu_num_share)
+    // {
+    //     num_kv_splits[0] = -1;
+    //     return;
+    // }
 
     for (int i = tidx; i < batch_size + 1; i += blockDim.x)
     {

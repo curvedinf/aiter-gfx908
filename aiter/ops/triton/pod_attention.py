@@ -239,6 +239,7 @@ def pod_attention(
 
     return o, o_pf
 
+
 def get_num_splits_and_buffer_sizes(
     causal,
     batch_size,

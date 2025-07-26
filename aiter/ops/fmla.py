@@ -31,6 +31,13 @@ def flash_mla_fwd_inline_impl(
 ):
     ...
 
+"""
+metadata:
+kv_indptr: kv seqlen tensor eg: [0, 100, 434, 613]
+num_kv_splits_indptr: split table, splits per batch eg: [0, 4, 8, 10]
+batch_split_table: split table map to batch idx: [0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2]
+split_table: split table map to split idx : [0, 1, 2, 3, 0, 1, 2, 3, 4, 0, 1]
+"""
 @compile_ops("module_fmla_fwd")
 def get_mla_metadata_impl(
     kv_indptr: Tensor,

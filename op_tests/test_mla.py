@@ -376,9 +376,6 @@ def test_mla(
             split_table,
             num_splits,
         )
-        print(num_kv_splits_indptr)
-        print(batch_split_table)
-        print(split_table)
         if num_kv_splits_indptr[0] == -1:
             num_kv_splits_indptr=None
             batch_split_table=None

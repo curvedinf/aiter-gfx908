@@ -1,0 +1,10 @@
+benchmarks:
+  moe:
+    input_columns: [model, M, N, K, E, top_k]
+    output_columns: [Time (ms), TFLOPS, Bandwidth (GB/s)]
+  gemm_afp4wfp4:
+    input_columns: [M, N, K]
+    output_columns: [Triton]
+  gemm_a16w16:
+    input_columns: [M, N, K]
+    output_columns: [Triton]

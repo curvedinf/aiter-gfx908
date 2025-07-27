@@ -8,6 +8,9 @@ benchmarks:
   gemm_a8w8:
     input_columns: [M, N, K]
     output_columns: [Triton]
+  batch_gemm_a8w8:
+    input_columns: [batch, M, N, K]
+    output_columns: [Triton]
   gemm_a16w16:
     input_columns: [M, N, K]
     output_columns: [Triton]
@@ -18,5 +21,8 @@ benchmarks:
     input_columns: [model, BS, HQ, HK, MAX_SEQ_LEN, HEAD_DIM]
     output_columns: [Time (ms), TFLOPS, Bandwidth (GB/s)]
   pa_decode:
-    input_columns: [model, BS, HQ, HK, SEQ_LEN, HEAD_DIM,]
+    input_columns: [model, BS, HQ, HK, SEQ_LEN, HEAD_DIM]
     output_columns: [Time (ms), TFLOPS, Bandwidth (GB/s)]
+  hstu_attn:
+    input_columns: [batch_size, max_seq_len, sparsity, heads, attn_dim, hidden_dim]
+    output_columns: [Triton]

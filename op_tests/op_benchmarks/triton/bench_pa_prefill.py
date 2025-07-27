@@ -1,4 +1,11 @@
+import torch
+import argparse
+import sys
+import math
+import random
 import triton
+
+from aiter.ops.triton.pa_prefill import context_attention_fwd
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_model_configs,
     get_available_models,
@@ -10,12 +17,6 @@ from op_tests.triton_tests.test_pa_prefill import (
     seed_everything,
     STR_DTYPE_TO_TORCH_DTYPE,
 )
-import torch
-import argparse
-from aiter.ops.triton.pa_prefill import context_attention_fwd
-import sys
-import math
-import random
 
 
 def _get_alibi_slopes(total_num_heads: int) -> torch.Tensor:

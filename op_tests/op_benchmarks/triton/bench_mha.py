@@ -1,15 +1,9 @@
-import triton
-from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
-    get_model_configs,
-    print_vgpr,
-    get_caller_name_no_ext,
-)
 import torch
 import sys
 import warnings
 import argparse
 import itertools
-
+import triton
 from aiter.ops.triton.mha import (
     flash_attn_func,
     flash_attn_fp8_func,
@@ -22,6 +16,11 @@ from aiter.test_mha_common import (
     generate_qkv,
 )
 from op_tests.op_benchmarks.triton.utils.argparse import get_parser
+from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
+    get_model_configs,
+    print_vgpr,
+    get_caller_name_no_ext,
+)
 
 
 def nonvarlen_benchmark_configs():

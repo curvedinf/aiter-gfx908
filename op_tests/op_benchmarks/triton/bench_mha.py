@@ -2,6 +2,7 @@ import triton
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_model_configs,
     print_vgpr,
+    get_caller_name_no_ext,
 )
 import torch
 import sys
@@ -120,7 +121,7 @@ def create_benchmark_configs(custom, args):
     varlen = args.layout == "thd"
 
     configs = []
-    plot_name = f"fused-attention-{mode}-D_HEAD-{head_size}-layout-{args.layout}-fp8-{args.fp8}-causal-{causal}"
+    plot_name = get_caller_name_no_ext()
     extra_args = {"D_HEAD": head_size, "dtype": dtype, "causal": causal, "mode": mode}
 
     if custom:

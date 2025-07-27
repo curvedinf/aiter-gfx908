@@ -336,7 +336,7 @@
             "f'{CK_DIR}/example/ck_tile/13_moe_sorting/'"
         ],
         "verbose": "False",
-        "blob_gen_cmd": "''"
+        "blob_gen_cmd": "f'{AITER_CSRC_DIR}/ck_gemm_moe_2stages_codegen/gen_instances.py --working_path {{}}'"
     },
     "module_norm": {
         "srcs": [

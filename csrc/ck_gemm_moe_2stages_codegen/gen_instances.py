@@ -2,6 +2,7 @@
 # Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 import os
 import argparse
+import itertools
 from gemm_moe_ck2stages_common import get_gemm1_kernels_list, get_gemm2_kernels_list
 
 STG_INSTANCE_IMPL = """// SPDX-License-Identifier: MIT
@@ -540,7 +541,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-a",
         "--a_dtype",
-        default="f8",
+        nargs="*",
         required=False,
         type=str,
         choices=["f8", "i8", "f16", "b16", "fp4x2"],
@@ -550,7 +551,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-b",
         "--b_dtype",
-        default="f8",
+        nargs="*",
         required=False,
         type=str,
         choices=["f8", "i8", "f16", "b16", "i4", "fp4x2"],

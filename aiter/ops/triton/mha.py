@@ -226,6 +226,7 @@ def _attn_fwd_inner(
     BLOCK_DMODEL: tl.constexpr,
     BLOCK_DMODEL_POW2: tl.constexpr,
     SM_SCALE: tl.constexpr,
+    QK_SCALE: tl.constexpr,
     IS_CAUSAL: tl.constexpr,
     MASK_STEPS: tl.constexpr,
     ENABLE_DROPOUT: tl.constexpr,
@@ -235,7 +236,6 @@ def _attn_fwd_inner(
     FP8_MAX: tl.constexpr,
     ENABLE_PIPELINING: tl.constexpr,
 ):
-    RCP_LN2: tl.constexpr = 1.4426950408889634
     num_stages: tl.constexpr = (
         None if ENABLE_PIPELINING else 1
     )  # Set num_stages==1 if we want to disable pipelining
@@ -303,10 +303,10 @@ def _attn_fwd_inner(
             qk += alibi_block / SM_SCALE
         # get max scores so far
         m_ij = tl.maximum(m_i, tl.max(qk, 1))
-        m_ij_scaled = m_ij * SM_SCALE * RCP_LN2
+        m_ij_scaled = m_ij * QK_SCALE
 
         # scale and subtract max
-        q_shifted = qk * SM_SCALE * RCP_LN2 - m_ij_scaled[:, None]
+        q_shifted = qk * QK_SCALE - m_ij_scaled[:, None]
 
         # Compute scaled QK and softmax probabilities
         p = tl.math.exp2(q_shifted)
@@ -333,7 +333,7 @@ def _attn_fwd_inner(
         # -- update output accumulator --
         # alpha is an adjustment factor for acc and li as we loop and find new maxes
         # store the diff in maxes to adjust acc and li as we discover new maxes
-        m_diff_scaled = m_i * SM_SCALE * RCP_LN2 - m_ij_scaled
+        m_diff_scaled = m_i * QK_SCALE - m_ij_scaled
         alpha = tl.math.exp2(m_diff_scaled)
         acc = acc * alpha[:, None]
         v = _load_fn(v_ptrs, k_offs_n, k_offs_k, seqlen_k, BLOCK_DMODEL)
@@ -403,7 +403,7 @@ def _attn_fwd(
     stride_lse_z_in,
     stride_lse_h_in,
     stride_lse_m_in,
-    sm_scale,
+    sm_scale: tl.constexpr,
     cu_seqlens_q,
     cu_seqlens_k,
     dropout_p,
@@ -693,6 +693,7 @@ def _attn_fwd(
     m_i = tl.full([BLOCK_M], float("-inf"), dtype=tl.float32)
     l_i = tl.full([BLOCK_M], 1.0, dtype=tl.float32)
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL_POW2], dtype=tl.float32)
+    qk_scale: tl.constexpr = sm_scale * 1.44269504089
     if BLOCK_DMODEL == BLOCK_DMODEL_POW2:
         q_mask = offs_m[:, None] < seqlen_q
     else:
@@ -766,6 +767,7 @@ def _attn_fwd(
             BLOCK_DMODEL,
             BLOCK_DMODEL_POW2,
             sm_scale,
+            qk_scale,
             False,
             MASK_STEPS=False,
             ENABLE_DROPOUT=ENABLE_DROPOUT,
@@ -824,6 +826,7 @@ def _attn_fwd(
             BLOCK_DMODEL,
             BLOCK_DMODEL_POW2,
             sm_scale,
+            qk_scale,
             IS_CAUSAL,
             MASK_STEPS=True,
             ENABLE_DROPOUT=ENABLE_DROPOUT,
@@ -860,11 +863,10 @@ def _attn_fwd(
     # write back LSE(Log Sum Exponents), the log of the normalization constant
     overflow_size = end_m_idx - seqlen_q
     if softmax_lse_ptr is not None:
-        RCP_LN2: tl.constexpr = 1.4426950408889634
         LN2: tl.constexpr = 0.6931471824645996
         # compute log-sum-exp in base 2 units
         # mi_base2 = m_i * RCP_LN2
-        mi_base2 = m_i * RCP_LN2 * sm_scale
+        mi_base2 = m_i * qk_scale
         softmax_lse = mi_base2 + tl.math.log2(l_i)
         # convert back to natural units
         softmax_lse *= LN2

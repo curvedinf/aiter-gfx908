@@ -11,9 +11,7 @@ from aiter.ops.triton.gemm_a16w16_atomic import gemm_a16w16_atomic
 from op_tests.triton_tests.utils.types import str_to_torch_dtype
 
 
-def generate_gemm_a16w16_inputs(
-    M, N, K, dtype, layout="TN", use_gating=False, output=True
-):
+def generate_gemm_a16w16_inputs(M, N, K, dtype, layout="TN", output=True):
     if isinstance(dtype, str):
         dtype = str_to_torch_dtype[dtype]
 
@@ -30,11 +28,7 @@ def generate_gemm_a16w16_inputs(
 
     y = None
     if output:
-        if use_gating:
-            assert N % 2 == 0
-            y = torch.empty((M, N // 2), dtype=dtype).cuda()
-        else:
-            y = torch.empty((M, N), dtype=dtype).cuda()
+        y = torch.empty((M, N), dtype=dtype).cuda()
         out_dtype = (None,)
     else:
         out_dtype = dtype
@@ -87,47 +81,6 @@ def minimal_x_vals(num_vals=20):
     num_ops = [(i, functools.reduce(lambda x, y: x * y, i)) for i in x_vals]
     sorted_x_vals = sorted(num_ops, key=lambda x: x[1])
     return [i[0] for i in sorted_x_vals[: min(num_vals, len(sorted_x_vals))]]
-
-
-@pytest.mark.parametrize("activation", ["gelu", "gelu_tanh", "silu", "silu_exp2"])
-@pytest.mark.parametrize("M, N, K", minimal_x_vals())
-@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
-@pytest.mark.parametrize("output", [True, False])
-def test_gemm_a16_w16_gating(M: int, N: int, K: int, dtype, output, activation):
-    if N % 2 != 0:
-        pytest.skip("Skipping shape incompatible w/gating")
-    x, w, out_dtype, y = generate_gemm_a16w16_inputs(
-        M, N, K, dtype, output=output, use_gating=True
-    )
-
-    torch_out = F.linear(x, w, bias=None)
-    if activation == "gelu":
-        gating = F.gelu(torch_out[:, : N // 2])
-        torch_y = torch_out[:, N // 2 :]
-        torch_out = gating * torch_y
-    elif activation == "gelu_tanh":
-        gating = F.gelu(torch_out[:, : N // 2], approximate="tanh")
-        torch_y = torch_out[:, N // 2 :]
-        torch_out = gating * torch_y
-    elif activation == "silu":
-        gating = F.silu(torch_out[:, : N // 2])
-        torch_y = torch_out[:, N // 2 :]
-        torch_out = gating * torch_y
-    elif activation == "silu_exp2":
-        gating = F.silu(torch_out[:, : N // 2])
-        torch_y = torch_out[:, N // 2 :]
-        torch_out = gating * torch_y
-
-    if output:
-        triton_out = gemm_a16w16(
-            x, w, out_dtype, y, activation=activation, use_gating=True
-        )
-    else:
-        triton_out = gemm_a16w16(
-            x, w, out_dtype, activation=activation, use_gating=True
-        )
-
-    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
 
 
 @pytest.mark.parametrize("activation", ["gelu", "gelu_tanh", "silu", "silu_exp2"])

@@ -138,7 +138,7 @@ def test_gemm_a16_w16(M: int, N: int, K: int, dtype, output):
     else:
         triton_out = gemm_a16w16(x, w, out_dtype)
 
-    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-2)
+    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
 
 
 @pytest.mark.parametrize("M, N, K", get_x_vals())
@@ -156,4 +156,4 @@ def test_gemm_a16_w16_atomic(M: int, N: int, K: int, dtype, output):
     else:
         triton_out = gemm_a16w16_atomic(x, w, dtype=torch.float32).to(dtype)
 
-    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-2)
+    triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)

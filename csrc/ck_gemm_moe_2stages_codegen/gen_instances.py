@@ -671,19 +671,7 @@ if __name__ == "__main__":
                 routed_weight,
             )
             codegen.generate_instance_and_lookUpTable()
-
-    elif len(args.b_dtype) == 1:
-        codegen = ck_moe_2stage_gemm_codegen(
-            args.working_path,
-            args.a_dtype,
-            args.b_dtype,
-            args.c_dtype,
-            args.quant_type,
-            args.activation,
-            args.mul_routed_weight_stage,
-        )
-        codegen.generate_instance_and_lookUpTable()
-    elif len(args.b_dtype) > 1:
+    else:
         for b_dtype in args.b_dtype:
             a_dtype = b_dtype if b_dtype != "i4" else "f8"
             codegen = ck_moe_2stage_gemm_codegen(

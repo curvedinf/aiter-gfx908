@@ -425,7 +425,7 @@ def _attn_fwd_persistent(
     BATCH,
     NUM_XCD: tl.constexpr,
     USE_INT64_STRIDES: tl.constexpr,
-    pool_counters: tl.constexpr,
+    pool_counters,
 ):
     NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
     # calculate offsets
@@ -1623,67 +1623,125 @@ def _flash_attn_forward(
     if config is None:
         config = _get_config(enable_dropout, q.dtype)
 
-    
-    NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
-    num_tiles = batch * num_q_heads * triton.cdiv(seqlen_q, config["BLOCK_M"]) 
-    grid = (min(num_tiles, NUM_WGS),)
-    NUM_XCDS = 8
-    pool_counters = torch.zeros([NUM_XCDS]).to(q.device).to(torch.int32)
+    persistent=True
 
-    pool_counters += (NUM_WGS // NUM_XCDS)
+    if persistent:
 
-    _attn_fwd_persistent[grid](
-        q,
-        k,
-        v,
-        descale_q,
-        descale_k,
-        descale_v,
-        o,
-        alibi_slopes,
-        s_dmask,
-        dropout_mask,
-        softmax_lse,
-        *q_strides,
-        *k_strides,
-        *v_strides,
-        descale_q.stride(0) if descale_q is not None else 0,
-        descale_k.stride(0) if descale_k is not None else 0,
-        descale_v.stride(0) if descale_v is not None else 0,
-        *o_strides,
-        alibi_slopes.stride(0) if alibi_slopes is not None else 0,
-        alibi_slopes.stride(1) if alibi_slopes is not None else 0,
-        s_dmask.stride(0) if s_dmask is not None else 0,
-        s_dmask.stride(1) if s_dmask is not None else 0,
-        s_dmask.stride(2) if s_dmask is not None else 0,
-        s_dmask.stride(3) if s_dmask is not None else 0,
-        stride_lse_z if softmax_lse is not None else 0,
-        stride_lse_h if softmax_lse is not None else 0,
-        stride_lse_m if softmax_lse is not None else 0,
-        softmax_scale,
-        cu_seqlens_q,
-        cu_seqlens_k,
-        dropout_p,
-        philox_seed,
-        philox_offset,
-        SEQLEN_Q=max_seqlen_q,
-        SEQLEN_K=max_seqlen_k,
-        IS_CAUSAL=causal,
-        NUM_Q_HEADS=num_q_heads,
-        NUM_K_HEADS=num_k_heads,
-        BLOCK_DMODEL=head_sz,
-        BLOCK_DMODEL_POW2=BLOCK_DMODEL_POW2,
-        RETURN_SCORES=return_softmax,
-        ENABLE_DROPOUT=enable_dropout,
-        IS_FP8=IS_FP8,
-        FP8_MAX=FP8_MAX,
-        VARLEN=is_varlen,
-        BATCH=batch,
-        NUM_XCD=8,
-        USE_INT64_STRIDES=_USE_INT64_STRIDES,
-        pool_counters=pool_counters,
-        **config,
-    )
+        NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
+        num_tiles = batch * num_q_heads * triton.cdiv(seqlen_q, config["BLOCK_M"]) 
+        grid = (min(num_tiles, NUM_WGS),)
+        NUM_XCDS = 8
+        pool_counters = torch.zeros([NUM_XCDS]).to(q.device).to(torch.int32)
+
+        pool_counters += (NUM_WGS // NUM_XCDS)
+
+        _attn_fwd_persistent[grid](
+            q,
+            k,
+            v,
+            descale_q,
+            descale_k,
+            descale_v,
+            o,
+            alibi_slopes,
+            s_dmask,
+            dropout_mask,
+            softmax_lse,
+            *q_strides,
+            *k_strides,
+            *v_strides,
+            descale_q.stride(0) if descale_q is not None else 0,
+            descale_k.stride(0) if descale_k is not None else 0,
+            descale_v.stride(0) if descale_v is not None else 0,
+            *o_strides,
+            alibi_slopes.stride(0) if alibi_slopes is not None else 0,
+            alibi_slopes.stride(1) if alibi_slopes is not None else 0,
+            s_dmask.stride(0) if s_dmask is not None else 0,
+            s_dmask.stride(1) if s_dmask is not None else 0,
+            s_dmask.stride(2) if s_dmask is not None else 0,
+            s_dmask.stride(3) if s_dmask is not None else 0,
+            stride_lse_z if softmax_lse is not None else 0,
+            stride_lse_h if softmax_lse is not None else 0,
+            stride_lse_m if softmax_lse is not None else 0,
+            softmax_scale,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            dropout_p,
+            philox_seed,
+            philox_offset,
+            SEQLEN_Q=max_seqlen_q,
+            SEQLEN_K=max_seqlen_k,
+            IS_CAUSAL=causal,
+            NUM_Q_HEADS=num_q_heads,
+            NUM_K_HEADS=num_k_heads,
+            BLOCK_DMODEL=head_sz,
+            BLOCK_DMODEL_POW2=BLOCK_DMODEL_POW2,
+            RETURN_SCORES=return_softmax,
+            ENABLE_DROPOUT=enable_dropout,
+            IS_FP8=IS_FP8,
+            FP8_MAX=FP8_MAX,
+            VARLEN=is_varlen,
+            BATCH=batch,
+            NUM_XCD=NUM_XCDS,
+            USE_INT64_STRIDES=_USE_INT64_STRIDES,
+            pool_counters=pool_counters,
+            **config,
+        )
+    else:
+        num_tiles = batch * num_q_heads * triton.cdiv(seqlen_q, config["BLOCK_M"]) 
+        grid = (num_tiles,)
+        _attn_fwd[grid](
+            q,
+            k,
+            v,
+            descale_q,
+            descale_k,
+            descale_v,
+            o,
+            alibi_slopes,
+            s_dmask,
+            dropout_mask,
+            softmax_lse,
+            *q_strides,
+            *k_strides,
+            *v_strides,
+            descale_q.stride(0) if descale_q is not None else 0,
+            descale_k.stride(0) if descale_k is not None else 0,
+            descale_v.stride(0) if descale_v is not None else 0,
+            *o_strides,
+            alibi_slopes.stride(0) if alibi_slopes is not None else 0,
+            alibi_slopes.stride(1) if alibi_slopes is not None else 0,
+            s_dmask.stride(0) if s_dmask is not None else 0,
+            s_dmask.stride(1) if s_dmask is not None else 0,
+            s_dmask.stride(2) if s_dmask is not None else 0,
+            s_dmask.stride(3) if s_dmask is not None else 0,
+            stride_lse_z if softmax_lse is not None else 0,
+            stride_lse_h if softmax_lse is not None else 0,
+            stride_lse_m if softmax_lse is not None else 0,
+            softmax_scale,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            dropout_p,
+            philox_seed,
+            philox_offset,
+            SEQLEN_Q=max_seqlen_q,
+            SEQLEN_K=max_seqlen_k,
+            IS_CAUSAL=causal,
+            NUM_Q_HEADS=num_q_heads,
+            NUM_K_HEADS=num_k_heads,
+            BLOCK_DMODEL=head_sz,
+            BLOCK_DMODEL_POW2=BLOCK_DMODEL_POW2,
+            RETURN_SCORES=return_softmax,
+            ENABLE_DROPOUT=enable_dropout,
+            IS_FP8=IS_FP8,
+            FP8_MAX=FP8_MAX,
+            VARLEN=is_varlen,
+            BATCH=batch,
+            NUM_XCD=8,
+            USE_INT64_STRIDES=_USE_INT64_STRIDES,
+            **config,
+        )
+
 
     return o, softmax_lse, s_dmask, philox_seed, philox_offset
 

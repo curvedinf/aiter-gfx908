@@ -23,6 +23,7 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     print_vgpr,
 )
 
+
 def nonvarlen_benchmark_configs():
     batch_sizes = [1, 4, 16]
     N_HEADS = [16, 48]

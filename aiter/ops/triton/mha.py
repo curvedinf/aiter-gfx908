@@ -444,9 +444,6 @@ def _attn_fwd_persistent(
     tile_id_local = workgroup_id // NUM_XCD
     tile_id = tile_id_local + pool_offset
 
-    if tile_id >= num_tiles:
-        return
-
     while xcd_counter < NUM_XCD:
 
         if tile_id_local >= pool_size: # current pool is exhausted => move to the next pool

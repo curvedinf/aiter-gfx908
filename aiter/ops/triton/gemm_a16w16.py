@@ -175,6 +175,7 @@ def gemm_a16w16(
     _LOGGER.info(f"GEMM_A16W16: x={tuple(x.shape)} w={tuple(w.shape)}")
     # Shape checks
     assert x.shape[1] == w.shape[1], "Incompatible matrix shapes."
+
     M, K = x.shape
     N, K = w.shape
     w = w.T

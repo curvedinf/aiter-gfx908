@@ -2,8 +2,8 @@ import torch
 import torch.nn.functional as F
 import triton
 import pytest
-from aiter.ops.triton.gemm_a16w16_gating import gemm_a16w16_gating
-from op_tests.triton_tests.test_gemm_a16w16 import get_x_vals, minimal_x_vals
+from aiter.ops.triton.gemm_a16w16_gated import gemm_a16w16_gated
+from op_tests.triton_tests.test_gemm_a16w16 import get_x_vals
 from op_tests.triton_tests.utils.types import str_to_torch_dtype
 
 
@@ -22,6 +22,8 @@ def generate_gemm_a16w16_gated_inputs(M, N, K, dtype, layout="TN", output=True):
     else:
         weight = torch.randn((N, K), dtype=dtype).cuda()
 
+    weight = weight / K**0.5  # scale down output variance to 1
+
     y = None
     if output:
         assert N % 2 == 0
@@ -33,11 +35,13 @@ def generate_gemm_a16w16_gated_inputs(M, N, K, dtype, layout="TN", output=True):
     return x, weight, out_dtype, y
 
 
-@pytest.mark.parametrize("activation", ["gelu", "gelu_tanh", "silu", "silu_exp2"])
-@pytest.mark.parametrize("M, N, K", minimal_x_vals())
+@pytest.mark.parametrize(
+    "activation", ["gelu", "gelu_tanh", "silu", "silu_exp2", "relu"]
+)
+@pytest.mark.parametrize("M, N, K", get_x_vals())
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("output", [True, False])
-def test_gemm_a16_w16_gating(M: int, N: int, K: int, dtype, output, activation):
+def test_gemm_a16_w16_gated(M: int, N: int, K: int, dtype, output, activation):
     if N % 2 != 0:
         pytest.skip("Skipping shape incompatible w/gating")
     x, w, out_dtype, y = generate_gemm_a16w16_gated_inputs(
@@ -61,9 +65,15 @@ def test_gemm_a16_w16_gating(M: int, N: int, K: int, dtype, output, activation):
         gating = F.silu(torch_out[:, : N // 2])
         torch_y = torch_out[:, N // 2 :]
         torch_out = gating * torch_y
+    elif activation == "relu":
+        gating = F.relu(torch_out[:, : N // 2])
+        torch_y = torch_out[:, N // 2 :]
+        torch_out = gating * torch_y
+    else:
+        raise Exception(f"Unsupported activation: {activation}")
 
     if output:
-        triton_out = gemm_a16w16_gating(
+        triton_out = gemm_a16w16_gated(
             x,
             w,
             out_dtype,
@@ -71,7 +81,7 @@ def test_gemm_a16_w16_gating(M: int, N: int, K: int, dtype, output, activation):
             activation=activation,
         )
     else:
-        triton_out = gemm_a16w16_gating(
+        triton_out = gemm_a16w16_gated(
             x,
             w,
             out_dtype,

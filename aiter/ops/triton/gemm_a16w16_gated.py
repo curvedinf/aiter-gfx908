@@ -12,6 +12,7 @@ from aiter.ops.triton.utils.pid_preprocessing import pid_grid, remap_xcd
 import aiter.ops.triton.utils.arch_info as arch_info
 from aiter.ops.triton.utils.core import AITER_TRITON_CONFIGS_PATH
 from aiter.ops.triton.activation import _get_activation_from_str
+from aiter.ops.triton.gemm_a16w16 import gemm_a16w16
 
 
 @triton.heuristics(
@@ -22,7 +23,7 @@ from aiter.ops.triton.activation import _get_activation_from_str
     }
 )
 @triton.jit
-def _gemm_a16_w16_gating_kernel(
+def _gemm_a16_w16_gated_kernel(
     a_ptr,
     b_ptr,
     c_ptr,
@@ -170,7 +171,7 @@ def _get_config(
         return _get_config._config_dict[key]["any"]
 
 
-def gemm_a16w16_gating(
+def gemm_a16w16_gated(
     x,
     w,
     dtype: Optional[float] = torch.bfloat16,
@@ -212,7 +213,7 @@ def gemm_a16w16_gating(
     grid = lambda META: (  # noqa: E731
         triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
     )
-    _gemm_a16_w16_gating_kernel[grid](
+    _gemm_a16_w16_gated_kernel[grid](
         x,
         w,
         y,
@@ -229,5 +230,41 @@ def gemm_a16w16_gating(
         use_activation=activation is not None,
         **config,
     )
+
+    return y
+
+
+def ff_a16w16_gated(
+    x,
+    w_up,
+    w_down,
+    dtype: Optional[float] = torch.bfloat16,
+    y: Optional[torch.Tensor] = None,
+    config: Optional[dict] = None,
+    activation: Optional[str] = None,
+):
+    """
+    Full feed-forward block with gating (e.g swiglu).
+    x: torch.Tensor (M, K)
+    w_up: torch.Tensor (N, K) -> N = intermediate_dim * 2
+    w_down: torch.Tensor (N//2, K)
+    y: torch.Tensor (M, K)
+    activation: One of ("geglu", "swiglu", "reglu")
+    """
+    # Shape checks
+    assert x.shape[1] == w_up.shape[1] == w_down.shape[1], "Incompatible matrix shapes."
+    assert w_up.shape[0] == w_down.shape[0] * 2, "Incompatible matrix shapes."
+    M, K = x.shape
+    N, K = w_up.shape
+
+    if y is None:
+        y = torch.empty((M, K), dtype=dtype, device=x.device)
+
+    activation_mapping = {"geglu": "gelu_tanh", "swiglu": "silu_exp2", "reglu": "relu"}
+
+    intermediate = gemm_a16w16_gated(
+        x, w_up, dtype=dtype, config=config, activation=activation_mapping[activation]
+    )
+    y = gemm_a16w16(intermediate, w_down, dtype=dtype, config=config, y=y)
 
     return y

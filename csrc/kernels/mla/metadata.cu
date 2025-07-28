@@ -208,7 +208,8 @@ union MlaWorkInfo
         int32_t q_end;
         int32_t kv_start;
         int32_t kv_end;
-        int32_t pad[2];
+        int32_t kv_offset;
+        int32_t padding[1];
     };
     uint32_t u32All[8];
 };
@@ -234,7 +235,8 @@ struct MlaMetadataTraits
 //   [1.3] q_end:            (#work),             The global index in seq where q/o ends (not included).
 //   [1.4] kv_start:         (#work),             The global index in seq where k/v starts.
 //   [1.5] kv_end:           (#work),             The global index in seq where k/v ends (not included).
-//   [1.6] pad               (#work, 2),          Pad to 8 DWs.
+//   [1.6] kv_offset:        (#work),             Difference between kv_end and the global index of end of batch.
+//   [1.7] padding:          (#work, 1),          Pad to 8 DWs.
 //   [2] reduce_indptr:      (#reduce_tiles + 1), The IDs in reduce_partial_map indicates the tiles should be merged
 //                                                together.
 //   [3] reduce_final_map:   (#reduce_tiles),     The final output location of each group of tiles.
@@ -355,12 +357,13 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     int num_partial_outputs = 0;
     for (int32_t bid = 0; bid < batch_size; ++bid)
     {
-        const int32_t qo_len        = qo_lens[bid];
-        const int32_t kv_len        = kv_lens[bid];
-        const int32_t packed_qo_len = qo_len * num_heads;
-        const int32_t num_qo_tiles  = ck_tile::integer_divide_ceil(packed_qo_len, cluster_len_q);
-        const int32_t qo_start      = p_seqlens_qo_indptr[bid];
-        const int32_t kv_start      = p_seqlens_kv_indptr[bid];
+        const int32_t qo_len         = qo_lens[bid];
+        const int32_t kv_len         = kv_lens[bid];
+        const int32_t packed_qo_len  = qo_len * num_heads;
+        const int32_t num_qo_tiles   = ck_tile::integer_divide_ceil(packed_qo_len, cluster_len_q);
+        const int32_t qo_batch_start = p_seqlens_qo_indptr[bid];
+        const int32_t kv_batch_start = p_seqlens_kv_indptr[bid];
+        const int32_t kv_batch_end   = p_seqlens_kv_indptr[bid + 1];
 
         for (int32_t tid = 0; tid < num_qo_tiles; ++tid)
         {
@@ -381,11 +384,12 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
 
                 // Record work
                 MlaWorkInfo work_info{};
-                work_info.bs_index = bid;
-                work_info.q_start  = tid * cluster_len_q + qo_start;
-                work_info.q_end    = ck_tile::min(work_info.q_start + cluster_len_q, qo_start + qo_len);
-                work_info.kv_start = kv_start_local + kv_start;
-                work_info.kv_end   = work_info.kv_start + kv_len_consuming;
+                work_info.bs_index  = bid;
+                work_info.q_start   = tid * cluster_len_q + qo_batch_start;
+                work_info.q_end     = ck_tile::min(work_info.q_start + cluster_len_q, qo_batch_start + qo_len);
+                work_info.kv_start  = kv_start_local + kv_batch_start;
+                work_info.kv_end    = work_info.kv_start + kv_len_consuming;
+                work_info.kv_offset = kv_batch_end - work_info.kv_end;
                 if (split_kv)
                 {
                     const int32_t global_cluster_q_idx = num_qo_clusters_indptr[bid] + tid;

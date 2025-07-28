@@ -135,8 +135,97 @@ def mla_decode_fwd(
     bs = qo_indptr.shape[0] - 1
     total_kv = kv_indices.shape[0]
 
-    test_v1 = False
+    test_v1 = True
     if test_v1:
+        use_test_data = True
+        if use_test_data:
+            kv_seqlens_test_data = [
+                3819,
+                9978,
+                784,
+                530,
+                8062,
+                1390,
+                287,
+                1008,
+                5090,
+                5304,
+                7396,
+                2288,
+                2104,
+                4063,
+                3644,
+                5091,
+                6470,
+                4732,
+                7237,
+                430,
+                2777,
+                956,
+                1357,
+                5478,
+                1292,
+                521,
+                6802,
+                1347,
+                2388,
+                5062,
+                443,
+                8560,
+                5049,
+                7235,
+                927,
+                9580,
+                623,
+                4913,
+                2511,
+                8120,
+                1638,
+                4859,
+                600,
+                7289,
+                8278,
+                6693,
+                136,
+                1021,
+                1465,
+                5859,
+                1278,
+                7123,
+                7839,
+                2459,
+                1090,
+                6333,
+                812,
+                9358,
+                6345,
+                8616,
+                2313,
+                6115,
+                6059,
+                4963,
+            ]
+            kv_seqlens_test = torch.tensor(
+                kv_seqlens_test_data, dtype=torch.int, device="cuda"
+            )
+            batch_size = len(kv_seqlens_test_data)
+            qo_seqlens_test_data = []
+            for i in range(batch_size):
+                qo_seqlens_test_data.append(i % 4 + 1)
+            qo_seqlens_test = torch.tensor(
+                qo_seqlens_test_data, dtype=torch.int, device="cuda"
+            )
+            qo_indptr_test = torch.zeros(batch_size + 1, dtype=torch.int, device="cuda")
+            kv_indptr_test = torch.zeros(batch_size + 1, dtype=torch.int, device="cuda")
+            qo_indptr_test[1 : batch_size + 1] = torch.cumsum(qo_seqlens_test, dim=0)
+            kv_indptr_test[1 : batch_size + 1] = torch.cumsum(kv_seqlens_test, dim=0)
+        else:
+            qo_indptr_test = qo_indptr
+            qo_indptr_test = kv_indptr
+        print("qo_indptr_test:")
+        print(qo_indptr_test)
+        print("kv_indptr_test:")
+        print(kv_indptr_test)
         (
             work_indptr,
             work_info_set,
@@ -144,13 +233,20 @@ def mla_decode_fwd(
             reduce_final_map,
             reduce_partial_map,
         ) = aiter.get_mla_metadata_v1(
-            qo_indptr, kv_indptr, nhead // nhead_kv, nhead_kv, True
+            qo_indptr_test, kv_indptr_test, nhead // nhead_kv, nhead_kv, True
         )
+        print("work_indptr:")
         print(work_indptr)
+        print("work_info_set:")
         print(work_info_set)
+        print("reduce_indptr:")
         print(reduce_indptr)
+        print("reduce_final_map:")
         print(reduce_final_map)
+        print("reduce_partial_map:")
         print(reduce_partial_map)
+        if use_test_data:
+            exit()
 
     if num_kv_splits is None:
         num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(

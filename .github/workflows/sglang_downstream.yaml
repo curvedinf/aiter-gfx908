@@ -31,7 +31,6 @@ jobs:
       - name: Build sglang_aiter_test image
         run: |
           cd sglang
-          sed -i '50i RUN apt-get update && apt-get install -y wget' docker/Dockerfile.rocm
           docker build --no-cache --build-arg SGL_BRANCH=v0.4.9.post3 --build-arg GPU_ARCH=gfx942 --build-arg AITER_COMMIT="v0.1.4" -t sglang_aiter_test -f docker/Dockerfile.rocm .
         
       # docker build -f docker/Dockerfile.rocm --build-arg AITER_BRANCH=main --build-arg PYTORCH_ROCM_ARCH=gfx942 --build-arg SGL_BRANCH=v0.4.9.post2 -t sglang_aiter_base .
@@ -45,6 +44,9 @@ jobs:
           docker ps -aq -f name=sglang_aiter_test | xargs -r docker stop | xargs -r docker rm; bash scripts/amd_ci_start_container.sh
         env:
           GITHUB_WORKSPACE: ${{ github.workspace }}
+      
+      - name: Install wget
+        run: sudo apt-get update && sudo apt-get install -y wget
 
       - name: Install dependencies
         run: |

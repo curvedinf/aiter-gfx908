@@ -459,12 +459,12 @@ def run_benchmark(custom, args):
             + total_num_tokens_q * HQ * D_HEAD * output_bytes
         )
         # return ms
-        # if "ms" in provider:
-        return ms
-        # elif "TFLOPS" in provider:
-        #     return total_flops / ms * 1e-9
-        # else:  # GB/s
-        #     return mem / ms * 1e-3
+        if "ms" in provider:
+            return ms
+        elif "TFLOPS" in provider:
+            return total_flops / ms * 1e-9
+        else:  # GB/s
+            return mem / ms * 1e-3
 
     bench_mha.run(save_path="." if args.o else None, print_data=True, show_plots=False)
 

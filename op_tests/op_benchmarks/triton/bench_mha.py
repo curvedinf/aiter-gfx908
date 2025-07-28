@@ -1,8 +1,5 @@
 import triton
-from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
-    get_model_configs,
-    print_vgpr,
-)
+
 import torch
 import sys
 import warnings
@@ -21,7 +18,10 @@ from aiter.test_mha_common import (
     generate_qkv,
 )
 from op_tests.op_benchmarks.triton.utils.argparse import get_parser
-
+from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
+    get_model_configs,
+    print_vgpr,
+)
 
 def nonvarlen_benchmark_configs():
     batch_sizes = [1, 4, 16]
@@ -459,14 +459,14 @@ def run_benchmark(custom, args):
             + total_num_tokens_q * HQ * D_HEAD * output_bytes
         )
         # return ms
-        if "ms" in provider:
-            return ms
-        elif "TFLOPS" in provider:
-            return total_flops / ms * 1e-9
-        else:  # GB/s
-            return mem / ms * 1e-3
+        # if "ms" in provider:
+        return ms
+        # elif "TFLOPS" in provider:
+        #     return total_flops / ms * 1e-9
+        # else:  # GB/s
+        #     return mem / ms * 1e-3
 
-    bench_mha.run(save_path="." if args.o else None, print_data=True)
+    bench_mha.run(save_path="." if args.o else None, print_data=True, show_plots=False)
 
 
 def supported_layouts():

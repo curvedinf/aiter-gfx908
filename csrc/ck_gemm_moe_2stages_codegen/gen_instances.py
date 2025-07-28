@@ -609,7 +609,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # build all
-    if args.b_dtype == None:
+    if args.b_dtype is None:
         # quanted moe
         b_quant_dtypes = ["f8", "i8", "i4", "fp4x2"]
         c_dtypes = ["f16", "b16"]

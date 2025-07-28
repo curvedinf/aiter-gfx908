@@ -428,16 +428,11 @@ def _attn_fwd(
     USE_INT64_STRIDES: tl.constexpr,
 ):
     NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
-    # calculate offsets
-    wid = tl.program_id(
-        0
-    )  # workgroup id ranging: 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
-    # num blocks along seqlen
 
-    off_q_head = wid % NUM_Q_HEADS
+    off_q_head = tl.program_id(0)
     off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS, NUM_XCD)
-    start_m = (wid // NUM_Q_HEADS) % NUM_BLOCKS
-    off_z = (wid // (NUM_BLOCKS * NUM_Q_HEADS)) % BATCH
+    start_m = tl.program_id(1)
+    off_z = tl.program_id(2)
 
     # offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -1064,7 +1059,9 @@ def _flash_attn_forward(
     """
 
     grid = lambda META: (  # noqa: E731
-        batch * num_q_heads * triton.cdiv(seqlen_q, META["BLOCK_M"]),
+        num_q_heads,
+        triton.cdiv(seqlen_q, META["BLOCK_M"]),
+        batch,
     )
 
     _attn_fwd[grid](

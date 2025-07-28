@@ -85,7 +85,7 @@
             "                int max_context_len,"                  \
             "                Tensor? alibi_slopes,"                 \
             "                str kv_cache_dtype,"                   \
-            "                float k_scale, float v_scale) -> ()");
+            "                Tensor k_scale, Tensor v_scale) -> ()");
 
 #define ATTENTION_RAGGED_PYBIND                                     \
       m.def("paged_attention_ragged", &paged_attention_ragged,      \

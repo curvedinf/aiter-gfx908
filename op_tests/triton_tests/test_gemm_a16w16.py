@@ -82,7 +82,6 @@ class TestGEMMA16W16:
         for output in [True, False]
     ]
 
-    
     test_params = basic_set + extended_set
 
     @pytest.mark.parametrize("M, N, K, dtype_str, output", test_params)

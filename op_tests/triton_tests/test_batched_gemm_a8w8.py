@@ -72,9 +72,19 @@ def run_triton(x, weight, x_scale, w_scale, bias=None, dtype=torch.bfloat16, y=N
 
 
 class TestBatchedGEMMA8W8:
-    full_shape_set = [(1024 * v, 1024 * v, 1024 * v) for v in range(1, 9)]
-    full_shape_set += [(4864, 4096, 8192), (9728, 8192, 65000), (4864, 8192, 4160)]
-    full_shape_set += [
+    basic_shape_set = [(4, 1024 * v, 1024 * v, 1024 * v) for v in range(1, 6)]
+    basic_shape_set += [(4, 4864, 4096, 8192), (4, 9728, 8192, 65000), (4, 4864, 8192, 4160)]
+
+    basic_set = [
+        (*shape, dtype, output)
+        for shape in basic_shape_set
+        for dtype in ["bf16"]
+        for output in [True, False]
+    ]
+
+    extended_shape_set = [(1024 * v, 1024 * v, 1024 * v) for v in range(6, 9)]
+    extended_shape_set += [(4864, 4096, 8192), (9728, 8192, 65000), (4864, 8192, 4160)]
+    extended_shape_set += [
         (1, 1280, 8192),
         (32, 1280, 8192),
         (64, 1280, 8192),
@@ -102,32 +112,26 @@ class TestBatchedGEMMA8W8:
         (8192, 8192, 1024),
         (16384, 8192, 1024),
     ]
-    full_shape_set += [(1, 1, 1)]  # minimal case 
+    extended_shape_set += [(1, 1, 1)]  # minimal case 
 
-    full_set = [
-        pytest.param(b, *shape, dtype, output, marks=pytest.mark.slow)
-        for b in [4, 16]
-        for shape in full_shape_set
-        for output in [True, False]
+    extended_shape_set_with_batch = []
+    batch_sizes = [1, 5, 8, 16]
+    for b in batch_sizes:
+        for s in extended_shape_set:
+            extended_shape_set_with_batch.append([b,*s])
+
+    extended_set = [
+        pytest.param(*shape, dtype, output, marks=pytest.mark.extended)
+        for shape in extended_shape_set_with_batch 
         for dtype in ["bf16"]
+        for output in [True, False]
     ]
 
-    fast_shape_set = [(1024 * v, 1024 * v, 1024 * v) for v in range(1, 9)]
-    fast_shape_set += [(4864, 4096, 8192), (9728, 8192, 65000), (4864, 8192, 4160)]
-
-    fast_set = [
-        (b, *shape, dtype, output)
-        for b in [16]
-        for shape in fast_shape_set
-        for output in [True, False]
-        for dtype in ["bf16"]
-    ]
-
-    test_params = full_set + fast_set
+    test_params = basic_set + extended_set
 
     @pytest.mark.parametrize(
-        "B, M, N, K, dtype_str, output",get_test_params())
-    def test_batched_gemm_a8w8(B: int, M: int, N: int, K: int, dtype_str, output: bool):
+        "B, M, N, K, dtype_str, output", test_params)
+    def test_batched_gemm_a8w8(self, B: int, M: int, N: int, K: int, dtype_str, output: bool):
 
         dtype = str_to_torch_dtype[dtype_str]
 

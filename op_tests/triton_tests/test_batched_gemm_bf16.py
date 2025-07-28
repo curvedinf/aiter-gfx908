@@ -60,11 +60,20 @@ def run_triton(x, weight, bias=None, dtype=torch.bfloat16, y=None):
     return batched_gemm_bf16(x, weight, bias, dtype, YQ=y)
 
 
-def get_x_vals():
+class TestBatchedGEMMA16W16:
+    basic_shape_set = [(4, 1024 * v, 1024 * v, 1024 * v) for v in range(1, 6)]
+    basic_shape_set += [(4, 4864, 4096, 8192), (4, 9728, 8192, 65000), (4, 4864, 8192, 4160)]
 
-    x_vals = [(1024 * v, 1024 * v, 1024 * v) for v in range(1, 9)]
-    x_vals += [(4864, 4096, 8192), (9728, 8192, 65000), (4864, 8192, 4160)]
-    x_vals += [
+    basic_set = [
+        (*shape, dtype, output)
+        for shape in basic_shape_set
+        for dtype in ["bf16"]
+        for output in [True, False]
+    ]
+
+    extended_shape_set = [(1024 * v, 1024 * v, 1024 * v) for v in range(6, 9)]
+    extended_shape_set += [(4864, 4096, 8192), (9728, 8192, 65000), (4864, 8192, 4160)]
+    extended_shape_set += [
         (1, 1280, 8192),
         (32, 1280, 8192),
         (64, 1280, 8192),
@@ -92,78 +101,37 @@ def get_x_vals():
         (8192, 8192, 1024),
         (16384, 8192, 1024),
     ]
-    x_vals += [(1, 1, 1)]  # minimal case
-    return x_vals
+    extended_shape_set += [(1, 1, 1)]  # minimal case 
 
+    extended_shape_set_with_batch = []
+    batch_sizes = [1, 5, 8, 16]
+    for b in batch_sizes:
+        for s in extended_shape_set:
+            extended_shape_set_with_batch.append([b,*s])
 
-def get_test_params():
-    full_shape_set = [(1024 * v, 1024 * v, 1024 * v) for v in range(1, 9)]
-    full_shape_set += [(4864, 4096, 8192), (9728, 8192, 65000), (4864, 8192, 4160)]
-    full_shape_set += [
-        (1, 1280, 8192),
-        (32, 1280, 8192),
-        (64, 1280, 8192),
-        (128, 1280, 8192),
-        (192, 1280, 8192),
-        (256, 1280, 8192),
-        (320, 1280, 8192),
-        (512, 1280, 8192),
-        (1024, 1280, 8192),
-        (2048, 1280, 8192),
-        (4096, 1280, 8192),
-        (8192, 1280, 8192),
-        (16384, 1280, 8192),
-        (1, 8192, 1024),
-        (32, 8192, 1024),
-        (64, 8192, 1024),
-        (128, 8192, 1024),
-        (192, 8192, 1024),
-        (256, 8192, 1024),
-        (320, 8192, 1024),
-        (512, 8192, 1024),
-        (1024, 8192, 1024),
-        (2048, 8192, 1024),
-        (4096, 8192, 1024),
-        (8192, 8192, 1024),
-        (16384, 8192, 1024),
-    ]
-    full_shape_set += [(1, 1, 1)]  # minimal case 
-
-    full_set = [
-        pytest.param(b, *shape, dtype, output, marks=pytest.mark.slow)
-        for b in [4, 16]
-        for shape in full_shape_set
-        for output in [True, False]
+    extended_set = [
+        pytest.param(*shape, dtype, output, marks=pytest.mark.extended)
+        for shape in extended_shape_set_with_batch 
         for dtype in ["bf16"]
-    ]
-
-    fast_shape_set = [(1024 * v, 1024 * v, 1024 * v) for v in range(1, 9)]
-    fast_shape_set += [(4864, 4096, 8192), (9728, 8192, 65000), (4864, 8192, 4160)]
-
-    fast_set = [
-        (b, *shape, dtype, output)
-        for b in [16]
-        for shape in fast_shape_set
         for output in [True, False]
-        for dtype in ["bf16"]
     ]
 
-    return full_set + fast_set
+    test_params = basic_set + extended_set
 
-@pytest.mark.parametrize("B, M, N, K, dtype_str, output",get_test_params())
-def test_batched_gemm_bf16(B: int, M: int, N: int, K: int, dtype_str, output: bool):
+    @pytest.mark.parametrize("B, M, N, K, dtype_str, output",test_params)
+    def test_batched_gemm_bf16(self, B: int, M: int, N: int, K: int, dtype_str, output: bool):
 
-    dtype = str_to_torch_dtype[dtype_str]
-    x = torch.randint(-20, 20, (B, M, K), dtype=dtype).cuda()
-    weight = torch.randint(-20, 20, (B, N, K), dtype=dtype).cuda()
+        dtype = str_to_torch_dtype[dtype_str]
+        x = torch.randint(-20, 20, (B, M, K), dtype=dtype).cuda()
+        weight = torch.randint(-20, 20, (B, N, K), dtype=dtype).cuda()
 
-    bias = torch.rand([B, 1, N], dtype=dtype).cuda() * 10
+        bias = torch.rand([B, 1, N], dtype=dtype).cuda() * 10
 
-    y = None
-    if output:
-        y = torch.empty((B, M, N), dtype=dtype, device=x.device)
+        y = None
+        if output:
+            y = torch.empty((B, M, N), dtype=dtype, device=x.device)
 
-    a = run_torch(x, weight, bias, dtype)
-    b = run_triton(x, weight, bias, dtype, y)
+        a = run_torch(x, weight, bias, dtype)
+        b = run_triton(x, weight, bias, dtype, y)
 
-    triton.testing.assert_close(a, b, atol=0.01, rtol=1e-2)
+        triton.testing.assert_close(a, b, atol=0.01, rtol=1e-2)

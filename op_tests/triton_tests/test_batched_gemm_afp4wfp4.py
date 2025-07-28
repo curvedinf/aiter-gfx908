@@ -122,14 +122,19 @@ def run_torch(x, w, x_scales, w_scales, dtype):
     w_f32 = w_f32 * w_scales_f32
     return torch.bmm(x_f32, w_f32.transpose(1, 2)).to(dtype)
 
-def get_test_params():
-    full_shape_set = [(1024 * v, 1024 * v, 1024 * v) for v in range(1, 9)]
-    full_shape_set += [(4864, 4096, 8192), (4864, 8192, 4160)]
-    # TODO: There's a known bug for large test cases (e.g (9728, 8192, 65536))
-    # That will cause a failure on the next test. My best guess is that we're not
-    # overwriting something we should when we get a big chunk of uninitialized data
-    # in torch.empty().
-    full_shape_set += [
+class TestBatchedGEMMAFP4WFP4Prequant:
+    basic_shape_set = [(4, 1024 * v, 1024 * v, 1024 * v) for v in range(1, 6)]
+    basic_shape_set += [(4, 4864, 4096, 8192), (4, 9728, 8192, 65536), (4, 4864, 8192, 4160)]
+
+    basic_set = [
+        pytest.param(*shape, dtype) 
+        for shape in basic_shape_set
+        for dtype in ["bfloat16"]
+    ]
+
+    extended_shape_set = [(1024 * v, 1024 * v, 1024 * v) for v in range(6, 9)]
+    extended_shape_set += [(4864, 4096, 8192), (9728, 8192, 65536), (4864, 8192, 4160)]
+    extended_shape_set += [
         (1, 1280, 8192),
         (32, 1280, 8192),
         (64, 1280, 8192),
@@ -157,49 +162,36 @@ def get_test_params():
         (8192, 8192, 1024),
         (16384, 8192, 1024),
     ]
-    full_shape_set += [(2 ** (v - 1), 4096 * v, 4096 * v) for v in range(1, 6)]
-    # full_shape_set = [(128, 1024, 4096)]
-    full_shape_set += [(16, 16384, 3328 * 2), (128, 16384, 3328 * 2)]
-    full_shape_set += [(256, 3584, 2112)]
-    full_shape_set += [(1, 1, 32)]  # minimal case
+    extended_shape_set += [(2 ** (v - 1), 4096 * v, 4096 * v) for v in range(1, 6)]
+    extended_shape_set += [(16, 16384, 3328 * 2), (128, 16384, 3328 * 2)]
+    extended_shape_set += [(256, 3584, 2112)]
+    extended_shape_set += [(1, 1, 32)]  # minimal case
 
-    # full_shape_set = [(1, 1280, 8192)]
     # add batch dim
     batch_sizes = [1, 2, 3, 5, 7, 8]
-    # batch_sizes = [8]
     num_batch_sizes = len(batch_sizes)
-    full_shape_set_with_batch = []
-    for i, (m, n, k) in enumerate(full_shape_set):
+    extended_shape_set_with_batch = []
+    for i, (m, n, k) in enumerate(extended_shape_set):
         b = batch_sizes[i % num_batch_sizes]
-        if k > 16384:
-            b = 1
-        full_shape_set_with_batch.append((b, m, n, k))
+        extended_shape_set_with_batch.append((b, m, n, k))
 
-    full_shape_set_with_batch = [
+    extended_shape_set_with_batch = [
         (b, 2**m, n, k)
         for b in range(1, 17)
         for m in range(0, 9)
         for (n, k) in [(512, 128), (128, 512)]
     ]
 
-    full_set = [
-        pytest.param(*shape, dtype, marks=pytest.mark.slow) 
-        for shape in full_shape_set_with_batch
+    extended_set = [
+        pytest.param(*shape, dtype, marks=pytest.mark.extended) 
+        for shape in extended_shape_set_with_batch
         for dtype in ["float16", "bfloat16"]
     ]
 
-    fast_shape_set = [(1024 * v, 1024 * v, 1024 * v) for v in range(1, 9)]
-    fast_shape_set += [(4864, 4096, 8192), (9728, 8192, 65536), (4864, 8192, 4160)]
+    test_params = basic_set + extended_set
 
-    fast_set = [
-        pytest.param(*shape, dtype) 
-        for b in [4]
-        for shape in fast_shape_set
-        for dtype in ["bfloat16"]
-    ]
-
-@pytest.mark.parametrize("B, M, N, K dtype_str", get_test_params())
-def test_batched_gemm_afp4_wfp4(B: int, M: int, N: int, K: int, dtype):
+    @pytest.mark.parametrize("B, M, N, K dtype_str", get_test_params())
+    def test_batched_gemm_afp4_wfp4(B: int, M: int, N: int, K: int, dtype):
     if not (arch_info.is_fp4_avail()):
         pytest.skip("MXFP4 not supported on this architecture")
 

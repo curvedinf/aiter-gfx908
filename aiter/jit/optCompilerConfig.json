@@ -787,6 +787,27 @@
             "f'{AITER_CSRC_DIR}/cpp_itfs/mha_bwd_generate.py --receipt 3 --output_dir {{}}'"
         ]
     },
+    "libm_grouped_flatmm": {
+        "srcs": [],
+        "flags_extra_cc": [],
+        "flags_extra_hip": [
+            "'-mllvm -greedy-reverse-local-assignment=1'", 
+            "'-mllvm --slp-threshold=-32'",
+            "'-mllvm -enable-noalias-to-md-conversion=0'"
+        ],
+        "extra_ldflags": "None",
+        "extra_include": [
+            "f'{CK_DIR}/example/ck_tile/19_grouped_flatmm'"
+        ],
+        "verbose": "False",
+        "is_python_module": "False",
+        "is_standalone": "False",
+        "torch_exclude": "True",
+        "hip_clang_path": "os.environ.get('GEMM_A4W4_BLOCKWISE_HIP_CLANG_PATH')",
+        "blob_gen_cmd": [
+           "f'{AITER_CSRC_DIR}/cpp_itfs/m_grouped_gemm_generate.py --output_dir {{}}'"
+        ]
+    },
     "module_rocsolgemm": {
         "srcs": [
             "f'{AITER_GRADLIB_DIR}/csrc/rocsolgemm.cu'"

@@ -375,7 +375,8 @@ def build_module(
                 shutil.copy(f"{opbd_dir}/{target_name}", f"{get_user_jit_dir()}")
             else:
                 shutil.copy(
-                    f"{opbd_dir}/{target_name}", f"{AITER_ROOT_DIR}/op_tests/cpp/mha"
+                    f"{opbd_dir}/{target_name}",
+                    f"{AITER_ROOT_DIR}/op_tests/cpp/grouped_gemm",
                 )
         except:
             tag = f"\033[31mfailed build jit [{md_name}]\033[0m"

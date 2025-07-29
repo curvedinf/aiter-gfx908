@@ -22,7 +22,7 @@
 #include "gemm_a8w8_blockscale.h"
 #include "gemm_a8w8_bpreshuffle.h"
 #include "hipbsolgemm.cuh"
-#include "mla_metadata.h"
+#include "mla.h"
 #include "moe_ck.h"
 #include "moe_op.h"
 #include "moe_sorting.h"
@@ -95,5 +95,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     HIPBSOLGEMM_PYBIND;
     ROCSOLGEMM_PYBIND;
     MLA_METADATA_PYBIND;
+    MLA_REDUCE_PYBIND;
 }
 #endif

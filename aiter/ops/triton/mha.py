@@ -2063,6 +2063,7 @@ def _attn_fwd(
 @functools.lru_cache(maxsize=1024)
 def _get_config(
     enable_dropout: bool,
+    persistent: bool,
     dtype: torch.dtype,
 ):
     if not hasattr(_get_config, "_config_dict"):
@@ -2075,6 +2076,8 @@ def _get_config(
 
     if enable_dropout or dtype == torch.float32:
         return _get_config._config_dict["default"]["fwd"]["dropout_or_fp32"]
+    elif persistent:
+        return _get_config._config_dict["default"]["fwd"]["persistent"]
     else:
         return _get_config._config_dict["default"]["fwd"]["default"]
 
@@ -2186,11 +2189,13 @@ def _flash_attn_forward(
         s_dmask = None
         dropout_mask = None
 
-    if config is None:
-        config = _get_config(enable_dropout, q.dtype)
-
     persistent = False
+    
+    if config is None:
+        config = _get_config(enable_dropout, persistent, q.dtype)
 
+    
+    
     if persistent:
         NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
         num_tiles = batch * num_q_heads * triton.cdiv(seqlen_q, config["BLOCK_M"]) 

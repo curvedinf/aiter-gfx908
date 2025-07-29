@@ -184,7 +184,7 @@ def gemm_a16w16(
         y = torch.empty((M, N), dtype=dtype, device=x.device)
 
     if config is None:
-        config = _get_config(M, N, K, activation)
+        config = _get_config(M, N, K)
 
     grid = lambda META: (  # noqa: E731
         triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),

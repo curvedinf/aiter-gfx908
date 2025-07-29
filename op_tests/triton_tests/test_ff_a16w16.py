@@ -7,7 +7,7 @@ from op_tests.triton_tests.test_gemm_a16w16 import get_x_vals
 from op_tests.triton_tests.utils.types import str_to_torch_dtype
 
 
-def generate_ff_a16w16_inputs(batch, intermediate_dim, hidden_dim, dtype, layout="TN", output=True):
+def generate_ff_a16w16_inputs(batch, hidden_dim, intermediate_dim, dtype, layout="TN", output=True):
     if isinstance(dtype, str):
         dtype = str_to_torch_dtype[dtype]
 
@@ -27,14 +27,16 @@ def generate_ff_a16w16_inputs(batch, intermediate_dim, hidden_dim, dtype, layout
     w1 = w1 / (intermediate_dim**0.5)  # scale down output variance
     w2 = w2 / (hidden_dim**0.5)
 
+    intermediate = None
     y = None
     if output:
+        intermediate = torch.empty((batch, intermediate_dim), dtype=dtype).cuda()
         y = torch.empty((batch, hidden_dim), dtype=dtype).cuda()
         out_dtype = (None,)
     else:
         out_dtype = dtype
 
-    return x, w1, w2, out_dtype, y
+    return x, w1, w2, out_dtype, intermediate, y
 
 
 @pytest.mark.parametrize(
@@ -44,10 +46,9 @@ def generate_ff_a16w16_inputs(batch, intermediate_dim, hidden_dim, dtype, layout
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("output", [True, False])
 def test_ff_a16w16_gated(batch: int, hidden_dim: int, intermediate_dim: int, dtype, output, activation):
-    x, w1, w2, out_dtype, y = generate_ff_a16w16_inputs(
+    x, w1, w2, out_dtype, intermediate, y = generate_ff_a16w16_inputs(
         batch, hidden_dim, intermediate_dim, dtype, output=output
     )
-    print(x.shape, w1.shape, w2.shape)
     torch_out = F.linear(x, w1, bias=None)
     if activation == "geglu":
         gating = F.gelu(torch_out[:, :intermediate_dim], approximate="tanh")
@@ -67,6 +68,7 @@ def test_ff_a16w16_gated(batch: int, hidden_dim: int, intermediate_dim: int, dty
             w1,
             w2,
             out_dtype,
+            intermediate,
             y,
             activation=activation,
         )

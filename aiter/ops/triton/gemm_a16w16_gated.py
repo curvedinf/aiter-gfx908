@@ -186,9 +186,9 @@ def gemm_a16w16_gated(
     - X: Matrix X with shape (M, K).
     - W: Matrix W with shape (N, K).
     - dtype: Optional parameter to specifcy bf16 or fp16 datatype. Default is bf16
-    - Y: Output Matrix Y with shape (M, N) or shape (M, N//2) if use_gating is True.
+    - Y: Output Matrix Y with shape (M, N//2).
     If this is none, then it's created by this API and returned as output.
-    - activation: Optional activation function to apply to the output. One of ("gelu", "gelu_tanh", "silu", "silu_exp2")
+    - activation: Optional activation function to apply to the output. One of ("gelu", "gelu_tanh", "silu", "silu_exp2", "relu")
 
     Returns:
     - Y: The output matrix with shape (M, N//2).
@@ -204,6 +204,7 @@ def gemm_a16w16_gated(
     w = w.T
 
     if y is None:
+        print("Dtype:", dtype)
         y = torch.empty((M, N // 2), dtype=dtype, device=x.device)
 
     if config is None:

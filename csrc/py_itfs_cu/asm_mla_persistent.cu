@@ -9,50 +9,48 @@
 
 struct __attribute__((packed)) KernelArgs
 {
-    void* ptr_R;
-    p2 _p0;
-    void* ptr_LSE;
-    p2 _p1;
-    void* ptr_Q;
-    p2 _p2;
-    void* ptr_KV;
-    p2 _p3;
-    void* ptr_LTP;
-    p2 _p4;
-    void* ptr_LTD;
-    p2 _p5;
-    void* ptr_LTL;
-    p2 _p6;
-    float scalar;
-    p3 _p12;
-    unsigned int s_MQA;
-    p3 _p13;
-    unsigned int s_kv_split;
-    p3 _p14;
-    unsigned int s_Q_Bs;
-    p3 _p15;
-    unsigned int s_Bs;
-    p3 _p16;
-    unsigned int s_log2_plen;
-    p3 _p17;
-    void* ptr_QTP;
-    p2 _p18;
-    void* ptr_STP;
-    p2 _p19;
+	void *ptr_R;
+	p2 _p0;
+	void *ptr_LSE;
+	p2 _p1;
+	void *ptr_Q;
+	p2 _p2;
+	void *ptr_KV;
+	p2 _p3;
+	void *ptr_LTP;
+	p2 _p4;
+	void *ptr_LTD;
+	p2 _p5;
+	void *ptr_LTL;
+	p2 _p6;
+	float scalar;
+	p3 _p12;
+	unsigned int s_MQA;
+	p3 _p13;
+	unsigned int s_kv_split;
+	p3 _p14;
+	unsigned int s_Q_Bs;
+	p3 _p15;
+	unsigned int s_Bs;
+	p3 _p16;
+	unsigned int s_log2_plen;
+	p3 _p17;
+	void *ptr_QTP;
+	p2 _p18;
+	void *ptr_STP;
+	p2 _p19;
 	void *ptr_RP;
 	p2 _p20;
 };
 
-void mla_decode_stage1_asm_fwd(
+void mla_persistent_stage1_asm_fwd(
     torch::Tensor& Q,                    //   [num_seqs, num_heads, head_size]
     torch::Tensor& KV,                   //   [num_page, page_size, num_kv_heads, head_size]
     torch::Tensor& qo_indptr,            //   [batch_size+1]
     torch::Tensor& kv_indptr,            //   [batch_size+1]
     torch::Tensor& kv_page_indices,      //   [num_page_used]
     torch::Tensor& kv_last_page_lens,    //   [batch_size]
-    std::optional<torch::Tensor>& num_kv_splits_indptr,   //   metadata
-    std::optional<torch::Tensor>& work_indptr,            //   metadata
-    std::optional<torch::Tensor>& work_info_set,          //   [batch_size+1]
+    torch::Tensor& num_kv_splits_indptr, //   [batch_size+1]
     int max_seqlen_q,
     float softmax_scale,
     // following are output
@@ -85,20 +83,10 @@ void mla_decode_stage1_asm_fwd(
     args.scalar      = softmax_scale;
     args.s_MQA       = gqa_ratio * max_seqlen_q;
     args.s_kv_split  = kv_split;
+    args.ptr_STP     = num_kv_splits_indptr.data_ptr();
     args.s_Q_Bs      = stride_Q;
     args.s_Bs        = stride_Page;
     args.s_log2_plen = log2_page;
-    if (num_kv_splits_indptr.has_value())
-    {
-        args.ptr_STP = num_kv_splits_indptr.value().data_ptr();
-        args.ptr_RP  = nullptr;
-    }
-    else
-    {
-        assert(work_indptr.has_value() && work_info_set.has_value());
-        args.ptr_STP = work_indptr.value().data_ptr();
-        args.ptr_RP  = work_info_set.value().data_ptr();
-    }
 
     // std::cout << "mla args" << std::endl;
     // std::cout << "ptr_R: " << args.ptr_R << std::endl;
@@ -136,15 +124,7 @@ void mla_decode_stage1_asm_fwd(
         }
         else if(gqa_ratio == 16)
         {
-            if(args.ptr_RP != nullptr)
-            {
-                sub_Q = 128;
-                static AiterAsmKernel impl_a16w16_bf16_ps(
-                    "mla_kernel_func",
-                    "/mla/mla_a16w16_qh16_m16x4_n16x1_coex0_mask1_ps.co");
-                impl_ptr = &impl_a16w16_bf16_ps;
-            }
-            else if(max_seqlen_q == 1)
+            if(max_seqlen_q == 1)
             {
                 sub_Q = 16;
                 static AiterAsmKernel impl_a16w16_bf16(
@@ -268,3 +248,4 @@ void mla_prefill_asm_fwd(
                              1,                                              // bdz
                              stream});
 }
+

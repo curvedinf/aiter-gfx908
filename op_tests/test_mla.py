@@ -183,8 +183,8 @@ def test_mla(
         return us_aiter
 
     us_aiter = None
-    if batch_size * ctx_lens * nhead < 256 * 8192 * 16:
-        us_aiter = test_normal_prefill()
+    # if batch_size * ctx_lens * nhead < 256 * 8192 * 16:
+    #     us_aiter = test_normal_prefill()
     torch.cuda.empty_cache()
     # absorb init
     qk_head_dim = kv_lora_rank + qk_rope_head_dim
@@ -267,8 +267,8 @@ def test_mla(
         return us_asm
 
     us_asm = None
-    if batch_size * ctx_lens * nhead < 32 * 8192 * 16:
-        us_asm = test_absorb_prefill()
+    # if batch_size * ctx_lens * nhead < 32 * 8192 * 16:
+    #     us_asm = test_absorb_prefill()
     torch.cuda.empty_cache()
 
     # ############################## absorb: decode
@@ -331,6 +331,20 @@ def test_mla(
     #     )
 
     # aiter implementation
+    (
+        work_indptr,
+        work_info_set,
+        reduce_indptr,
+        reduce_final_map,
+        reduce_partial_map,
+    ) = aiter.get_mla_metadata_v1(
+        qo_indptr,
+        kv_indptr,
+        nhead // nhead_kv,
+        nhead_kv,
+        True,
+    )
+
     kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
     out_asm = torch.empty((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
     (attn_logits, attn_lse), us_asm_decode = run_perftest(
@@ -344,6 +358,8 @@ def test_mla(
         kv_last_page_lens,
         max_seqlen_qo,
         sm_scale,
+        work_indptr=work_indptr,
+        work_info_set=work_info_set,
     )
 
     # print(f"{out_ref.view(total_q, -1)=}")

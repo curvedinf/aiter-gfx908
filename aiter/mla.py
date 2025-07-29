@@ -124,6 +124,8 @@ def mla_decode_fwd(
     logit_cap=0.0,
     num_kv_splits=None,  # for experts only!!!
     num_kv_splits_indptr=None,  # for experts only!!!
+    work_indptr=None,  # for experts only!!!
+    work_info_set=None,  # for experts only!!!
 ):
     device = q.device
     assert logit_cap <= 0, f"{logit_cap=} is not support yet"
@@ -135,7 +137,7 @@ def mla_decode_fwd(
     bs = qo_indptr.shape[0] - 1
     total_kv = kv_indices.shape[0]
 
-    test_v1 = True
+    test_v1 = False
     if test_v1:
         use_test_data = True
         if use_test_data:
@@ -287,7 +289,10 @@ def mla_decode_fwd(
         kv_indptr,
         kv_indices,
         kv_last_page_lens,
-        num_kv_splits_indptr,
+        # num_kv_splits_indptr,
+        None,
+        work_indptr,
+        work_info_set,
         max_seqlen_q,
         sm_scale,
         logits,

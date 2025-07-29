@@ -10,7 +10,9 @@ void mla_decode_stage1_asm_fwd(
     torch::Tensor& kv_indptr,            //   [batch_size+1]
     torch::Tensor& kv_page_indices,      //   [num_page_used]
     torch::Tensor& kv_last_page_lens,    //   [batch_size]
-    torch::Tensor& num_kv_splits_indptr, //   [batch_size+1]
+    std::optional<torch::Tensor>& num_kv_splits_indptr,   //   metadata
+    std::optional<torch::Tensor>& work_indptr,   //   metadata
+    std::optional<torch::Tensor>& work_info_set, //   [batch_size+1]
     int max_seqlen_q,
     float softmax_scale,
     // following are output

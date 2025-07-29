@@ -813,7 +813,7 @@
     "module_mla_metadata": {
         "srcs": [
             "f'{AITER_CSRC_DIR}/pybind/mla_metadata_pybind.cu'",
-            "f'{AITER_CSRC_DIR}/kernels/fmla/metadata.cu'"
+            "f'{AITER_CSRC_DIR}/kernels/mla/metadata.cu'"
         ],
         "flags_extra_cc": [],
         "flags_extra_hip": [],

@@ -4,7 +4,9 @@ import torch
 import triton
 import math
 from aiter.ops.triton.gemm_a16w16_gated import gemm_a16w16_gated
-from op_tests.triton_tests.test_gemm_a16w16_gated import generate_gemm_a16w16_gated_inputs
+from op_tests.triton_tests.test_gemm_a16w16_gated import (
+    generate_gemm_a16w16_gated_inputs,
+)
 from op_tests.op_benchmarks.triton.utils.argparse import (
     get_parser,
     get_ff_args,
@@ -18,8 +20,11 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
 import warnings
 import matplotlib.pyplot as plt
 
+
 def get_model_benchmark_object(
-    plot_name, args, x_names=None, 
+    plot_name,
+    args,
+    x_names=None,
 ):
     """
     Utility function for returning a triton.testing.Benchmark object to populate.
@@ -63,8 +68,16 @@ def get_model_benchmark_object(
     )
     return benchmark
 
+
 def bench_gemm_fn(
-    M: int, N: int, K: int, metric: str, layout: str, activation: str=None, layer="ff", **kwargs
+    M: int,
+    N: int,
+    K: int,
+    metric: str,
+    layout: str,
+    activation: str = None,
+    layer="ff",
+    **kwargs,
 ):
     # NOTE: Assume bias and output has the same dtype
     c_dtype = torch.bfloat16
@@ -74,7 +87,7 @@ def bench_gemm_fn(
 
     if layer == "fc1":
         # flops
-        flops = 2.0 * M * N * K + M * N # GEMM + gating
+        flops = 2.0 * M * N * K + M * N  # GEMM + gating
         if activation is not None:
             flops += M * N  # elementwise ops on the GEMM output
 
@@ -83,7 +96,9 @@ def bench_gemm_fn(
         mem_write = (M * N // 2) * x.element_size()
         mem = mem_read + mem_write
         ms = triton.testing.do_bench(
-            lambda: gemm_a16w16_gated(x, w, c_dtype, y), warmup=25, rep=100  # noqa: E731
+            lambda: gemm_a16w16_gated(x, w, c_dtype, y),
+            warmup=25,
+            rep=100,  # noqa: E731
         )
     else:
         ms = triton.testing
@@ -99,6 +114,7 @@ def bench_gemm_fn(
         return bandwidth
     else:
         raise ValueError("Unknown metric: " + metric)
+
 
 def run_model_benchmark(args):
     """

@@ -6,6 +6,14 @@ import torch
 from aiter.ops.triton.gemm_a16w16 import gemm_a16w16
 from aiter.ops.triton.gemm_a16w16_gated import gemm_a16w16_gated
 
+activation_mapping = {
+    "gelu": "gelu_tanh",
+    "silu": "silu_exp2",
+    "relu": "relu",
+    None: None,
+}
+
+
 def ff_a16w16_nogate(
     x,
     w_up,
@@ -32,14 +40,13 @@ def ff_a16w16_nogate(
     if y is None:
         y = torch.empty((M, K), dtype=dtype, device=x.device)
 
-    activation_mapping = {"gelu": "gelu_tanh", "silu": "silu_exp2", "relu": "relu", None: None}
-
     intermediate = gemm_a16w16(
         x, w_up, dtype=dtype, config=config, activation=activation_mapping[activation]
     )
     y = gemm_a16w16(intermediate, w_down, dtype=dtype, config=config, y=y)
 
     return y
+
 
 def ff_a16w16_gated(
     x,
@@ -63,12 +70,16 @@ def ff_a16w16_gated(
     assert x.shape[1] == w_up.shape[1] == w_down.shape[0], "Incompatible matrix shapes."
     assert w_up.shape[0] == w_down.shape[1] * 2, "Incompatible matrix shapes."
     batch, hidden_dim = x.shape
-    activation_mapping = {"geglu": "gelu_tanh", "swiglu": "silu_exp2", "reglu": "relu", None: None}
 
     if intermediate is None:
         intermediate = torch.empty((batch, hidden_dim), dtype=dtype, device=x.device)
     intermediate = gemm_a16w16_gated(
-        x, w_up, y=intermediate, dtype=dtype, config=config, activation=activation_mapping[activation]
+        x,
+        w_up,
+        y=intermediate,
+        dtype=dtype,
+        config=config,
+        activation=activation_mapping[activation],
     )
     if y is None:
         y = torch.empty((batch, hidden_dim), dtype=dtype, device=x.device)

@@ -7,7 +7,9 @@ from op_tests.triton_tests.test_gemm_a16w16 import get_x_vals
 from op_tests.triton_tests.utils.types import str_to_torch_dtype
 
 
-def generate_ff_a16w16_inputs(batch, hidden_dim, intermediate_dim, dtype, layout="TN", output=True):
+def generate_ff_a16w16_inputs(
+    batch, hidden_dim, intermediate_dim, dtype, layout="TN", output=True
+):
     if isinstance(dtype, str):
         dtype = str_to_torch_dtype[dtype]
 
@@ -39,13 +41,13 @@ def generate_ff_a16w16_inputs(batch, hidden_dim, intermediate_dim, dtype, layout
     return x, w1, w2, out_dtype, intermediate, y
 
 
-@pytest.mark.parametrize(
-    "activation", ["geglu", "swiglu", "reglu"]
-)
+@pytest.mark.parametrize("activation", ["geglu", "swiglu", "reglu"])
 @pytest.mark.parametrize("batch, hidden_dim, intermediate_dim", get_x_vals())
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("output", [True, False])
-def test_ff_a16w16_gated(batch: int, hidden_dim: int, intermediate_dim: int, dtype, output, activation):
+def test_ff_a16w16_gated(
+    batch: int, hidden_dim: int, intermediate_dim: int, dtype, output, activation
+):
     x, w1, w2, out_dtype, intermediate, y = generate_ff_a16w16_inputs(
         batch, hidden_dim, intermediate_dim, dtype, output=output
     )

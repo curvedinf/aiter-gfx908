@@ -469,8 +469,8 @@ def mla_decode_fwd_balenced(
         k_rope,
         batch_split_table,
         split_table,
+        cu_num,
         o,
-        cu_num.item(),
     )
 
     grid = (bs, nhead)

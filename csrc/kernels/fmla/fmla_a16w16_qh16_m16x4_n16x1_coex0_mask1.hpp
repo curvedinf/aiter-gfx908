@@ -117,6 +117,7 @@ struct FlashMlaInlineFwdParams
 
     void* __restrict__ p_batch_split_table;      // [num_splits]
     void* __restrict__ p_split_table;      // [num_splits]
+    void* __restrict__ p_splits;      // [num_splits]
 
     int32_t stride_page_rope;    // page stride 
     int32_t size_b;         // batch count
@@ -169,6 +170,9 @@ struct Fmla_gfx9_a16w16_qh16_m16x4_n16x1_coex0_mask1_total
     operator()(const FlashMlaInlineFwdParams &params,
                CK_TILE_LDS_ADDR void* smem)
     {
+        if (blockIdx.z >= reinterpret_cast<int32_t*>(params.p_splits)[0])
+            return;
+
         auto o_lds_ptr   = reinterpret_cast<uint32_t*>(smem);
         int batch_idx = reinterpret_cast<int32_t*>(params.p_batch_split_table)[blockIdx.z];
         int split_idx = reinterpret_cast<int32_t*>(params.p_split_table)[blockIdx.z];

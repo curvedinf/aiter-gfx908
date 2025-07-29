@@ -23,8 +23,8 @@ std::vector<torch::Tensor> flash_mla_fwd_inline_impl(
     const std::optional<torch::Tensor>& key_rope_cache,
     const std::optional<torch::Tensor>& batch_split_table,
     const std::optional<torch::Tensor>& split_table,
-    std::optional<torch::Tensor>&       out,
-    const int            num_splits_ = 1);
+    const std::optional<torch::Tensor>& splits,
+    std::optional<torch::Tensor>&       out);
 
 std::vector<torch::Tensor> get_mla_metadata_impl(
     const torch::Tensor& kv_indptr,            // [batch size + 1]

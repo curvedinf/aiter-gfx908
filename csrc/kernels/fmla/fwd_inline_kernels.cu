@@ -570,8 +570,8 @@ std::vector<torch::Tensor> flash_mla_fwd_inline_impl(
     const std::optional<torch::Tensor>& key_rope_cache,
     const std::optional<torch::Tensor>& batch_split_table,
     const std::optional<torch::Tensor>& split_table,
-    std::optional<torch::Tensor>&       out,
-    const int num_splits_ = 1)
+    const std::optional<torch::Tensor>& splits,
+    std::optional<torch::Tensor>&       out)
 {
     //                                        dqk  dv   m0  n0  n1  #warp
     using Traits = FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 4>;
@@ -603,14 +603,24 @@ std::vector<torch::Tensor> flash_mla_fwd_inline_impl(
 
     const int32_t num_splits = split_data.size(1);
 
-    auto output = !out.has_value() ? 
-            torch::empty({pack_batch_seq_q, hq_hk_ratio, head_size_v}, opts) :
-            out.value().data_ptr() ? out.value() : 
-                torch::empty({pack_batch_seq_q, hq_hk_ratio, head_size_v}, opts);
+    // auto output = !out.has_value() ? 
+    //         torch::empty({pack_batch_seq_q, hq_hk_ratio, head_size_v}, opts) :
+    //         (out.value().data_ptr() ? out.value() : 
+    //             torch::empty({pack_batch_seq_q, hq_hk_ratio, head_size_v}, opts));
+
+    auto output = out.value();
 
     ck_tile::FlashMlaInlineFwdParams params = {};
 
-    params.cu_nums                = num_splits_;
+    hipDevice_t dev;
+    hipDeviceProp_t dev_prop;
+    HIP_CALL(hipGetDevice(&dev));
+    HIP_CALL(hipGetDeviceProperties(&dev_prop, dev));
+
+    const int32_t cu_num = batch_size == 1 ? 16 :
+        max(40, (batch_size / 16) * dev_prop.multiProcessorCount);
+
+    params.cu_nums                = cu_num;
     params.num_splits             = num_splits;
     params.p_qo_indptr            = qo_indptr.data_ptr<int32_t>();
     params.p_seqlens_k            = cache_seqlens.data_ptr<int32_t>();
@@ -618,6 +628,7 @@ std::vector<torch::Tensor> flash_mla_fwd_inline_impl(
     params.p_num_kv_splits_indptr = num_kv_splits_indptr.data_ptr<int32_t>();
     params.p_batch_split_table    = batch_split_table.value().data_ptr<int32_t>();
     params.p_split_table          = split_table.value().data_ptr<int32_t>();
+    params.p_splits               = splits.value().data_ptr<int32_t>();
 
     params.p_query       = query.data_ptr();
     params.p_key         = key_cache.data_ptr();

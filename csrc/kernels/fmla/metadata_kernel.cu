@@ -229,22 +229,12 @@ std::vector<torch::Tensor> get_mla_metadata_impl(
     const int32_t batch_size = kv_indptr.size(0) - 1;
     const int32_t cu_num = batch_size == 1 ? 16 :
         max(40, (batch_size / 16) * dev_prop.multiProcessorCount);
-        // !!!!!!!!JUST FOR MI300!!!!!!!!!!!!!!
-        // ROUND(batch_size, 16) * 80;
     auto opt = kv_indptr.options();
 
     // declare outputs
-    auto num_kv_splits = num_kv_splits_indptr.data_ptr() ?
-        num_kv_splits_indptr :
-        torch::empty({batch_size + 1}, opt);
-
-    auto batch_split_table_ptr = batch_split_table.data_ptr() ?
-        batch_split_table :
-        torch::empty({cu_num}, opt);
-
-    auto split_table_ptr = split_table.data_ptr() ?
-        split_table :
-        torch::empty({cu_num}, opt);
+    auto num_kv_splits = num_kv_splits_indptr;
+    auto batch_split_table_ptr = batch_split_table;
+    auto split_table_ptr = split_table;
 
     constexpr int32_t fixed_blocked_len = 80;
 

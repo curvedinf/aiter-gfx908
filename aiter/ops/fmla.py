@@ -26,8 +26,8 @@ def flash_mla_fwd_inline_impl(
     key_rope_cache: Optional[Tensor] = None,
     batch_split_table: Optional[Tensor]= None,
     split_table: Optional[Tensor] = None,
+    splits: Optional[Tensor] = None,
     out: Optional[Tensor] = None,
-    num_splits: Optional[int] = 0,
 ):
     ...
 

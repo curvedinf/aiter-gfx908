@@ -9,7 +9,7 @@ on:
 jobs:
   sglang:
     name: sglang integration
-    runs-on: aiter-k8s-build
+    runs-on: mi300x-1gpu
     env:
       HF_TOKEN: ${{ secrets.HF_TOKEN_TEST }}
     steps:

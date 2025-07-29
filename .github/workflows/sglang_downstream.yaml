@@ -1,4 +1,4 @@
-name: Sglang Downstream Test
+name: Sglang Downstream Test on Kubernetes
 
 on:
   push:
@@ -19,22 +19,11 @@ jobs:
       - name: Clone sglang repo
         run: |
           git clone https://github.com/sgl-project/sglang.git
-        
-      # TODO: Currently, we use PAT, it should be replaced by repo token
-      - name: Make authenticated API request
-        env:
-          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-        run: |
-          curl -H "Authorization: token $PERSONAL_ACCESS_TOKEN" \
-               -sSfL https://api.github.com/repos/casey/just/releases/latest
 
       - name: Build sglang_aiter_test image
         run: |
           cd sglang
           docker build --no-cache --build-arg SGL_BRANCH=v0.4.9.post3 --build-arg GPU_ARCH=gfx942 --build-arg AITER_COMMIT="v0.1.4" -t sglang_aiter_test -f docker/Dockerfile.rocm .
-        
-      # docker build -f docker/Dockerfile.rocm --build-arg AITER_BRANCH=main --build-arg PYTORCH_ROCM_ARCH=gfx942 --build-arg SGL_BRANCH=v0.4.9.post2 -t sglang_aiter_base .
-      # docker build --no-cache -f docker/Dockerfile.rocm --build-arg BASE_IMAGE=sglang_aiter_base -t sglang_aiter_test ."
             
       - name: Start CI container
         run: |
@@ -63,8 +52,3 @@ jobs:
           bash scripts/amd_ci_exec.sh python3 test_eval_fp8_accuracy.py
           bash scripts/amd_ci_exec.sh python3 models/test_qwen_models.py
         
-      # TODO: Clean up because some dependencies are installed under root user which can't be removed by runner, these dependencies should be installed as a non-root user
-      - name: Clean Up
-        if: always()
-        run:
-          docker exec -u root sglang_aiter_test bash -c "rm -rf /sglang-checkout/sgl-kernel; rm -rf /sglang-checkout/python"

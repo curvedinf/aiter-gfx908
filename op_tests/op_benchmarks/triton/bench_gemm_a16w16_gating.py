@@ -17,7 +17,6 @@ from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_shape_benchmark_object,
     print_vgpr,
 )
-import warnings
 import matplotlib.pyplot as plt
 
 
@@ -44,10 +43,7 @@ def get_model_benchmark_object(
     else:
         raise NotImplementedError(f"{args.metric} is not supported")
 
-    if args.fc1:
-        line_names = ["fc1"]
-    else:
-        line_names = ["FF"]
+    line_names = ["fc1"]
     line_vals = line_names
 
     mpl_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -76,7 +72,6 @@ def bench_gemm_fn(
     metric: str,
     layout: str,
     activation: str = None,
-    layer="ff",
     **kwargs,
 ):
     # NOTE: Assume bias and output has the same dtype
@@ -85,23 +80,20 @@ def bench_gemm_fn(
         M, N, K, c_dtype, layout=layout, output=True
     )
 
-    if layer == "fc1":
-        # flops
-        flops = 2.0 * M * N * K + M * N  # GEMM + gating
-        if activation is not None:
-            flops += M * N  # elementwise ops on the GEMM output
+    # flops
+    flops = 2.0 * M * N * K + M * N  # GEMM + gating
+    if activation is not None:
+        flops += M * N  # elementwise ops on the GEMM output
 
-        # memory transfer
-        mem_read = (M * K) * x.element_size() + (N * K) * w.element_size()
-        mem_write = (M * N // 2) * x.element_size()
-        mem = mem_read + mem_write
-        ms = triton.testing.do_bench(
-            lambda: gemm_a16w16_gated(x, w, c_dtype, y),
-            warmup=25,
-            rep=100,  # noqa: E731
-        )
-    else:
-        ms = triton.testing
+    # memory transfer
+    mem_read = (M * K) * x.element_size() + (N * K) * w.element_size()
+    mem_write = (M * N // 2) * x.element_size()
+    mem = mem_read + mem_write
+    ms = triton.testing.do_bench(
+        lambda: gemm_a16w16_gated(x, w, c_dtype, y, activation=activation),
+        warmup=25,
+        rep=100,  # noqa: E731
+    )
 
     # Return exactly one scalar depending on which metric is active
     if metric == "time":
@@ -120,35 +112,16 @@ def run_model_benchmark(args):
     """
     Runs benchmark given a --model argument.
     """
-    benchmark = get_model_benchmark_object("GEMM A16W16 Benchmark", args)
+    benchmark = get_model_benchmark_object("Fused-act-gate GEMM A16W16 Benchmark", args)
 
     @triton.testing.perf_report([benchmark])
-    def bench_gemm_a16w16(M, hidden_dim, intermediate_dim, metric, layer, **kwargs):
-        """
-        Fc1:
-             M      K                  K           N          M       N
-        A = (B, hidden_dim) @ W = (hidden_dim, 2*int_dim) -> (B, 2*int_dim) -> gating -> (B, int_dim)
-
-        Fc2:
-             M     K               K          N          M       N
-        A = (B, int_dim) @ W = (int_dim, hidden_dim) -> (B, hidden_dim)
-
-        Tensor parallel splits across int_dim (N for fc1, K for fc2)
-        """
-        if layer == "fc1":
-            if args.no_glu:
-                N, K = intermediate_dim, hidden_dim
-            else:
-                N, K = intermediate_dim * 2, hidden_dim
-            # Divide N by tensor parallel
-            N = math.ceil(N / args.tp)
-        elif layer == "FF":
-            N, K = hidden_dim, intermediate_dim
-            # Divide K by tensor parallel
-            K = math.ceil(K / args.tp)
+    def bench_gemm_a16w16(M, hidden_dim, intermediate_dim, metric, **kwargs):
+        N, K = intermediate_dim * 2, hidden_dim
+        # Divide N by tensor parallel
+        N = math.ceil(N / args.tp)
         # print(f"Layer: {layer}, M: {M}, N: {N}, K: {K}, hidden_dim: {hidden_dim}, intermediate_dim: {intermediate_dim}")
 
-        return bench_gemm_fn(M, N, K, metric, args.layout)
+        return bench_gemm_fn(M, N, K, metric, args.layout, activation=args.activation)
 
     bench_gemm_a16w16.run(save_path="." if args.o else None, print_data=True)
 
@@ -157,13 +130,13 @@ def run_shape_benchmark(args):
     """
     Runs a benchmark with given tensor shapes.
     """
-    benchmark = get_shape_benchmark_object("GEMM A16W16 Benchmark", args)
+    benchmark = get_shape_benchmark_object("Fused-act-gate GEMM A16W16 Benchmark", args)
 
     @triton.testing.perf_report([benchmark])
     def bench_gemm_a16w16(M, N, K, metric, **kwargs):
         # Divide N by tensor parallel
         N = math.ceil(N / args.tp)
-        return bench_gemm_fn(M, N, K, metric, args.layout)
+        return bench_gemm_fn(M, N, K, metric, args.layout, activation=args.activation)
 
     bench_gemm_a16w16.run(save_path="." if args.o else None, print_data=True)
 
@@ -193,7 +166,7 @@ def run_benchmark(args, defaults):
 
 
 def parse_args():
-    parser = get_parser(kernel_name="A16W16 GEMM")
+    parser = get_parser(kernel_name="Fused-act-gate A16W16 GEMM")
     parser.add_argument(
         "-tp",
         type=int,
@@ -206,11 +179,6 @@ def parse_args():
         choices=["TT", "TN", "NT", "NN"],
         default="TN",
         help="Layout of input and weight matrix",
-    )
-    parser.add_argument(
-        "-fc1",
-        action="store_true",
-        help="Benchmark the up-projection only.",
     )
     parser.add_argument(
         "-M",
@@ -247,7 +215,7 @@ def main():
     if args.print_vgpr:
         print("Retrieving VGPR usage for Triton kernels...")
         fun = lambda: run_benchmark(args, defaults)  # noqa: E731
-        print_vgpr(fun, "GEMM")
+        print_vgpr(fun, "Fused-act-gate")
         return 0
     run_benchmark(args, defaults)
 

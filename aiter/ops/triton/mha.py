@@ -2189,7 +2189,7 @@ def _flash_attn_forward(
     if config is None:
         config = _get_config(enable_dropout, q.dtype)
 
-    persistent = True
+    persistent = False
 
     if persistent:
         NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU

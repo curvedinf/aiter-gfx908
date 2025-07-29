@@ -281,6 +281,10 @@ def mla_decode_fwd(
     attn_lse = torch.empty(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
+    print("!!!!!!!!!!!!!!!!!!!!!")
+
+    print(work_indptr)
+    print(work_info_set)
 
     aiter.mla_decode_stage1_asm_fwd(
         q,

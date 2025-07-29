@@ -5,6 +5,9 @@
 #include "gemm_a8w8_bpreshuffle_cktile_manifest.h"
 #include "gemm_a8w8_bpreshuffle_cktile_lookup.h"
 #include <cmath>
+#include <cstdlib>
+#include <cstdio>
+#include <iostream>
 
 using RowwiseKernel = std::function<
     torch::Tensor(torch::Tensor &, torch::Tensor &,
@@ -29,11 +32,66 @@ using RowwiseKernelMap = std::unordered_map<
     IntTupleHash>;
 
 template <typename DDataType, typename EDataType = DDataType>
-RowwiseKernel rowwise_heuristic_dispatch(int M, int N, int K)
+RowwiseKernel rowwise_heuristic_dispatch_942(int M, int N, int K)
 {
-  return a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_128x128x128_1x4x1_16x16x64_default<DDataType, EDataType>;
+    if(K >= 1536)
+    {
+        if(M < 256 && K % 512 == 0)
+        {
+          return a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_16x64x512_1x4x1_16x16x64_default<DDataType, EDataType>;
+        }
+        else
+        {
+            if(N < 1536)
+            {
+                return a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_128x64x128_1x4x1_16x16x64_default<DDataType, EDataType>;
+            }
+            else
+            {
+                return a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_128x128x128_1x4x1_16x16x64_default<DDataType, EDataType>;
+            }
+        }
+    }
+    else if(K >= 512)
+    {
+        if(M < 64)
+        {
+            return a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_16x64x256_1x4x1_16x16x64_default<DDataType, EDataType>;
+        }
+        else if(M <= 256)
+        {
+            return a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_128x64x128_1x4x1_16x16x64_default<DDataType, EDataType>;
+        }
+        else
+        {
+            return a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_128x128x64_1x4x1_16x16x64_default<DDataType, EDataType>;
+        }
+    }
+    else if(K >= 192 && K % 64 == 0)
+    {
+        if(M <= 256)
+        {
+            return a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_64x256x64_1x4x1_16x16x64_default<DDataType, EDataType>;
+        }
+        else
+        {
+            return a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x2_128x128x64_1x4x1_16x16x64_default<DDataType, EDataType>;
+        }
+    }
+    else
+    {
+        TORCH_CHECK(false,
+                    "Unsupported K for heuristic dispatch: ",
+                    K,
+                    ". Supported K greater than 192 and K % 64 == 0.");
+    }
 }
 
+template <typename DDataType, typename EDataType = DDataType>
+RowwiseKernel rowwise_heuristic_dispatch_950(int M, int N, int K)
+{
+  return a8w8_bpreshuffle_cktile_0x0x8x4x1x0x0x0x0x1_256x256x128_1x4x1_16x16x128_default<DDataType, EDataType>;
+}
 // Helper function to return the next largest power of 2
 static constexpr int nextPow2(unsigned int num)
 {
@@ -48,6 +106,8 @@ RowwiseKernel rowwise_dispatch(int M, int N, int K)
   // For a given shape, either find the best kernel via lookup or heuristic.
   // For many small M shapes, we bucket them to the next largest kernel.
   // This is fine since kernels are padded anyway.
+  const char* arch = std::getenv("GPU_ARCHS");
+  if (!arch) arch = "native";
 
   static const auto lookup = []
   {
@@ -88,7 +148,15 @@ RowwiseKernel rowwise_dispatch(int M, int N, int K)
     return it->second;
   }
   // Otherwise, use heuristics.
-  return rowwise_heuristic_dispatch<DDataType, EDataType>(M, N, K);
+  if (arch && std::strcmp(arch, "gfx942") == 0)
+  {
+    return rowwise_heuristic_dispatch_942<DDataType, EDataType>(M, N, K);
+  }
+  else
+  {
+    return rowwise_heuristic_dispatch_950<DDataType, EDataType>(M, N, K);
+  }
+  // return rowwise_heuristic_dispatch<DDataType, EDataType>(M, N, K);
 }
 
 torch::Tensor gemm_a8w8_bpreshuffle_cktile(

@@ -2,8 +2,8 @@ import torch
 import torch.nn.functional as F
 import triton
 import pytest
-from aiter.ops.triton.ff_a16w16 import ff_a16w16_gated, ff_a16w16_nogate
-from op_tests.triton_tests.test_gemm_a16w16 import get_x_vals
+from aiter.ops.triton.ff_a16w16 import ff_a16w16_gated
+from op_tests.triton_tests.test_gemm_a16w16 import minimal_x_vals
 from op_tests.triton_tests.utils.types import str_to_torch_dtype
 
 
@@ -42,7 +42,7 @@ def generate_ff_a16w16_inputs(
 
 
 @pytest.mark.parametrize("activation", ["geglu", "swiglu", "reglu"])
-@pytest.mark.parametrize("batch, hidden_dim, intermediate_dim", get_x_vals())
+@pytest.mark.parametrize("batch, hidden_dim, intermediate_dim", minimal_x_vals())
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("output", [True, False])
 def test_ff_a16w16_gated(

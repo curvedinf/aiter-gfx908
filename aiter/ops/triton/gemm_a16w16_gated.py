@@ -204,7 +204,6 @@ def gemm_a16w16_gated(
     w = w.T
 
     if y is None:
-        print("Dtype:", dtype)
         y = torch.empty((M, N // 2), dtype=dtype, device=x.device)
 
     if config is None:

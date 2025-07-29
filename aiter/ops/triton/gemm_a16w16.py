@@ -166,7 +166,7 @@ def gemm_a16w16(
     - Y: Output Matrix Y with shape (M, N).
     If this is none, then it's created by this API and returned as output.
     - activation: Optional activation function to apply to the output.
-    One of ("gelu", "gelu_tanh", "silu", "silu_exp2")
+    One of ("gelu", "gelu_tanh", "silu", "silu_exp2", "relu"). Default is None.
 
     Returns:
     - Y: The output matrix with shape (M, N).
@@ -184,7 +184,7 @@ def gemm_a16w16(
         y = torch.empty((M, N), dtype=dtype, device=x.device)
 
     if config is None:
-        config = _get_config(M, N, K)
+        config = _get_config(M, N, K, activation)
 
     grid = lambda META: (  # noqa: E731
         triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),

@@ -148,7 +148,7 @@ def _get_config(
     if not hasattr(_get_config, "_config_dict"):
         dev = arch_info.get_device()
         _get_config._config_dict = {}
-        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM-A16W16.json"
+        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM-A16W16-gated.json"
         with open(fpath, "r") as file:
             config = json.load(file)
         _get_config._config_dict["default"] = config
@@ -156,7 +156,9 @@ def _get_config(
     key = f"{N}_{K}"
     if key not in _get_config._config_dict.keys():
         dev = arch_info.get_device()
-        fpath = f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM-A16W16-N={N}-K={K}.json"
+        fpath = (
+            f"{AITER_TRITON_CONFIGS_PATH}/gemm/{dev}-GEMM-A16W16-gated-N={N}-K={K}.json"
+        )
         if os.path.exists(fpath):
             with open(fpath, "r") as file:
                 config = json.load(file)
@@ -164,10 +166,12 @@ def _get_config(
         else:
             key = "default"  # fall back to default config
 
-    if M < 128 and "small" in _get_config._config_dict[key]:
-        return _get_config._config_dict[key]["small"]
+    bounds = [64, 128, 256, 512, 2048]
+    for bound in bounds:
+        if M <= bound and f"M_LEQ_{bound}" in _get_config._config_dict[key]:
+            return _get_config._config_dict[key][f"M_LEQ_{bound}"]
     else:
-        return _get_config._config_dict[key]["any"]
+        return _get_config._config_dict[key]["M_GEQ_4096"]
 
 
 def gemm_a16w16_gated(

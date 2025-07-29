@@ -142,10 +142,12 @@ def _get_config(
         else:
             key = "default"  # fall back to default config
 
-    if M < 128 and "small" in _get_config._config_dict[key]:
-        return _get_config._config_dict[key]["small"]
+    bounds = [64, 128, 256, 512, 2048]
+    for bound in bounds:
+        if M <= bound and f"M_LEQ_{bound}" in _get_config._config_dict[key]:
+            return _get_config._config_dict[key][f"M_LEQ_{bound}"]
     else:
-        return _get_config._config_dict[key]["any"]
+        return _get_config._config_dict[key]["M_GEQ_4096"]
 
 
 def gemm_a16w16(

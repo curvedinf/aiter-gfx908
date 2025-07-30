@@ -9,7 +9,8 @@
 template <int32_t kSizeDV_,
           int32_t kSeqlenTileQ_,
           int32_t kNumHeadQ_,
-          int32_t kMaxSplits_>
+          int32_t kMaxSplits_,
+          bool    kOutputLse_>
 struct MlaReduceKernelV1Traits
 {
     static constexpr int32_t kSizeDV      = kSizeDV_;       // hidden dimension size of value/output
@@ -18,6 +19,7 @@ struct MlaReduceKernelV1Traits
     static constexpr int32_t kMaxSplits   = kMaxSplits_;
     static constexpr int32_t kNumWarps    = 2;
     static constexpr int32_t kNumThreads  = kNumWarps * ck_tile::get_warp_size();
+    static constexpr bool    kOutputLse   = kOutputLse_;
 };
 
 struct MlaReduceKernelV1Params
@@ -202,10 +204,13 @@ __global__ void kn_mla_reduce_v1(
 
             // Get global LSE
             float global_lse = ((sum_lse == 0.f) || (sum_lse != sum_lse)) ? INFINITY : (logf(sum_lse) + max_lse);
-            if (lane_idx == 0)
+            if constexpr (Traits::kOutputLse)
             {
-                lse_t* p_final_lse = p_final_lse_base + seq_idx * Traits::kNumHeadQ;
-                *p_final_lse = ck_tile::type_convert<lse_t>(global_lse);
+                if (lane_idx == 0)
+                {
+                    lse_t* p_final_lse = p_final_lse_base + seq_idx * Traits::kNumHeadQ;
+                    *p_final_lse = ck_tile::type_convert<lse_t>(global_lse);
+                }
             }
 
             // Write LSE to LDS
@@ -249,77 +254,93 @@ __global__ void kn_mla_reduce_v1(
     }
 }
 
-#define DISPATCH_MLA_MERGE_KERNEL(LSE_TYPE, OUT_TYPE, NUM_HEAD, NUM_CU, NAME, ...)                          \
-    switch ((LSE_TYPE))                                                                                     \
-    {                                                                                                       \
-        case at::ScalarType::Float:                                                                         \
-        {                                                                                                   \
-            using lse_t = float;                                                                            \
-            switch ((OUT_TYPE))                                                                             \
-            {                                                                                               \
-                case at::ScalarType::BFloat16:                                                              \
-                {                                                                                           \
-                    using out_t = ck_tile::bf16_t;                                                          \
-                    switch ((NUM_HEAD))                                                                     \
-                    {                                                                                       \
-                        case 16:                                                                            \
-                        {                                                                                   \
-                            constexpr int32_t NumHeads = 16;                                                \
-                            switch ((NUM_CU))                                                               \
-                            {                                                                               \
-                                case 80:                                                                    \
-                                {                                                                           \
-                                    constexpr int32_t NumCUs = 80;                                          \
-                                    using Traits = MlaReduceKernelV1Traits<512, 4, NumHeads, NumCUs>;       \
-                                    __VA_ARGS__;                                                            \
-                                }                                                                           \
-                                break;                                                                      \
-                                default:                                                                    \
-                                    TORCH_CHECK(false, NAME " doesn't support the specified CU count.");    \
-                            }                                                                               \
-                        }                                                                                   \
-                        break;                                                                              \
-                        default:                                                                            \
-                            TORCH_CHECK(false, NAME " doesn't support the specified head count.");          \
-                    }                                                                                       \
-                    break;                                                                                  \
-                }                                                                                           \
-                break;                                                                                      \
-                case at::ScalarType::Half:                                                                  \
-                {                                                                                           \
-                    using out_t = ck_tile::fp16_t;                                                          \
-                    switch ((NUM_HEAD))                                                                     \
-                    {                                                                                       \
-                        case 16:                                                                            \
-                        {                                                                                   \
-                            constexpr int32_t NumHeads = 16;                                                \
-                            switch ((NUM_CU))                                                               \
-                            {                                                                               \
-                                case 80:                                                                    \
-                                {                                                                           \
-                                    constexpr int32_t NumCUs = 80;                                          \
-                                    using Traits = MlaReduceKernelV1Traits<512, 4, NumHeads, NumCUs>;       \
-                                    __VA_ARGS__;                                                            \
-                                }                                                                           \
-                                break;                                                                      \
-                                default:                                                                    \
-                                    TORCH_CHECK(false, NAME " doesn't support the specified CU count.");    \
-                            }                                                                               \
-                        }                                                                                   \
-                        break;                                                                              \
-                        default:                                                                            \
-                            TORCH_CHECK(false, NAME " doesn't support the specified head count.");          \
-                    }                                                                                       \
-                    break;                                                                                  \
-                }                                                                                           \
-                break;                                                                                      \
-                default:                                                                                    \
-                    TORCH_CHECK(false, NAME " doesn't support output type ", toString((OUT_TYPE)), ".");    \
-            }                                                                                               \
-        }                                                                                                   \
-        break;                                                                                              \
-        default:                                                                                            \
-            TORCH_CHECK(false, NAME " doesn't support LSE type ", toString((LSE_TYPE)), ".");               \
+#define DISPATCH_MLA_MERGE_KERNEL(LSE_TYPE, OUT_TYPE, NUM_HEAD, NUM_CU, OUTPUT_LSE, NAME, ...)                      \
+    switch ((LSE_TYPE))                                                                                             \
+    {                                                                                                               \
+        case at::ScalarType::Float:                                                                                 \
+        {                                                                                                           \
+            using lse_t = float;                                                                                    \
+            switch ((OUT_TYPE))                                                                                     \
+            {                                                                                                       \
+                case at::ScalarType::BFloat16:                                                                      \
+                {                                                                                                   \
+                    using out_t = ck_tile::bf16_t;                                                                  \
+                    switch ((NUM_HEAD))                                                                             \
+                    {                                                                                               \
+                        case 16:                                                                                    \
+                        {                                                                                           \
+                            constexpr int32_t NumHeads = 16;                                                        \
+                            switch ((NUM_CU))                                                                       \
+                            {                                                                                       \
+                                case 80:                                                                            \
+                                {                                                                                   \
+                                    constexpr int32_t NumCUs = 80;                                                  \
+                                    if ((OUTPUT_LSE))                                                               \
+                                    {                                                                               \
+                                        using Traits = MlaReduceKernelV1Traits<512, 4, NumHeads, NumCUs, true>;     \
+                                        __VA_ARGS__;                                                                \
+                                    }                                                                               \
+                                    else                                                                            \
+                                    {                                                                               \
+                                        using Traits = MlaReduceKernelV1Traits<512, 4, NumHeads, NumCUs, false>;    \
+                                        __VA_ARGS__;                                                                \
+                                    }                                                                               \
+                                }                                                                                   \
+                                break;                                                                              \
+                                default:                                                                            \
+                                    TORCH_CHECK(false, NAME " doesn't support the specified CU count.");            \
+                            }                                                                                       \
+                        }                                                                                           \
+                        break;                                                                                      \
+                        default:                                                                                    \
+                            TORCH_CHECK(false, NAME " doesn't support the specified head count.");                  \
+                    }                                                                                               \
+                    break;                                                                                          \
+                }                                                                                                   \
+                break;                                                                                              \
+                case at::ScalarType::Half:                                                                          \
+                {                                                                                                   \
+                    using out_t = ck_tile::fp16_t;                                                                  \
+                    switch ((NUM_HEAD))                                                                             \
+                    {                                                                                               \
+                        case 16:                                                                                    \
+                        {                                                                                           \
+                            constexpr int32_t NumHeads = 16;                                                        \
+                            switch ((NUM_CU))                                                                       \
+                            {                                                                                       \
+                                case 80:                                                                            \
+                                {                                                                                   \
+                                    constexpr int32_t NumCUs = 80;                                                  \
+                                    if ((OUTPUT_LSE))                                                               \
+                                    {                                                                               \
+                                        using Traits = MlaReduceKernelV1Traits<512, 4, NumHeads, NumCUs, true>;     \
+                                        __VA_ARGS__;                                                                \
+                                    }                                                                               \
+                                    else                                                                            \
+                                    {                                                                               \
+                                        using Traits = MlaReduceKernelV1Traits<512, 4, NumHeads, NumCUs, false>;    \
+                                        __VA_ARGS__;                                                                \
+                                    }                                                                               \
+                                }                                                                                   \
+                                break;                                                                              \
+                                default:                                                                            \
+                                    TORCH_CHECK(false, NAME " doesn't support the specified CU count.");            \
+                            }                                                                                       \
+                        }                                                                                           \
+                        break;                                                                                      \
+                        default:                                                                                    \
+                            TORCH_CHECK(false, NAME " doesn't support the specified head count.");                  \
+                    }                                                                                               \
+                    break;                                                                                          \
+                }                                                                                                   \
+                break;                                                                                              \
+                default:                                                                                            \
+                    TORCH_CHECK(false, NAME " doesn't support output type ", toString((OUT_TYPE)), ".");            \
+            }                                                                                                       \
+        }                                                                                                           \
+        break;                                                                                                      \
+        default:                                                                                                    \
+            TORCH_CHECK(false, NAME " doesn't support LSE type ", toString((LSE_TYPE)), ".");                       \
     }
 
 template <typename Traits, typename lse_t, typename out_t>
@@ -333,13 +354,13 @@ void dispatch_mla_reduce_v1(
 }
 
 void mla_reduce_v1(
-    torch::Tensor&       final_lse,             // contiguous [bs, h]
-    torch::Tensor&       final_output,          //            [bs, h, dv]
-    const torch::Tensor& partial_lse,           // contiguous [bs + #CU, h]
-    const torch::Tensor& partial_output,        // contiguous [bs + #CU, h, dv]
-    const torch::Tensor& reduce_indptr,         // contiguous [#work + 1]
-    const torch::Tensor& reduce_final_map,      // contiguous [#work, 2]
-    const torch::Tensor& reduce_partial_map)    // contiguous [#split_tile]
+    const torch::Tensor&          partial_output,        // contiguous [bs + #CU, h, dv]
+    const torch::Tensor&          partial_lse,           // contiguous [bs + #CU, h]
+    const torch::Tensor&          reduce_indptr,         // contiguous [#work + 1]
+    const torch::Tensor&          reduce_final_map,      // contiguous [#work, 2]
+    const torch::Tensor&          reduce_partial_map,    // contiguous [#split_tile]
+    torch::Tensor&                final_output,          //            [bs, h, dv]
+    std::optional<torch::Tensor>& final_lse)             // contiguous [bs, h]
 {
     const at::cuda::OptionalCUDAGuard device_guard(device_of(final_output));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -349,6 +370,7 @@ void mla_reduce_v1(
     HIP_CALL(hipGetDevice(&dev));
     HIP_CALL(hipGetDeviceProperties(&dev_prop, dev));
 
+    const bool output_lse = final_lse.has_value();
     const int32_t num_reduce_tile = reduce_indptr.size(0) - 1;
     TORCH_CHECK(num_reduce_tile == reduce_final_map.size(0),
                 __func__, ": Invalid size of reduce_indptr or reduce_final_map!");
@@ -357,7 +379,7 @@ void mla_reduce_v1(
     params.p_reduce_indptr = reduce_indptr.data_ptr<int32_t>();
     params.p_reduce_final_map = reinterpret_cast<const MlaPartialTileInfo*>(reduce_final_map.data_ptr());
     params.p_reduce_partial_map = reduce_partial_map.data_ptr<int32_t>();
-    params.p_final_lse = final_lse.data_ptr();
+    params.p_final_lse = output_lse ? final_lse.value().data_ptr() : nullptr;
     params.p_final_output = final_output.data_ptr();
     params.p_partial_lse = partial_lse.data_ptr();
     params.p_partial_output = partial_output.data_ptr();
@@ -365,10 +387,11 @@ void mla_reduce_v1(
     params.stride_h_o = final_output.stride(-2);
 
     DISPATCH_MLA_MERGE_KERNEL(
-        final_lse.scalar_type(),
+        output_lse ? final_lse.value().scalar_type() : at::ScalarType::Float,
         final_output.scalar_type(),
         16,
         dev_prop.multiProcessorCount,
+        output_lse,
         "kn_mla_reduce_v1",
         dispatch_mla_reduce_v1<Traits, lse_t, out_t>(params, num_reduce_tile, stream)
     );

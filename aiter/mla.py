@@ -285,6 +285,8 @@ def mla_decode_fwd(
 
     print(work_indptr)
     print(work_info_set)
+    print(qo_indptr)
+    import pdb;pdb.set_trace()
 
     aiter.mla_decode_stage1_asm_fwd(
         q,
@@ -294,6 +296,9 @@ def mla_decode_fwd(
         kv_indices,
         kv_last_page_lens,
         # num_kv_splits_indptr,
+        # None,
+        # None,
+
         None,
         work_indptr,
         work_info_set,
@@ -301,7 +306,9 @@ def mla_decode_fwd(
         sm_scale,
         logits,
         attn_lse,
+        o,
     )
+
     # if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
     #     return logits.view(total_s, nhead, v_head_dim), attn_lse
     Lv = v_head_dim

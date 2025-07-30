@@ -17,7 +17,8 @@ void mla_decode_stage1_asm_fwd(
     float softmax_scale,
     // following are output
     torch::Tensor& splitData, //[batch_size, num_kv_splits, num_heads, v_head_dim]
-    torch::Tensor& splitLse   //[batch_size, num_kv_splits, num_heads,  1]
+    torch::Tensor& splitLse,  //[batch_size, num_kv_splits, num_heads,  1]
+    torch::Tensor& output     //[batch_size, num_heads, v_head_dim]
 );
 
 void mla_prefill_asm_fwd(

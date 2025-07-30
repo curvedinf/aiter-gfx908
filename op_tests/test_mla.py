@@ -10,7 +10,7 @@ import itertools
 import argparse
 
 torch.set_default_device("cuda")
-torch.set_printoptions(sci_mode=False, threshold=torch.inf)
+# torch.set_printoptions(sci_mode=False, threshold=torch.inf)
 
 
 def ref_masked_attention(
@@ -349,20 +349,22 @@ def test_mla(
 
     kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
     out_asm = torch.empty((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
-    # (attn_logits, attn_lse), us_asm_decode = run_perftest(
-    #     aiter.mla.mla_decode_fwd,
-    #     q,
-    #     kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
-    #     out_asm,
-    #     qo_indptr,
-    #     kv_indptr,
-    #     kv_indices,
-    #     kv_last_page_lens,
-    #     max_seqlen_qo,
-    #     sm_scale,
-    #     work_indptr=work_indptr,
-    #     work_info_set=work_info_set,
-    # )
+
+
+    (attn_logits, attn_lse), us_asm_decode = run_perftest(
+        aiter.mla.mla_decode_fwd,
+        q,
+        kv_buffer.view(num_page, page_size, nhead_kv, qk_head_dim),
+        out_asm,
+        qo_indptr,
+        kv_indptr,
+        kv_indices,
+        kv_last_page_lens,
+        max_seqlen_qo,
+        sm_scale,
+        work_indptr=work_indptr,
+        work_info_set=work_info_set,
+    )
 
     # print(f"{out_ref.view(total_q, -1)=}")
     # print(f"{out_asm.view(total_q, -1)=}")

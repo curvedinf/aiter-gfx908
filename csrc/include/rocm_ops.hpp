@@ -38,7 +38,8 @@
           py::arg("max_seqlen_q"),         \
           py::arg("softmax_scale"),        \
           py::arg("splitData"),            \
-          py::arg("splitLse"));            \
+          py::arg("splitLse"),             \
+          py::arg("output"));              \
     m.def("mla_prefill_asm_fwd",           \
           &mla_prefill_asm_fwd,            \
           "mla_prefill_asm_fwd",           \

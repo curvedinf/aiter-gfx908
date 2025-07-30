@@ -39,7 +39,7 @@ struct __attribute__((packed)) KernelArgs
     p2 _p18;
     void* ptr_STP;
     p2 _p19;
-	void *ptr_RP;
+	void* ptr_RP;
 	p2 _p20;
 };
 
@@ -57,7 +57,8 @@ void mla_decode_stage1_asm_fwd(
     float softmax_scale,
     // following are output
     torch::Tensor& splitData, //[batch_size, num_kv_splits, num_heads, v_head_dim]
-    torch::Tensor& splitLse   //[batch_size, num_kv_splits, num_heads,  1]
+    torch::Tensor& splitLse,  //[batch_size, num_kv_splits, num_heads,  1]
+    torch::Tensor& output     //[batch_size, num_heads, v_head_dim]
 )
 {
     int batch           = qo_indptr.size(0) - 1;
@@ -67,6 +68,8 @@ void mla_decode_stage1_asm_fwd(
     int num_kv_heads    = KV.size(2);
     int kv_split        = splitData.size(1);
     const int gqa_ratio = num_heads / num_kv_heads;
+
+    bool persistent = !num_kv_splits_indptr.has_value();
 
     int stride_Q       = Q.stride(0) * Q.itemsize() * max_seqlen_q;
     int stride_Page    = KV.stride(0) * KV.itemsize();
@@ -88,17 +91,35 @@ void mla_decode_stage1_asm_fwd(
     args.s_Q_Bs      = stride_Q;
     args.s_Bs        = stride_Page;
     args.s_log2_plen = log2_page;
-    if (num_kv_splits_indptr.has_value())
+
+    if (persistent)
     {
-        args.ptr_STP = num_kv_splits_indptr.value().data_ptr();
-        args.ptr_RP  = nullptr;
+        assert(work_indptr.has_value() && work_info_set.has_value());
+        assert(work_indptr.value().data_ptr() != nullptr && work_info_set.value().data_ptr() != nullptr);
+
+        uint64_t* persistent_meta_data = new uint64_t[10];
+        persistent_meta_data[0] = (uint64_t)work_indptr.value().data_ptr();
+        persistent_meta_data[1] = (uint64_t)work_info_set.value().data_ptr();
+        uint32_t* dev_PS_META_DATA;
+
+        unsigned long buf_size_META = 10 * sizeof(uint64_t);
+        hipMalloc(&dev_PS_META_DATA, buf_size_META);
+        hipMemcpy(dev_PS_META_DATA, persistent_meta_data, buf_size_META, hipMemcpyHostToDevice);
+
+        // args.ptr_STP = work_indptr.value().data_ptr();
+        args.ptr_STP = dev_PS_META_DATA;
+        printf("enter presistent \n");
+        printf("work_indptr %p work_info_set %p \n", args.ptr_STP, args.ptr_RP);
+        printf("out %p lse %p \n", args.ptr_R, args.ptr_LSE);
+        printf("q %p kv %p \n", args.ptr_Q, args.ptr_KV);
+        printf("ltp %p ltd %p \n", args.ptr_LTP, args.ptr_LTD);
+        printf("qtp %p ltl %p \n", args.ptr_QTP, args.ptr_LTL);
     }
     else
     {
-        assert(work_indptr.has_value() && work_info_set.has_value());
-        args.ptr_STP = work_indptr.value().data_ptr();
-        args.ptr_RP  = work_info_set.value().data_ptr();
+        args.ptr_STP = num_kv_splits_indptr.value().data_ptr();
     }
+	args.ptr_RP = output.data_ptr();
 
     // std::cout << "mla args" << std::endl;
     // std::cout << "ptr_R: " << args.ptr_R << std::endl;
@@ -136,12 +157,12 @@ void mla_decode_stage1_asm_fwd(
         }
         else if(gqa_ratio == 16)
         {
-            if(args.ptr_RP != nullptr)
+            if(persistent)
             {
                 sub_Q = 128;
                 static AiterAsmKernel impl_a16w16_bf16_ps(
                     "mla_kernel_func",
-                    "/mla/mla_a16w16_qh16_m16x4_n16x1_coex0_mask1_ps.co");
+                    "/mla/mla.co");
                 impl_ptr = &impl_a16w16_bf16_ps;
             }
             else if(max_seqlen_q == 1)
@@ -173,14 +194,27 @@ void mla_decode_stage1_asm_fwd(
 
     TORCH_CHECK(impl_ptr != nullptr, __func__, ": unsupport current Q_type:", Q.scalar_type());
 
+    int bdx = 256;
+    int gdx = (max_seqlen_q * gqa_ratio + sub_Q - 1) / sub_Q;
+    int gdy = batch;
+    int gdz = kv_split;
+
+    if(persistent)
+    {
+        gdx = work_info_set.value().size(0);
+        gdy = 1;
+        gdz = 1;
+    }
+    printf("gdx: %d \n", gdx);
+
     impl_ptr->launch_kernel({&args,
                              &arg_size,
-                             (max_seqlen_q * gqa_ratio + sub_Q - 1) / sub_Q, // gdx
-                             batch,                                          // gdy
-                             kv_split,                                       // gdz
-                             256,                                            // bdx: 4 wv64
-                             1,                                              // bdy
-                             1,                                              // bdz
+                             gdx,       // gdx
+                             gdy,       // gdy
+                             gdz,       // gdz
+                             256,       // bdx: 4 wv64
+                             1,         // bdy
+                             1,         // bdz
                              stream});
 }
 

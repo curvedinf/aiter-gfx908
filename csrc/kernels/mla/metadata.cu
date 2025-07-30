@@ -242,11 +242,6 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     using Traits  = MlaMetadataTraits<64,               1>;
     using index_t = uint32_t;
 
-    constexpr size_t kSizeWorkInfoInDw = sizeof(MlaWorkInfo) / sizeof(uint32_t);
-    static_assert(kSizeWorkInfoInDw == 8);
-    constexpr size_t kSizePartialInfoInDw = sizeof(MlaPartialTileInfo) / sizeof(uint32_t);
-    static_assert(kSizePartialInfoInDw == 2);
-
     hipDevice_t dev;
     hipDeviceProp_t dev_prop;
     HIP_CALL(hipGetDevice(&dev));
@@ -410,7 +405,10 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     work_indptr.push_back(0);
     for (int32_t cid = 0; cid < num_clusters; ++cid)
     {
-        work_indptr.push_back(work_indptr.back() + work_info_set[cid].size());
+        if (work_info_set[cid].empty() == false)
+        {
+            work_indptr.push_back(work_indptr.back() + work_info_set[cid].size());
+        }
     }
     const int32_t num_works = work_indptr.back();
 
@@ -437,10 +435,10 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
 
     // Step.7. Create tensors.
     auto int_opts = torch::TensorOptions().dtype(torch::kInt32);
-    auto work_info_set_tsr = torch::from_blob(work_info_set_flatten.data(), {num_works, kSizeWorkInfoInDw}, int_opts);
-    auto work_indptr_tsr = torch::from_blob(work_indptr.data(), {num_clusters + 1}, int_opts);
+    auto work_info_set_tsr = torch::from_blob(work_info_set_flatten.data(), {num_works, kSizeMlaWorkInfoInDw}, int_opts);
+    auto work_indptr_tsr = torch::from_blob(work_indptr.data(), {static_cast<int32_t>(work_indptr.size())}, int_opts);
     auto reduce_indptr_tsr = torch::from_blob(reduce_indptr.data(), {num_reduce_row + 1}, int_opts);
-    auto reduce_final_map_tsr = torch::from_blob(reduce_final_map.data(), {num_reduce_row, kSizePartialInfoInDw}, int_opts);
+    auto reduce_final_map_tsr = torch::from_blob(reduce_final_map.data(), {num_reduce_row, kSizeMlaPartialTileInfoInDw}, int_opts);
     auto reduce_partial_map_tsr = torch::from_blob(reduce_partial_map_flatten.data(), {num_partial_outputs}, int_opts);
 
     // Last step. Copy to the device of input and return the results.

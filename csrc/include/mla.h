@@ -20,6 +20,8 @@ union MlaWorkInfo
     };
     uint32_t u32All[8];
 };
+constexpr size_t kSizeMlaWorkInfoInDw = sizeof(MlaWorkInfo) / sizeof(uint32_t);
+static_assert(kSizeMlaWorkInfoInDw == 8);
 
 union MlaPartialTileInfo
 {
@@ -30,6 +32,8 @@ union MlaPartialTileInfo
     };
     uint32_t u32All[2];
 };
+constexpr size_t kSizeMlaPartialTileInfoInDw = sizeof(MlaPartialTileInfo) / sizeof(uint32_t);
+static_assert(kSizeMlaPartialTileInfoInDw == 2);
 
 std::vector<torch::Tensor> get_mla_metadata_v0(const torch::Tensor& p_seqlens_k, // [batch size + 1]
                                                const int32_t num_heads_per_head_k,
@@ -42,10 +46,10 @@ get_mla_metadata_v1(const torch::Tensor& seqlens_qo_indptr, // [batch size + 1]
                     const int32_t num_heads_k,
                     const bool is_causal);
 
-void mla_reduce_v1(torch::Tensor& final_lse,
-                   torch::Tensor& final_output,
+void mla_reduce_v1(const torch::Tensor& partial_output,
                    const torch::Tensor& partial_lse,
-                   const torch::Tensor& partial_output,
                    const torch::Tensor& reduce_indptr,
                    const torch::Tensor& reduce_final_map,
-                   const torch::Tensor& reduce_partial_map);
+                   const torch::Tensor& reduce_partial_map,
+                   torch::Tensor& final_output,
+                   std::optional<torch::Tensor>& final_lse);

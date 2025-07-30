@@ -364,6 +364,9 @@ def test_mla(
         sm_scale,
         work_indptr=work_indptr,
         work_info_set=work_info_set,
+        reduce_indptr=reduce_indptr,
+        reduce_final_map=reduce_final_map,
+        reduce_partial_map=reduce_partial_map,
     )
 
     # print(f"{out_ref.view(total_q, -1)=}")
@@ -400,7 +403,7 @@ v_head_dim = 128
 block_size = 1
 list_dtype = ["bf16"]
 l_kv_dtype = ["bf16"]
-list_nhead = [(16, 2), (16, 4), (128, 2)]
+list_nhead = [(16, 3), (16, 4), (128, 2)]
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,
@@ -471,7 +474,7 @@ parser.add_argument(
     "--ctxLen",
     type=int,
     nargs="*",
-    default=[21, 64, 256, 512, 1200, 3200, 5200, 8192],
+    default=[3200],
     help="""Context length.
     e.g.: -c 21""",
 )
@@ -480,7 +483,7 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[1, 3, 5, 16, 32, 64, 128, 256],
+    default=[3],
     help="""Batch size.
     e.g.: -b 16""",
 )

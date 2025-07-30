@@ -106,14 +106,7 @@ void mla_decode_stage1_asm_fwd(
         hipMalloc(&dev_PS_META_DATA, buf_size_META);
         hipMemcpy(dev_PS_META_DATA, persistent_meta_data, buf_size_META, hipMemcpyHostToDevice);
 
-        // args.ptr_STP = work_indptr.value().data_ptr();
         args.ptr_STP = dev_PS_META_DATA;
-        printf("enter presistent \n");
-        printf("work_indptr %p work_info_set %p \n", args.ptr_STP, args.ptr_RP);
-        printf("out %p lse %p \n", args.ptr_R, args.ptr_LSE);
-        printf("q %p kv %p \n", args.ptr_Q, args.ptr_KV);
-        printf("ltp %p ltd %p \n", args.ptr_LTP, args.ptr_LTD);
-        printf("qtp %p ltl %p \n", args.ptr_QTP, args.ptr_LTL);
     }
     else
     {
@@ -121,21 +114,21 @@ void mla_decode_stage1_asm_fwd(
     }
 	args.ptr_RP = output.data_ptr();
 
-    // std::cout << "mla args" << std::endl;
-    // std::cout << "ptr_R: " << args.ptr_R << std::endl;
-    // std::cout << "ptr_LSE: " << args.ptr_LSE << std::endl;
-    // std::cout << "ptr_Q: " << args.ptr_Q << std::endl;
-    // std::cout << "ptr_KV: " << args.ptr_KV << std::endl;
-    // std::cout << "ptr_LTP: " << args.ptr_LTP << std::endl;
-    // std::cout << "ptr_LTD: " << args.ptr_LTD << std::endl;
-    // std::cout << "ptr_LTL: " << args.ptr_LTL << std::endl;
-    // std::cout << "scalar: " << args.scalar << std::endl;
-    // std::cout << "s_MQA: " << args.s_MQA << std::endl;
-    // std::cout << "s_kv_split: " << args.s_kv_split << std::endl;
-    // std::cout << "s_Q_Bs: " << args.s_Q_Bs << std::endl;
-    // std::cout << "s_Bs: " << args.s_Bs << std::endl;
-    // std::cout << "s_log2_plen: " << args.s_log2_plen << std::endl;
-    // std::cout << "ptr_QTP: " << args.ptr_QTP << std::endl;
+    std::cout << "mla args" << std::endl;
+    std::cout << "ptr_R: " << args.ptr_R << std::endl;
+    std::cout << "ptr_LSE: " << args.ptr_LSE << std::endl;
+    std::cout << "ptr_Q: " << args.ptr_Q << std::endl;
+    std::cout << "ptr_KV: " << args.ptr_KV << std::endl;
+    std::cout << "ptr_LTP: " << args.ptr_LTP << std::endl;
+    std::cout << "ptr_LTD: " << args.ptr_LTD << std::endl;
+    std::cout << "ptr_LTL: " << args.ptr_LTL << std::endl;
+    std::cout << "scalar: " << args.scalar << std::endl;
+    std::cout << "s_MQA: " << args.s_MQA << std::endl;
+    std::cout << "s_kv_split: " << args.s_kv_split << std::endl;
+    std::cout << "s_Q_Bs: " << args.s_Q_Bs << std::endl;
+    std::cout << "s_Bs: " << args.s_Bs << std::endl;
+    std::cout << "s_log2_plen: " << args.s_log2_plen << std::endl;
+    std::cout << "ptr_QTP: " << args.ptr_QTP << std::endl;
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(Q));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();

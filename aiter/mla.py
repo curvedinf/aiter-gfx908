@@ -124,8 +124,11 @@ def mla_decode_fwd(
     logit_cap=0.0,
     num_kv_splits=None,  # for experts only!!!
     num_kv_splits_indptr=None,  # for experts only!!!
-    work_indptr=None,  # for experts only!!!
-    work_info_set=None,  # for experts only!!!
+    work_indptr=None,
+    work_info_set=None,
+    reduce_indptr=None,
+    reduce_final_map=None,
+    reduce_partial_map=None,
 ):
     device = q.device
     assert logit_cap <= 0, f"{logit_cap=} is not support yet"
@@ -286,12 +289,6 @@ def mla_decode_fwd(
     attn_lse = torch.empty(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
-    print("!!!!!!!!!!!!!!!!!!!!!")
-
-    print(work_indptr)
-    print(work_info_set)
-    print(qo_indptr)
-    import pdb;pdb.set_trace()
 
     aiter.mla_decode_stage1_asm_fwd(
         q,
@@ -314,33 +311,46 @@ def mla_decode_fwd(
         o,
     )
 
+    final_lse = torch.empty_like(attn_lse)
+
+    aiter.mla_reduce_v1(
+        final_lse,
+        o,
+        attn_lse,
+        logits,
+        reduce_indptr,
+        reduce_final_map,
+        reduce_partial_map,
+    )
+    import pdb;pdb.set_trace()
+
     # if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
     #     return logits.view(total_s, nhead, v_head_dim), attn_lse
-    Lv = v_head_dim
-    BLOCK_DV = triton.next_power_of_2(Lv)
-    grid = (bs, nhead)
-    extra_kargs = {"waves_per_eu": 4}
-    _fwd_kernel_stage2_asm[grid](
-        logits,
-        attn_lse,
-        o,
-        qo_indptr,
-        kv_indptr,
-        num_kv_splits_indptr,
-        attn_lse.stride(0),
-        attn_lse.stride(2),
-        attn_lse.stride(1),
-        o.stride(0),
-        o.stride(1),
-        MAYBE_FINAL_OUT=MAYBE_FINAL_OUT,
-        BATCH_NUM=bs,
-        BLOCK_DV=BLOCK_DV,
-        Lv=Lv,
-        mgc=mgc,
-        num_warps=4,
-        num_stages=2,
-        **extra_kargs,
-    )
+    # Lv = v_head_dim
+    # BLOCK_DV = triton.next_power_of_2(Lv)
+    # grid = (bs, nhead)
+    # extra_kargs = {"waves_per_eu": 4}
+    # _fwd_kernel_stage2_asm[grid](
+    #     logits,
+    #     attn_lse,
+    #     o,
+    #     qo_indptr,
+    #     kv_indptr,
+    #     num_kv_splits_indptr,
+    #     attn_lse.stride(0),
+    #     attn_lse.stride(2),
+    #     attn_lse.stride(1),
+    #     o.stride(0),
+    #     o.stride(1),
+    #     MAYBE_FINAL_OUT=MAYBE_FINAL_OUT,
+    #     BATCH_NUM=bs,
+    #     BLOCK_DV=BLOCK_DV,
+    #     Lv=Lv,
+    #     mgc=mgc,
+    #     num_warps=4,
+    #     num_stages=2,
+    #     **extra_kargs,
+    # )
     return logits, attn_lse
 
 

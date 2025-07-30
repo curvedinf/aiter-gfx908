@@ -375,24 +375,27 @@ void mla_reduce_v1(
     TORCH_CHECK(num_reduce_tile == reduce_final_map.size(0),
                 __func__, ": Invalid size of reduce_indptr or reduce_final_map!");
 
-    MlaReduceKernelV1Params params = {};
-    params.p_reduce_indptr = reduce_indptr.data_ptr<int32_t>();
-    params.p_reduce_final_map = reinterpret_cast<const MlaPartialTileInfo*>(reduce_final_map.data_ptr());
-    params.p_reduce_partial_map = reduce_partial_map.data_ptr<int32_t>();
-    params.p_final_lse = output_lse ? final_lse.value().data_ptr() : nullptr;
-    params.p_final_output = final_output.data_ptr();
-    params.p_partial_lse = partial_lse.data_ptr();
-    params.p_partial_output = partial_output.data_ptr();
-    params.stride_s_o = final_output.stride(-3);
-    params.stride_h_o = final_output.stride(-2);
+    if (num_reduce_tile > 0)
+    {
+        MlaReduceKernelV1Params params = {};
+        params.p_reduce_indptr = reduce_indptr.data_ptr<int32_t>();
+        params.p_reduce_final_map = reinterpret_cast<const MlaPartialTileInfo*>(reduce_final_map.data_ptr());
+        params.p_reduce_partial_map = reduce_partial_map.data_ptr<int32_t>();
+        params.p_final_lse = output_lse ? final_lse.value().data_ptr() : nullptr;
+        params.p_final_output = final_output.data_ptr();
+        params.p_partial_lse = partial_lse.data_ptr();
+        params.p_partial_output = partial_output.data_ptr();
+        params.stride_s_o = final_output.stride(-3);
+        params.stride_h_o = final_output.stride(-2);
 
-    DISPATCH_MLA_MERGE_KERNEL(
-        output_lse ? final_lse.value().scalar_type() : at::ScalarType::Float,
-        final_output.scalar_type(),
-        16,
-        dev_prop.multiProcessorCount,
-        output_lse,
-        "kn_mla_reduce_v1",
-        dispatch_mla_reduce_v1<Traits, lse_t, out_t>(params, num_reduce_tile, stream)
-    );
+        DISPATCH_MLA_MERGE_KERNEL(
+            output_lse ? final_lse.value().scalar_type() : at::ScalarType::Float,
+            final_output.scalar_type(),
+            16,
+            dev_prop.multiProcessorCount,
+            output_lse,
+            "kn_mla_reduce_v1",
+            dispatch_mla_reduce_v1<Traits, lse_t, out_t>(params, num_reduce_tile, stream)
+        );
+    }
 }

@@ -221,7 +221,7 @@ def mla_decode_fwd(
             kv_indptr_test[1 : batch_size + 1] = torch.cumsum(kv_seqlens_test, dim=0)
         else:
             qo_indptr_test = qo_indptr
-            qo_indptr_test = kv_indptr
+            kv_indptr_test = kv_indptr
         print("qo_indptr_test:")
         print(qo_indptr_test)
         print("kv_indptr_test:")
@@ -247,7 +247,7 @@ def mla_decode_fwd(
         print(reduce_partial_map)
 
         aiter.mla_reduce_v1(
-            o, o, q, q, reduce_indptr, reduce_final_map, reduce_partial_map
+            q, q, reduce_indptr, reduce_final_map, reduce_partial_map, o, o
         )
 
         if use_test_data:

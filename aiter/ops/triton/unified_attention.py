@@ -82,11 +82,12 @@ def kernel_unified_attention_2d(
     BLOCK_Q: tl.constexpr,  # int
     num_seqs: tl.int32,
     BLOCK_M: tl.constexpr,  # int
-    BLOCK_N: tl.constexpr,  # int
 ):
     kv_head_idx = tl.program_id(0)
     q_block_global_idx = tl.program_id(1)
 
+    tl.assume(kv_head_idx >= 0)
+    tl.assume(q_block_global_idx >= 0)
     tl.assume(block_table_stride > 0)
     tl.assume(query_stride_0 > 0)
     tl.assume(query_stride_1 > 0)
@@ -102,13 +103,13 @@ def kernel_unified_attention_2d(
     seq_idx = find_seq_idx(
         query_start_len_ptr, q_block_global_idx, num_seqs, BLOCK_Q, True
     )
+    cur_batch_in_all_start_index = tl.load(query_start_len_ptr + seq_idx)
+    cur_batch_in_all_stop_index = tl.load(query_start_len_ptr + seq_idx + 1)
 
-    q_block_start_idx = tl.load(query_start_len_ptr + seq_idx) // BLOCK_Q + seq_idx
+    q_block_start_idx = cur_batch_in_all_start_index // BLOCK_Q + seq_idx
 
     q_block_local_idx = q_block_global_idx - q_block_start_idx
 
-    cur_batch_in_all_start_index = tl.load(query_start_len_ptr + seq_idx)
-    cur_batch_in_all_stop_index = tl.load(query_start_len_ptr + seq_idx + 1)
 
     cur_batch_query_len = cur_batch_in_all_stop_index - cur_batch_in_all_start_index
 
@@ -176,106 +177,39 @@ def kernel_unified_attention_2d(
     # actual sequence length
     max_seq_prefix_len = tl.minimum(max_seq_prefix_len, seq_len)
 
+    # calculate the number of tiles (blocks) that need to be processed to
+    # cover the longest sequence prefix (due to causal masking, blocks beyond
+    # this prefix can be skipped)
+    num_blocks = cdiv_fn(max_seq_prefix_len, BLOCK_SIZE)
     if SLIDING_WINDOW > 0:
-        num_blocks_start = (max_seq_prefix_len - SLIDING_WINDOW - 1) // BLOCK_N
+        num_blocks_start = (max_seq_prefix_len - SLIDING_WINDOW - 1) // BLOCK_SIZE
         # TODO (cagri): this works for most cases but not all, not sure why: num_blocks_start = max(0, num_blocks_start)
-        # this needs to be evaluated further
         num_blocks_start = max(0, num_blocks_start - 1)
     else:
         num_blocks_start = 0
-
-    USE_SINGLE_KV_LOAD: tl.constexpr = BLOCK_N == BLOCK_SIZE
-
-    if USE_SINGLE_KV_LOAD:
-        # calculate the number of tiles (blocks) that need to be processed to
-        # cover the longest sequence prefix (due to causal masking, blocks beyond
-        # this prefix can be skipped)
-        loop_end = cdiv_fn(max_seq_prefix_len, BLOCK_N)
-        loop_step = 1
-        loop_start = num_blocks_start
-    else:
-        loop_end = max_seq_prefix_len
-        loop_step = BLOCK_N
-        loop_start = num_blocks_start * BLOCK_N
-
     # iterate through tiles
-    for j in range(loop_start, loop_end, loop_step):
-        offs_n = tl.arange(0, BLOCK_N)
-        # to reduce the overhead when BLOCK_N = BLOCK_SIZE
-        if USE_SINGLE_KV_LOAD:
-            physical_block_idx = tl.load(block_tables_ptr + block_table_offset + j)
+    for j in range(num_blocks_start, num_blocks):
 
-            v_offset = (
-                physical_block_idx * stride_v_cache_0
-                + kv_head_idx * stride_v_cache_2
-                + offs_d[None, :] * stride_v_cache_3
-                + offs_n[:, None] * stride_v_cache_1
-            )
+        physical_block_idx = tl.load(block_tables_ptr + block_table_offset + j)
 
-            k_offset = (
-                physical_block_idx * stride_k_cache_0
-                + kv_head_idx * stride_k_cache_2
-                + offs_d[:, None] * stride_k_cache_3
-                + offs_n[None, :] * stride_k_cache_1
-            )
-            seq_offset = j * BLOCK_N + offs_n
+        offs_n = tl.arange(0, BLOCK_SIZE)
 
-            # K : (HEAD_SIZE_PADDED, BLOCK_N)
-            K_load = tl.load(
-                key_cache_ptr + k_offset,
-                mask=dim_mask[:, None],
-                other=0.0,
-            )
-            # V : (BLOCK_N, HEAD_SIZE_PADDED)
-            V_load = tl.load(
-                value_cache_ptr + v_offset,
-                mask=dim_mask[None, :],
-                other=0.0,
-            )
+        v_offset = (
+            physical_block_idx * stride_v_cache_0
+            + kv_head_idx * stride_v_cache_2
+            + offs_d[None, :] * stride_v_cache_3
+            + offs_n[:, None] * stride_v_cache_1
+        )
 
-        else:
-            j = tl.multiple_of(j, BLOCK_N)
-            seq_offset = j + offs_n
-            load_mask = seq_offset < max_seq_prefix_len
-            physical_block_idx = tl.load(
-                block_tables_ptr + block_table_offset + seq_offset // BLOCK_SIZE,
-                mask=load_mask,
-                other=0,
-            )
+        k_offset = (
+            physical_block_idx * stride_k_cache_0
+            + kv_head_idx * stride_k_cache_2
+            + offs_d[:, None] * stride_k_cache_3
+            + offs_n[None, :] * stride_k_cache_1
+        )
 
-            v_offset = (
-                physical_block_idx[:, None] * stride_v_cache_0
-                + kv_head_idx * stride_v_cache_2
-                + offs_d[None, :] * stride_v_cache_3
-                + (offs_n[:, None] % BLOCK_SIZE) * stride_v_cache_1
-            )
-
-            k_offset = (
-                physical_block_idx[None, :] * stride_k_cache_0
-                + kv_head_idx * stride_k_cache_2
-                + offs_d[:, None] * stride_k_cache_3
-                + (offs_n[None, :] % BLOCK_SIZE) * stride_k_cache_1
-            )
-            # Cagri: load masking is not needed even when we load multiple block sizes
-            # as the later masks, should get rid of the effect.
-            # This increases the overhead, but keeping it for now as it leads to issues e2e somehow
-
-            # K : (HEAD_SIZE_PADDED, BLOCK_N)
-            K_load = tl.load(
-                key_cache_ptr + k_offset,
-                mask=dim_mask[:, None],  # & load_mask[None, :],
-                other=0.0,
-            )
-
-            # V : (BLOCK_N, HEAD_SIZE_PADDED)
-            V_load = tl.load(
-                value_cache_ptr + v_offset,
-                mask=dim_mask[None, :] & load_mask[:, None],
-                other=0.0,
-            )
-
-        # seq_mask: (BLOCK_M, BLOCK_N)
-        seq_mask = seq_offset[None, :] < context_len + query_pos[:, None] + 1
+        # K : (HEAD_SIZE, BLOCK_SIZE)
+        K_load = tl.load(key_cache_ptr + k_offset, mask=dim_mask[:, None], other=0.0)
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -285,6 +219,9 @@ def kernel_unified_attention_2d(
         else:
             K = K_load
 
+        # V : (BLOCK_SIZE, HEAD_SIZE)
+        V_load = tl.load(value_cache_ptr + v_offset, mask=dim_mask[None, :], other=0.0)
+
         if V_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
                 V = V_load
@@ -293,8 +230,12 @@ def kernel_unified_attention_2d(
         else:
             V = V_load
 
-        # S : (BLOCK_M, BLOCK_N)
-        S = tl.zeros(shape=(BLOCK_M, BLOCK_N), dtype=tl.float32)
+        seq_offset = j * BLOCK_SIZE + offs_n
+
+        seq_mask = seq_offset[None, :] < context_len + query_pos[:, None] + 1
+
+        # S : (BLOCK_M, BLOCK_SIZE)
+        S = tl.zeros(shape=(BLOCK_M, BLOCK_SIZE), dtype=tl.float32)
 
         S += scale * tl.dot(Q, K)
 
@@ -322,7 +263,7 @@ def kernel_unified_attention_2d(
         # the entire row. In this case we need to set m_j 0 to avoid NaN
         m_j = tl.where(m_j > float("-inf"), m_j, 0.0)
 
-        # P : (BLOCK_M, BLOCK_N)
+        # P : (BLOCK_M, BLOCK_SIZE)
         P = tl.exp(S - m_j[:, None])
 
         # l_j : (BLOCK_M,)
@@ -342,10 +283,8 @@ def kernel_unified_attention_2d(
         acc += tl.dot(P.to(V.dtype), V)
 
     # epilogue
-    # This helps the compiler do Newton Raphson on l_i vs on acc which is much larger.
-    l_recip = 1 / L[:, None]
-    acc = acc * l_recip
-
+    one_over_L = 1.0 / L[:, None]
+    acc = acc * one_over_L
     output_offset = (
         query_offset_0[:, None] * output_stride_0
         + query_offset_1[:, None] * output_stride_1
@@ -357,7 +296,6 @@ def kernel_unified_attention_2d(
         acc,
         mask=dim_mask[None, :] & query_mask_0[:, None] & query_mask_1[:, None],
     )
-
 
 @triton.jit
 def kernel_unified_attention_3d(
@@ -401,9 +339,13 @@ def kernel_unified_attention_3d(
     BLOCK_M: tl.constexpr,  # int
     NUM_SEGMENTS_PER_SEQ: tl.constexpr,  # int
 ):
-    q_block_global_idx = tl.program_id(0)
-    kv_head_idx = tl.program_id(1)
-    segm_idx = tl.program_id(2)
+    q_block_global_idx = tl.program_id(2)
+    kv_head_idx = tl.program_id(0)
+    segm_idx = tl.program_id(1)
+
+    tl.assume(kv_head_idx >= 0)
+    tl.assume(q_block_global_idx >= 0)
+    tl.assume(segm_idx >= 0)
 
     tl.assume(block_table_stride > 0)
     tl.assume(query_stride_0 > 0)
@@ -515,7 +457,7 @@ def kernel_unified_attention_3d(
         )
 
         # K : (HEAD_SIZE, BLOCK_SIZE)
-        K_load = tl.load(key_cache_ptr + k_offset, mask=dim_mask[:, None], other=0.0)
+        K_load = tl.load(key_cache_ptr + k_offset, mask=dim_mask[:, None], other=0.0, cache_modifier=".cg")
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -526,7 +468,7 @@ def kernel_unified_attention_3d(
             K = K_load
 
         # V : (BLOCK_SIZE, HEAD_SIZE)
-        V_load = tl.load(value_cache_ptr + v_offset, mask=dim_mask[None, :], other=0.0)
+        V_load = tl.load(value_cache_ptr + v_offset, mask=dim_mask[None, :], other=0.0, cache_modifier=".cg")
 
         if V_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -663,6 +605,7 @@ def reduce_segments(
     segm_expsum = tl.load(segm_expsum_ptr + segm_offset, mask=segm_mask, other=0.0)
     segm_expsum = segm_expsum * tl.exp(segm_max - overall_max)
     overall_expsum = tl.sum(segm_expsum)
+    one_over_overall_expsum = 1 / overall_expsum
 
     # load, rescale, and add segment attention outputs
     segm_output_offset = (
@@ -680,7 +623,7 @@ def reduce_segments(
     segm_output *= tl.exp(segm_max - overall_max)[:, None]
     acc_sum = tl.sum(segm_output, axis=0)
     # safely divide by overall_expsum, returning 0.0 if overall_expsum is 0
-    acc = tl.where(overall_expsum == 0.0, 0.0, acc_sum / overall_expsum)
+    acc = tl.where(overall_expsum == 0.0, 0.0, acc_sum * one_over_overall_expsum)
 
     # write result
     output_offset = (
@@ -723,6 +666,7 @@ def unified_attention(
     ), "Sinks must be num_query_heads size"
     use_alibi_slopes = alibi_slopes is not None
     SLIDING_WINDOW = 1 + window_size[0]
+    block_size = v.shape[1]
     num_seqs = len(seqused_k)
     num_query_heads = q.shape[1]
     num_kv_heads = k.shape[2]
@@ -746,38 +690,33 @@ def unified_attention(
     #    = floor(q.shape[0] / BLOCK_Q) + num_seqs
 
     total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
-    target_num_prgms = get_num_sms() * 4
+    target_num_prgms = get_num_sms() * 2
     num_2d_prgms = total_num_q_blocks * num_kv_heads
 
-    # Original condition:
-    # if max_seqlen_q > 1 or total_num_q_blocks * num_kv_heads > 128:
     # call 2d if sliding window is used
-    if SLIDING_WINDOW > 0 or num_2d_prgms >= target_num_prgms or max_seqlen_k <= 1024:
-        # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
-        # q.shape[0] is sum(query_lens) which is dynamic so it shouldnt be used in the heuristic
+    if (
+        SLIDING_WINDOW > 0
+        or num_2d_prgms >= target_num_prgms * 2
+        or max_seqlen_k <= 1024
+    ):
         num_stages_2d = 4
-        BLOCK_N = block_size
-        num_warps = 2
+        num_warps = 4
+        if max_seqlen_q == 1 and SLIDING_WINDOW > 0:
+            num_warps = 2    
         # make the block_m bigger if we already have enough parallelism
-        if num_2d_prgms >= 2 * target_num_prgms:
-            num_warps = 4
-            if num_2d_prgms <= 4 * target_num_prgms:
+        if num_2d_prgms >= 4 * target_num_prgms:
+            if num_2d_prgms <= 8 * target_num_prgms:
                 BLOCK_M = 64
                 num_stages_2d = 2 if SLIDING_WINDOW > 0 else 4
+            elif num_2d_prgms <= 16 * target_num_prgms:
+                BLOCK_M = 64
+                num_stages_2d = 1 if SLIDING_WINDOW > 0 else 2
             else:
                 BLOCK_M = 64
                 num_stages_2d = 1
             BLOCK_Q = BLOCK_M // num_queries_per_kv
             total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
-        # if there is prefill with relatively large amount of computation,
-        # increases the tile sizes to improve math perf.
-        if max_seqlen_q >= 256 and max_seqlen_k >= 256 and SLIDING_WINDOW == 0:
-            num_warps = 4
-            BLOCK_M = 128
-            num_stages_2d = 1
-            BLOCK_N = 64
-            BLOCK_Q = BLOCK_M // num_queries_per_kv
-            total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
+
         kernel_unified_attention_2d[
             (
                 num_kv_heads,
@@ -824,20 +763,16 @@ def unified_attention(
             waves_per_eu=2,
             num_warps=num_warps,
             num_stages=num_stages_2d,
-            BLOCK_N=BLOCK_N,
         )
     else:
         # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         # q.shape[0] is sum(query_lens) which becomes same as batch size
         # so it is static dim. for decode, should be okay to use it in heuristics
         # make the block_m bigger if we already have enough parallelism
-        NUM_SEGMENTS = math.ceil(
-            (target_num_prgms) / (total_num_q_blocks * num_kv_heads)
-        )
-        NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
+        NUM_SEGMENTS = math.ceil(target_num_prgms / (total_num_q_blocks * num_kv_heads))
+        NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS) * 2
         NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
         NUM_SEGMENTS = max(NUM_SEGMENTS, 16)
-
         segm_output = torch.empty(
             q.shape[0],
             num_query_heads,
@@ -861,7 +796,7 @@ def unified_attention(
             device=q.device,
         )
 
-        kernel_unified_attention_3d[(total_num_q_blocks, num_kv_heads, NUM_SEGMENTS)](
+        kernel_unified_attention_3d[(num_kv_heads, NUM_SEGMENTS, total_num_q_blocks)](
             segm_output_ptr=segm_output,
             segm_max_ptr=segm_max,
             segm_expsum_ptr=segm_expsum,

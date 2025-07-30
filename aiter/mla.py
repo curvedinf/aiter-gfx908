@@ -269,7 +269,7 @@ def mla_decode_fwd(
 
     if nhead == 16 and max_seqlen_q == 1:
         # special case for 16 heads and max_seqlen_q == 1
-        logits = torch.empty(
+        logits = torch.zeros(
             (total_s, num_kv_splits, nhead, v_head_dim),
             dtype=dtypes.fp32,
             device=device,
@@ -278,7 +278,7 @@ def mla_decode_fwd(
     elif nhead in [16, 128]:
         MAYBE_FINAL_OUT = True
         num_kv_splits = 16
-        logits = torch.empty(
+        logits = torch.zeros(
             (total_s, num_kv_splits, nhead, v_head_dim),
             dtype=dtypes.fp32,
             device=device,
@@ -286,7 +286,7 @@ def mla_decode_fwd(
     else:
         assert False, f"{nhead=} not supported"
 
-    attn_lse = torch.empty(
+    attn_lse = torch.zeros(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
     import pdb;pdb.set_trace()
@@ -316,13 +316,13 @@ def mla_decode_fwd(
     import pdb;pdb.set_trace()
 
     aiter.mla_reduce_v1(
-        final_lse,
-        o,
-        attn_lse,
         logits,
+        attn_lse,
         reduce_indptr,
         reduce_final_map,
         reduce_partial_map,
+        o,
+        final_lse,
     )
     import pdb;pdb.set_trace()
 

@@ -126,7 +126,7 @@ CK_TILE_DEVICE static auto MakeOutputTileWindow(
 
 template <typename Traits, typename lse_t, typename out_t>
 __global__ void kn_mla_reduce_v1(
-    const MlaReduceKernelV1Params& params)
+    const MlaReduceKernelV1Params params)
 {
     __shared__ float lds_lse_scale[Traits::kMaxSplits];
 

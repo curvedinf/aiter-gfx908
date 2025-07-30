@@ -6,6 +6,7 @@
 #include <torch/python.h>
 #include <c10/cuda/CUDAGuard.h>
 #include "aiter_hip_common.h"
+#include "mla.h"
 
 
 __device__ constexpr int32_t get_warp_size()
@@ -198,22 +199,6 @@ std::vector<T> flatten(
     return result;
 }
 
-union MlaWorkInfo
-{
-    struct
-    {
-        int32_t bs_index;
-        int32_t partial_index;
-        int32_t q_start;
-        int32_t q_end;
-        int32_t kv_start;
-        int32_t kv_end;
-        int32_t kv_offset;
-        int32_t padding[1];
-    };
-    uint32_t u32All[8];
-};
-
 template<int32_t kPackedQoLenPerWg_,
          int32_t kMaxClusterSize_>
 struct MlaMetadataTraits
@@ -230,16 +215,16 @@ struct MlaMetadataTraits
 //   [1] work information    (#work, 8)
 //   [1.0] bs_index:         (#work),             The index of batch handled by each work.
 //   [1.1] partial_index:    (#work),             The index of tile in output buffer when splits. -1 means no split.
-//   [1.2] q_start:          (#work),             The global index in seq where q/o starts. Use global index here can
-//                                                reduce memory access count in kernel.
+//   [1.2] q_start:          (#work),             The global index in seq where q/o starts.
 //   [1.3] q_end:            (#work),             The global index in seq where q/o ends (not included).
 //   [1.4] kv_start:         (#work),             The global index in seq where k/v starts.
 //   [1.5] kv_end:           (#work),             The global index in seq where k/v ends (not included).
-//   [1.6] kv_offset:        (#work),             Difference between kv_end and the global index of end of batch.
-//   [1.7] padding:          (#work, 1),          Pad to 8 DWs.
+//   [1.6] pad               (#work, 2),          Pad to 8 DWs.
 //   [2] reduce_indptr:      (#reduce_tiles + 1), The IDs in reduce_partial_map indicates the tiles should be merged
 //                                                together.
-//   [3] reduce_final_map:   (#reduce_tiles),     The final output location of each group of tiles.
+//   [3] reduce_final_map:   (#reduce_tiles, 2),  The final output location and length of each group of tiles.
+//   [3.0] q_start           (#reduce_tiles),     The global index in seq where q/o starts.
+//   [3.1] q_end             (#reduce_tiles),     The global index in seq where q/o ends (not included).
 //   [4] reduce_partial_map: (#partial_tiles),    The locations in partial buffer of partial tiles waiting for being
 //                                                reduced.
 //
@@ -257,8 +242,10 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     using Traits  = MlaMetadataTraits<64,               1>;
     using index_t = uint32_t;
 
-    constexpr size_t kSizeMetadataInDw = sizeof(MlaWorkInfo) / sizeof(uint32_t);
-    static_assert(kSizeMetadataInDw == 8);
+    constexpr size_t kSizeWorkInfoInDw = sizeof(MlaWorkInfo) / sizeof(uint32_t);
+    static_assert(kSizeWorkInfoInDw == 8);
+    constexpr size_t kSizePartialInfoInDw = sizeof(MlaPartialTileInfo) / sizeof(uint32_t);
+    static_assert(kSizePartialInfoInDw == 2);
 
     hipDevice_t dev;
     hipDeviceProp_t dev_prop;
@@ -345,6 +332,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     // Step.3.1. Allocates output buffers except indptrs
     std::vector<std::vector<MlaWorkInfo>> work_info_set(num_clusters, std::vector<MlaWorkInfo>());
     std::vector<std::vector<index_t>> reduce_partial_map(num_qo_clusters_indptr.back(), std::vector<index_t>());
+    std::vector<MlaPartialTileInfo> reduce_partial_info(num_qo_clusters_indptr.back(), {-1, 0});
 
     // Step.3.2. Declare priority queue
     using ClusterCost = std::tuple<int32_t, float>; // cluster_id(cid), cost
@@ -394,7 +382,11 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
                 {
                     const int32_t global_cluster_q_idx = num_qo_clusters_indptr[bid] + tid;
                     work_info.partial_index = num_partial_outputs;
-                    num_reduce_row += reduce_partial_map[global_cluster_q_idx].empty() ? 1 : 0;
+                    if (reduce_partial_map[global_cluster_q_idx].empty())
+                    {
+                        ++num_reduce_row;
+                        reduce_partial_info[global_cluster_q_idx] = { work_info.q_start, work_info.q_end };
+                    }
                     reduce_partial_map[global_cluster_q_idx].push_back(num_partial_outputs);
                     ++num_partial_outputs;
                 }
@@ -422,7 +414,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     }
     const int32_t num_works = work_indptr.back();
 
-    std::vector<index_t> reduce_final_map;
+    std::vector<MlaPartialTileInfo> reduce_final_map;
     std::vector<index_t> reduce_indptr;
     reduce_final_map.reserve(num_reduce_row);
     reduce_indptr.reserve(num_reduce_row + 1);
@@ -434,7 +426,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
         if (reduce_partial_map[global_cluster_q_idx].empty() == false)
         {
             reduce_indptr.push_back(reduce_indptr.back() + reduce_partial_map[global_cluster_q_idx].size());
-            reduce_final_map.push_back(global_cluster_q_idx);
+            reduce_final_map.push_back(reduce_partial_info[global_cluster_q_idx]);
             ++rid;
         }
     }
@@ -445,10 +437,10 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
 
     // Step.7. Create tensors.
     auto int_opts = torch::TensorOptions().dtype(torch::kInt32);
-    auto work_info_set_tsr = torch::from_blob(work_info_set_flatten.data(), {num_works, kSizeMetadataInDw}, int_opts);
+    auto work_info_set_tsr = torch::from_blob(work_info_set_flatten.data(), {num_works, kSizeWorkInfoInDw}, int_opts);
     auto work_indptr_tsr = torch::from_blob(work_indptr.data(), {num_clusters + 1}, int_opts);
     auto reduce_indptr_tsr = torch::from_blob(reduce_indptr.data(), {num_reduce_row + 1}, int_opts);
-    auto reduce_final_map_tsr = torch::from_blob(reduce_final_map.data(), {num_reduce_row}, int_opts);
+    auto reduce_final_map_tsr = torch::from_blob(reduce_final_map.data(), {num_reduce_row, kSizePartialInfoInDw}, int_opts);
     auto reduce_partial_map_tsr = torch::from_blob(reduce_partial_map_flatten.data(), {num_partial_outputs}, int_opts);
 
     // Last step. Copy to the device of input and return the results.

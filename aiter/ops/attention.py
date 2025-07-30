@@ -326,3 +326,15 @@ def get_mla_metadata_v1(
                                                      reduced.
     """
     ...
+
+
+@compile_ops("module_mla_reduce")
+def mla_reduce_v1(
+    final_lse: torch.Tensor,
+    final_output: torch.Tensor,
+    partial_lse: torch.Tensor,
+    partial_output: torch.Tensor,
+    reduce_indptr: torch.Tensor,
+    reduce_final_map: torch.Tensor,
+    reduce_partial_map: torch.Tensor,
+): ...

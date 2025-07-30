@@ -247,6 +247,11 @@ def mla_decode_fwd(
         print(reduce_final_map)
         print("reduce_partial_map:")
         print(reduce_partial_map)
+
+        aiter.mla_reduce_v1(
+            o, o, q, q, reduce_indptr, reduce_final_map, reduce_partial_map
+        )
+
         if use_test_data:
             exit()
 

@@ -134,7 +134,7 @@ __global__ void kn_mla_reduce_v1(
     const int32_t work_idx = blockIdx.x;
     const int32_t head_idx = blockIdx.y;
     const int32_t reduce_tile_start = params.p_reduce_indptr[work_idx];
-    const int32_t reduce_tile_end = params.p_reduce_indptr[work_idx - 1];
+    const int32_t reduce_tile_end = params.p_reduce_indptr[work_idx + 1];
     const MlaPartialTileInfo final_loc = params.p_reduce_final_map[work_idx];
 
     // Assuming that the layout of LSE final output is in [bs, h].
@@ -151,9 +151,9 @@ __global__ void kn_mla_reduce_v1(
 
     for (int32_t seq_idx = final_loc.q_start; seq_idx < final_loc.q_end; ++seq_idx)
     {
-        const int32_t sub_seqlen_idx = seq_idx - final_loc.q_start;
-        const float* p_partial_lse_seq_base = p_partial_lse_base + sub_seqlen_idx * Traits::kNumHeadQ;
-        const float* p_partial_output_seq_base = p_partial_output_base + sub_seqlen_idx * Traits::kNumHeadQ * Traits::kSizeDV;
+        const int32_t local_seqlen_idx = seq_idx - final_loc.q_start;
+        const float* p_partial_lse_seq_base = p_partial_lse_base + local_seqlen_idx * Traits::kNumHeadQ;
+        const float* p_partial_output_seq_base = p_partial_output_base + local_seqlen_idx * Traits::kNumHeadQ * Traits::kSizeDV;
 
         if (ck_tile::get_warp_id() == 0)
         {

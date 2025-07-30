@@ -141,7 +141,10 @@ float flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
                                              FlatmmConfig::K_Warp_Tile,
                                              CodegenPipelineProblem::TransposeC,
                                              memory_operation,
-                                             FlatmmConfig::NumWaveGroups>>;
+                                             FlatmmConfig::NumWaveGroups,
+                                             false,
+                                             1,
+                                             false>>;
 
         // ToDo: Will add the codegen part to test different pipeline policies in GEMM.
         // Now we only use the BlockGemmASmemBSmemCRegV1DefaultPolicy.
@@ -149,7 +152,7 @@ float flatmm_calc(const ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN>& args,
 
         auto kargs = Kernel::MakeKernelArgs(args);
 
-        const dim3 grids      = Kernel::GridSize(args.M, args.N, args.k_batch);
+        const dim3 grids      = Kernel::GridSize(kargs);
         constexpr dim3 blocks = Kernel::BlockSize();
 
         if(!Kernel::IsSupportedArgument(kargs))
@@ -348,6 +351,7 @@ gemm_a8w8_bpreshuffle_cktile_impl(torch::Tensor& XQ,
 
     using ScaleM       = typename ck_tile::FlatmmScalePointer<1>;
     using ScaleN       = typename ck_tile::FlatmmScalePointer<1>;
+
 
     ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN> args;
     args.a_ptr = (void*)XQ.data_ptr();

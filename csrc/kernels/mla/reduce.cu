@@ -126,13 +126,14 @@ CK_TILE_DEVICE static auto MakeOutputTileWindow(
 
 template <typename Traits, typename lse_t, typename out_t>
 __global__ void kn_mla_reduce_v1(
-    const MlaReduceKernelV1Params& params)
+    const MlaReduceKernelV1Params params)
 {
     __shared__ float lds_lse_scale[Traits::kMaxSplits];
 
     const int32_t lane_idx = ck_tile::get_lane_id();
     const int32_t work_idx = blockIdx.x;
     const int32_t head_idx = blockIdx.y;
+
     const int32_t reduce_tile_start = params.p_reduce_indptr[work_idx];
     const int32_t reduce_tile_end = params.p_reduce_indptr[work_idx + 1];
     const MlaPartialTileInfo final_loc = params.p_reduce_final_map[work_idx];

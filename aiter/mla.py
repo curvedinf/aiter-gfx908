@@ -289,6 +289,7 @@ def mla_decode_fwd(
     attn_lse = torch.empty(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
+    import pdb;pdb.set_trace()
 
     aiter.mla_decode_stage1_asm_fwd(
         q,
@@ -312,6 +313,7 @@ def mla_decode_fwd(
     )
 
     final_lse = torch.empty_like(attn_lse)
+    import pdb;pdb.set_trace()
 
     aiter.mla_reduce_v1(
         final_lse,

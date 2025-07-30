@@ -483,7 +483,7 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[3],
+    default=[1],
     help="""Batch size.
     e.g.: -b 16""",
 )

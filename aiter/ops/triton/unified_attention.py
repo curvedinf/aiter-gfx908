@@ -110,7 +110,6 @@ def kernel_unified_attention_2d(
 
     q_block_local_idx = q_block_global_idx - q_block_start_idx
 
-
     cur_batch_query_len = cur_batch_in_all_stop_index - cur_batch_in_all_start_index
 
     if q_block_local_idx * BLOCK_Q >= cur_batch_query_len:
@@ -297,6 +296,7 @@ def kernel_unified_attention_2d(
         mask=dim_mask[None, :] & query_mask_0[:, None] & query_mask_1[:, None],
     )
 
+
 @triton.jit
 def kernel_unified_attention_3d(
     segm_output_ptr,
@@ -457,7 +457,12 @@ def kernel_unified_attention_3d(
         )
 
         # K : (HEAD_SIZE, BLOCK_SIZE)
-        K_load = tl.load(key_cache_ptr + k_offset, mask=dim_mask[:, None], other=0.0, cache_modifier=".cg")
+        K_load = tl.load(
+            key_cache_ptr + k_offset,
+            mask=dim_mask[:, None],
+            other=0.0,
+            cache_modifier=".cg",
+        )
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -468,7 +473,12 @@ def kernel_unified_attention_3d(
             K = K_load
 
         # V : (BLOCK_SIZE, HEAD_SIZE)
-        V_load = tl.load(value_cache_ptr + v_offset, mask=dim_mask[None, :], other=0.0, cache_modifier=".cg")
+        V_load = tl.load(
+            value_cache_ptr + v_offset,
+            mask=dim_mask[None, :],
+            other=0.0,
+            cache_modifier=".cg",
+        )
 
         if V_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -702,7 +712,7 @@ def unified_attention(
         num_stages_2d = 4
         num_warps = 4
         if max_seqlen_q == 1 and SLIDING_WINDOW > 0:
-            num_warps = 2    
+            num_warps = 2
         # make the block_m bigger if we already have enough parallelism
         if num_2d_prgms >= 4 * target_num_prgms:
             if num_2d_prgms <= 8 * target_num_prgms:

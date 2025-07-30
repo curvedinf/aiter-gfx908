@@ -277,7 +277,7 @@ def mla_decode_fwd(
         MAYBE_FINAL_OUT = False
     elif nhead in [16, 128]:
         MAYBE_FINAL_OUT = True
-        num_kv_splits = 16
+        num_kv_splits = 80
         logits = torch.zeros(
             (total_s, num_kv_splits, nhead, v_head_dim),
             dtype=dtypes.fp32,

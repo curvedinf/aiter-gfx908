@@ -144,6 +144,24 @@ void mla_decode_stage1_asm_fwd(
             }
         }
     }
+    else if(Q.dtype() == at::ScalarType::Float8_e4m3fn) // at::ScalarType::Float8_e4m3fnuz or at::ScalarType::Float8_e4m3fn ?
+    {
+        if(gqa_ratio == 16)
+        {
+            if(max_seqlen_q <= 4)
+            {
+                sub_Q = 128;
+                static AiterAsmKernel impl_a16w16_bf16(
+                    "mla_kernel_func",
+                    "/mla/mla_a16w16_qh16_m16x4_n16x1_coex0_mask1_fp8.co");
+                impl_ptr = &impl_a16w16_bf16;
+            }
+            else
+            {
+                assert(false);
+            }
+
+    }
 
     TORCH_CHECK(impl_ptr != nullptr, __func__, ": unsupport current Q_type:", Q.scalar_type());
 

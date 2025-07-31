@@ -82,6 +82,7 @@ def kernel_unified_attention_2d(
     BLOCK_Q: tl.constexpr,  # int
     num_seqs: tl.int32,
     BLOCK_M: tl.constexpr,  # int
+    ALL_DECODE: tl.constexpr,
 ):
     kv_head_idx = tl.program_id(0)
     q_block_global_idx = tl.program_id(1)
@@ -131,11 +132,17 @@ def kernel_unified_attention_2d(
     query_mask_0 = query_pos < cur_batch_query_len
     query_mask_1 = query_offset_1 < num_query_heads
 
+    if ALL_DECODE or BLOCK_M >= num_query_heads:
+        Q_cache_modifier: tl.constexpr = ".cg"
+    else:
+        Q_cache_modifier: tl.constexpr = ""
+
     # Q : (BLOCK_M, HEAD_SIZE_PADDED)
     Q = tl.load(
         query_ptr + query_offset,
         mask=dim_mask[None, :] & query_mask_0[:, None] & query_mask_1[:, None],
         other=0.0,
+        cache_modifier=Q_cache_modifier,
     )
 
     block_table_offset = seq_idx * block_table_stride
@@ -180,14 +187,16 @@ def kernel_unified_attention_2d(
     # cover the longest sequence prefix (due to causal masking, blocks beyond
     # this prefix can be skipped)
     num_blocks = cdiv_fn(max_seq_prefix_len, BLOCK_SIZE)
+
     if SLIDING_WINDOW > 0:
-        num_blocks_start = (max_seq_prefix_len - SLIDING_WINDOW - 1) // BLOCK_SIZE
+        num_blocks_start = (
+            max_seq_prefix_len - SLIDING_WINDOW - BLOCK_Q - 1
+        ) // BLOCK_SIZE
         # TODO (cagri): this works for most cases but not all, not sure why: num_blocks_start = max(0, num_blocks_start)
-        num_blocks_start = max(0, num_blocks_start - 1)
-        KV_cache_modifier: tl.constexpr = ".cg"
+        num_blocks_start = max(0, num_blocks_start)
     else:
         num_blocks_start = 0
-        KV_cache_modifier: tl.constexpr = ""
+    KV_cache_modifier: tl.constexpr = ".cg" if ALL_DECODE else ""
     # iterate through tiles
     for j in range(num_blocks_start, num_blocks):
 
@@ -294,7 +303,8 @@ def kernel_unified_attention_2d(
         acc += tl.dot(P.to(V.dtype), V)
 
     # epilogue
-    acc = acc / L[:, None]
+    one_over_L = 1.0 / L[:, None]
+    acc = acc * one_over_L
     output_offset = (
         query_offset_0[:, None] * output_stride_0
         + query_offset_1[:, None] * output_stride_1
@@ -349,6 +359,7 @@ def kernel_unified_attention_3d(
     num_seqs: tl.int32,
     BLOCK_M: tl.constexpr,  # int
     NUM_SEGMENTS_PER_SEQ: tl.constexpr,  # int
+    ALL_DECODE: tl.constexpr,
 ):
     q_block_global_idx = tl.program_id(2)
     kv_head_idx = tl.program_id(0)
@@ -412,6 +423,8 @@ def kernel_unified_attention_3d(
     query_mask_0 = query_pos < cur_batch_query_len
     query_mask_1 = query_offset_1 < num_query_heads
 
+    KV_cache_modifier: tl.constexpr = ".cg" if ALL_DECODE else ""
+
     # Q : (BLOCK_M, HEAD_SIZE_PADDED)
     Q = tl.load(
         query_ptr + query_offset,
@@ -472,7 +485,7 @@ def kernel_unified_attention_3d(
             key_cache_ptr + k_offset,
             mask=dim_mask[:, None],
             other=0.0,
-            cache_modifier=".cg",
+            cache_modifier=KV_cache_modifier,
         )
 
         if K_load.dtype.is_fp8():
@@ -488,7 +501,7 @@ def kernel_unified_attention_3d(
             value_cache_ptr + v_offset,
             mask=dim_mask[None, :],
             other=0.0,
-            cache_modifier=".cg",
+            cache_modifier=KV_cache_modifier,
         )
 
         if V_load.dtype.is_fp8():
@@ -626,6 +639,7 @@ def reduce_segments(
     segm_expsum = tl.load(segm_expsum_ptr + segm_offset, mask=segm_mask, other=0.0)
     segm_expsum = segm_expsum * tl.exp(segm_max - overall_max)
     overall_expsum = tl.sum(segm_expsum)
+    one_over_overall_expsum = 1 / overall_expsum
 
     # load, rescale, and add segment attention outputs
     segm_output_offset = (
@@ -643,7 +657,7 @@ def reduce_segments(
     segm_output *= tl.exp(segm_max - overall_max)[:, None]
     acc_sum = tl.sum(segm_output, axis=0)
     # safely divide by overall_expsum, returning 0.0 if overall_expsum is 0
-    acc = tl.where(overall_expsum == 0.0, 0.0, acc_sum / overall_expsum)
+    acc = tl.where(overall_expsum == 0.0, 0.0, acc_sum * one_over_overall_expsum)
 
     # write result
     output_offset = (
@@ -712,10 +726,11 @@ def unified_attention(
     total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
     target_num_prgms = get_num_sms() * 4
     num_2d_prgms = total_num_q_blocks * num_kv_heads
+    ALL_DECODE = max_seqlen_q == 1
 
     # call 2d if sliding window is used
     if SLIDING_WINDOW > 0 or num_2d_prgms >= target_num_prgms or max_seqlen_k <= 1024:
-        num_stages_2d = 4
+        num_stages_2d = 2
         num_warps = 4
         # make the block_m bigger if we already have enough parallelism
         if num_2d_prgms >= 2 * target_num_prgms:
@@ -728,6 +743,13 @@ def unified_attention(
             else:
                 BLOCK_M = 64
                 num_stages_2d = 1
+            BLOCK_Q = BLOCK_M // num_queries_per_kv
+            total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
+
+        if max_seqlen_q >= 512 and block_size == 64:
+            BLOCK_M = 128
+            num_stages_2d = 1
+            num_warps = 4
             BLOCK_Q = BLOCK_M // num_queries_per_kv
             total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
 
@@ -774,16 +796,21 @@ def unified_attention(
             BLOCK_Q=BLOCK_Q,
             num_seqs=num_seqs,
             BLOCK_M=BLOCK_M,
+            ALL_DECODE=ALL_DECODE,
             waves_per_eu=2,
             num_warps=num_warps,
             num_stages=num_stages_2d,
         )
     else:
+        # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
+        # q.shape[0] is sum(query_lens) which becomes same as batch size
+        # so it is static dim. for decode, should be okay to use it in heuristics
         # make the block_m bigger if we already have enough parallelism
         NUM_SEGMENTS = math.ceil(target_num_prgms / (total_num_q_blocks * num_kv_heads))
         NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
         NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
-        NUM_SEGMENTS = max(NUM_SEGMENTS, 16)
+        MIN_SEGMENTS = 16 if block_size <= 16 else 8
+        NUM_SEGMENTS = max(NUM_SEGMENTS, MIN_SEGMENTS)
         segm_output = torch.empty(
             q.shape[0],
             num_query_heads,
@@ -846,6 +873,7 @@ def unified_attention(
             num_seqs=num_seqs,
             BLOCK_M=BLOCK_M,
             NUM_SEGMENTS_PER_SEQ=NUM_SEGMENTS,
+            ALL_DECODE=ALL_DECODE,
             waves_per_eu=2,
             num_stages=1,
             num_warps=2,

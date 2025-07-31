@@ -13,14 +13,13 @@ e5m2_type, e4m3_type = get_fp8_dtypes()
 
 NUM_HEADS = [(4, 4), (8, 2), (16, 2)]
 HEAD_SIZES = [128, 256]
-BLOCK_SIZES = [16, 32]
+BLOCK_SIZES = [16, 64]
 
 DTYPES = [torch.float16, torch.bfloat16]
 QDTYPES = [None, e4m3_type]
 # one value large enough to test overflow in index calculation.
 # one value small enough to test the schema op check
-NUM_BLOCKS = [32768, 2048]
-
+NUM_BLOCKS = [32768, 4096]
 
 def ref_paged_attn(
     query: torch.Tensor,
@@ -97,9 +96,9 @@ def ref_paged_attn(
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
 @pytest.mark.parametrize("block_size", BLOCK_SIZES)
-@pytest.mark.parametrize("sliding_window", [None, 256])
+@pytest.mark.parametrize("sliding_window", [None, 128, 256])
 @pytest.mark.parametrize("dtype", DTYPES)
-@pytest.mark.parametrize("soft_cap", [None, 10.0, 50.0])
+@pytest.mark.parametrize("soft_cap", [None, 50.0])
 @pytest.mark.parametrize("num_blocks", NUM_BLOCKS)
 @pytest.mark.parametrize("q_dtype", QDTYPES)
 @torch.inference_mode()

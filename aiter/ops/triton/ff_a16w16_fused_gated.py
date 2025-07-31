@@ -22,7 +22,7 @@ from aiter.ops.triton.activation import _get_activation_from_str
     }
 )
 @triton.jit
-def _ff_fused_gated(
+def _ff_a16w16_fused_gated(
     x_ptr,
     w1_ptr,
     w2_ptr,
@@ -199,7 +199,7 @@ def _get_config(
         return _get_config._config_dict[key]["M_GEQ_4096"]
 
 
-def ff_fused_gated(
+def ff_a16w16_fused_gated(
     x,
     w_up,
     w_down,
@@ -247,7 +247,7 @@ def ff_fused_gated(
     grid = lambda META: (  # noqa: E731
         triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
     )
-    _ff_fused_gated[grid](
+    _ff_a16w16_fused_gated[grid](
         x,
         w_up,
         w_down,

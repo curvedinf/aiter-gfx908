@@ -184,8 +184,10 @@ def kernel_unified_attention_2d(
         num_blocks_start = (max_seq_prefix_len - SLIDING_WINDOW - 1) // BLOCK_SIZE
         # TODO (cagri): this works for most cases but not all, not sure why: num_blocks_start = max(0, num_blocks_start)
         num_blocks_start = max(0, num_blocks_start - 1)
+        KV_cache_modifier: tl.constexpr = ".cg"
     else:
         num_blocks_start = 0
+        KV_cache_modifier: tl.constexpr = ""
     # iterate through tiles
     for j in range(num_blocks_start, num_blocks):
 
@@ -208,7 +210,7 @@ def kernel_unified_attention_2d(
         )
 
         # K : (HEAD_SIZE, BLOCK_SIZE)
-        K_load = tl.load(key_cache_ptr + k_offset, mask=dim_mask[:, None], other=0.0)
+        K_load = tl.load(key_cache_ptr + k_offset, mask=dim_mask[:, None], other=0.0, cache_modifier=KV_cache_modifier)
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -219,7 +221,7 @@ def kernel_unified_attention_2d(
             K = K_load
 
         # V : (BLOCK_SIZE, HEAD_SIZE)
-        V_load = tl.load(value_cache_ptr + v_offset, mask=dim_mask[None, :], other=0.0)
+        V_load = tl.load(value_cache_ptr + v_offset, mask=dim_mask[None, :], other=0.0, cache_modifier=KV_cache_modifier)
 
         if V_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -700,25 +702,23 @@ def unified_attention(
     #    = floor(q.shape[0] / BLOCK_Q) + num_seqs
 
     total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
-    target_num_prgms = get_num_sms() * 2
+    target_num_prgms = get_num_sms() * 4
     num_2d_prgms = total_num_q_blocks * num_kv_heads
 
     # call 2d if sliding window is used
     if (
         SLIDING_WINDOW > 0
-        or num_2d_prgms >= target_num_prgms * 2
+        or num_2d_prgms >= target_num_prgms
         or max_seqlen_k <= 1024
     ):
         num_stages_2d = 4
         num_warps = 4
-        if max_seqlen_q == 1 and SLIDING_WINDOW > 0:
-            num_warps = 2
         # make the block_m bigger if we already have enough parallelism
-        if num_2d_prgms >= 4 * target_num_prgms:
-            if num_2d_prgms <= 8 * target_num_prgms:
+        if num_2d_prgms >= 2 * target_num_prgms:
+            if num_2d_prgms <= 4 * target_num_prgms:
                 BLOCK_M = 64
                 num_stages_2d = 2 if SLIDING_WINDOW > 0 else 4
-            elif num_2d_prgms <= 16 * target_num_prgms:
+            elif num_2d_prgms <= 8 * target_num_prgms:
                 BLOCK_M = 64
                 num_stages_2d = 1 if SLIDING_WINDOW > 0 else 2
             else:
@@ -780,7 +780,7 @@ def unified_attention(
         # so it is static dim. for decode, should be okay to use it in heuristics
         # make the block_m bigger if we already have enough parallelism
         NUM_SEGMENTS = math.ceil(target_num_prgms / (total_num_q_blocks * num_kv_heads))
-        NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS) * 2
+        NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
         NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
         NUM_SEGMENTS = max(NUM_SEGMENTS, 16)
         segm_output = torch.empty(

@@ -146,13 +146,12 @@ __global__ void kn_mla_reduce_v1(
     // Thus, stride of hidden dim is 1, head is Traits::kSizeDV and b/s is Traits::kSizeDV * #heads
     // while the strides are 1, params.stride_h_o and params.stride_s_o for final output.
     out_t* p_final_out_base = reinterpret_cast<out_t*>(params.p_final_output) + head_idx * params.stride_h_o;
-    const float* p_partial_output_base = reinterpret_cast<float*>(params.p_partial_output) + head_idx * Traits::kSizeDV;
 
     for (int32_t seq_idx = final_loc.q_start; seq_idx < final_loc.q_end; ++seq_idx)
     {
         const int32_t local_seqlen_idx = seq_idx - final_loc.q_start;
         const float* p_partial_lse_seq_base = p_partial_lse_base + local_seqlen_idx * Traits::kNumHeadQ;
-        const float* p_partial_output_seq_base = p_partial_output_base + local_seqlen_idx * Traits::kNumHeadQ * Traits::kSizeDV;
+        const float* p_partial_output_seq_base = reinterpret_cast<float*>(params.p_partial_output) + local_seqlen_idx * Traits::kNumHeadQ * Traits::kSizeDV;
 
         if (ck_tile::get_warp_id() == 0)
         {

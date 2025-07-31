@@ -211,13 +211,16 @@ def mla_decode_fwd(
     ):
         qs = torch.tensor_split(q, qo_indptr.tolist()[1:])
         kvc = torch.index_select(kvc_cache, 0, kv_indices)
+
+
+
         kvs = torch.tensor_split(kvc, kv_indptr.tolist()[:])
         bs = qo_indptr.shape[0] - 1
 
         os = []
         lses = []
         for i in range(bs):
-            kvc = kvs[i]
+            kvc = kvs[1]
             q = qs[i]
             k = kvc
             v, _ = torch.split(kvc, [kv_lora_rank, qk_rope_head_dim], dim=-1)
@@ -228,8 +231,8 @@ def mla_decode_fwd(
         lse = torch.concat(lses)
         return o, lse.transpose(0, 1)
 
-    kv_indptr[0] = 192
-    kv_indptr[1] = 384
+    # kv_indptr[0] = 192
+    # kv_indptr[1] = 384
 
     out_ref, lse_ref = torch_mla_extend(
         q,
@@ -263,7 +266,7 @@ def mla_decode_fwd(
         attn_lse,
         o,
     )
-    # import pdb; pdb.set_trace()
+    import pdb; pdb.set_trace()
 
     aiter.mla_reduce_v1(
         logits,

@@ -488,7 +488,7 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[1],
+    default=[20],
     help="""Batch size.
     e.g.: -b 16""",
 )
@@ -527,7 +527,7 @@ for nhead, mtp in list_nhead:
             dtype,
             kvtype,
             args.block_size,
-            varlen=False,
+            varlen=True,
             mtp=mtp,
         )
         df.append(ret)

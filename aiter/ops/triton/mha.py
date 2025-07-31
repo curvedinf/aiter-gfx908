@@ -445,10 +445,14 @@ def _attn_fwd_persistent_pooled(
     tile_id = tile_id_local + pool_offset
 
     while tile_id_local < pool_size:
-        off_q_head = tile_id % NUM_Q_HEADS
-        off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS, NUM_XCD)
-        start_m = (tile_id // NUM_Q_HEADS) % NUM_BLOCKS
-        off_z = (tile_id // (NUM_BLOCKS * NUM_Q_HEADS)) % BATCH
+        start_m = (tile_id) % NUM_BLOCKS
+        off_z = (tile_id // (NUM_BLOCKS)) % BATCH
+        off_q_head = (tile_id // (NUM_BLOCKS * BATCH)) % NUM_Q_HEADS
+
+        # off_q_head = tile_id % (NUM_Q_HEADS // NUM_XCD)
+        # # off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS, NUM_XCD)
+        # start_m = (tile_id // NUM_Q_HEADS) % NUM_BLOCKS
+        # off_z = (tile_id // (NUM_BLOCKS * NUM_Q_HEADS)) % BATCH
 
         # offsets
         offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -1006,12 +1010,9 @@ def _attn_fwd_persistent_static(
     workgroup_id = tl.program_id(
         0
     )  # workgroup id ranging: 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
-    
 
     num_tiles = NUM_Q_HEADS * NUM_BLOCKS * BATCH
-
-    # tile_id = workgroup_id
-
+    batch_per_round = max((256 // (NUM_Q_HEADS * NUM_BLOCKS)), 1)
 
     # while tile_id < num_tiles:
     for tile_id in tl.range(workgroup_id, num_tiles, NUM_WGS, flatten=True):
@@ -1019,6 +1020,9 @@ def _attn_fwd_persistent_static(
         off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS, NUM_XCD)
         start_m = (tile_id // NUM_Q_HEADS) % NUM_BLOCKS
         off_z = (tile_id // (NUM_BLOCKS * NUM_Q_HEADS)) % BATCH
+
+        if (off_z // batch_per_round) % 2 == 1:
+            start_m = (NUM_BLOCKS - 1) - start_m
 
         # offsets
         offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
@@ -2749,21 +2753,17 @@ def _flash_attn_forward(
         dropout_mask = None
 
     persistent = True
-    
+    pooled = False
+    dynamic = False # only in effect if pooled False
+
     if config is None:
         config = _get_config(enable_dropout, persistent, q.dtype)
-
-    
-    
     if persistent:
         NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
         num_tiles = batch * num_q_heads * triton.cdiv(seqlen_q, config["BLOCK_M"]) 
         # print("num_tiles", num_tiles)
         grid = (min(num_tiles, NUM_WGS),)
         NUM_XCDS = 8
-        
-        pooled = False
-        dynamic = False # only in effect if pooled False
 
         if pooled: # NUM_XCDS pools of tiles (pids). The pool the next tile gets fetched from is based on which XCD the persistent workgroup exists.
             pool_counters = torch.zeros([NUM_XCDS]).to(q.device).to(torch.int32)

@@ -210,7 +210,12 @@ def kernel_unified_attention_2d(
         )
 
         # K : (HEAD_SIZE, BLOCK_SIZE)
-        K_load = tl.load(key_cache_ptr + k_offset, mask=dim_mask[:, None], other=0.0, cache_modifier=KV_cache_modifier)
+        K_load = tl.load(
+            key_cache_ptr + k_offset,
+            mask=dim_mask[:, None],
+            other=0.0,
+            cache_modifier=KV_cache_modifier,
+        )
 
         if K_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -221,7 +226,12 @@ def kernel_unified_attention_2d(
             K = K_load
 
         # V : (BLOCK_SIZE, HEAD_SIZE)
-        V_load = tl.load(value_cache_ptr + v_offset, mask=dim_mask[None, :], other=0.0, cache_modifier=KV_cache_modifier)
+        V_load = tl.load(
+            value_cache_ptr + v_offset,
+            mask=dim_mask[None, :],
+            other=0.0,
+            cache_modifier=KV_cache_modifier,
+        )
 
         if V_load.dtype.is_fp8():
             if Q.dtype.is_fp8():
@@ -706,11 +716,7 @@ def unified_attention(
     num_2d_prgms = total_num_q_blocks * num_kv_heads
 
     # call 2d if sliding window is used
-    if (
-        SLIDING_WINDOW > 0
-        or num_2d_prgms >= target_num_prgms
-        or max_seqlen_k <= 1024
-    ):
+    if SLIDING_WINDOW > 0 or num_2d_prgms >= target_num_prgms or max_seqlen_k <= 1024:
         num_stages_2d = 4
         num_warps = 4
         # make the block_m bigger if we already have enough parallelism

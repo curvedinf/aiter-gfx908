@@ -1494,7 +1494,29 @@ def _process_tile(
             tl.store(out_ptr + offs_out, op, mask=out_mask)
 
 
-        
+@triton.jit
+def get_wg_offset(num_tiles: int, wg: int, NUM_WGS: tl.constexpr = 256):
+    """
+    num_tiles: total number of tiles all the pools combined
+    wg: current wg id. 0-indexed.
+    NUM_WGS: total number of wgs (persistent workgroups). Default is 256 for MI3XX series.
+    """
+    pids_per_wg = (num_tiles + NUM_WGS - 1) // NUM_WGS # ceiling division
+    # When NUM_WGS cannot divide num_tiles, some wgs will have
+    # pids_per_wg pids, the other will have pids_per_xcd - 1 pids.
+    # We calculate the number of wgs that have pids_per_wg pids as
+    # tall_wgs
+    tall_wgs = num_tiles % NUM_WGS
+    tall_wgs = NUM_WGS if tall_wgs == 0 else tall_wgs
+    if wg < tall_wgs:
+        wg_offset = wg * pids_per_wg  
+    else:
+        wg_offset = (
+            tall_wgs * pids_per_wg
+            + (wg - tall_wgs) * (pids_per_wg - 1)
+        )
+
+    return wg_offset
 
 
 @triton.jit
@@ -1564,6 +1586,11 @@ def _attn_fwd_persistent_static(
     NUM_WGS: tl.constexpr,
     sorted_tile_indices,
 ):
+    # sorted_tile_indices has the tile indices sorted in a descending order based on the workload of the tile
+    # process <tiles_per_workgroup // 2> tiles in front to back order (high workload tiles)
+    # and then the same amount (possibly plus 1 if num_tiles // NUM_WGS is not even) in back to front order
+    # this ensures that all the persistent workgroups get roughly the same amount of work
+    
     # num blocks along seqlen
     NUM_BLOCKS: tl.constexpr  = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
     # calculate offsets
@@ -1572,22 +1599,17 @@ def _attn_fwd_persistent_static(
     )  # workgroup id ranging: 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
     
     num_tiles: tl.constexpr = NUM_Q_HEADS * NUM_BLOCKS * BATCH
-    tiles_per_workgroup = num_tiles // NUM_WGS
+    
+    high_tiles = num_tiles // 2
+    high_tiles_per_workgroup = high_tiles // NUM_WGS
 
-    if workgroup_id < (num_tiles % NUM_WGS):
-        tiles_per_workgroup += 1
+    if workgroup_id < (high_tiles % NUM_WGS):
+        high_tiles_per_workgroup += 1
 
-    high_tiles = tiles_per_workgroup // 2
-    # sorted_tile_indices has the tile indices sorted in a descending order based on the workload of the tile
-    # process first the high workload tiles in front to back order
-    # and the rest in back to front order
-    # this is to ensure that all the persistent workgroups get roughly the same amount of work
+    start_tile = get_wg_offset(high_tiles, workgroup_id, NUM_WGS)
 
-    for i in tl.range(0, tiles_per_workgroup, flatten=True):
-        if i < high_tiles: # front to back
-            tile_id = workgroup_id + i * NUM_WGS
-        else: # back to front
-            tile_id = num_tiles - (workgroup_id + (i - high_tiles) * NUM_WGS)
+    for i in range(high_tiles_per_workgroup):
+        tile_id = start_tile + i
         
         off_q_head = tile_id % NUM_Q_HEADS
 
@@ -1666,6 +1688,98 @@ def _attn_fwd_persistent_static(
              USE_INT64_STRIDES, 
              NUM_WGS, 
              sorted_tile_indices,)
+
+
+    low_tiles = num_tiles - high_tiles
+    low_tiles_per_workgroup = low_tiles // NUM_WGS
+    if workgroup_id < (low_tiles % NUM_WGS):
+        low_tiles_per_workgroup += 1
+
+    start_tile = get_wg_offset(low_tiles, workgroup_id, NUM_WGS)
+
+    for i in range(low_tiles_per_workgroup):
+        tile_id = num_tiles - 1 - (start_tile + i)
+
+        off_q_head = tile_id % NUM_Q_HEADS
+
+        token_id = tile_id // NUM_Q_HEADS
+
+        sorted_tile_id = tl.load(sorted_tile_indices + token_id).to(tl.int32)
+
+        start_m = sorted_tile_id % NUM_BLOCKS
+        off_z = sorted_tile_id // NUM_BLOCKS % BATCH
+
+        _process_tile(
+            start_m,
+            off_q_head,
+            off_z,
+            q_ptr,
+            k_ptr,
+            v_ptr,
+            descale_q_ptr,
+            descale_k_ptr,
+            descale_v_ptr,
+            out_ptr,
+            alibi_slopes_ptr,
+            s_dmask_ptr,
+            dropout_mask_ptr,
+            softmax_lse_ptr,
+            stride_qz_in,
+            stride_qh_in,
+            stride_qm_in,
+            stride_qk_in,
+            stride_kz_in,
+            stride_kh_in,
+            stride_kn_in,
+            stride_kk_in,
+            stride_vz_in,
+            stride_vh_in,
+            stride_vn_in,
+            stride_vk_in,
+            stride_descale_q_z_in,
+            stride_descale_k_z_in,
+            stride_descale_v_z_in,
+            stride_oz_in,
+            stride_oh_in,
+            stride_om_in,
+            stride_on_in,
+            stride_alibi_z_in,
+            stride_alibi_h_in,
+            stride_sd_z_in,
+            stride_sd_h_in,
+            stride_sd_m_in,
+            stride_sd_n_in,
+            stride_lse_z_in,
+            stride_lse_h_in,
+            stride_lse_m_in,
+            sm_scale,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            dropout_p,
+            philox_seed,
+            philox_offset_base_in,
+            SEQLEN_Q,
+            SEQLEN_K,
+            IS_CAUSAL,
+            NUM_Q_HEADS,
+            NUM_K_HEADS,
+            BLOCK_M,
+            BLOCK_N,
+            BLOCK_DMODEL,
+            BLOCK_DMODEL_POW2,
+            RETURN_SCORES,
+            ENABLE_DROPOUT,
+            IS_FP8, 
+             FP8_MAX, 
+             VARLEN, 
+             BATCH, 
+             NUM_XCD, 
+             USE_INT64_STRIDES, 
+             NUM_WGS, 
+             sorted_tile_indices,)
+
+
+
 
 
 

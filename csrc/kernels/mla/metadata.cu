@@ -214,12 +214,13 @@ struct MlaMetadataTraits
 //   [0] work_indptr:        (#cu_part + 1),      The IDs of work handled by each cu_part.
 //   [1] work information    (#work, 8)
 //   [1.0] bs_index:         (#work),             The index of batch handled by each work.
-//   [1.1] partial_index:    (#work),             The index of tile in output buffer when splits. -1 means no split.
+//   [1.1] partial_qo_loc:   (#work),             The location in qo of tile in output buffer when splits. -1 means no split.
 //   [1.2] q_start:          (#work),             The global index in seq where q/o starts.
 //   [1.3] q_end:            (#work),             The global index in seq where q/o ends (not included).
 //   [1.4] kv_start:         (#work),             The global index in seq where k/v starts.
 //   [1.5] kv_end:           (#work),             The global index in seq where k/v ends (not included).
-//   [1.6] pad               (#work, 2),          Pad to 8 DWs.
+//   [1.6] kv_offset:        (#work),             The delta between kv_end and seqlens_kv_indptr[batch_idx].
+//   [1.7] paddings:         (#work, 1),          Pad to 8 DWs.
 //   [2] reduce_indptr:      (#reduce_tiles + 1), The IDs in reduce_partial_map indicates the tiles should be merged
 //                                                together.
 //   [3] reduce_final_map:   (#reduce_tiles, 2),  The final output location and length of each group of tiles.
@@ -336,8 +337,9 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     for (int32_t cid = 0; cid < num_clusters; ++cid) { cost_heap.push(std::tuple{cid, 0.0f}); }
 
     // Step.4. Fill the output buffers except indptrs
-    int num_reduce_row     = 0;
-    int num_partial_outputs = 0;
+    int32_t num_reduce_row      = 0;
+    int32_t num_partial_outputs = 0;
+    int32_t loc_partial_outputs = 0;
     for (int32_t bid = 0; bid < batch_size; ++bid)
     {
         const int32_t qo_len         = qo_lens[bid];
@@ -376,18 +378,19 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
                 if (split_kv)
                 {
                     const int32_t global_cluster_q_idx = num_qo_clusters_indptr[bid] + tid;
-                    work_info.partial_index = num_partial_outputs;
+                    work_info.partial_qo_loc = loc_partial_outputs;
                     if (reduce_partial_map[global_cluster_q_idx].empty())
                     {
                         ++num_reduce_row;
                         reduce_partial_info[global_cluster_q_idx] = { work_info.q_start, work_info.q_end };
                     }
-                    reduce_partial_map[global_cluster_q_idx].push_back(num_partial_outputs);
+                    reduce_partial_map[global_cluster_q_idx].push_back(loc_partial_outputs);
                     ++num_partial_outputs;
+                    loc_partial_outputs += (work_info.q_end - work_info.q_start);
                 }
                 else
                 {
-                    work_info.partial_index = -1;
+                    work_info.partial_qo_loc = -1;
                 }
                 work_info_set[cid].push_back(work_info);
 

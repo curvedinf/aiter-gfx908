@@ -7,14 +7,12 @@
 #include "mla.h"
 
 template <int32_t kSizeDV_,
-          int32_t kSeqlenTileQ_,
           int32_t kNumHeadQ_,
           int32_t kMaxSplits_,
           bool    kOutputLse_>
 struct MlaReduceKernelV1Traits
 {
     static constexpr int32_t kSizeDV      = kSizeDV_;       // hidden dimension size of value/output
-    static constexpr int32_t kSeqlenTileQ = kSeqlenTileQ_;  // sequence length of tile in query/ouput
     static constexpr int32_t kNumHeadQ    = kNumHeadQ_;     // head count of q
     static constexpr int32_t kMaxSplits   = kMaxSplits_;
     static constexpr int32_t kNumWarps    = 2;
@@ -172,7 +170,7 @@ __global__ void kn_mla_reduce_v1(
                 if (tile_idx < reduce_tile_end)
                 {
                     const int64_t reduce_tile_pos =
-                        params.p_reduce_partial_map[tile_idx] * int64_t(Traits::kSeqlenTileQ) * Traits::kNumHeadQ;
+                        params.p_reduce_partial_map[tile_idx] * int64_t(Traits::kNumHeadQ);
                     const float lse = p_partial_lse_seq_base[reduce_tile_pos];
                     local_lse[i] = lse;
                     max_lse = ck_tile::max(max_lse, lse);
@@ -238,7 +236,7 @@ __global__ void kn_mla_reduce_v1(
         {
             const int32_t split_idx = tile_idx - reduce_tile_start;
 
-            const int64_t reduce_tile_pos = params.p_reduce_partial_map[tile_idx] * int64_t(Traits::kSeqlenTileQ) * Traits::kNumHeadQ * Traits::kSizeDV;
+            const int64_t reduce_tile_pos = params.p_reduce_partial_map[tile_idx] * int64_t(Traits::kNumHeadQ * Traits::kSizeDV);
             const float* p_partial_output = p_partial_output_seq_base + reduce_tile_pos;
             oaccu_window.set_bottom_tensor_view_data_ptr(p_partial_output);
 
@@ -278,12 +276,12 @@ __global__ void kn_mla_reduce_v1(
                                     constexpr int32_t NumCUs = 80;                                                  \
                                     if ((OUTPUT_LSE))                                                               \
                                     {                                                                               \
-                                        using Traits = MlaReduceKernelV1Traits<512, 4, NumHeads, NumCUs, true>;     \
+                                        using Traits = MlaReduceKernelV1Traits<512, NumHeads, NumCUs, true>;        \
                                         __VA_ARGS__;                                                                \
                                     }                                                                               \
                                     else                                                                            \
                                     {                                                                               \
-                                        using Traits = MlaReduceKernelV1Traits<512, 4, NumHeads, NumCUs, false>;    \
+                                        using Traits = MlaReduceKernelV1Traits<512, NumHeads, NumCUs, false>;       \
                                         __VA_ARGS__;                                                                \
                                     }                                                                               \
                                 }                                                                                   \
@@ -314,12 +312,12 @@ __global__ void kn_mla_reduce_v1(
                                     constexpr int32_t NumCUs = 80;                                                  \
                                     if ((OUTPUT_LSE))                                                               \
                                     {                                                                               \
-                                        using Traits = MlaReduceKernelV1Traits<512, 4, NumHeads, NumCUs, true>;     \
+                                        using Traits = MlaReduceKernelV1Traits<512, NumHeads, NumCUs, true>;        \
                                         __VA_ARGS__;                                                                \
                                     }                                                                               \
                                     else                                                                            \
                                     {                                                                               \
-                                        using Traits = MlaReduceKernelV1Traits<512, 4, NumHeads, NumCUs, false>;    \
+                                        using Traits = MlaReduceKernelV1Traits<512, NumHeads, NumCUs, false>;       \
                                         __VA_ARGS__;                                                                \
                                     }                                                                               \
                                 }                                                                                   \

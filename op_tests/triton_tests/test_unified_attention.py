@@ -21,6 +21,7 @@ QDTYPES = [None, e4m3_type]
 # one value small enough to test the schema op check
 NUM_BLOCKS = [32768, 4096]
 
+
 def ref_paged_attn(
     query: torch.Tensor,
     key_cache: torch.Tensor,

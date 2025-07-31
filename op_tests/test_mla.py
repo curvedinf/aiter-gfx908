@@ -30,10 +30,11 @@ def ref_masked_attention(
         attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
         attn_bias.to(query.dtype)
         attn_weights += attn_bias
+    lse = attn_weights.logsumexp(dim=-1)
     attn_weights = torch.softmax(attn_weights, dim=-1)
 
     out = torch.einsum("hqk,khd->qhd", attn_weights.float(), value.float())
-    return out.to(dtype)
+    return out.to(dtype), lse
 
 
 def torch_mha_extend(
@@ -52,14 +53,17 @@ def torch_mha_extend(
     bs = qo_indptr.shape[0] - 1
 
     os = []
+    lses = []
     for i in range(bs):
         q = qs[i]
         k = ks[i]
         v = vs[i]
-        o = ref_masked_attention(q, k, v, sm_scale, dtype)
+        o, lse = ref_masked_attention(q, k, v, sm_scale, dtype)
         os.append(o)
+        lses.append(lse)
     o = torch.concat(os)
-    return o
+    lse = torch.concat(lses).transpose(0, 1)
+    return o, lse
 
 
 def torch_mla_extend(
@@ -80,15 +84,18 @@ def torch_mla_extend(
     bs = qo_indptr.shape[0] - 1
 
     os = []
+    lses = []
     for i in range(bs):
         kvc = kvs[i]
         q = qs[i]
         k = kvc
         v, _ = torch.split(kvc, [kv_lora_rank, qk_rope_head_dim], dim=-1)
-        o = ref_masked_attention(q, k, v, sm_scale, dtype, is_causal=is_causal)
+        o, lse = ref_masked_attention(q, k, v, sm_scale, dtype, is_causal=is_causal)
         os.append(o)
+        lses.append(lse)
     o = torch.concat(os)
-    return o
+    lse = torch.concat(lses).transpose(0, 1)
+    return o, lse
 
 
 @benchmark()
@@ -147,7 +154,7 @@ def test_mla(
         k = torch.randn((total_kv, nhead, qk_head_dim), dtype=dtype)
         v = torch.randn((total_kv, nhead, v_head_dim), dtype=dtype)
 
-        out_ref = torch_mha_extend(
+        out_ref, lse_ref = torch_mha_extend(
             q,
             k,
             v,
@@ -197,7 +204,7 @@ def test_mla(
     def test_absorb_prefill():
         q = torch.randn((total_qo, nhead, qk_head_dim), dtype=dtype)
 
-        out_ref = torch_mla_extend(
+        out_ref, lse_ref = torch_mla_extend(
             q,
             kv_buffer,
             qo_indptr,
@@ -283,7 +290,7 @@ def test_mla(
     q = torch.randn((total_q, nhead, qk_head_dim), dtype=dtype)
 
     # troch implementation
-    out_ref = torch_mla_extend(
+    out_ref, lse_ref = torch_mla_extend(
         q,
         kv_buffer,
         qo_indptr,
@@ -350,7 +357,6 @@ def test_mla(
     kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
     out_asm = torch.empty((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
 
-
     (attn_logits, attn_lse), us_asm_decode = run_perftest(
         aiter.mla.mla_decode_fwd,
         q,
@@ -373,8 +379,7 @@ def test_mla(
     # print(f"{out_asm.view(total_q, -1)=}")
     # checkAllclose(logits_ref, attn_logits,
     #               msg=f'attn_logits [golden vs aiter_asm]')
-    # checkAllclose(lse_ref, attn_lse,
-    #               msg=f'attn_lse    [golden vs aiter_asm]')
+    checkAllclose(lse_ref, attn_lse, msg="attn_lse    [golden vs aiter_asm]")
     flops = mtp * total_kv * nhead * (qk_head_dim + v_head_dim) * 2
     bytes = (
         total_kv * nhead_kv * qk_head_dim + total_q * nhead * (qk_head_dim + v_head_dim)

@@ -140,124 +140,6 @@ def mla_decode_fwd(
     bs = qo_indptr.shape[0] - 1
     total_kv = kv_indices.shape[0]
 
-    test_v1 = False
-    if test_v1:
-        use_test_data = True
-        if use_test_data:
-            kv_seqlens_test_data = [
-                3819,
-                9978,
-                784,
-                530,
-                8062,
-                1390,
-                287,
-                1008,
-                5090,
-                5304,
-                7396,
-                2288,
-                2104,
-                4063,
-                3644,
-                5091,
-                6470,
-                4732,
-                7237,
-                430,
-                2777,
-                956,
-                1357,
-                5478,
-                1292,
-                521,
-                6802,
-                1347,
-                2388,
-                5062,
-                443,
-                8560,
-                5049,
-                7235,
-                927,
-                9580,
-                623,
-                4913,
-                2511,
-                8120,
-                1638,
-                4859,
-                600,
-                7289,
-                8278,
-                6693,
-                136,
-                1021,
-                1465,
-                5859,
-                1278,
-                7123,
-                7839,
-                2459,
-                1090,
-                6333,
-                812,
-                9358,
-                6345,
-                8616,
-                2313,
-                6115,
-                6059,
-                4963,
-            ]
-            kv_seqlens_test = torch.tensor(
-                kv_seqlens_test_data, dtype=torch.int, device="cuda"
-            )
-            batch_size = len(kv_seqlens_test_data)
-            qo_seqlens_test_data = []
-            for i in range(batch_size):
-                qo_seqlens_test_data.append(i % 4 + 1)
-            qo_seqlens_test = torch.tensor(
-                qo_seqlens_test_data, dtype=torch.int, device="cuda"
-            )
-            qo_indptr_test = torch.zeros(batch_size + 1, dtype=torch.int, device="cuda")
-            kv_indptr_test = torch.zeros(batch_size + 1, dtype=torch.int, device="cuda")
-            qo_indptr_test[1 : batch_size + 1] = torch.cumsum(qo_seqlens_test, dim=0)
-            kv_indptr_test[1 : batch_size + 1] = torch.cumsum(kv_seqlens_test, dim=0)
-        else:
-            qo_indptr_test = qo_indptr
-            kv_indptr_test = kv_indptr
-        print("qo_indptr_test:")
-        print(qo_indptr_test)
-        print("kv_indptr_test:")
-        print(kv_indptr_test)
-        (
-            work_indptr,
-            work_info_set,
-            reduce_indptr,
-            reduce_final_map,
-            reduce_partial_map,
-        ) = aiter.get_mla_metadata_v1(
-            qo_indptr_test, kv_indptr_test, nhead // nhead_kv, nhead_kv, True
-        )
-        print("work_indptr:")
-        print(work_indptr)
-        print("work_info_set:")
-        print(work_info_set)
-        print("reduce_indptr:")
-        print(reduce_indptr)
-        print("reduce_final_map:")
-        print(reduce_final_map)
-        print("reduce_partial_map:")
-        print(reduce_partial_map)
-
-        aiter.mla_reduce_v1(
-            q, q, reduce_indptr, reduce_final_map, reduce_partial_map, o, o
-        )
-
-        if use_test_data:
-            exit()
-
     if num_kv_splits is None:
         num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(
             num_kv_splits, kv_indptr, nhead, nhead_kv, max_seqlen_q
@@ -289,6 +171,7 @@ def mla_decode_fwd(
     attn_lse = torch.zeros(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
+    final_lse = torch.zeros((total_s, nhead), dtype=dtypes.fp32, device=device)
     # import pdb;pdb.set_trace()
 
     def ref_masked_attention(
@@ -308,10 +191,11 @@ def mla_decode_fwd(
             attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
             attn_bias.to(query.dtype)
             attn_weights += attn_bias
+        lse = attn_weights.logsumexp(dim=-1)
         attn_weights = torch.softmax(attn_weights, dim=-1)
 
         out = torch.einsum("hqk,khd->qhd", attn_weights.float(), value.float())
-        return out.to(dtype)
+        return out.to(dtype), lse
 
     def torch_mla_extend(
         q,  # [total_q, nheads, headdim_q]
@@ -327,24 +211,27 @@ def mla_decode_fwd(
     ):
         qs = torch.tensor_split(q, qo_indptr.tolist()[1:])
         kvc = torch.index_select(kvc_cache, 0, kv_indices)
-        kvs = torch.tensor_split(kvc, kv_indptr.tolist()[1:])
+        kvs = torch.tensor_split(kvc, kv_indptr.tolist()[:])
         bs = qo_indptr.shape[0] - 1
 
         os = []
+        lses = []
         for i in range(bs):
             kvc = kvs[i]
             q = qs[i]
             k = kvc
             v, _ = torch.split(kvc, [kv_lora_rank, qk_rope_head_dim], dim=-1)
-            o = ref_masked_attention(q, k, v, sm_scale, dtype, is_causal=is_causal)
+            o, lse = ref_masked_attention(q, k, v, sm_scale, dtype, is_causal=is_causal)
             os.append(o)
+            lses.append(lse)
         o = torch.concat(os)
-        return o
+        lse = torch.concat(lses)
+        return o, lse.transpose(0, 1)
 
     kv_indptr[0] = 192
     kv_indptr[1] = 384
 
-    out_ref = torch_mla_extend(
+    out_ref, lse_ref = torch_mla_extend(
         q,
         kv_buffer.reshape(-1, 1, 576),
         qo_indptr,
@@ -367,7 +254,6 @@ def mla_decode_fwd(
         # num_kv_splits_indptr,
         # None,
         # None,
-
         None,
         work_indptr,
         work_info_set,
@@ -377,9 +263,7 @@ def mla_decode_fwd(
         attn_lse,
         o,
     )
-    import pdb; pdb.set_trace()
-
-    final_lse = torch.empty_like(attn_lse)
+    # import pdb; pdb.set_trace()
 
     aiter.mla_reduce_v1(
         logits,
@@ -388,7 +272,7 @@ def mla_decode_fwd(
         reduce_final_map,
         reduce_partial_map,
         o,
-        None,
+        final_lse,
     )
 
     # if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
@@ -418,7 +302,7 @@ def mla_decode_fwd(
     #     num_stages=2,
     #     **extra_kargs,
     # )
-    return logits, attn_lse
+    return logits, final_lse
 
 
 def mla_prefill_fwd(

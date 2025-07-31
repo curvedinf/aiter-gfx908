@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
+#include <sstream>
 #include <torch/python.h>
 #include <c10/cuda/CUDAGuard.h>
 #include "aiter_hip_common.h"
@@ -80,34 +81,12 @@ CK_TILE_DEVICE static constexpr auto MakeOutputTileDistribution()
 }
 
 template <typename Traits, typename scalar_t>
-CK_TILE_DEVICE static auto MakeOaccuTileWindow(
-    const scalar_t* p_output_oaccu,
-    const int32_t   head_idx)
+CK_TILE_DEVICE static auto MakeTileWindow(
+    scalar_t* p_tile)
 {
     const auto naive_view =
         ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-            p_output_oaccu,
-            ck_tile::make_tuple(Traits::kNumHeadQ, Traits::kSizeDV),    // lengths
-            ck_tile::make_tuple(Traits::kSizeDV, 1),                    // strides
-            ck_tile::number<Traits::kSizeDV>{},                         // last dim alignment
-            ck_tile::number<1>{});                                      // last dim stride
-
-    // Each thread group handles tile whose shape is [1, Traits::kSizeDV]
-    const auto tile_window = ck_tile::make_tile_window(
-        naive_view,
-        ck_tile::make_tuple(ck_tile::number<1>{}, ck_tile::number<Traits::kSizeDV>{}), // window size
-        {head_idx, 0});                                                                // origin
-
-    return ck_tile::make_tile_window(tile_window, MakeOutputTileDistribution<Traits, scalar_t>());
-}
-
-template <typename Traits, typename scalar_t>
-CK_TILE_DEVICE static auto MakeOutputTileWindow(
-    scalar_t* p_output)
-{
-    const auto naive_view =
-        ck_tile::make_naive_tensor_view<ck_tile::address_space_enum::global>(
-            p_output,
+            p_tile,
             ck_tile::make_tuple(1, Traits::kSizeDV),    // lengths
             ck_tile::make_tuple(Traits::kSizeDV, 1),    // strides
             ck_tile::number<Traits::kSizeDV>{},         // last dim alignment
@@ -131,6 +110,7 @@ __global__ void kn_mla_reduce_v1(
     const int32_t lane_idx = ck_tile::get_lane_id();
     const int32_t work_idx = blockIdx.x;
     const int32_t head_idx = blockIdx.y;
+
     const int32_t reduce_tile_start = params.p_reduce_indptr[work_idx];
     const int32_t reduce_tile_end = params.p_reduce_indptr[work_idx + 1];
     const MlaPartialTileInfo final_loc = params.p_reduce_final_map[work_idx];
@@ -145,12 +125,13 @@ __global__ void kn_mla_reduce_v1(
     // Thus, stride of hidden dim is 1, head is Traits::kSizeDV and b/s is Traits::kSizeDV * #heads
     // while the strides are 1, params.stride_h_o and params.stride_s_o for final output.
     out_t* p_final_out_base = reinterpret_cast<out_t*>(params.p_final_output) + head_idx * params.stride_h_o;
+    const float* p_partial_output_base = reinterpret_cast<float*>(params.p_partial_output) + head_idx * Traits::kSizeDV;
 
     for (int32_t seq_idx = final_loc.q_start; seq_idx < final_loc.q_end; ++seq_idx)
     {
         const int32_t local_seqlen_idx = seq_idx - final_loc.q_start;
         const float* p_partial_lse_seq_base = p_partial_lse_base + local_seqlen_idx * Traits::kNumHeadQ;
-        const float* p_partial_output_seq_base = reinterpret_cast<float*>(params.p_partial_output) + local_seqlen_idx * Traits::kNumHeadQ * Traits::kSizeDV;
+        const float* p_partial_output_seq_base = p_partial_output_base + local_seqlen_idx * Traits::kNumHeadQ * Traits::kSizeDV;
 
         if (ck_tile::get_warp_id() == 0)
         {
@@ -225,7 +206,7 @@ __global__ void kn_mla_reduce_v1(
         __builtin_amdgcn_sched_barrier(0);
         ck_tile::block_sync_lds();
 
-        auto oaccu_window = MakeOaccuTileWindow<Traits, float>(nullptr, head_idx);
+        auto oaccu_window = MakeTileWindow<Traits, const float>(nullptr);
         auto reg_out = ck_tile::make_static_distributed_tensor<float>(
             decltype(ck_tile::load_tile(oaccu_window))::get_tile_distribution());
         ck_tile::set_tile(reg_out, 0.f);
@@ -246,98 +227,72 @@ __global__ void kn_mla_reduce_v1(
         }
 
         out_t* p_final_out = p_final_out_base + seq_idx * params.stride_s_o;
-        auto dram_out = MakeOutputTileWindow<Traits, out_t>(p_final_out);
+        auto dram_out = MakeTileWindow<Traits, out_t>(p_final_out);
         ck_tile::store_tile(dram_out, ck_tile::cast_tile<out_t>(reg_out));
     }
 }
 
-#define DISPATCH_MLA_MERGE_KERNEL(LSE_TYPE, OUT_TYPE, NUM_HEAD, NUM_CU, OUTPUT_LSE, NAME, ...)                      \
-    switch ((LSE_TYPE))                                                                                             \
-    {                                                                                                               \
-        case at::ScalarType::Float:                                                                                 \
-        {                                                                                                           \
-            using lse_t = float;                                                                                    \
-            switch ((OUT_TYPE))                                                                                     \
-            {                                                                                                       \
-                case at::ScalarType::BFloat16:                                                                      \
-                {                                                                                                   \
-                    using out_t = ck_tile::bf16_t;                                                                  \
-                    switch ((NUM_HEAD))                                                                             \
-                    {                                                                                               \
-                        case 16:                                                                                    \
-                        {                                                                                           \
-                            constexpr int32_t NumHeads = 16;                                                        \
-                            switch ((NUM_CU))                                                                       \
-                            {                                                                                       \
-                                case 80:                                                                            \
-                                {                                                                                   \
-                                    constexpr int32_t NumCUs = 80;                                                  \
-                                    if ((OUTPUT_LSE))                                                               \
-                                    {                                                                               \
-                                        using Traits = MlaReduceKernelV1Traits<512, NumHeads, NumCUs, true>;        \
-                                        __VA_ARGS__;                                                                \
-                                    }                                                                               \
-                                    else                                                                            \
-                                    {                                                                               \
-                                        using Traits = MlaReduceKernelV1Traits<512, NumHeads, NumCUs, false>;       \
-                                        __VA_ARGS__;                                                                \
-                                    }                                                                               \
-                                }                                                                                   \
-                                break;                                                                              \
-                                default:                                                                            \
-                                    TORCH_CHECK(false, NAME " doesn't support the specified CU count.");            \
-                            }                                                                                       \
-                        }                                                                                           \
-                        break;                                                                                      \
-                        default:                                                                                    \
-                            TORCH_CHECK(false, NAME " doesn't support the specified head count.");                  \
-                    }                                                                                               \
-                    break;                                                                                          \
-                }                                                                                                   \
-                break;                                                                                              \
-                case at::ScalarType::Half:                                                                          \
-                {                                                                                                   \
-                    using out_t = ck_tile::fp16_t;                                                                  \
-                    switch ((NUM_HEAD))                                                                             \
-                    {                                                                                               \
-                        case 16:                                                                                    \
-                        {                                                                                           \
-                            constexpr int32_t NumHeads = 16;                                                        \
-                            switch ((NUM_CU))                                                                       \
-                            {                                                                                       \
-                                case 80:                                                                            \
-                                {                                                                                   \
-                                    constexpr int32_t NumCUs = 80;                                                  \
-                                    if ((OUTPUT_LSE))                                                               \
-                                    {                                                                               \
-                                        using Traits = MlaReduceKernelV1Traits<512, NumHeads, NumCUs, true>;        \
-                                        __VA_ARGS__;                                                                \
-                                    }                                                                               \
-                                    else                                                                            \
-                                    {                                                                               \
-                                        using Traits = MlaReduceKernelV1Traits<512, NumHeads, NumCUs, false>;       \
-                                        __VA_ARGS__;                                                                \
-                                    }                                                                               \
-                                }                                                                                   \
-                                break;                                                                              \
-                                default:                                                                            \
-                                    TORCH_CHECK(false, NAME " doesn't support the specified CU count.");            \
-                            }                                                                                       \
-                        }                                                                                           \
-                        break;                                                                                      \
-                        default:                                                                                    \
-                            TORCH_CHECK(false, NAME " doesn't support the specified head count.");                  \
-                    }                                                                                               \
-                    break;                                                                                          \
-                }                                                                                                   \
-                break;                                                                                              \
-                default:                                                                                            \
-                    TORCH_CHECK(false, NAME " doesn't support output type ", toString((OUT_TYPE)), ".");            \
-            }                                                                                                       \
-        }                                                                                                           \
-        break;                                                                                                      \
-        default:                                                                                                    \
-            TORCH_CHECK(false, NAME " doesn't support LSE type ", toString((LSE_TYPE)), ".");                       \
+#define MLA_MERGE_CASE(NUM_HEAD_C, NUM_CU_C, OUTPUT_LSE_C, ...)                                             \
+    constexpr int32_t NumHeads  = (NUM_HEAD_C);                                                             \
+    constexpr int32_t NumCUs    = (NUM_CU_C);                                                               \
+    constexpr bool    OutputLse = (OUTPUT_LSE_C);                                                           \
+    using Traits = MlaReduceKernelV1Traits<512, NumHeads, NumCUs, OutputLse>;                               \
+    __VA_ARGS__;
+
+#define MLA_MERGE_CASE_IF(NUM_HEAD, NUM_HEAD_C, NUM_CU, NUM_CU_C, OUTPUT_LSE, OUTPUT_LSE_C, ...)            \
+    if (((NUM_HEAD) == (NUM_HEAD_C)) && ((NUM_CU) == (NUM_CU_C)) && ((OUTPUT_LSE) == (OUTPUT_LSE_C)))       \
+    {                                                                                                       \
+        MLA_MERGE_CASE(NUM_HEAD_C, NUM_CU_C, OUTPUT_LSE_C, __VA_ARGS__)                                     \
+    }
+
+#define MLA_MERGE_CASE_EF(NUM_HEAD, NUM_HEAD_C, NUM_CU, NUM_CU_C, OUTPUT_LSE, OUTPUT_LSE_C, ...)            \
+    else if (((NUM_HEAD) == (NUM_HEAD_C)) && ((NUM_CU) == (NUM_CU_C)) && ((OUTPUT_LSE) == (OUTPUT_LSE_C)))  \
+    {                                                                                                       \
+        MLA_MERGE_CASE(NUM_HEAD_C, NUM_CU_C, OUTPUT_LSE_C, __VA_ARGS__)                                     \
+    }
+
+#define MLA_MERGE_ERROR(NUM_HEAD, NUM_CU, OUTPUT_LSE, NAME)                                                 \
+    {                                                                                                       \
+        std::stringstream ss;                                                                               \
+        ss << "#heads: " << (NUM_HEAD) << ", #CUs: " << (NUM_CU) << ", Output LSE: " << (OUTPUT_LSE);       \
+        TORCH_CHECK(false, NAME " doesn't support the specified settings: ", ss.str().c_str(), ".");        \ 
+    }
+
+#define DISPATCH_MLA_MERGE_KERNEL(LSE_TYPE, OUT_TYPE, NUM_HEAD, NUM_CU, OUTPUT_LSE, NAME, ...)              \
+    switch ((LSE_TYPE))                                                                                     \
+    {                                                                                                       \
+        case at::ScalarType::Float:                                                                         \
+        {                                                                                                   \
+            using lse_t = float;                                                                            \
+            switch ((OUT_TYPE))                                                                             \
+            {                                                                                               \
+                case at::ScalarType::BFloat16:                                                              \
+                {                                                                                           \
+                    using out_t = ck_tile::bf16_t;                                                          \
+                    MLA_MERGE_CASE_IF(NUM_HEAD,  16, NUM_CU, 80, OUTPUT_LSE, true,  __VA_ARGS__)            \
+                    MLA_MERGE_CASE_EF(NUM_HEAD,  16, NUM_CU, 80, OUTPUT_LSE, false, __VA_ARGS__)            \
+                    MLA_MERGE_CASE_EF(NUM_HEAD, 128, NUM_CU, 80, OUTPUT_LSE, true,  __VA_ARGS__)            \
+                    MLA_MERGE_CASE_EF(NUM_HEAD, 128, NUM_CU, 80, OUTPUT_LSE, false, __VA_ARGS__)            \
+                    else MLA_MERGE_ERROR(NUM_HEAD, NUM_CU, OUTPUT_LSE, NAME);                               \
+                }                                                                                           \
+                break;                                                                                      \
+                case at::ScalarType::Half:                                                                  \
+                {                                                                                           \
+                    using out_t = ck_tile::fp16_t;                                                          \
+                    MLA_MERGE_CASE_IF(NUM_HEAD,  16, NUM_CU, 80, OUTPUT_LSE, true,  __VA_ARGS__)            \
+                    MLA_MERGE_CASE_EF(NUM_HEAD,  16, NUM_CU, 80, OUTPUT_LSE, false, __VA_ARGS__)            \
+                    MLA_MERGE_CASE_EF(NUM_HEAD, 128, NUM_CU, 80, OUTPUT_LSE, true,  __VA_ARGS__)            \
+                    MLA_MERGE_CASE_EF(NUM_HEAD, 128, NUM_CU, 80, OUTPUT_LSE, false, __VA_ARGS__)            \
+                    else MLA_MERGE_ERROR(NUM_HEAD, NUM_CU, OUTPUT_LSE, NAME);                               \
+                }                                                                                           \
+                break;                                                                                      \
+                default:                                                                                    \
+                    TORCH_CHECK(false, NAME " doesn't support output type ", toString((OUT_TYPE)), ".");    \
+            }                                                                                               \
+        }                                                                                                   \
+        break;                                                                                              \
+        default:                                                                                            \
+            TORCH_CHECK(false, NAME " doesn't support LSE type ", toString((LSE_TYPE)), ".");               \
     }
 
 template <typename Traits, typename lse_t, typename out_t>
@@ -369,6 +324,7 @@ void mla_reduce_v1(
 
     const bool output_lse = final_lse.has_value();
     const int32_t num_reduce_tile = reduce_indptr.size(0) - 1;
+    const int32_t num_heads = partial_output.size(-2);
     TORCH_CHECK(num_reduce_tile == reduce_final_map.size(0),
                 __func__, ": Invalid size of reduce_indptr or reduce_final_map!");
 
@@ -388,7 +344,7 @@ void mla_reduce_v1(
         DISPATCH_MLA_MERGE_KERNEL(
             output_lse ? final_lse.value().scalar_type() : at::ScalarType::Float,
             final_output.scalar_type(),
-            16,
+            num_heads,
             dev_prop.multiProcessorCount,
             output_lse,
             "kn_mla_reduce_v1",

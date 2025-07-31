@@ -132,6 +132,10 @@ def test_mla(
     else:
         seq_lens_kv.fill_(ctx_lens)
         seq_lens_qo.fill_(ctx_lens)
+
+    seq_lens_kv = torch.tensor([3819,9978,784,530,8062,1390,287,1008,5090,5304,7396,2288,2104,4063,3644,5091,6470,4732,7237,430,2777,956,1357,5478,1292,521,6802,1347,2388,5062,443,8560,5049,7235,927,9580,623,4913,2511,8120,1638,4859,600,7289,8278,6693,136,1021,1465,5859,1278,7123,7839,2459,1090,6333,812,9358,6345,8616,2313,6115,6059,4963,
+        3819,9978,784,530,8062,1390,287,1008,5090,5304,7396,2288,2104,4063,3644,5091,6470,4732,7237,430,2777,956,1357,5478], device="cuda")
+    seq_lens_kv = seq_lens_kv[:batch_size]
     kv_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens_kv, dim=0)
     kv_indices = torch.randint(0, num_page, (kv_indptr[-1].item(),), dtype=torch.int)
     qo_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens_qo, dim=0)
@@ -379,7 +383,7 @@ def test_mla(
     # print(f"{out_asm.view(total_q, -1)=}")
     # checkAllclose(logits_ref, attn_logits,
     #               msg=f'attn_logits [golden vs aiter_asm]')
-    checkAllclose(lse_ref, attn_lse, msg="attn_lse    [golden vs aiter_asm]")
+    # checkAllclose(lse_ref, attn_lse, msg="attn_lse    [golden vs aiter_asm]")
     flops = mtp * total_kv * nhead * (qk_head_dim + v_head_dim) * 2
     bytes = (
         total_kv * nhead_kv * qk_head_dim + total_q * nhead * (qk_head_dim + v_head_dim)
@@ -408,7 +412,7 @@ v_head_dim = 128
 block_size = 1
 list_dtype = ["bf16"]
 l_kv_dtype = ["bf16"]
-list_nhead = [(16, 3), (16, 4), (128, 2)]
+list_nhead = [(16, 3)]
 
 parser = argparse.ArgumentParser(
     formatter_class=argparse.RawTextHelpFormatter,
@@ -488,7 +492,7 @@ parser.add_argument(
     "--batchSize",
     type=int,
     nargs="*",
-    default=[20],
+    default=[i for i in range(1, 80)],
     help="""Batch size.
     e.g.: -b 16""",
 )

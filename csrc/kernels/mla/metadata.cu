@@ -321,7 +321,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
         else if (avg_kv_lens <= 16) limit = 64;
         else if (avg_kv_lens <= 32) limit = 128;
         else if (avg_kv_lens <= 64) limit = 192;
-        else limit = ck_tile::integer_divide_ceil(avg_kv_lens, 256) * 256;
+        else limit = ck_tile::integer_divide_ceil(avg_kv_lens, 16) * 16;
         return limit;
     }();
 

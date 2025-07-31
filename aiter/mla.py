@@ -234,18 +234,18 @@ def mla_decode_fwd(
     # kv_indptr[0] = 192
     # kv_indptr[1] = 384
 
-    out_ref, lse_ref = torch_mla_extend(
-        q,
-        kv_buffer.reshape(-1, 1, 576),
-        qo_indptr,
-        kv_indptr,
-        kv_indices,
-        sm_scale,
-        512,
-        64,
-        is_causal=True,
-        dtype=torch.bfloat16,
-    )
+    # out_ref, lse_ref = torch_mla_extend(
+    #     q,
+    #     kv_buffer.reshape(-1, 1, 576),
+    #     qo_indptr,
+    #     kv_indptr,
+    #     kv_indices,
+    #     sm_scale,
+    #     512,
+    #     64,
+    #     is_causal=True,
+    #     dtype=torch.bfloat16,
+    # )
 
     aiter.mla_decode_stage1_asm_fwd(
         q,
@@ -266,7 +266,7 @@ def mla_decode_fwd(
         attn_lse,
         o,
     )
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
 
     aiter.mla_reduce_v1(
         logits,

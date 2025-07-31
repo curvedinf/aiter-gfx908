@@ -289,7 +289,73 @@ def mla_decode_fwd(
     attn_lse = torch.zeros(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
-    import pdb;pdb.set_trace()
+    # import pdb;pdb.set_trace()
+
+    def ref_masked_attention(
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        scale: float,
+        dtype,
+        is_causal=True,
+    ) -> torch.Tensor:
+        attn_weights = torch.einsum("qhd,khd->hqk", query.float(), key.float()) * scale
+        if is_causal:
+            s_q = query.shape[0]
+            s_k = key.shape[0]
+            attn_bias = torch.zeros(s_q, s_k, dtype=query.dtype)
+            temp_mask = torch.ones(s_q, s_k, dtype=torch.bool).tril(diagonal=s_k - s_q)
+            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+            attn_bias.to(query.dtype)
+            attn_weights += attn_bias
+        attn_weights = torch.softmax(attn_weights, dim=-1)
+
+        out = torch.einsum("hqk,khd->qhd", attn_weights.float(), value.float())
+        return out.to(dtype)
+
+    def torch_mla_extend(
+        q,  # [total_q, nheads, headdim_q]
+        kvc_cache,  # [num_page * page_size, nhead_kv, qk_head_dim]
+        qo_indptr,
+        kv_indptr,
+        kv_indices,
+        sm_scale,
+        kv_lora_rank,
+        qk_rope_head_dim,
+        dtype,
+        is_causal=True,
+    ):
+        qs = torch.tensor_split(q, qo_indptr.tolist()[1:])
+        kvc = torch.index_select(kvc_cache, 0, kv_indices)
+        kvs = torch.tensor_split(kvc, kv_indptr.tolist()[1:])
+        bs = qo_indptr.shape[0] - 1
+
+        os = []
+        for i in range(bs):
+            kvc = kvs[i]
+            q = qs[i]
+            k = kvc
+            v, _ = torch.split(kvc, [kv_lora_rank, qk_rope_head_dim], dim=-1)
+            o = ref_masked_attention(q, k, v, sm_scale, dtype, is_causal=is_causal)
+            os.append(o)
+        o = torch.concat(os)
+        return o
+
+    kv_indptr[0] = 192
+    kv_indptr[1] = 384
+
+    out_ref = torch_mla_extend(
+        q,
+        kv_buffer.reshape(-1, 1, 576),
+        qo_indptr,
+        kv_indptr,
+        kv_indices,
+        sm_scale,
+        512,
+        64,
+        is_causal=True,
+        dtype=torch.bfloat16,
+    )
 
     aiter.mla_decode_stage1_asm_fwd(
         q,
@@ -311,9 +377,9 @@ def mla_decode_fwd(
         attn_lse,
         o,
     )
+    import pdb; pdb.set_trace()
 
     final_lse = torch.empty_like(attn_lse)
-    import pdb;pdb.set_trace()
 
     aiter.mla_reduce_v1(
         logits,
@@ -322,9 +388,8 @@ def mla_decode_fwd(
         reduce_final_map,
         reduce_partial_map,
         o,
-        final_lse,
+        None,
     )
-    import pdb;pdb.set_trace()
 
     # if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
     #     return logits.view(total_s, nhead, v_head_dim), attn_lse

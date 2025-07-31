@@ -294,8 +294,7 @@ def kernel_unified_attention_2d(
         acc += tl.dot(P.to(V.dtype), V)
 
     # epilogue
-    one_over_L = 1.0 / L[:, None]
-    acc = acc * one_over_L
+    acc = acc / L[:, None]
     output_offset = (
         query_offset_0[:, None] * output_stride_0
         + query_offset_1[:, None] * output_stride_1
@@ -627,7 +626,6 @@ def reduce_segments(
     segm_expsum = tl.load(segm_expsum_ptr + segm_offset, mask=segm_mask, other=0.0)
     segm_expsum = segm_expsum * tl.exp(segm_max - overall_max)
     overall_expsum = tl.sum(segm_expsum)
-    one_over_overall_expsum = 1 / overall_expsum
 
     # load, rescale, and add segment attention outputs
     segm_output_offset = (
@@ -645,7 +643,7 @@ def reduce_segments(
     segm_output *= tl.exp(segm_max - overall_max)[:, None]
     acc_sum = tl.sum(segm_output, axis=0)
     # safely divide by overall_expsum, returning 0.0 if overall_expsum is 0
-    acc = tl.where(overall_expsum == 0.0, 0.0, acc_sum * one_over_overall_expsum)
+    acc = tl.where(overall_expsum == 0.0, 0.0, acc_sum / overall_expsum)
 
     # write result
     output_offset = (

@@ -779,21 +779,3 @@ def test_mha_backward_varlen(
     torch.testing.assert_close(
         triton_dv, torch_dv.to(triton_out.dtype), atol=1e-2, rtol=1e-2
     )
-
-
-if __name__ == "__main__":
-    test_mha_varlen(
-        BATCH=1,
-        SEQLEN_Q=16384,
-        SEQLEN_K=16384,
-        NUM_Q_HEADS=64,
-        NUM_K_HEADS=64,
-        HEAD_SZ=128,
-        DROPOUT=0.0,
-        RETURN_LSE=False,
-        RETURN_SOFTMAX=False,
-        CAUSAL=True,
-        FP8=False,
-        dtype=torch.bfloat16
-    )
-    print("Test completed successfully.")

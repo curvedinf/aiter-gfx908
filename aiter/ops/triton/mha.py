@@ -1615,12 +1615,8 @@ def _flash_attn_forward(
         s_dmask = None
         dropout_mask = None
 
-    persistent = True
-    pooled = False
-    dynamic = False # only in effect if pooled False
-
     if config is None:
-        config = _get_config(enable_dropout, persistent, q.dtype)
+        config = _get_config(enable_dropout, _USE_MHA_PERSISTENT_KERNEL, q.dtype)
     if _USE_MHA_PERSISTENT_KERNEL:
         NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count # launch a persistent workgroup per CU
         num_tiles = batch * num_q_heads * triton.cdiv(seqlen_q, config["BLOCK_M"]) 

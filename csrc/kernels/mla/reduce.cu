@@ -306,11 +306,11 @@ void dispatch_mla_reduce_v1(
 }
 
 void mla_reduce_v1(
-    const torch::Tensor&          partial_output,        // contiguous [bs + #CU, h, dv]
-    const torch::Tensor&          partial_lse,           // contiguous [bs + #CU, h]
+    const torch::Tensor&          partial_output,        // contiguous [max(reduce_partial_map)+s, h, dv]
+    const torch::Tensor&          partial_lse,           // contiguous [max(reduce_partial_map)+s, h]
     const torch::Tensor&          reduce_indptr,         // contiguous [#work + 1]
     const torch::Tensor&          reduce_final_map,      // contiguous [#work, 2]
-    const torch::Tensor&          reduce_partial_map,    // contiguous [#split_tile]
+    const torch::Tensor&          reduce_partial_map,    // contiguous [reduce_indptr[-1]]
     torch::Tensor&                final_output,          //            [bs, h, dv]
     std::optional<torch::Tensor>& final_lse)             // contiguous [bs, h]
 {

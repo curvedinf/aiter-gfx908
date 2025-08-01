@@ -160,6 +160,7 @@ def _ff_a16w16_fused_gated(
 
         y_mask = (offs_ym[:, None] < M) & ((offs_k[None, :] + BLOCK_SIZE_K * k) < K)
         tl.atomic_add(y_ptrs, partial_sum_y, mask=y_mask, sem="relaxed", scope="gpu")
+        # tl.store(y_ptrs, partial_sum_y, mask=y_mask)
         w2_ptrs += BLOCK_SIZE_K * stride_w2k
         y_ptrs += BLOCK_SIZE_K * stride_yk
 

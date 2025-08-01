@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
+import itertools
 import torch
 import aiter
 from aiter import dtypes
@@ -10,6 +11,7 @@ from aiter.test_mha_common import (
     ck_randval_to_dropout_mask,
     convert_flash_attn_S_to_softmax,
 )
+from aiter.test_common import run_perftest, benchmark
 import pytest
 import argparse
 
@@ -126,30 +128,52 @@ def run_ck(
         return out, dropout_mask, dq, dk, dv, None
 
 
-@pytest.mark.parametrize("dtype", [dtypes.bf16])
-@pytest.mark.parametrize("mha_type", ["gqa"])
-@pytest.mark.parametrize("deterministic", [True])#, False])
-@pytest.mark.parametrize("bias_type", ["no"])#, "bias", "alibi"])
-@pytest.mark.parametrize("local", [False])#, True])
-@pytest.mark.parametrize("causal", [False])#, True])
-@pytest.mark.parametrize("dropout_p", [0.0])#, 0.17])
-@pytest.mark.parametrize("batch_size", [1])
-@pytest.mark.parametrize("nheads", [64])
-@pytest.mark.parametrize(
-    "d,d_v",
-    [
-        (128, 128),
-    ],
-)
-@pytest.mark.parametrize(
-    "seqlen_q,seqlen_k",
-    [
-        (1024, 1024),
-    ],
-)
+# @pytest.mark.parametrize("dtype", [dtypes.fp16, dtypes.bf16])
+# @pytest.mark.parametrize("mha_type", ["mha", "mqa", "gqa"])
+# @pytest.mark.parametrize("deterministic", [True, False])
+# @pytest.mark.parametrize("bias_type", ["no", "bias", "alibi"])
+# @pytest.mark.parametrize("local", [False, True])
+# @pytest.mark.parametrize("causal", [False, True])
+# @pytest.mark.parametrize("dropout_p", [0.0, 0.17])
+# @pytest.mark.parametrize("batch_size", [5])
+# @pytest.mark.parametrize("nheads", [6])
+# @pytest.mark.parametrize(
+#     "d,d_v",
+#     [
+#         (32, 32),
+#         (40, 40),
+#         (59, 59),
+#         (64, 64),
+#         (96, 96),
+#         (111, 111),
+#         (128, 128),
+#         (160, 160),
+#         (192, 192),
+#         (224, 224),
+#         (256, 256),
+#     ],
+# )
+# @pytest.mark.parametrize(
+#     "seqlen_q,seqlen_k",
+#     [
+#         (113, 203),
+#         (128, 217),
+#         (113, 211),
+#         (108, 256),
+#         (256, 512),
+#         (512, 256),
+#         (1024, 1024),
+#         (1023, 1024),
+#         (1024, 1023),
+#         (2048, 2048),
+#     ],
+# )
+
+@benchmark()
 def test_flash_attn_output(
     batch_size,
     nheads,
+    nheads_k,
     seqlen_q,
     seqlen_k,
     d,
@@ -164,7 +188,6 @@ def test_flash_attn_output(
 ):
     torch.random.manual_seed(0)
     torch.cuda.empty_cache()
-    nheads_k = nheads if mha_type == "mha" else (1 if mha_type == "mqa" else 8)
     assert nheads % nheads_k == 0
     window_size = (-1, -1) if not local else torch.randint(0, seqlen_k, (2,))
 
@@ -223,11 +246,11 @@ def test_flash_attn_output(
         dropout_p,
         causal,
         window_size,
-        deterministic,
-        return_lse,
-        return_attn_probs,
+        deterministic=deterministic,
+        return_lse=return_lse,
+        return_attn_probs=return_attn_probs,
     )
-    print(f'us: {us}')
+    print(f"MHA RESULT: batch: {q.shape[0]}, q_nheads: {q.shape[2]}, kv_nheads: {k.shape[2]}, q_seq_len: {q.shape[1]}, kv_seq_len: {k.shape[1]}, head_dim: {d_v}, us: {us}")
 
     out_ref, dq_ref, dk_ref, dv_ref, dbias_ref = run_torch(
         q,
@@ -303,6 +326,14 @@ parser.add_argument(
     default=5,
     help="""Number of heads. Default is 5.
     e.g.: -n 8""",
+)
+parser.add_argument(
+    "-nk",
+    "--nheads_k",
+    type=int,
+    default=5,
+    help="""Number of heads. Default is 5.
+    e.g.: -nk 8""",
 )
 parser.add_argument(
     "-q",
@@ -391,10 +422,11 @@ parser.add_argument(
 )
 if __name__ == "__main__":
     args = parser.parse_args()
-    dtype = dtypes.d_dtypes[args.dtype]
+    dtype = dtypes.fp16 if args.dtype == "fp16" else dtypes.bf16
     test_flash_attn_output(
         args.batch_size,
         args.nheads,
+        args.nheads_k,
         args.seqlen_q,
         args.seqlen_k,
         args.d,
@@ -407,3 +439,4 @@ if __name__ == "__main__":
         args.mha_type,
         dtype,
     )
+

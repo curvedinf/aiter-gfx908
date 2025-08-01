@@ -110,12 +110,12 @@ def _ff_a16w16_fused_gated(
             x = tl.load(x_ptrs, mask=offs_xm[:, None] < M)
             w1n0 = tl.load(
                 w1n0_ptrs,
-                mask=offs_w1n0[:, None] < (N // 2),
+                mask=offs_w1n0[None, :] < (N // 2),
                 cache_modifier=cache_modifier,
             )
             w1n1 = tl.load(
                 w1n1_ptrs,
-                mask=offs_w1n1[:, None] < (N // 2),
+                mask=offs_w1n1[None, :] < N,
                 cache_modifier=cache_modifier,
             )
         else:
@@ -159,24 +159,27 @@ def _ff_a16w16_fused_gated(
     # (BLOCK_N // 2, BLOCK_K)
     w2_ptrs = w2_ptr + (offs_w2n[:, None] * stride_w2n + offs_k[None, :] * stride_w2k)
 
-    offs_ym = (pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+    offs_ym = pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     y_ptrs = y_ptr + (offs_ym[:, None] * stride_ym + offs_k[None, :] * stride_yk)
 
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         if EVEN_K:
-            w2 = tl.load(w2_ptrs)
+            w2 = tl.load(
+                w2_ptrs,
+                mask=offs_w2n[:, None] < (N // 2),
+            )
         else:
             w2 = tl.load(
                 w2_ptrs,
                 mask=(offs_w2n[:, None] < (N // 2))
-                & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                & ((offs_k[None, :] + k * BLOCK_SIZE_K) < K),
                 other=0.0,
             )
         partial_sum_y = tl.dot(acc_gated, w2)
         # tl.device_print("w2:", w2)
         # tl.device_print("partial y:", partial_sum_y)
         y_mask = (offs_ym[:, None] < M) & ((offs_k[None, :] + BLOCK_SIZE_K * k) < K)
-        tl.atomic_add(y_ptrs, partial_sum_y, mask=y_mask, sem="acq_rel", scope="gpu")
+        tl.atomic_add(y_ptrs, partial_sum_y, mask=y_mask, sem="relaxed", scope="gpu")
         # tl.store(y_ptrs, partial_sum_y, mask=y_mask)
         w2_ptrs += BLOCK_SIZE_K * stride_w2k
         y_ptrs += BLOCK_SIZE_K * stride_yk

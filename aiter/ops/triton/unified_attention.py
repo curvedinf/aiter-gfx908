@@ -735,7 +735,7 @@ def unified_attention(
             num_warps = 4
         else:
             num_stages_2d = 3
-            num_warps = 2            
+            num_warps = 2
         # make the block_m bigger if we already have enough parallelism
         if num_2d_prgms >= 2 * target_num_prgms:
             if num_2d_prgms <= 4 * target_num_prgms:

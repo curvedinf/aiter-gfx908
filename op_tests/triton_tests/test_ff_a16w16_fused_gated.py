@@ -24,13 +24,13 @@ def generate_ff_a16w16_inputs(
             w1 = torch.randn((hidden_dim, intermediate_dim * 2), dtype=dtype).cuda().T
         else:
             w1 = torch.randn((hidden_dim, intermediate_dim), dtype=dtype).cuda().T
-        w2 = torch.randn((intermediate_dim, hidden_dim), dtype=dtype).cuda().T
+        w2 = torch.randn((intermediate_dim, hidden_dim), dtype=dtype).cuda()
     else:
         if gating:
             w1 = torch.randn((intermediate_dim * 2, hidden_dim), dtype=dtype).cuda() # (N*2, K)
         else:
             w1 = torch.randn((intermediate_dim, hidden_dim), dtype=dtype).cuda()
-        w2 = torch.randn((hidden_dim, intermediate_dim), dtype=dtype).cuda() # (K, N)
+        w2 = torch.randn((hidden_dim, intermediate_dim), dtype=dtype).cuda().T
 
     w1 = w1 / (intermediate_dim**0.5)  # scale down output variance
     w2 = w2 / (hidden_dim**0.5)
@@ -66,7 +66,7 @@ def test_ff_a16w16_gated(
         raise Exception(f"Unsupported activation: {activation}")
     torch_y = torch_out[:, intermediate_dim:]
     torch_intermediate = gating * torch_y
-    torch_out = F.linear(torch_intermediate, w2, bias=None)
+    torch_out = torch_intermediate @ w2
 
     if output:
         triton_out = ff_a16w16_fused_gated(
@@ -90,4 +90,10 @@ def test_ff_a16w16_gated(
     Note: There's a small distinction between Triton and Torch's implementations of silu
     (due to tl.sigmoid() vs torch.sigmoid()). The gated outputs can differ by as much as 3%.
     """
+    # print("x:", x)
+    # print("w1:", w1)
+    # print("intermediate:", torch_intermediate)
+    # print("w2:", w2)
+    # print("torch_out:", torch_out)
+    # print("triton_out:", triton_out)
     triton.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)

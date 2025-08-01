@@ -78,7 +78,7 @@ def _ff_a16w16_fused_gated(
 
     # Create pointers for first block of x and w1 input matrices
     offs_k = tl.arange(0, BLOCK_SIZE_K)
-    offs_xm = (pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
+    offs_xm = (pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))
     x_ptrs = x_ptr + (offs_xm[:, None] * stride_xm + offs_k[None, :] * stride_xk)
 
     acc_dtype = tl.float32 if y_ptr.type.element_ty != tl.int8 else tl.int32
@@ -90,10 +90,9 @@ def _ff_a16w16_fused_gated(
     """
     offs_w1n0 = (
         pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(0, BLOCK_SIZE_N // 2)
-    ) % (N // 2)
+    )
     offs_w1n1 = (
         (pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(0, BLOCK_SIZE_N // 2))
-        % (N // 2)
     ) + (N // 2)
     w1n0_ptrs = w1_ptr + (
         offs_k[:, None] * stride_w1k + offs_w1n0[None, :] * stride_w1n
@@ -108,20 +107,27 @@ def _ff_a16w16_fused_gated(
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
         if EVEN_K:
-            x = tl.load(x_ptrs)
-            w1n0 = tl.load(w1n0_ptrs, cache_modifier=cache_modifier)
-            w1n1 = tl.load(w1n1_ptrs, cache_modifier=cache_modifier)
+            x = tl.load(x_ptrs,
+                        mask=offs_xm[:, None] < M)
+            w1n0 = tl.load(w1n0_ptrs, 
+                           mask=offs_w1n0[:, None] < (N // 2), 
+                           cache_modifier=cache_modifier)
+            w1n1 = tl.load(w1n1_ptrs, 
+                           mask=offs_w1n1[:, None] < (N // 2), 
+                           cache_modifier=cache_modifier)
         else:
-            x = tl.load(x_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
+            x = tl.load(x_ptrs, 
+                        mask=(offs_xm[:, None] < M) & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                        other=0.0)
             w1n0 = tl.load(
                 w1n0_ptrs,
-                mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
+                mask=(offs_k[:, None] < K - k * BLOCK_SIZE_K) & (offs_w1n0[None, :] < (N // 2)),
                 other=0.0,
                 cache_modifier=cache_modifier,
             )
             w1n1 = tl.load(
                 w1n1_ptrs,
-                mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
+                mask=(offs_k[:, None] < K - k * BLOCK_SIZE_K) & (offs_w1n1[None, :] < N),
                 other=0.0,
                 cache_modifier=cache_modifier,
             )
@@ -142,7 +148,7 @@ def _ff_a16w16_fused_gated(
 
     offs_w2n = (
         pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(0, BLOCK_SIZE_N // 2)
-    ) % (N // 2)
+    )
     # (BLOCK_N // 2, BLOCK_K)
     w2_ptrs = w2_ptr + (offs_w2n[:, None] * stride_w2n + offs_k[None, :] * stride_w2k)
 
@@ -154,12 +160,13 @@ def _ff_a16w16_fused_gated(
             w2 = tl.load(w2_ptrs)
         else:
             w2 = tl.load(
-                w2_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0
+                w2_ptrs, mask=(offs_w2n[:, None] < (N // 2)) & (offs_k[None, :] < K - k * BLOCK_SIZE_K), other=0.0
             )
         partial_sum_y = tl.dot(acc_gated, w2)
-
+        # tl.device_print("w2:", w2)
+        # tl.device_print("partial y:", partial_sum_y)
         y_mask = (offs_ym[:, None] < M) & ((offs_k[None, :] + BLOCK_SIZE_K * k) < K)
-        tl.atomic_add(y_ptrs, partial_sum_y, mask=y_mask, sem="relaxed", scope="gpu")
+        tl.atomic_add(y_ptrs, partial_sum_y, mask=y_mask, sem="acq_rel", scope="gpu")
         # tl.store(y_ptrs, partial_sum_y, mask=y_mask)
         w2_ptrs += BLOCK_SIZE_K * stride_w2k
         y_ptrs += BLOCK_SIZE_K * stride_yk
@@ -228,9 +235,10 @@ def ff_a16w16_fused_gated(
     """
 
     # Shape checks
-    assert x.shape[1] == w_up.shape[1] == w_down.shape[0], "Incompatible matrix shapes."
-    assert w_up.shape[0] == w_down.shape[1] * 2, "Incompatible matrix shapes."
+    assert x.shape[1] == w_up.shape[1] == w_down.shape[1], "Incompatible matrix shapes."
+    assert w_up.shape[0] == w_down.shape[0] * 2, "Incompatible matrix shapes."
     N, K = w_up.shape
+    assert w_down.shape == (N // 2, K), "Incompatible matrix shapes."
     M = x.shape[0]
 
     assert N % 2 == 0, "Weight shape incompatible with gating (N not divisible by 2)"

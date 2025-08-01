@@ -192,6 +192,9 @@ def test_gemm_afp4_wfp4(M: int, N: int, K: int, dtype, output):
         pytest.skip("MXFP4 not supported on this architecture")
 
     if TRITON_HIP_PRESHUFFLE_SCALES:
+        if M < 32:
+            pytest.skip("Minimal tile size for preshuffling is 32x32x256")
+
         if N % 32 > 0:
             pytest.skip(
                 f"N = {N} is not divisible by 32, skip this test for preshuffled scales tests"

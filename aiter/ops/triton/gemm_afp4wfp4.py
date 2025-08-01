@@ -313,8 +313,35 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
         for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
-            a_scales = tl.load(a_scale_ptrs)
-            b_scales = tl.load(b_scale_ptrs, cache_modifier=cache_modifier)
+            a_scales = (
+                tl.load(a_scale_ptrs)
+                .reshape(
+                    BLOCK_SIZE_M // 32,
+                    BLOCK_SIZE_K // SCALE_GROUP_SIZE // 8,
+                    4,
+                    16,
+                    2,
+                    2,
+                    1,
+                )
+                .permute(0, 5, 3, 1, 4, 2, 6)
+                .reshape(BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+            )
+            b_scales = (
+                tl.load(b_scale_ptrs)
+                .reshape(
+                    BLOCK_SIZE_N // 32,
+                    BLOCK_SIZE_K // SCALE_GROUP_SIZE // 8,
+                    4,
+                    16,
+                    2,
+                    2,
+                    1,
+                )
+                .permute(0, 5, 3, 1, 4, 2, 6)
+                .reshape(BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
+            )
+
             if BLOCK_SIZE_M >= 32:
                 a_scales = tl.reshape(
                     a_scales, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)

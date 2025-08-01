@@ -15,7 +15,7 @@ def generate_ff_a16w16_inputs(
 
     # TN is default layout
     if layout[0] == "T":
-        x = torch.randn((batch, hidden_dim), dtype=dtype).cuda() # (M, K)
+        x = torch.randn((batch, hidden_dim), dtype=dtype).cuda()  # (M, K)
     else:
         x = torch.randn((hidden_dim, batch), dtype=dtype).cuda().T
 
@@ -27,7 +27,9 @@ def generate_ff_a16w16_inputs(
         w2 = torch.randn((intermediate_dim, hidden_dim), dtype=dtype).cuda()
     else:
         if gating:
-            w1 = torch.randn((intermediate_dim * 2, hidden_dim), dtype=dtype).cuda() # (N*2, K)
+            w1 = torch.randn(
+                (intermediate_dim * 2, hidden_dim), dtype=dtype
+            ).cuda()  # (N*2, K)
         else:
             w1 = torch.randn((intermediate_dim, hidden_dim), dtype=dtype).cuda()
         w2 = torch.randn((hidden_dim, intermediate_dim), dtype=dtype).cuda().T

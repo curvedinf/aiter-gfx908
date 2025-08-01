@@ -78,7 +78,7 @@ def _ff_a16w16_fused_gated(
 
     # Create pointers for first block of x and w1 input matrices
     offs_k = tl.arange(0, BLOCK_SIZE_K)
-    offs_xm = (pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M))
+    offs_xm = pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     x_ptrs = x_ptr + (offs_xm[:, None] * stride_xm + offs_k[None, :] * stride_xk)
 
     acc_dtype = tl.float32 if y_ptr.type.element_ty != tl.int8 else tl.int32
@@ -88,8 +88,8 @@ def _ff_a16w16_fused_gated(
     Per Triton program, we compute the matmul for TWO tiles of C of shape (BLOCK_M, BLOCK_N // 2) -
     one on the left side of C and one on the right side.
     """
-    offs_w1n0 = (
-        pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(0, BLOCK_SIZE_N // 2)
+    offs_w1n0 = pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(
+        0, BLOCK_SIZE_N // 2
     )
     offs_w1n1 = (
         (pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(0, BLOCK_SIZE_N // 2))
@@ -107,27 +107,34 @@ def _ff_a16w16_fused_gated(
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
         if EVEN_K:
-            x = tl.load(x_ptrs,
-                        mask=offs_xm[:, None] < M)
-            w1n0 = tl.load(w1n0_ptrs, 
-                           mask=offs_w1n0[:, None] < (N // 2), 
-                           cache_modifier=cache_modifier)
-            w1n1 = tl.load(w1n1_ptrs, 
-                           mask=offs_w1n1[:, None] < (N // 2), 
-                           cache_modifier=cache_modifier)
-        else:
-            x = tl.load(x_ptrs, 
-                        mask=(offs_xm[:, None] < M) & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
-                        other=0.0)
+            x = tl.load(x_ptrs, mask=offs_xm[:, None] < M)
             w1n0 = tl.load(
                 w1n0_ptrs,
-                mask=(offs_k[:, None] < K - k * BLOCK_SIZE_K) & (offs_w1n0[None, :] < (N // 2)),
+                mask=offs_w1n0[:, None] < (N // 2),
+                cache_modifier=cache_modifier,
+            )
+            w1n1 = tl.load(
+                w1n1_ptrs,
+                mask=offs_w1n1[:, None] < (N // 2),
+                cache_modifier=cache_modifier,
+            )
+        else:
+            x = tl.load(
+                x_ptrs,
+                mask=(offs_xm[:, None] < M) & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                other=0.0,
+            )
+            w1n0 = tl.load(
+                w1n0_ptrs,
+                mask=(offs_k[:, None] < K - k * BLOCK_SIZE_K)
+                & (offs_w1n0[None, :] < (N // 2)),
                 other=0.0,
                 cache_modifier=cache_modifier,
             )
             w1n1 = tl.load(
                 w1n1_ptrs,
-                mask=(offs_k[:, None] < K - k * BLOCK_SIZE_K) & (offs_w1n1[None, :] < N),
+                mask=(offs_k[:, None] < K - k * BLOCK_SIZE_K)
+                & (offs_w1n1[None, :] < N),
                 other=0.0,
                 cache_modifier=cache_modifier,
             )
@@ -146,8 +153,8 @@ def _ff_a16w16_fused_gated(
     acc_gated = acc0 * acc1
     acc_gated = acc_gated.to(w2_ptr.type.element_ty)
 
-    offs_w2n = (
-        pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(0, BLOCK_SIZE_N // 2)
+    offs_w2n = pid_n.to(tl.int64) * (BLOCK_SIZE_N // 2) + tl.arange(
+        0, BLOCK_SIZE_N // 2
     )
     # (BLOCK_N // 2, BLOCK_K)
     w2_ptrs = w2_ptr + (offs_w2n[:, None] * stride_w2n + offs_k[None, :] * stride_w2k)
@@ -160,7 +167,10 @@ def _ff_a16w16_fused_gated(
             w2 = tl.load(w2_ptrs)
         else:
             w2 = tl.load(
-                w2_ptrs, mask=(offs_w2n[:, None] < (N // 2)) & (offs_k[None, :] < K - k * BLOCK_SIZE_K), other=0.0
+                w2_ptrs,
+                mask=(offs_w2n[:, None] < (N // 2))
+                & (offs_k[None, :] < K - k * BLOCK_SIZE_K),
+                other=0.0,
             )
         partial_sum_y = tl.dot(acc_gated, w2)
         # tl.device_print("w2:", w2)

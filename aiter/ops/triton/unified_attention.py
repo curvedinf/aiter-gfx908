@@ -730,7 +730,7 @@ def unified_attention(
 
     # call 2d if sliding window is used
     if SLIDING_WINDOW > 0 or num_2d_prgms >= target_num_prgms or max_seqlen_k <= 1024:
-        num_stages_2d = 2
+        num_stages_2d = 4
         num_warps = 4
         # make the block_m bigger if we already have enough parallelism
         if num_2d_prgms >= 2 * target_num_prgms:

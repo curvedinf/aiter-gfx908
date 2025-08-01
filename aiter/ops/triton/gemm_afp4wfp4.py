@@ -342,14 +342,6 @@ def _gemm_afp4_wfp4_kernel_preshuffled_scales(
                 .reshape(BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
             )
 
-            if BLOCK_SIZE_M >= 32:
-                a_scales = tl.reshape(
-                    a_scales, (BLOCK_SIZE_M, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
-                )
-            b_scales = tl.reshape(
-                b_scales, (BLOCK_SIZE_N, BLOCK_SIZE_K // SCALE_GROUP_SIZE)
-            )
-
             # Load the next block of A and B, generate a mask by checking the K dimension.
             # If it is out of bounds, set it to 0.
             if EVEN_K:

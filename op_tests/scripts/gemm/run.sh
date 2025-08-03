@@ -13,4 +13,4 @@ python3 ${AITER_HOME}/op_tests/test_gemm.py         |& tee gemm_bf16.log
 python3 ${AITER_HOME}/op_tests/test_gemm_a8w8.py    |& tee gemm_a8w8.log
 
 # gemm a4w4
-python3 ${AITER_HOME}/op_tests/test_gemm_a8w8.py    |& tee gemm_a4w4.log
+python3 ${AITER_HOME}/op_tests/test_gemm_a4w4.py    |& tee gemm_a4w4.log

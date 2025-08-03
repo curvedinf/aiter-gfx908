@@ -95,6 +95,10 @@ def _fused_qkv_split_qk_rope_kernel(
     if HAVE_NOPE and NOPE_FIRST:
         nope_offs = BLOCK_D
 
+    offs_nope_ratio = 1
+    if HAVE_NOPE:
+        offs_nope_ratio = 2
+
     x_mask = t_mask[:, None] & (d_offs < BLOCK_D)[None, :]
 
     if IS_NEOX:
@@ -102,10 +106,10 @@ def _fused_qkv_split_qk_rope_kernel(
     else:
         qk_rotated_mask = (d_offs % 2 == 0)[None, :]
 
+    H_OFFS_SIZE = hq * BLOCK_D
     d_offs += nope_offs
-    qkv_ptrs = qkv_ptr + t_offs[:, None] * stride_qkv_t
-    q_in_offs = (hq * BLOCK_D + d_offs)[None, :] * stride_qkv_d
-    q = tl.load(qkv_ptrs + q_in_offs, mask=x_mask)
+    q_in_offs = t_offs[:, None] * stride_qkv_t + (H_OFFS_SIZE * offs_nope_ratio + d_offs)[None, :] * stride_qkv_d
+    q = tl.load(qkv_ptr + q_in_offs, mask=x_mask)
 
     if IS_NEOX:
         q_rotated = _get_neox_rotated_x(
@@ -127,19 +131,19 @@ def _fused_qkv_split_qk_rope_kernel(
 
     if HAVE_NOPE:
         if NOPE_FIRST:
-            q = tl.load(qkv_ptrs + q_in_offs - BLOCK_D * stride_qkv_d, mask=x_mask)
+            q = tl.load(qkv_ptr + q_in_offs - BLOCK_D * stride_qkv_d, mask=x_mask)
             tl.store(q_ptr + q_out_offs - BLOCK_D * stride_q_d, q, mask=x_mask)
         else:
-            q = tl.load(qkv_ptrs + q_in_offs + BLOCK_D * stride_qkv_d, mask=x_mask)
+            q = tl.load(qkv_ptr + q_in_offs + BLOCK_D * stride_qkv_d, mask=x_mask)
             tl.store(q_ptr + q_out_offs + BLOCK_D * stride_q_d, q, mask=x_mask)
 
     if hq < KVH:
         Q_SIZE = QH * BLOCK_D
         KV_SIZE = KVH * BLOCK_D
-        k_in_offs = (Q_SIZE + hq * BLOCK_D + d_offs)[None, :] * stride_qkv_d
-        v_in_offs = (Q_SIZE + KV_SIZE + hq * BLOCK_D + d_offs)[None, :] * stride_qkv_d
-        k = tl.load(qkv_ptrs + k_in_offs, mask=x_mask)
-        v = tl.load(qkv_ptrs + v_in_offs, mask=x_mask)
+        k_in_offs = t_offs[:, None] * stride_qkv_t + ((Q_SIZE + H_OFFS_SIZE) * offs_nope_ratio + d_offs)[None, :] * stride_qkv_d
+        v_in_offs = t_offs[:, None] * stride_qkv_t + ((Q_SIZE + KV_SIZE + H_OFFS_SIZE) * offs_nope_ratio + d_offs)[None, :] * stride_qkv_d
+        k = tl.load(qkv_ptr + k_in_offs, mask=x_mask)
+        v = tl.load(qkv_ptr + v_in_offs, mask=x_mask)
         
         if IS_NEOX:
             k_rotated = _get_neox_rotated_x(
@@ -163,14 +167,14 @@ def _fused_qkv_split_qk_rope_kernel(
 
         if HAVE_NOPE:
             if NOPE_FIRST:
-                k = tl.load(qkv_ptrs + k_in_offs - BLOCK_D * stride_qkv_d, mask=x_mask)
+                k = tl.load(qkv_ptr + k_in_offs - BLOCK_D * stride_qkv_d, mask=x_mask)
                 tl.store(k_ptr + kv_out_offs - BLOCK_D * stride_kv_d, k, mask=x_mask)
-                v = tl.load(qkv_ptrs + v_in_offs - BLOCK_D * stride_qkv_d, mask=x_mask)
+                v = tl.load(qkv_ptr + v_in_offs - BLOCK_D * stride_qkv_d, mask=x_mask)
                 tl.store(v_ptr + kv_out_offs - BLOCK_D * stride_kv_d, v, mask=x_mask)
             else:
-                k = tl.load(qkv_ptrs + k_in_offs + BLOCK_D * stride_qkv_d, mask=x_mask)
+                k = tl.load(qkv_ptr + k_in_offs + BLOCK_D * stride_qkv_d, mask=x_mask)
                 tl.store(k_ptr + kv_out_offs + BLOCK_D * stride_kv_d, k, mask=x_mask)
-                v = tl.load(qkv_ptrs + v_in_offs + BLOCK_D * stride_qkv_d, mask=x_mask)
+                v = tl.load(qkv_ptr + v_in_offs + BLOCK_D * stride_qkv_d, mask=x_mask)
                 tl.store(v_ptr + kv_out_offs + BLOCK_D * stride_kv_d, v, mask=x_mask)
 
 def fused_qkv_split_qk_rope(
@@ -191,8 +195,6 @@ def fused_qkv_split_qk_rope(
     kv_size = kvh * head_dim
 
     assert qh >= kvh and qh % kvh == 0, "qh must be mutiple of kvh"
-    assert qkv.shape[-1] == q_size + 2*kv_size, "Shape error"
-    assert head_dim == triton.next_power_of_2(head_dim), "head_dim should be power of 2"
 
     q = torch.empty((qkv.shape[0], qh, head_dim), dtype=qkv.dtype, device=qkv.device)
     k = torch.empty((qkv.shape[0], kvh, head_dim), dtype=qkv.dtype, device=qkv.device)
@@ -207,6 +209,9 @@ def fused_qkv_split_qk_rope(
         have_nope = True
     else:
         have_nope = False
+        
+    assert qkv.shape[-1] == q_size + 2*kv_size, "Shape error"
+    assert head_dim // ((2 if have_nope else 1)) == triton.next_power_of_2(head_dim // ((2 if have_nope else 1))), "head_dim should be power of 2"
 
     if have_nope:
         BLOCK_D = head_dim // 2
@@ -231,7 +236,8 @@ def fused_qkv_split_qk_rope(
         v,
         T,
         *qkv.stride(),
-        *cos.stride(),
+        cos.stride(0),
+        cos.stride(-1),
         *positions.stride(),
         *q.stride(),
         *k.stride(),

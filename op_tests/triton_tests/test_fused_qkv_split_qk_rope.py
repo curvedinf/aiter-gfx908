@@ -5,12 +5,27 @@ from op_tests.triton_tests.test_fused_qk_concat import generate_rope_cached_freq
 from op_tests.test_rope import ref_rope_sbhd_fwd, RotateStyle
 
 
-def generate_qkv_inputs(B: int, QH_PER_KH: int, KH: int, D: int, nope: bool, nope_first: bool, dtype):
-    qkv = torch.randn((B, (QH_PER_KH * KH + 2 * KH) * (D * (2 if nope else 1))), dtype=dtype, device="cuda")
+def generate_qkv_inputs(
+    B: int, QH_PER_KH: int, KH: int, D: int, nope: bool, nope_first: bool, dtype
+):
+    qkv = torch.randn(
+        (B, (QH_PER_KH * KH + 2 * KH) * (D * (2 if nope else 1))),
+        dtype=dtype,
+        device="cuda",
+    )
     return qkv
 
-def run_torch( 
-    qkv, QH_PER_KH, KH, D, ref_freqs, reuse_freqs_front_part, nope, nope_first, rotate_style
+
+def run_torch(
+    qkv,
+    QH_PER_KH,
+    KH,
+    D,
+    ref_freqs,
+    reuse_freqs_front_part,
+    nope,
+    nope_first,
+    rotate_style,
 ):
     q_size = QH_PER_KH * KH * D
     kv_size = KH * D
@@ -66,14 +81,36 @@ def test_fused_qkv_split_qk_rope(
 ):
 
     qkv = generate_qkv_inputs(B, QH_PER_KH, KH, D, nope, nope_first, dtype)
-    
+
     pos, freqs, cos, sin = generate_rope_cached_freqs(
         B, max_embed_positions, (D // 2) if reuse_freqs_front_part else D, dtype
     )
     ref_freqs = freqs[pos].squeeze(-2)
-    
-    q_triton, k_triton, v_triton = fused_qkv_split_qk_rope(qkv, cos, sin, pos, QH_PER_KH*KH, KH, (D * (2 if nope else 1)), is_neox=(rotate_style == RotateStyle.NEOX), offsets=None, reuse_freqs_front_part=reuse_freqs_front_part, nope_first=nope_first)
-    q_torch, k_torch, v_torch = run_torch(qkv, QH_PER_KH, KH, (D * (2 if nope else 1)), ref_freqs, reuse_freqs_front_part, nope, nope_first, rotate_style)
+
+    q_triton, k_triton, v_triton = fused_qkv_split_qk_rope(
+        qkv,
+        cos,
+        sin,
+        pos,
+        QH_PER_KH * KH,
+        KH,
+        (D * (2 if nope else 1)),
+        is_neox=(rotate_style == RotateStyle.NEOX),
+        offsets=None,
+        reuse_freqs_front_part=reuse_freqs_front_part,
+        nope_first=nope_first,
+    )
+    q_torch, k_torch, v_torch = run_torch(
+        qkv,
+        QH_PER_KH,
+        KH,
+        (D * (2 if nope else 1)),
+        ref_freqs,
+        reuse_freqs_front_part,
+        nope,
+        nope_first,
+        rotate_style,
+    )
 
     torch.testing.assert_close(q_torch, q_triton)
     torch.testing.assert_close(k_torch, k_triton)

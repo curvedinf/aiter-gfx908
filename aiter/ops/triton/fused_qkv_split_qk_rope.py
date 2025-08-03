@@ -3,6 +3,7 @@ import triton
 import triton.language as tl
 from aiter.ops.triton.rope import _get_gptj_rotated_x, _get_neox_rotated_x
 
+
 @triton.jit
 def _fused_qkv_split_qk_rope_kernel(
     qkv_ptr,
@@ -85,12 +86,12 @@ def _fused_qkv_split_qk_rope_kernel(
     else:
         d_cos_offs = d_offs
         d_cos_mask = d_cos_offs < BLOCK_D
-        
+
     cos_mask = t_mask[:, None] & d_cos_mask[None, :]
     cos_offs = t_cos_offs[:, None] * stride_cos_t + d_cos_offs[None, :] * stride_cos_d
     cos = tl.load(cos_ptr + cos_offs, mask=cos_mask)
     sin = tl.load(sin_ptr + cos_offs, mask=cos_mask)
-    
+
     nope_offs = 0
     if HAVE_NOPE and NOPE_FIRST:
         nope_offs = BLOCK_D
@@ -108,7 +109,10 @@ def _fused_qkv_split_qk_rope_kernel(
 
     H_OFFS_SIZE = hq * BLOCK_D
     d_offs += nope_offs
-    q_in_offs = t_offs[:, None] * stride_qkv_t + (H_OFFS_SIZE * offs_nope_ratio + d_offs)[None, :] * stride_qkv_d
+    q_in_offs = (
+        t_offs[:, None] * stride_qkv_t
+        + (H_OFFS_SIZE * offs_nope_ratio + d_offs)[None, :] * stride_qkv_d
+    )
     q = tl.load(qkv_ptr + q_in_offs, mask=x_mask)
 
     if IS_NEOX:
@@ -121,9 +125,7 @@ def _fused_qkv_split_qk_rope_kernel(
         )
 
     q_out_offs = (
-        t_offs[:, None] * stride_q_t
-        + d_offs[None, :] * stride_q_d
-        + hq * stride_q_h
+        t_offs[:, None] * stride_q_t + d_offs[None, :] * stride_q_d + hq * stride_q_h
     )
     q = q * cos + q_rotated * sin
     q = q.to(q_ptr.dtype.element_ty)
@@ -140,11 +142,19 @@ def _fused_qkv_split_qk_rope_kernel(
     if hq < KVH:
         Q_SIZE = QH * BLOCK_D
         KV_SIZE = KVH * BLOCK_D
-        k_in_offs = t_offs[:, None] * stride_qkv_t + ((Q_SIZE + H_OFFS_SIZE) * offs_nope_ratio + d_offs)[None, :] * stride_qkv_d
-        v_in_offs = t_offs[:, None] * stride_qkv_t + ((Q_SIZE + KV_SIZE + H_OFFS_SIZE) * offs_nope_ratio + d_offs)[None, :] * stride_qkv_d
+        k_in_offs = (
+            t_offs[:, None] * stride_qkv_t
+            + ((Q_SIZE + H_OFFS_SIZE) * offs_nope_ratio + d_offs)[None, :]
+            * stride_qkv_d
+        )
+        v_in_offs = (
+            t_offs[:, None] * stride_qkv_t
+            + ((Q_SIZE + KV_SIZE + H_OFFS_SIZE) * offs_nope_ratio + d_offs)[None, :]
+            * stride_qkv_d
+        )
         k = tl.load(qkv_ptr + k_in_offs, mask=x_mask)
         v = tl.load(qkv_ptr + v_in_offs, mask=x_mask)
-        
+
         if IS_NEOX:
             k_rotated = _get_neox_rotated_x(
                 k, qk_rotated_mask, BLOCK_T, BLOCK_D, BLOCK_D_HALF
@@ -176,6 +186,7 @@ def _fused_qkv_split_qk_rope_kernel(
                 tl.store(k_ptr + kv_out_offs + BLOCK_D * stride_kv_d, k, mask=x_mask)
                 v = tl.load(qkv_ptr + v_in_offs + BLOCK_D * stride_qkv_d, mask=x_mask)
                 tl.store(v_ptr + kv_out_offs + BLOCK_D * stride_kv_d, v, mask=x_mask)
+
 
 def fused_qkv_split_qk_rope(
     qkv: torch.Tensor,
@@ -209,9 +220,11 @@ def fused_qkv_split_qk_rope(
         have_nope = True
     else:
         have_nope = False
-        
-    assert qkv.shape[-1] == q_size + 2*kv_size, "Shape error"
-    assert head_dim // ((2 if have_nope else 1)) == triton.next_power_of_2(head_dim // ((2 if have_nope else 1))), "head_dim should be power of 2"
+
+    assert qkv.shape[-1] == q_size + 2 * kv_size, "Shape error"
+    assert head_dim // ((2 if have_nope else 1)) == triton.next_power_of_2(
+        head_dim // ((2 if have_nope else 1))
+    ), "head_dim should be power of 2"
 
     if have_nope:
         BLOCK_D = head_dim // 2
@@ -219,7 +232,7 @@ def fused_qkv_split_qk_rope(
     else:
         BLOCK_D = head_dim
         BLOCK_D_HALF = head_dim // 2
-    
+
     BLOCK_T = 32
     num_warps = 4
     waves_per_eu = 0
@@ -247,11 +260,11 @@ def fused_qkv_split_qk_rope(
         IS_NEOX=is_neox,
         HAVE_POS=(positions is not None),
         HAVE_OFFS=(offsets is not None),
-        QH = qh,
-        KVH = kvh,
-        BLOCK_T = BLOCK_T,
-        BLOCK_D = BLOCK_D,
-        BLOCK_D_HALF = BLOCK_D_HALF,
+        QH=qh,
+        KVH=kvh,
+        BLOCK_T=BLOCK_T,
+        BLOCK_D=BLOCK_D,
+        BLOCK_D_HALF=BLOCK_D_HALF,
         num_warps=num_warps,
         waves_per_eu=waves_per_eu,
     )

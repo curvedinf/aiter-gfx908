@@ -2,6 +2,7 @@ import torch
 import triton
 import triton.language as tl
 
+
 @triton.jit
 def _rmsmorm_op(row, weight, n_cols, epsilon):
     row_norm = row * row
@@ -10,6 +11,7 @@ def _rmsmorm_op(row, weight, n_cols, epsilon):
 
     rms_norm = row * norm_factor * weight
     return rms_norm
+
 
 @triton.jit
 def _fused_add_rmsnorm_pad(
@@ -37,33 +39,33 @@ def _fused_add_rmsnorm_pad(
     tl.assume(x_stride_n > 0)
     tl.assume(res_stride_m > 0)
     tl.assume(res_stride_n > 0)
-    tl.assume(out_stride_m  > 0)
-    tl.assume(out_stride_n  > 0)
-    
+    tl.assume(out_stride_m > 0)
+    tl.assume(out_stride_n > 0)
+
     pid_m = tl.program_id(0)
     tl.assume(pid_m >= 0)
 
     n_offs = tl.arange(0, BLOCK_SIZE_N)
-    mask = (n_offs < N)
+    mask = n_offs < N
     x = tl.load(
         x_ptr + pid_m * x_stride_m + n_offs * x_stride_n,
-        mask = mask,
-        other = 0.0,
-        cache_modifier = ".cg",
+        mask=mask,
+        other=0.0,
+        cache_modifier=".cg",
     ).to(tl.float32)
     if HAS_RES:
         res = tl.load(
             res_ptr + pid_m * res_stride_m + n_offs * res_stride_n,
-            mask = mask,
-            other = 0.0,
-            cache_modifier = ".cg",
+            mask=mask,
+            other=0.0,
+            cache_modifier=".cg",
         ).to(tl.float32)
         x = x + res
 
     w = tl.load(
-        weight_ptr + n_offs, 
-        mask = mask,
-        other = 0.0,
+        weight_ptr + n_offs,
+        mask=mask,
+        other=0.0,
     ).to(tl.float32)
     out = _rmsmorm_op(x, w, N, eps).to(out_ptr.dtype.element_ty)
 
@@ -76,8 +78,9 @@ def _fused_add_rmsnorm_pad(
         tl.store(
             res_out_ptr + pid_m * res_out_stride_m + n_offs * res_out_stride_n,
             x,
-            mask = mask,
+            mask=mask,
         )
+
 
 def fused_add_rmsnorm_pad(
     x: torch.Tensor,
@@ -93,16 +96,15 @@ def fused_add_rmsnorm_pad(
     else:
         N_out = N
     out = torch.empty((M, N_out), dtype=x.dtype, device=x.device)
-    
+
     res_out = None
     if res is not None:
         M2, N2 = res.shape
         assert M == M2, "Shape error!"
         assert N == N2, "Shape error!"
-        res_out = torch.empty((M, N), dtype=res.dtype, device=res.device)\
-        
+        res_out = torch.empty((M, N), dtype=res.dtype, device=res.device)
     BLOCK_SIZE_N = triton.next_power_of_2(N_out)
-    _fused_add_rmsnorm_pad[(M, )](
+    _fused_add_rmsnorm_pad[(M,)](
         x,
         res,
         out,
@@ -120,8 +122,8 @@ def fused_add_rmsnorm_pad(
         out.stride(1),
         res_out.stride(0) if res is not None else 0,
         res_out.stride(1) if res is not None else 0,
-        HAS_RES = (res is not None),
-        BLOCK_SIZE_N = BLOCK_SIZE_N,
+        HAS_RES=(res is not None),
+        BLOCK_SIZE_N=BLOCK_SIZE_N,
     )
 
     if res is not None:

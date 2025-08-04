@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
-#include <limits>
 #include <queue>
 #include <torch/python.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -199,6 +198,18 @@ std::vector<T> flatten(
     return result;
 }
 
+struct BatchInfo
+{
+    int32_t batch_idx;
+    int32_t qo_len;
+    int32_t kv_len;
+
+    bool operator > (const BatchInfo& rhs) const
+    {
+        return cal_cost(qo_len, kv_len) > cal_cost(rhs.qo_len, rhs.kv_len);
+    }
+};
+
 template<int32_t kPackedQoLenPerWg_,
          int32_t kMaxClusterSize_>
 struct MlaMetadataTraits
@@ -258,10 +269,8 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     const int32_t* p_seqlens_kv_indptr = seqlens_kv_indptr_cpu.data_ptr<int32_t>();
 
     // Step.0. Get sequence lengths of query/output and key/value for each batch.
-    std::vector<int32_t> qo_lens;
-    std::vector<int32_t> kv_lens;
-    qo_lens.reserve(batch_size);
-    kv_lens.reserve(batch_size);
+    std::vector<BatchInfo> batch_infos;
+    batch_infos.reserve(batch_size);
     int32_t sum_packed_qo_len = 0;
     for (int32_t bid = 0; bid < batch_size; ++bid)
     {
@@ -272,9 +281,9 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
         const int32_t packed_qo_len = qo_len * num_heads;
         sum_packed_qo_len += packed_qo_len;
 
-        qo_lens.push_back(qo_len);
-        kv_lens.push_back(kv_len);
+        batch_infos.push_back({bid, qo_len, kv_len});
     }
+    std::sort(batch_infos.begin(), batch_infos.end(), std::greater<BatchInfo>());
 
     // Step.1. Calculate the size of cluster and some related information. The size is the number of workgroups
     //         composing each cluster. The size is determined by average packed qo length.
@@ -296,11 +305,9 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     std::vector<int32_t> num_qo_clusters_indptr;
     num_qo_clusters_indptr.reserve(batch_size + 1);
     num_qo_clusters_indptr.push_back(0);
-    for (int32_t bid = 0; bid < batch_size; ++bid)
+    for (const auto& binfo : batch_infos)
     {
-        const int32_t qo_len        = qo_lens[bid];
-        const int32_t kv_len        = kv_lens[bid];
-        const int32_t packed_qo_len = qo_len * num_heads;
+        const int32_t packed_qo_len = binfo.qo_len * num_heads;
         const int32_t num_qo_tiles  = ck_tile::integer_divide_ceil(packed_qo_len, cluster_len_q);
 
         num_qo_clusters_indptr.push_back(num_qo_clusters_indptr.back() + num_qo_tiles);
@@ -308,11 +315,11 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
         for (int32_t tid = 0; tid < num_qo_tiles; ++tid)
         {
             const int32_t kv_len_valid =
-                cal_packed_causal_kv_len(qo_len, kv_len, tid, cluster_len_q, num_qo_tiles, num_heads, is_causal);
+                cal_packed_causal_kv_len(binfo.qo_len, binfo.kv_len, tid, cluster_len_q, num_qo_tiles, num_heads, is_causal);
             sum_kv_lens += kv_len_valid;
         }
     }
-    const int32_t kv_len_limit =
+    const int32_t kv_len_limit_global =
     [&]() {
         const int32_t avg_kv_lens = ck_tile::max(ck_tile::integer_divide_ceil(sum_kv_lens, num_clusters), 1);
         // TODO: The following code just follow FlashInfer. Further tune may be required for AMD GPU.
@@ -340,10 +347,11 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     int32_t num_reduce_row      = 0;
     int32_t num_partial_outputs = 0;
     int32_t loc_partial_outputs = 0;
-    for (int32_t bid = 0; bid < batch_size; ++bid)
+    for (const auto& binfo : batch_infos)
     {
-        const int32_t qo_len         = qo_lens[bid];
-        const int32_t kv_len         = kv_lens[bid];
+        const int32_t bid            = binfo.batch_idx;
+        const int32_t qo_len         = binfo.qo_len;
+        const int32_t kv_len         = binfo.kv_len;
         const int32_t packed_qo_len  = qo_len * num_heads;
         const int32_t num_qo_tiles   = ck_tile::integer_divide_ceil(packed_qo_len, cluster_len_q);
         const int32_t qo_batch_start = p_seqlens_qo_indptr[bid];
@@ -356,14 +364,31 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
                 cal_packed_causal_kv_len(qo_len, kv_len, tid, cluster_len_q, num_qo_tiles, num_heads, is_causal);
             int32_t kv_start_local = 0;
 
-            const bool split_kv = remaining_kv_len > kv_len_limit;
+            const int32_t num_splits = ck_tile::integer_divide_ceil(remaining_kv_len, kv_len_limit_global);
+            bool split_kv = remaining_kv_len > kv_len_limit_global;
+            int32_t kv_len_limit = kv_len_limit_global;
+            if (num_splits == 2)
+            {
+                if (float(kv_len_limit_global) * 1.2f >= float(remaining_kv_len))
+                {
+                    kv_len_limit = remaining_kv_len;
+                    split_kv = false;
+                }
+            }
 
-            do
+            for (int32_t split_idx = 0; split_idx < num_splits; ++split_idx)
             {
                 // Check and update cost_heap
                 auto [cid, accum_cost] = cost_heap.top();
                 cost_heap.pop();
-                const int32_t kv_len_consuming = ck_tile::min(remaining_kv_len, kv_len_limit);
+                const int32_t kv_len_consuming = [&]() {
+                    int32_t result = ck_tile::min(remaining_kv_len, kv_len_limit);
+                    if ((float(result) * 1.2f) >= float(remaining_kv_len))
+                    {
+                        result = remaining_kv_len;
+                    }
+                    return result;
+                }();
                 const float cost = cal_cost(cluster_len_q, kv_len_consuming);
                 cost_heap.push(std::tuple{cid, accum_cost + cost});
 
@@ -398,7 +423,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
                 remaining_kv_len -= kv_len_consuming;
                 kv_start_local += kv_len_consuming;
             }
-            while (remaining_kv_len > 0);
+            assert(remaining_kv_len <= 0);
         }
     }
 

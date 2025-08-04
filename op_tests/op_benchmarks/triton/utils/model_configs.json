@@ -47,7 +47,6 @@
       "num_expert": 8,
       "top_k": 2
     }
-
   },
   "deepseek": {
     "V3": {
@@ -60,7 +59,7 @@
       "n_routed_experts": 256,
       "num_expert": 256,
       "top_k": 8
-    }
+    },
     "V3_TP4": {
       "hidden_size": 7168,
       "intermediate_size": 1024,
@@ -71,7 +70,7 @@
       "n_routed_experts": 256,
       "num_expert": 256,
       "top_k": 8
-    }
+    },
     "V3_TP8": {
       "hidden_size": 7168,
       "intermediate_size": 512,
@@ -82,7 +81,7 @@
       "n_routed_experts": 256,
       "num_expert": 256,
       "top_k": 8
-    }
+    },
     "V3_EP8_top2": {
       "hidden_size": 7168,
       "intermediate_size": 4096,
@@ -93,7 +92,7 @@
       "n_routed_experts": 256,
       "num_expert": 32,
       "top_k": 2
-    }
+    },
     "V3_EP8_top4": {
       "hidden_size": 7168,
       "intermediate_size": 4096,
@@ -105,7 +104,7 @@
       "num_expert": 32,
       "top_k": 4
     }
-  }
+  },
   "qwen3": {
     "235B": {
       "num_attention_heads": 64,
@@ -143,7 +142,7 @@
       "num_expert": 16,
       "top_k": 2
     },
-    "235B_EP8_top2": {
+    "235B_EP8_top4": {
       "num_attention_heads": 64,
       "num_key_value_heads": 4,
       "hidden_size": 4096,
@@ -151,8 +150,8 @@
       "vocab_size": 151936,
       "num_expert": 16,
       "top_k": 4
-    },
-  },
+    }
+  }
 }
     
     

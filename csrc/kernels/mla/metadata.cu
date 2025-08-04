@@ -192,6 +192,13 @@ inline int32_t cal_kv_len(
     return cost - 2 * qo_len;
 }
 
+inline int32_t get_remaining_kv_capability(
+    const int32_t kv_len_upper_bound,
+    const int32_t kv_len_used)
+{
+    return ck_tile::integer_least_multiple(kv_len_upper_bound - kv_len_used, 16);
+}
+
 template <typename T>
 std::vector<T> flatten(
     const std::vector<std::vector<T>>& vec, 
@@ -361,7 +368,6 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     int32_t num_reduce_row      = 0;
     int32_t num_partial_outputs = 0;
     int32_t loc_partial_outputs = 0;
-    int32_t max_workload        = cal_cost(cluster_len_q, kv_len_limit_global);
     for (const auto& binfo : batch_infos)
     {
         const int32_t bid            = binfo.batch_idx;
@@ -382,14 +388,18 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
                 cal_packed_causal_kv_len(qo_len, kv_len, tid, cluster_len_q, num_qo_tiles, num_heads, is_causal);
             int32_t kv_start_local = 0;
 
-            const bool split_kv = (remaining_kv_len > kv_len_limit_global);
+            const auto [cid_top, accum_cost_top] = cost_heap.top();
+            const int32_t remaining_capability_top =
+                get_remaining_kv_capability(kv_len_limit_global, cal_kv_len(accum_cost_top, cluster_len_q));
+            const bool split_kv = (remaining_kv_len > remaining_capability_top);
 
             do
             {
                 // Check and update cost_heap
                 auto [cid, accum_cost] = cost_heap.top();
                 cost_heap.pop();
-                const int32_t remaining_capability = kv_len_limit_global - cal_kv_len(accum_cost, cluster_len_q);
+                const int32_t remaining_capability =
+                    get_remaining_kv_capability(kv_len_limit_global, cal_kv_len(accum_cost, cluster_len_q));
                 const int32_t kv_len_limit_local = remaining_capability > 64 ? remaining_capability : 128;
                 const int32_t kv_len_consuming = ck_tile::min(remaining_kv_len, kv_len_limit_local);
                 const int32_t cost = cal_cost(cluster_len_q, kv_len_consuming);
@@ -399,7 +409,6 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
 #endif
                 const int32_t new_cost = accum_cost + cost;
                 cost_heap.push(std::tuple{cid, new_cost});
-                max_workload = ck_tile::max(max_workload, new_cost);
 
                 // Record work
                 MlaWorkInfo work_info{};
@@ -442,7 +451,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     {
         auto [id, cost] = cost_heap.top();
         cost_heap.pop();
-        printf("[metadata] - ClusterId=%d, cost=%d\n", id, cost);
+        printf("[metadata] - cid=%d, cost=%d\n", id, cost);
     }
 #endif
 

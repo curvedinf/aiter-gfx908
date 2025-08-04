@@ -1916,53 +1916,27 @@ def _flash_attn_forward(
             )
         else: # static fetching of next tile
             
-            # sort the tiles in order of non masked key tokens
-            # Compute sequence lengths for each batch element
+            # traversal strategy of tiles that ensures that all workgroups get roughly the same amount of work:
+
+            # num tiles in total: num_q_heads * num_tiles_per_seq * batch
+            # tiles vary in workload in dimensions sequence length (num_tiles_per_seq) and batch:
+            # - if causal, token i along sequence length can only attend to tokens up to i
+            # - if varlen, some tiles are out of bounds, since we create the grid based on max_seqlen_q (num_tiles_per_seq = triton.cdiv(max_seqlen_q, config["BLOCK_M"])). For those tiles we exit early.
+            # sort the tiles based on the workload. Out of bounds tiles get workload 0.
+            
             if cu_seqlens_q is None:
                 # If cu_seqlens_q is not provided, we assume all sequences are of the same length
                 seq_lengths = torch.full((batch,), max_seqlen_q, device=q.device, dtype=torch.int32)
             else:
                 seq_lengths = cu_seqlens_q[1:] - cu_seqlens_q[:-1]  # shape: (BATCH,)
 
-            # num_tiles_per_seq: Number of tiles per sequence (each tile covers BLOCK_M tokens). Every sequence gets the same number of tiles, which for some we early exit if we go over the seqlen.
-
-            # Create indices for tile positions per sequence
+            # Create indices for tile positions per sequence. Reversed to represent the number of key tiles to attend to (i.e. workload).
             tile_indices = torch.arange(num_tiles_per_seq-1,-1,-1, device=q.device).repeat(batch)
 
             # Compute work per tile: for each sequence, work = seq_length - BLOCK_M * tile_index, clamped at 0
             tile_work = seq_lengths.repeat_interleave(num_tiles_per_seq) - config["BLOCK_M"] * tile_indices
-            tile_work = torch.clamp(tile_work, min=0)
-
-
+            tile_work = torch.clamp(tile_work, min=0) # early exit tiles have 0 work
             tile_work_sorted_indices = torch.argsort(tile_work, descending=True)
-            
-            # if DEBUG:
-            # print("tile_work", tile_work)
-
-            # print("tile_work_sorted_indices", tile_work_sorted_indices)
-
-            # sorted_work = tile_work[tile_work_sorted_indices].repeat_interleave(num_q_heads)
-
-            # workloads = torch.zeros((NUM_WGS,), dtype=torch.int32, device=q.device)
-
-            # half = num_tiles // 2
-            # high_per_wg = half // NUM_WGS
-            # low_count = num_tiles - half
-            # low_per_wg = low_count // NUM_WGS
-            # # Get the low-half tiles in reverse order (i.e. back-to-front)
-            # low_reversed = sorted_work[half:].flip(0)
-            # for i in range(NUM_WGS):
-            #     # Compute indices for the high half (front-to-back)
-            #     start_high = i * high_per_wg
-            #     end_high = (i + 1) * high_per_wg if i < NUM_WGS - 1 else half
-            #     # Compute indices for the reversed low half (back-to-front)
-            #     start_low = i * low_per_wg
-            #     end_low = (i + 1) * low_per_wg if i < NUM_WGS - 1 else low_count
-            #     workloads[i] = torch.sum(sorted_work[start_high:end_high]) + torch.sum(low_reversed[start_low:end_low])
-
-            # print("workloads", workloads)
-
-
 
             _attn_fwd_persistent_static[grid](
                 q,

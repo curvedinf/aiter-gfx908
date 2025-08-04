@@ -8,6 +8,9 @@
 #include "mla.h"
 
 
+#define PRINT_DBG 0
+
+
 __device__ constexpr int32_t get_warp_size()
 {
 #if defined(__GFX9__) || !defined(__HIP_DEVICE_COMPILE__)
@@ -175,11 +178,18 @@ inline int32_t cal_packed_causal_kv_len(
     return result;
 }
 
-inline float cal_cost(
+inline int32_t cal_cost(
     const int32_t qo_len,
     const int32_t kv_len)
 {
-    return 2.0f * float(qo_len) + float(kv_len);
+    return 2 * qo_len + kv_len;
+}
+
+inline int32_t cal_kv_len(
+    const int32_t cost,
+    const int32_t qo_len)
+{
+    return cost - 2 * qo_len;
 }
 
 template <typename T>
@@ -328,9 +338,13 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
         else if (avg_kv_lens <= 16) limit = 64;
         else if (avg_kv_lens <= 32) limit = 128;
         else if (avg_kv_lens <= 64) limit = 192;
-        else limit = ck_tile::integer_divide_ceil(avg_kv_lens, 16) * 16;
+        else limit = ck_tile::integer_least_multiple(avg_kv_lens, 16);
         return limit;
     }();
+#if PRINT_DBG
+    printf("[metadata] kv_len_limit_global=%d\n",
+           kv_len_limit_global);
+#endif
 
     // Step.3.1. Allocates output buffers except indptrs
     std::vector<std::vector<MlaWorkInfo>> work_info_set(num_clusters, std::vector<MlaWorkInfo>());
@@ -338,7 +352,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     std::vector<MlaPartialTileInfo> reduce_partial_info(num_qo_clusters_indptr.back(), {-1, 0});
 
     // Step.3.2. Declare priority queue
-    using ClusterCost = std::tuple<int32_t, float>; // cluster_id(cid), cost
+    using ClusterCost = std::tuple<int32_t, int32_t>; // cluster_id(cid), cost
     auto pq_cmp = [](const ClusterCost& l, const ClusterCost& r) { return std::get<1>(l) > std::get<1>(r); };
     std::priority_queue<ClusterCost, std::vector<ClusterCost>, decltype(pq_cmp)> cost_heap(pq_cmp);
     for (int32_t cid = 0; cid < num_clusters; ++cid) { cost_heap.push(std::tuple{cid, 0.0f}); }
@@ -347,6 +361,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     int32_t num_reduce_row      = 0;
     int32_t num_partial_outputs = 0;
     int32_t loc_partial_outputs = 0;
+    int32_t max_workload        = cal_cost(cluster_len_q, kv_len_limit_global);
     for (const auto& binfo : batch_infos)
     {
         const int32_t bid            = binfo.batch_idx;
@@ -357,6 +372,9 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
         const int32_t qo_batch_start = p_seqlens_qo_indptr[bid];
         const int32_t kv_batch_start = p_seqlens_kv_indptr[bid];
         const int32_t kv_batch_end   = p_seqlens_kv_indptr[bid + 1];
+#if PRINT_DBG
+        printf("[metadata] Dividing batch=%d, qo_len=%d, kv_len=%d\n", bid, qo_len, kv_len);
+#endif
 
         for (int32_t tid = 0; tid < num_qo_tiles; ++tid)
         {
@@ -364,33 +382,24 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
                 cal_packed_causal_kv_len(qo_len, kv_len, tid, cluster_len_q, num_qo_tiles, num_heads, is_causal);
             int32_t kv_start_local = 0;
 
-            const int32_t num_splits = ck_tile::integer_divide_ceil(remaining_kv_len, kv_len_limit_global);
-            bool split_kv = remaining_kv_len > kv_len_limit_global;
-            int32_t kv_len_limit = kv_len_limit_global;
-            if (num_splits == 2)
-            {
-                if (float(kv_len_limit_global) * 1.2f >= float(remaining_kv_len))
-                {
-                    kv_len_limit = remaining_kv_len;
-                    split_kv = false;
-                }
-            }
+            const bool split_kv = (remaining_kv_len > kv_len_limit_global);
 
-            for (int32_t split_idx = 0; split_idx < num_splits; ++split_idx)
+            do
             {
                 // Check and update cost_heap
                 auto [cid, accum_cost] = cost_heap.top();
                 cost_heap.pop();
-                const int32_t kv_len_consuming = [&]() {
-                    int32_t result = ck_tile::min(remaining_kv_len, kv_len_limit);
-                    if ((float(result) * 1.2f) >= float(remaining_kv_len))
-                    {
-                        result = remaining_kv_len;
-                    }
-                    return result;
-                }();
-                const float cost = cal_cost(cluster_len_q, kv_len_consuming);
-                cost_heap.push(std::tuple{cid, accum_cost + cost});
+                const int32_t remaining_capability = kv_len_limit_global - cal_kv_len(accum_cost, cluster_len_q);
+                const int32_t kv_len_limit_local = remaining_capability > 64 ? remaining_capability : 128;
+                const int32_t kv_len_consuming = ck_tile::min(remaining_kv_len, kv_len_limit_local);
+                const int32_t cost = cal_cost(cluster_len_q, kv_len_consuming);
+#if PRINT_DBG
+                printf("[metadata] cost heap updated: cid=%d, pre_cost=%d, new_cost=%d, tot_cost=%d, kv_len_cons=%d\n",
+                       cid, accum_cost, cost, accum_cost+cost, kv_len_consuming);
+#endif
+                const int32_t new_cost = accum_cost + cost;
+                cost_heap.push(std::tuple{cid, new_cost});
+                max_workload = ck_tile::max(max_workload, new_cost);
 
                 // Record work
                 MlaWorkInfo work_info{};
@@ -423,9 +432,19 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
                 remaining_kv_len -= kv_len_consuming;
                 kv_start_local += kv_len_consuming;
             }
-            assert(remaining_kv_len <= 0);
+            while (remaining_kv_len > 0);
         }
     }
+
+#if PRINT_DBG
+    printf("[metadata] Final Cost Heap Status: %zu elements\n", cost_heap.size());
+    while (cost_heap.empty() == false)
+    {
+        auto [id, cost] = cost_heap.top();
+        cost_heap.pop();
+        printf("[metadata] - ClusterId=%d, cost=%d\n", id, cost);
+    }
+#endif
 
     // Step.5. Allocate and fill indptrs
     std::vector<index_t> work_indptr;

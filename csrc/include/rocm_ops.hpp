@@ -978,6 +978,39 @@
           py::arg("scaleC")    = std::nullopt);                                       \
     m.def("getHipblasltKernelName", &getHipblasltKernelName);
 
+#define FLASH_MLA_FWD_PYBIND                         \
+    m.def("get_mla_metadata", &get_mla_metadata);    \
+    m.def("flash_mla_fwd_with_kvcache_impl",         \
+          &flash_mla_fwd_with_kvcache_impl,          \
+          "flash_mla_fwd_with_kvcache_impl",         \
+          py::arg("query_nope"),                     \
+          py::arg("key_nope_cache"),                 \
+          py::arg("value_cache"),                    \
+          py::arg("head_size_v"),                    \
+          py::arg("seqlens_qo"),                     \
+          py::arg("seqlens_kv"),                     \
+          py::arg("block_table"),                    \
+          py::arg("softmax_scale"),                  \
+          py::arg("is_causal"),                      \
+          py::arg("tile_scheduler_metadata"),        \
+          py::arg("num_splits"),                     \
+          py::arg("query_rope")     = std::nullopt,  \
+          py::arg("key_rope_cache") = std::nullopt); \
+    m.def("flash_mla_fwd_prefill_with_kvcache_impl", \
+          &flash_mla_fwd_prefill_with_kvcache_impl,  \
+          "flash_mla_fwd_prefill_with_kvcache_impl", \
+          py::arg("query_nope"),                     \
+          py::arg("key_nope_cache"),                 \
+          py::arg("value_cache"),                    \
+          py::arg("head_size_v"),                    \
+          py::arg("seqlens_qo"),                     \
+          py::arg("seqlens_kv"),                     \
+          py::arg("block_table"),                    \
+          py::arg("softmax_scale"),                  \
+          py::arg("is_causal"),                      \
+          py::arg("query_rope")     = std::nullopt,  \
+          py::arg("key_rope_cache") = std::nullopt);
+
 #define ROCSOLGEMM_PYBIND                                                          \
     m.def("rocb_create_extension", &rocb_create_extension, "create_extension");    \
     m.def("rocb_destroy_extension", &rocb_destroy_extension, "destroy_extension"); \
@@ -1001,8 +1034,3 @@
 
 #define GEMM_COMMON_PYBIND \
     m.def("get_padded_m", &getPaddedM, py::arg("M"), py::arg("N"), py::arg("K"), py::arg("gl"));
-
-#define FLASH_MLA_FWD_PYBIND                                                    \
-    m.def("get_mla_metadata", &get_mla_metadata);                               \
-    m.def("flash_mla_fwd_with_kvcache_impl", &flash_mla_fwd_with_kvcache_impl); \
-    m.def("flash_mla_fwd_prefill_with_kvcache_impl", &flash_mla_fwd_prefill_with_kvcache_impl);

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 from functools import partial
 
@@ -43,6 +43,8 @@ def torch_routing_sigmoid_top1(
 @pytest.mark.parametrize("K", [16, 128])
 @pytest.mark.parametrize("dtype", [torch.bfloat16])
 def test_routing_sigmoid_top1(M, N, K, dtype):
+    torch.cuda.empty_cache()  # Helps avoid hangs in large tests
+
     TOPK = 1
 
     torch.manual_seed(7)

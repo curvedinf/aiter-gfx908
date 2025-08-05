@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "batched_gemm_bf16_common.cuh"
 #include "batched_gemm_bf16_manifest.h"
@@ -50,7 +50,7 @@ BatchedKernel batched_dispatch(int id)
 }
 
 
-torch::Tensor batched_gemm_bf16_tune(
+void batched_gemm_bf16_tune(
     torch::Tensor &XQ,
     torch::Tensor &WQ,
     torch::Tensor &Y,
@@ -75,5 +75,5 @@ torch::Tensor batched_gemm_bf16_tune(
   {
     TORCH_CHECK(false, "Unsupported output dtype!");
   }
-  return Y;
+  // return Y;
 }

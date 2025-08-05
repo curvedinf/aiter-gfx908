@@ -12,6 +12,12 @@ import argparse
 torch.set_default_device("cuda")
 # torch.set_printoptions(sci_mode=False, threshold=torch.inf)
 
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+setup_seed(1)
 
 def ref_masked_attention(
     query: torch.Tensor,

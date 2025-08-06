@@ -1431,87 +1431,92 @@ def _attn_fwd_persistent_dynamic(
     # calculate offsets
     workgroup_id = tl.program_id(
         0
-    )  # workgroup id ranging: 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
-    
+    )  # workgroup id ranging: 0,1,2,....,num_tiles-1
     num_tiles = NUM_Q_HEADS * NUM_BLOCKS * BATCH
 
-    tile_id = workgroup_id
+    start_tile = workgroup_id
 
-    while tile_id < num_tiles:
-        off_q_head = tile_id % NUM_Q_HEADS
-        off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS, NUM_XCD)
-        start_m = (tile_id // NUM_Q_HEADS) % NUM_BLOCKS
-        off_z = (tile_id // (NUM_BLOCKS * NUM_Q_HEADS)) % BATCH
+    TILE_GROUP_SIZE: tl.constexpr = 4
 
-        # process the tile
-        _process_tile(
-            start_m,
-            off_q_head,
-            off_z,
-            q_ptr,
-            k_ptr,
-            v_ptr,
-            descale_q_ptr,
-            descale_k_ptr,
-            descale_v_ptr,
-            out_ptr,
-            alibi_slopes_ptr,
-            s_dmask_ptr,
-            dropout_mask_ptr,
-            softmax_lse_ptr,
-            stride_qz_in,
-            stride_qh_in,
-            stride_qm_in,
-            stride_qk_in,
-            stride_kz_in,
-            stride_kh_in,
-            stride_kn_in,
-            stride_kk_in,
-            stride_vz_in,
-            stride_vh_in,
-            stride_vn_in,
-            stride_vk_in,
-            stride_descale_q_z_in,
-            stride_descale_k_z_in,
-            stride_descale_v_z_in,
-            stride_oz_in,
-            stride_oh_in,
-            stride_om_in,
-            stride_on_in,
-            stride_alibi_z_in,
-            stride_alibi_h_in,
-            stride_sd_z_in,
-            stride_sd_h_in,
-            stride_sd_m_in,
-            stride_sd_n_in,
-            stride_lse_z_in,
-            stride_lse_h_in,
-            stride_lse_m_in,
-            sm_scale,
-            cu_seqlens_q,
-            cu_seqlens_k,
-            dropout_p,
-            philox_seed,
-            philox_offset_base_in,
-            SEQLEN_Q,
-            SEQLEN_K,
-            IS_CAUSAL,
-            NUM_Q_HEADS,
-            NUM_K_HEADS,
-            BLOCK_M,
-            BLOCK_N,
-            BLOCK_DMODEL,
-            BLOCK_DMODEL_POW2,
-            RETURN_SCORES,
-            ENABLE_DROPOUT,
-            IS_FP8, 
-            FP8_MAX, 
-            VARLEN, 
-            USE_INT64_STRIDES)
+    while start_tile < num_tiles:
+        
+        # end_i = min(TILE_GROUP_SIZE, num_tiles-start_tile + 1)
+
+        for i in tl.range(0, TILE_GROUP_SIZE, flatten=True):
+            tile_id = (start_tile + i) % num_tiles # wrap around if we exceed num_tiles
+            off_q_head = tile_id % NUM_Q_HEADS
+            # off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS, NUM_XCD)
+            start_m = (tile_id // NUM_Q_HEADS) % NUM_BLOCKS
+            off_z = (tile_id // (NUM_BLOCKS * NUM_Q_HEADS)) % BATCH
+            # process the tile
+            _process_tile(
+                start_m,
+                off_q_head,
+                off_z,
+                q_ptr,
+                k_ptr,
+                v_ptr,
+                descale_q_ptr,
+                descale_k_ptr,
+                descale_v_ptr,
+                out_ptr,
+                alibi_slopes_ptr,
+                s_dmask_ptr,
+                dropout_mask_ptr,
+                softmax_lse_ptr,
+                stride_qz_in,
+                stride_qh_in,
+                stride_qm_in,
+                stride_qk_in,
+                stride_kz_in,
+                stride_kh_in,
+                stride_kn_in,
+                stride_kk_in,
+                stride_vz_in,
+                stride_vh_in,
+                stride_vn_in,
+                stride_vk_in,
+                stride_descale_q_z_in,
+                stride_descale_k_z_in,
+                stride_descale_v_z_in,
+                stride_oz_in,
+                stride_oh_in,
+                stride_om_in,
+                stride_on_in,
+                stride_alibi_z_in,
+                stride_alibi_h_in,
+                stride_sd_z_in,
+                stride_sd_h_in,
+                stride_sd_m_in,
+                stride_sd_n_in,
+                stride_lse_z_in,
+                stride_lse_h_in,
+                stride_lse_m_in,
+                sm_scale,
+                cu_seqlens_q,
+                cu_seqlens_k,
+                dropout_p,
+                philox_seed,
+                philox_offset_base_in,
+                SEQLEN_Q,
+                SEQLEN_K,
+                IS_CAUSAL,
+                NUM_Q_HEADS,
+                NUM_K_HEADS,
+                BLOCK_M,
+                BLOCK_N,
+                BLOCK_DMODEL,
+                BLOCK_DMODEL_POW2,
+                RETURN_SCORES,
+                ENABLE_DROPOUT,
+                IS_FP8, 
+                FP8_MAX, 
+                VARLEN, 
+                USE_INT64_STRIDES)
 
 
-        # fetch the next tile id
-        tile_id= tl.atomic_add(pid_counter, 1)
+        # fetch the start tile for the next group of tiles
+        start_tile = tl.atomic_add(pid_counter, TILE_GROUP_SIZE)
 
 
 @triton.jit

@@ -4,8 +4,8 @@
 
 // Include these 2 headers instead of torch/extension.h since we don't need all
 // of the torch headers.
-#include "fmha_fwd.hpp"
 #include "aiter_hip_common.h"
+#include "fmha_fwd.hpp"
 #include "mask.hpp"
 
 namespace aiter {

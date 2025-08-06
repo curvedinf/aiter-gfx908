@@ -18,8 +18,8 @@
     m.def("mul_", &aiter_mul_, "apply for mul_ with transpose and broadcast."); \
     m.def("sub_", &aiter_sub_, "apply for sub_ with transpose and broadcast."); \
     m.def("div_", &aiter_div_, "apply for div_ with transpose and broadcast.");
-#define AITER_UNARY_PYBIND                                                      \
-    m.def("sigmoid", &aiter_sigmoid, "apply for sigmoid.");                     \
+#define AITER_UNARY_PYBIND                                  \
+    m.def("sigmoid", &aiter_sigmoid, "apply for sigmoid."); \
     m.def("tanh", &aiter_tanh, "apply for tanh.");
 
 #define ATTENTION_ASM_MLA_PYBIND        \
@@ -154,16 +154,16 @@
           py::arg("kernelId") = 0,    \
           py::arg("splitK")   = 0);
 
-#define M_GROUPED_FLATMM_PYBIND            \
-      m.def("m_grouped_flatmm_ck",              \
-            &m_grouped_flatmm_ck,               \
-            "m_grouped_flatmm_ck",              \
-            py::arg("XQ"),                    \
-            py::arg("WQ"),                    \
-            py::arg("x_scale"),               \
-            py::arg("w_scale"),               \
-            py::arg("out"),                   \
-            py::arg("group_layout"));
+#define M_GROUPED_GEMM_PYBIND                \
+    m.def("m_grouped_gemm",                  \
+          &m_grouped_gemm,                   \
+          "m_grouped_gemm",                  \
+          py::arg("XQ"),                     \
+          py::arg("WQ"),                     \
+          py::arg("Y"),                      \
+          py::arg("group_layout"),           \
+          py::arg("x_scale") = std::nullopt, \
+          py::arg("w_scale") = std::nullopt);
 
 #define CACHE_PYBIND                                                                \
     m.def("swap_blocks",                                                            \
@@ -336,7 +336,7 @@
           py::arg("x_scale"),       \
           py::arg("w_scale"),       \
           py::arg("Out"),           \
-          py::arg("splitK")   = 0);
+          py::arg("splitK") = 0);
 
 #define GEMM_A8W8_BLOCKSCALE_PYBIND \
     m.def("gemm_a8w8_blockscale",   \

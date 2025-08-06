@@ -322,18 +322,21 @@
     },
     "module_m_grouped_gemm": {
         "srcs": [
+            "f'{AITER_CSRC_DIR}/ck_m_grouped_gemm/include'",
             "f'{AITER_CSRC_DIR}/pybind/m_grouped_gemm_pybind.cu'",
-            "f'{AITER_CSRC_DIR}/py_itfs_ck/m_grouped_flatmm.cu'"
+            "f'{AITER_CSRC_DIR}/ck_m_grouped_gemm/m_grouped_gemm.cu'"
+            
         ],
         "flags_extra_cc": [],
         "flags_extra_hip": [],
+        "md_name": "'module_m_grouped_gemm'",
         "extra_ldflags": "None",
-        "extra_include": ["f'{CK_DIR}/example/ck_tile/19_grouped_flatmm'"],
+        "extra_include": ["f'{CK_DIR}/example/ck_tile/18_flatmm'"],
         "verbose": "False", 
         "is_python_module": "True",
         "is_standalone": "False",
-        "hip_clang_path": "os.environ.get('CK_TILE_CLANG_PATH')",
-        "blob_gen_cmd": "''"
+        "hip_clang_path": "os.environ.get('FLATMM_HIP_CLANG_PATH')",
+        "blob_gen_cmd": "f'{AITER_CSRC_DIR}/ck_m_grouped_gemm/gen_instances.py --working_path {{}}'"
     },
     "module_moe_sorting": {
         "srcs": [
@@ -797,13 +800,13 @@
         ],
         "extra_ldflags": "None",
         "extra_include": [
-            "f'{CK_DIR}/example/ck_tile/19_grouped_flatmm'"
+            "f'{CK_DIR}/example/ck_tile/18_flatmm'"
         ],
         "verbose": "False",
         "is_python_module": "False",
         "is_standalone": "False",
         "torch_exclude": "True",
-        "hip_clang_path": "os.environ.get('GEMM_A4W4_BLOCKWISE_HIP_CLANG_PATH')",
+        "hip_clang_path": "os.environ.get('FLATMM_HIP_CLANG_PATH')",
         "blob_gen_cmd": [
            "f'{AITER_CSRC_DIR}/cpp_itfs/m_grouped_gemm_generate.py --output_dir {{}}'"
         ]

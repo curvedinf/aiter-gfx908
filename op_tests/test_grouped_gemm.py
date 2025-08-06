@@ -62,21 +62,27 @@ def construct_masked_grouped(num_groups: int, max_m: int, expected_m_per_group: 
     x = torch.randn((num_groups, max_m, k), device='cuda', dtype=torch.bfloat16)
     y = torch.randn((num_groups, n, k), device='cuda', dtype=torch.bfloat16)
     out = torch.zeros((num_groups, max_m, n), device='cuda', dtype=torch.bfloat16)
-    ref_out = torch.einsum('gmk,gnk->gmn', x, y)
 
+    from aiter import dtypes
     assert max_m % 4 == 0, f'TMA alignment error: {max_m}'
-    x_fp8 = [torch.empty_like(x, dtype=dtypes), torch.empty((num_groups, max_m, k // 128), device='cuda', dtype=torch.float)]
-    y_fp8 = [torch.empty_like(y, dtype=dtypes), torch.empty((num_groups, (n + 128 - 1) // 128, k // 128), device='cuda', dtype=torch.float)]
-    if dtypes not in [torch.bfloat16, torch.half]:
-        for i in range(num_groups):
-            x_fp8[0][i], x_fp8[1][i] = per_token_cast_to_fp8(x[i])
-            y_fp8[0][i], y_fp8[1][i] = per_block_cast_to_fp8(y[i])
-    else:
-        x_fp8[0] = x
-        y_fp8[0] = y
-    # Transpose earlier so that the testing will not trigger transposing kernels
-    # x_fp8 = (x_fp8[0], get_col_major_tma_aligned_tensor(x_fp8[1]))
+    x_fp8 = [torch.empty_like(x, dtype=dtypes.fp8), torch.empty((num_groups, max_m, 1), device='cuda', dtype=torch.float)]
+    y_fp8 = [torch.empty_like(y, dtype=dtypes.fp8), torch.empty((num_groups, n, 1), device='cuda', dtype=torch.float)]
+    # if dtypes not in [torch.bfloat16, torch.half]:
+    torch_quant = aiter.get_triton_quant(aiter.QuantType.per_Token)
+    for i in range(num_groups):
+        x_fp8[0][i], x_fp8[1][i] = torch_quant(x[i], quant_dtype=dtypes.fp8)
+        y_fp8[0][i], y_fp8[1][i] = torch_quant(y[i], quant_dtype=dtypes.fp8)
 
+    # else:
+    #     x_fp8[0] = x
+    #     y_fp8[0] = y
+    # Transpose earlier so that the testing will not trigger transposing kernels
+    # x_fp8 = (x_fp8[0], get_col_major_tma_aligned_tensor(x_fp8[1]))\
+
+    print(x_fp8[0][i].shape, x_fp8[1][i].shape)
+    x = x_fp8[0].to(float) * x_fp8[1]
+    y = y_fp8[0].to(float) * y_fp8[1]
+    ref_out = torch.einsum('gmk,gnk->gmn', x, y).to(torch.bfloat16)
     # Construct mask
     # TODO: remove follow line
     # ref_out = torch.einsum('gmk,gnk->gmn', x_fp8[0], y_fp8[0])
@@ -116,12 +122,14 @@ for num_groups, expected_m_per_group in ((2, 512), (4, 256)):
             x_fp8, y_fp8, masked_m, out, ref_out = construct_masked_grouped(num_groups, 2048, expected_m_per_group, k, n)
             print(f"{masked_m=}")
             weightshuffle = shuffle_weight(y_fp8[0], layout=(16, 16))
-            aiter.m_grouped_flatmm_ck(x_fp8[0], weightshuffle, x_fp8[1], y_fp8[1], out, masked_m)
+            aiter.m_grouped_gemm(x_fp8[0], weightshuffle, out, masked_m, x_fp8[1], y_fp8[1])
 
         for j in range(num_groups):
             # print(f"{out[j, :masked_m[j].item()]=}")
             err = checkAllclose(
                 out[j, :masked_m[j].item()],
                 ref_out[j, :masked_m[j].item()],
-                msg=f"",
-            )
+                msg=f"")
+
+        # print(x_fp8[0])
+        # print(x_fp8[1])

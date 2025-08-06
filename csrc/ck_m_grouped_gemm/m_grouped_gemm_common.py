@@ -21,8 +21,6 @@ class kernelInstance:
     # CBLOCK_SPV: list[int]
     # CSHUFFLE_MX_PER_WAVE_PERSHUFFLE: int
     # CSHUFFLE_NX_PER_WAVE_PERSHUFFLE: int
-    LOOP_SCHED: str
-    PIPELINE_VERSION: int
 
     @property
     def name(self) -> str:
@@ -55,8 +53,8 @@ class kernelInstance:
                 #         ],
                 #     )
                 # ),
-                self.LOOP_SCHED.lower(),
-                f"v{self.PIPELINE_VERSION}",
+                # self.LOOP_SCHED.lower(),
+                # f"v{self.PIPELINE_VERSION}",
             ]
         )
 
@@ -64,21 +62,15 @@ class kernelInstance:
 # fmt: off
 kernels_list = {
 #   (    M,     N,     K): kernel:        BLOCK_SIZE| MPerBLOCK| NPerBLOCK| KPerBLOCK| WAVE_TILE_M| WAVE_TILE_N| WAVE_TILE_K| WAVE_MAP_M| WAVE_MAP_N|  LOOP_SCHED|PIPELINE_VERSION
-    1:                     kernelInstance(       256,       128,       128,       128,           16,         16,          32,         1,           4, "Intrawave",  3),
+    1:                     kernelInstance(       256,       128,       128,       128,           16,         16,          64,         1,           4),
+    2:                     kernelInstance(       256,       128,       128,       128,           16,         16,          32,         1,           4),
 }
 
 
 default_kernels_dict = {
 #   (    M,     N,     K): kernel:        BLOCK_SIZE| MPerBLOCK| NPerBLOCK| KPerBLOCK| WAVE_TILE_M| WAVE_TILE_N| WAVE_MAP_M| WAVE_MAP_N| ABLOCK_TRANSFER| BBLOCK_TRANSFER| CBLOCK_TRANSFER| CBLOCK_SPV| CSHUFFLE_MX| CSHUFFLE_NX|  LOOP_SCHED|PIPELINE_VERSION
-    (-1):                  kernelInstance(        64,        16,        16,       128,           16,         16,          1,          1,      [8, 8,  1],      [8, 8,  1],   [1, 16, 1, 4],  [4, 4, 1],           1,           1, "Interwave",  2),
-    (-3):                  kernelInstance(       128,        32,        16,       128,           16,         16,          1,          1,      [8, 16, 1],      [8, 16, 1],   [1, 16, 1, 8],  [2, 2, 1],           1,           1, "Interwave",  2),
-    (-4):                  kernelInstance(        64,        16,        16,       256,           16,         16,          1,          1,      [16, 4, 1],      [16, 4, 1],   [1, 16, 1, 4],  [4, 4, 1],           1,           1, "Intrawave",  1),
-    (-5):                  kernelInstance(       128,        16,        32,       128,           16,         16,          1,          1,      [8, 16, 1],      [8, 16, 1],   [1, 16, 1, 8],  [2, 2, 1],           1,           1, "Intrawave",  2),
-    (-6):                  kernelInstance(       256,       128,       128,       128,           32,         32,          2,          2,      [8, 32, 1],      [8, 32, 1],   [1, 32, 1, 8],  [8, 8, 1],           1,           1, "Interwave",  1),
-    (-7):                  kernelInstance(       256,       128,       128,       128,           32,         32,          2,          2,      [8, 32, 1],      [8, 32, 1],   [1, 32, 1, 8],  [8, 8, 1],           1,           1, "Intrawave",  3),
-    (-8):                  kernelInstance(       256,       256,       128,        64,           32,         32,          4,          2,      [4, 64, 1],      [4, 64, 1],   [1, 32, 1, 8],  [8, 8, 1],           1,           1, "Interwave",  1),
-    (-9):                  kernelInstance(       256,       224,       256,       128,           16,         16,          7,          8,      [8, 32, 1],      [8, 32, 1],   [1, 32, 1, 8],  [8, 8, 1],           1,           2, "Intrawave",  3),
-    (-10):                 kernelInstance(       128,        16,        32,       128,           16,         16,          1,          1,      [8, 16, 1],      [8, 16, 1],   [1, 16, 1, 8],  [4, 4, 1],           1,           1, "Intrawave",  2),
+    (-1):                     kernelInstance(       256,       128,       128,       128,           16,         16,          64,         1,           4),
+    (-2):                     kernelInstance(       256,       128,       128,       128,           16,         16,          32,         1,           4),
 
 }
 # fmt: on

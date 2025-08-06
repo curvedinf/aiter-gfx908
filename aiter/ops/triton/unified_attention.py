@@ -192,7 +192,6 @@ def kernel_unified_attention_2d(
         num_blocks_start = (
             max_seq_prefix_len - SLIDING_WINDOW - BLOCK_Q - 1
         ) // BLOCK_SIZE
-        # TODO (cagri): this works for most cases but not all, not sure why: num_blocks_start = max(0, num_blocks_start)
         num_blocks_start = max(0, num_blocks_start)
     else:
         num_blocks_start = 0

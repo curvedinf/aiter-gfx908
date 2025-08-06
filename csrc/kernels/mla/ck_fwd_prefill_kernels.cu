@@ -3,8 +3,8 @@
 
 #include <ck_tile/ops/fmha.hpp>
 #include <ck_tile/core/tensor/tile_scatter_gather.hpp>
-#include "fwd_kernels_params.hpp"
-#include "fwd_prefill_kernels_pipelines.hpp"
+#include "ck_fwd_kernels_params.hpp"
+#include "ck_fwd_prefill_kernels_pipelines.hpp"
 
 // =====================================================================================================================
 // Kernel Functions

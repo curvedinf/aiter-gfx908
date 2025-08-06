@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "fwd_prefill_kernels_policy.hpp"
+#include "ck_fwd_prefill_kernels_policy.hpp"
 
 // =====================================================================================================================
 // Kernel Pipeline Functions

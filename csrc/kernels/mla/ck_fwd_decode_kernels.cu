@@ -11,7 +11,7 @@
 
 #include <ck_tile/ops/reduce/block/block_reduce.hpp>
 #include <ck_tile/ops/fmha/block/page_block_navigator.hpp>
-#include "fwd_kernels_params.hpp"
+#include "ck_fwd_kernels_params.hpp"
 
 #define ZZDebug
 #define DEBUG_TID 255

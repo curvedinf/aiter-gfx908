@@ -8,8 +8,8 @@
 #include <ck_tile/core.hpp>
 #include <ck_tile/host.hpp>
 #include <ck_tile/ops/reduce.hpp>
-#include "fwd_kernels_traits.hpp"
-#include "block_gemm_areg_bsmem_creg.hpp"
+#include "ck_fwd_kernels_traits.hpp"
+#include "ck_block_gemm_areg_bsmem_creg.hpp"
 
 // =====================================================================================================================
 // Utils

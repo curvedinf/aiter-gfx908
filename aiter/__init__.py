@@ -62,5 +62,5 @@ from .ops.topk import *
 from .ops.mha import *
 from .ops.gradlib import *
 from .ops.trans_ragged_layout import *
-from .ops.fmla import *
+from .ops.ck_mla import *
 from . import mla

@@ -1,6 +1,6 @@
 #include <torch/python.h>
 #include <c10/cuda/CUDAGuard.h>
-#include "fmla.h"
+#include "ck_mla.h"
 
 // clang-format off
 std::vector<torch::Tensor> get_mla_metadata(

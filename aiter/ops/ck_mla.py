@@ -6,10 +6,10 @@ from torch import Tensor
 from ..jit.core import compile_ops
 
 
-MD_NAME = "module_fmla_fwd"
+MD_NAME = "module_ck_mla_fwd"
 
 
-@compile_ops("module_fmla_fwd")
+@compile_ops("module_ck_mla_fwd")
 def get_mla_metadata(
     seqlens_kv: Tensor,
     num_heads_per_head_k: int,
@@ -28,7 +28,7 @@ def get_mla_metadata(
     ...
 
 
-@compile_ops("module_fmla_fwd")
+@compile_ops("module_ck_mla_fwd")
 def flash_mla_fwd_with_kvcache_impl(
     q_nope: Tensor,
     k_nope_cache: Tensor,
@@ -46,7 +46,7 @@ def flash_mla_fwd_with_kvcache_impl(
 ) -> Tuple[Tensor, Tensor]: ...
 
 
-@compile_ops("module_fmla_fwd")
+@compile_ops("module_ck_mla_fwd")
 def flash_mla_fwd_prefill_with_kvcache_impl(
     q_nope: Tensor,
     k_nope_cache: Tensor,

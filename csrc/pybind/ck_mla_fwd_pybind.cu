@@ -2,7 +2,7 @@
 // Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "rocm_ops.hpp"
-#include "fmla.h"
+#include "ck_mla.h"
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {

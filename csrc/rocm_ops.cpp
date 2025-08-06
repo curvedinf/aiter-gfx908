@@ -32,7 +32,7 @@
 #include "rocsolgemm.cuh"
 #include "rope.h"
 #include "smoothquant.h"
-#include "fmla.h"
+#include "ck_mla.h"
 #include <torch/extension.h>
 
 // #include "torch/mha_batch_prefill.h"

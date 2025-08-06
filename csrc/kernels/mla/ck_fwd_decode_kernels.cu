@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <torch/python.h>
 #include <c10/cuda/CUDAGuard.h>
@@ -25,7 +25,7 @@ template <int32_t kSizeD_,
           int32_t kBlockM_,
           int32_t kBlockN_,
           int32_t kNumWarps_>
-struct FlashMlaKernelTrait
+struct CkMlaKernelTrait
 {
     static constexpr int32_t kSizeD                  = kSizeD_;    // hidden dimension size of query and key
     static constexpr int32_t kSizeDV                 = kSizeDV_;   // hidden dimension size of value
@@ -58,8 +58,8 @@ struct FlashMlaKernelTrait
     static constexpr int32_t kKPack = 8;
 };
 
-// using FlashMlaKernelTraitsInstance = FlashMlaKernelTrait<576, 512, 64, 64, 4>;
-using FlashMlaKernelTraitsInstance = FlashMlaKernelTrait<576, 512, 64, 16, 4>;
+// using CkMlaKernelTraitsInstance = CkMlaKernelTrait<576, 512, 64, 64, 4>;
+using CkMlaKernelTraitsInstance = CkMlaKernelTrait<576, 512, 64, 16, 4>;
 
 
 // =====================================================================================================================
@@ -299,7 +299,7 @@ __device__ constexpr auto get_kv_block_gemm_backup()
 
 template <typename Traits, typename scalar_t, typename acc_t, bool Is_causal>
 __global__ void flash_fwd_splitkv_mla_kernel(
-    const FlashMlaDecodeFwdParams params)
+    const CkMlaDecodeFwdParams params)
 {
     constexpr int32_t kSizeD             = Traits::kSizeD; 
     constexpr int32_t kSizeDV            = Traits::kSizeDV; 
@@ -1131,8 +1131,8 @@ __global__ void flash_fwd_splitkv_mla_kernel(
 
 
 template <typename Traits, typename scalar_t, typename acc_t, bool Is_causal>
-void dispatch_fmla_fwd_splictkv(
-    const FlashMlaDecodeFwdParams& params)
+void dispatch_ck_mla_fwd_splictkv(
+    const CkMlaDecodeFwdParams& params)
 {
     // assert(params.page_block_size == Traits::kBlockN);
     const uint32_t num_m_block = static_cast<uint32_t>(ck_tile::integer_divide_ceil(params.size_s, Traits::kBlockM));
@@ -1148,45 +1148,45 @@ void dispatch_fmla_fwd_splictkv(
     kernel<<<grid, Traits::kNumThreads, smem_size, stream>>>(params);
 }
 
-#define DISPATCH_FMLA_TYPES(TYPE, IS_CAUSAL, NAME, ...) \
-    switch ((TYPE))                                     \
-    {                                                   \
-        case at::ScalarType::BFloat16:                           \
-        {                                               \
-            using scalar_t = ck_tile::bf16_t;           \
-            if ((IS_CAUSAL))                            \
-            {                                           \
-                constexpr bool Is_causal = true;        \
-                __VA_ARGS__;                            \
-            }                                           \
-            else                                        \
-            {                                           \
-                constexpr bool Is_causal = false;       \
-                __VA_ARGS__;                            \
-            }                                           \
-            break;                                      \
-        }                                               \
-        case at::ScalarType::Half:                               \
-        {                                               \
-            using scalar_t = ck_tile::fp16_t;           \
-            if ((IS_CAUSAL))                            \
-            {                                           \
-                constexpr bool Is_causal = true;        \
-                __VA_ARGS__;                            \
-            }                                           \
-            else                                        \
-            {                                           \
-                constexpr bool Is_causal = false;       \
-                __VA_ARGS__;                            \
-            }                                           \
-            break;                                      \
-        }                                               \
-        default:                                        \
-            TORCH_CHECK(false, NAME " does't support ", \
-                        toString((TYPE)), ".");         \
+#define DISPATCH_CK_MLA_TYPES(TYPE, IS_CAUSAL, NAME, ...)   \
+    switch ((TYPE))                                         \
+    {                                                       \
+        case at::ScalarType::BFloat16:                      \
+        {                                                   \
+            using scalar_t = ck_tile::bf16_t;               \
+            if ((IS_CAUSAL))                                \
+            {                                               \
+                constexpr bool Is_causal = true;            \
+                __VA_ARGS__;                                \
+            }                                               \
+            else                                            \
+            {                                               \
+                constexpr bool Is_causal = false;           \
+                __VA_ARGS__;                                \
+            }                                               \
+            break;                                          \
+        }                                                   \
+        case at::ScalarType::Half:                          \
+        {                                                   \
+            using scalar_t = ck_tile::fp16_t;               \
+            if ((IS_CAUSAL))                                \
+            {                                               \
+                constexpr bool Is_causal = true;            \
+                __VA_ARGS__;                                \
+            }                                               \
+            else                                            \
+            {                                               \
+                constexpr bool Is_causal = false;           \
+                __VA_ARGS__;                                \
+            }                                               \
+            break;                                          \
+        }                                                   \
+        default:                                            \
+            TORCH_CHECK(false, NAME " does't support ",     \
+                        toString((TYPE)), ".");             \
     }
 
-std::vector<torch::Tensor> flash_mla_fwd_decode_with_kvcache_impl(
+std::vector<torch::Tensor> ck_mla_fwd_decode_with_kvcache_impl(
     torch::Tensor& query,
     const torch::Tensor& key_cache,
     const torch::Tensor& value_cache,
@@ -1198,7 +1198,7 @@ std::vector<torch::Tensor> flash_mla_fwd_decode_with_kvcache_impl(
     const torch::Tensor& tile_scheduler_metadata,
     const torch::Tensor& num_splits)
 {
-    using Traits = FlashMlaKernelTraitsInstance;
+    using Traits = CkMlaKernelTraitsInstance;
 
     torch::Tensor vcache = value_cache.data_ptr() ? value_cache : key_cache;
 
@@ -1232,7 +1232,7 @@ std::vector<torch::Tensor> flash_mla_fwd_decode_with_kvcache_impl(
     auto softmax_lseaccum = torch::empty({batch_size + num_cu_parts, num_heads, seqlen_q}, opts.dtype(torch::kFloat32));
     auto output_accum = torch::empty({batch_size + num_cu_parts, num_heads, seqlen_q, head_size_v}, opts.dtype(torch::kFloat32));
 
-    FlashMlaDecodeFwdParams params = {};
+    CkMlaDecodeFwdParams params = {};
     params.p_cu_seqlens_k            = cache_seqlens.data_ptr<int32_t>();
     params.p_block_table             = block_table.data_ptr<int32_t>();
     params.p_tile_scheduler_metadata = tile_scheduler_metadata.data_ptr<int32_t>();
@@ -1273,13 +1273,13 @@ std::vector<torch::Tensor> flash_mla_fwd_decode_with_kvcache_impl(
 
 	using acc_t = float;
 
-    dispatch_fmla_fwd_splictkv<Traits, ck_tile::fp16_t, float, true>(params);
-    // DISPATCH_FMLA_TYPES(
+    dispatch_ck_mla_fwd_splictkv<Traits, ck_tile::fp16_t, float, true>(params);
+    // DISPATCH_CK_MLA_TYPES(
     //     query.scalar_type(),
     //     is_causal,
-    //     "fmla_fwd",
+    //     "ck_mla_fwd",
     //     [&](){
-    //         dispatch_fmla_fwd_splictkv<Traits, scalar_t, acc_t, Is_causal>(params);
+    //         dispatch_ck_mla_fwd_splictkv<Traits, scalar_t, acc_t, Is_causal>(params);
     //     }();
     // );
 

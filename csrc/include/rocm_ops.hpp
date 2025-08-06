@@ -978,11 +978,11 @@
           py::arg("scaleC")    = std::nullopt);                                       \
     m.def("getHipblasltKernelName", &getHipblasltKernelName);
 
-#define FLASH_MLA_FWD_PYBIND                         \
+#define CK_MLA_FWD_PYBIND                            \
     m.def("get_mla_metadata", &get_mla_metadata);    \
-    m.def("flash_mla_fwd_with_kvcache_impl",         \
-          &flash_mla_fwd_with_kvcache_impl,          \
-          "flash_mla_fwd_with_kvcache_impl",         \
+    m.def("ck_mla_fwd_with_kvcache_impl",            \
+          &ck_mla_fwd_with_kvcache_impl,             \
+          "ck_mla_fwd_with_kvcache_impl",            \
           py::arg("query_nope"),                     \
           py::arg("key_nope_cache"),                 \
           py::arg("value_cache"),                    \
@@ -996,9 +996,9 @@
           py::arg("num_splits"),                     \
           py::arg("query_rope")     = std::nullopt,  \
           py::arg("key_rope_cache") = std::nullopt); \
-    m.def("flash_mla_fwd_prefill_with_kvcache_impl", \
-          &flash_mla_fwd_prefill_with_kvcache_impl,  \
-          "flash_mla_fwd_prefill_with_kvcache_impl", \
+    m.def("ck_mla_fwd_prefill_with_kvcache_impl",    \
+          &ck_mla_fwd_prefill_with_kvcache_impl,     \
+          "ck_mla_fwd_prefill_with_kvcache_impl",    \
           py::arg("query_nope"),                     \
           py::arg("key_nope_cache"),                 \
           py::arg("value_cache"),                    \

@@ -21,11 +21,11 @@ union TileSchedulerMetaData
 };
 constexpr size_t TileSchedulerMetaDataSizeInDw = sizeof(TileSchedulerMetaData) / sizeof(int32_t);
 
-struct FlashMlaPrefillFwdParams
+struct CkMlaPrefillFwdParams
 {
-    int32_t* __restrict__ p_seqlens_qo;     // [b]
-    int32_t* __restrict__ p_seqlens_kv;     // [b]
-    int32_t* __restrict__ p_block_table;    // [b, max_seqlen_pad // block_size]
+    int32_t* __restrict__ p_seqlens_qo;  // [b]
+    int32_t* __restrict__ p_seqlens_kv;  // [b]
+    int32_t* __restrict__ p_block_table; // [b, max_seqlen_pad // block_size]
 
     void* __restrict__ p_query_nope;
     void* __restrict__ p_key_nope;
@@ -50,8 +50,8 @@ struct FlashMlaPrefillFwdParams
     float scale_softmax;
     ck_tile::mdiv mask_y_ratio_mdiv;
 
-    // Use int64_t if there is int32 overflow case. For now, just use int32 to save sgpr and prevent using
-    // spill table.
+    // Use int64_t if there is int32 overflow case. For now, just use int32 to save sgpr and prevent
+    // using spill table.
     using index_t = int32_t;
 
     index_t stride_b_q_nope; // stride in batch of query nope
@@ -78,11 +78,11 @@ struct FlashMlaPrefillFwdParams
     index_t stride_sp_lseacc; //    ... in split ...
     index_t stride_b_oacc;
     index_t stride_h_oacc;
-    index_t stride_sp_oacc;   //    ... in split ...
+    index_t stride_sp_oacc; //    ... in split ...
     index_t stride_s_oacc;
 };
 
-struct FlashMlaDecodeFwdParams
+struct CkMlaDecodeFwdParams
 {
     int32_t* __restrict__ p_cu_seqlens_k;
     int32_t* __restrict__ p_block_table;
@@ -105,24 +105,24 @@ struct FlashMlaDecodeFwdParams
     int32_t num_cu_parts;
     int64_t block_table_batch_stride;
     int32_t page_block_size;
-    float   scale_softmax;
-    float   scale_softmax_log2;
-    bool    is_causal;
+    float scale_softmax;
+    float scale_softmax_log2;
+    bool is_causal;
 
-    // Use int64_t if there is int32 overflow case. For now, just use int32 to save sgpr and prevent using
-    // spill table.
+    // Use int64_t if there is int32 overflow case. For now, just use int32 to save sgpr and prevent
+    // using spill table.
     using index_t = int32_t;
 
-    index_t stride_b_q;     // stride in batch of query
-    index_t stride_s_q;     //    ... in sequence ...
-    index_t stride_h_q;     //    ... in head ...
-    index_t stride_b_k;     // stride in batch of key
-    index_t stride_s_k;     //    ... in sequence ...
-    index_t stride_h_k;     //    ... in head ...
-    index_t stride_b_v;     // stride in batch of value
-    index_t stride_s_v;     //    ... in sequence ...
-    index_t stride_h_v;     //    ... in head ...
-    index_t stride_b_o;     // stride in batch of output
-    index_t stride_s_o;     //    ... in sequence ...
-    index_t stride_h_o;     //    ... in head ...
+    index_t stride_b_q; // stride in batch of query
+    index_t stride_s_q; //    ... in sequence ...
+    index_t stride_h_q; //    ... in head ...
+    index_t stride_b_k; // stride in batch of key
+    index_t stride_s_k; //    ... in sequence ...
+    index_t stride_h_k; //    ... in head ...
+    index_t stride_b_v; // stride in batch of value
+    index_t stride_s_v; //    ... in sequence ...
+    index_t stride_h_v; //    ... in head ...
+    index_t stride_b_o; // stride in batch of output
+    index_t stride_s_o; //    ... in sequence ...
+    index_t stride_h_o; //    ... in head ...
 };

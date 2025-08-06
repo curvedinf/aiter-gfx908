@@ -298,10 +298,10 @@ CK_TILE_DEVICE static auto MakeOutDram(scalar_t* p_data,
 
 template <typename Traits, typename scalar_t, typename acc_t, typename out_t, bool kIsCausal, bool kIsRopeSeparate, bool kDoSplit>
 __launch_bounds__(Traits::kNumThreads, Traits::kWaveOccupancy)
-__global__ void kn_fmla_fwd_splictkv_prefill(
-    const FlashMlaPrefillFwdParams params)
+__global__ void kn_ck_mla_fwd_splictkv_prefill(
+    const CkMlaPrefillFwdParams params)
 {
-    using Policy = FlashMlaPrefillPolicy<Traits, scalar_t, acc_t>;
+    using Policy = CkMlaPrefillPolicy<Traits, scalar_t, acc_t>;
     constexpr auto HiddenDimSize = kIsRopeSeparate ? Traits::kSizeNope : Traits::kSizeD;
 
     // allocate LDS
@@ -461,7 +461,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
 
 
         if constexpr (!Traits::kKVLoadOnce) {
-            kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t, kIsRopeSeparate>(
+            kn_ck_mla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t, kIsRopeSeparate>(
                 q_dram_window_nope,
                 q_dram_window_rope,
                 k_dram_window_nope,
@@ -478,7 +478,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                 params.num_splits,
                 split_id,
                 mask,
-#if FMLA_FWD_FAST_EXP2
+#if CK_MLA_FWD_FAST_EXP2
                 static_cast<float>(params.scale_softmax * ck_tile::log2e_v<>),
 #else
                 params.scale_softmax,
@@ -487,7 +487,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
         }
         else
         {
-            kn_fmla_fwd_splitkv_prefill_load_once_tile<Traits, scalar_t, acc_t, out_t>(
+            kn_ck_mla_fwd_splitkv_prefill_load_once_tile<Traits, scalar_t, acc_t, out_t>(
                 q_dram_window_nope,
                 q_dram_window_rope,
                 k_dram_window_nope,
@@ -503,7 +503,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                 params.num_splits,
                 split_id,
                 mask,
-#if FMLA_FWD_FAST_EXP2
+#if CK_MLA_FWD_FAST_EXP2
                 static_cast<float>(params.scale_softmax * ck_tile::log2e_v<>),
 #else
                 params.scale_softmax,
@@ -541,7 +541,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
 
         if constexpr (!Traits::kKVLoadOnce)
         {
-            kn_fmla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t, kIsRopeSeparate>(
+            kn_ck_mla_fwd_splitkv_prefill_tile<Traits, scalar_t, acc_t, out_t, kIsRopeSeparate>(
                 q_dram_window_nope,
                 q_dram_window_rope,
                 k_dram_window_nope,
@@ -558,7 +558,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                 1, // num_splits
                 0, // split_id
                 mask,
-#if FMLA_FWD_FAST_EXP2
+#if CK_MLA_FWD_FAST_EXP2
                 static_cast<float>(params.scale_softmax * ck_tile::log2e_v<>),
 #else
                 params.scale_softmax,
@@ -567,7 +567,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
         }
         else
         {
-            kn_fmla_fwd_splitkv_prefill_load_once_tile<Traits, scalar_t, acc_t, out_t>(
+            kn_ck_mla_fwd_splitkv_prefill_load_once_tile<Traits, scalar_t, acc_t, out_t>(
                 q_dram_window_nope,
                 q_dram_window_rope,
                 k_dram_window_nope,
@@ -583,7 +583,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
                 1, // num_splits
                 0, // split_id
                 mask,
-#if FMLA_FWD_FAST_EXP2
+#if CK_MLA_FWD_FAST_EXP2
                 static_cast<float>(params.scale_softmax * ck_tile::log2e_v<>),
 #else
                 params.scale_softmax,
@@ -594,10 +594,10 @@ __global__ void kn_fmla_fwd_splictkv_prefill(
 }
 
 template <typename Traits, int32_t kMaxSplits, typename out_t, typename in_t>
-__global__ void kn_fmla_fwd_splictkv_prefill_combine(
-    const FlashMlaPrefillFwdParams params)
+__global__ void kn_ck_mla_fwd_splictkv_prefill_combine(
+    const CkMlaPrefillFwdParams params)
 {
-    using Policy  = FlashMlaCombineKernelPolicy<Traits, out_t, in_t>;
+    using Policy  = CkMlaCombineKernelPolicy<Traits, out_t, in_t>;
     using index_t = int64_t;
 
     __shared__ in_t lds_lse_scale[kMaxSplits];
@@ -649,7 +649,7 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
         #pragma unroll
         for (int32_t i = 0; i < kNumLsePerThr; ++i)
         {
-#ifdef FMLA_FWD_FAST_EXP2
+#ifdef CK_MLA_FWD_FAST_EXP2
             static_assert(0, "have not figured out if need exp2 here");
 #endif
             sum_lse += ck_tile::exp(local_lse[i] - max_lse);
@@ -723,8 +723,8 @@ __global__ void kn_fmla_fwd_splictkv_prefill_combine(
 //
 
 template <typename Traits, typename scalar_t, typename acc_t, typename out_t, bool kIsCausal, bool kIsRopeSeparate>
-void dispatch_fmla_fwd_splictkv_prefill(
-    const FlashMlaPrefillFwdParams& params)
+void dispatch_ck_mla_fwd_splictkv_prefill(
+    const CkMlaPrefillFwdParams& params)
 {
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
@@ -738,20 +738,20 @@ void dispatch_fmla_fwd_splictkv_prefill(
     {
         // out_t is not take into consideration when doing splits because combine shader is always expected to do
         // the final output type conversion.
-        auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, acc_t, kIsCausal, kIsRopeSeparate, true>;
+        auto kn_attn = &kn_ck_mla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, acc_t, kIsCausal, kIsRopeSeparate, true>;
         auto kn_comb =
-            (params.num_splits <= 32)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 32,  scalar_t, acc_t> :
-            // (params.num_splits <= 64)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 64,  scalar_t, acc_t> :
-            // (params.num_splits <= 96)  ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 96,  scalar_t, acc_t> :
-            // (params.num_splits <= 128) ? &kn_fmla_fwd_splictkv_prefill_combine<Traits, 128, scalar_t, acc_t> :
-            static_cast<decltype(kn_fmla_fwd_splictkv_prefill_combine<Traits, 32, scalar_t, acc_t>)*>(nullptr);
+            (params.num_splits <= 32)  ? &kn_ck_mla_fwd_splictkv_prefill_combine<Traits, 32,  scalar_t, acc_t> :
+            // (params.num_splits <= 64)  ? &kn_ck_mla_fwd_splictkv_prefill_combine<Traits, 64,  scalar_t, acc_t> :
+            // (params.num_splits <= 96)  ? &kn_ck_mla_fwd_splictkv_prefill_combine<Traits, 96,  scalar_t, acc_t> :
+            // (params.num_splits <= 128) ? &kn_ck_mla_fwd_splictkv_prefill_combine<Traits, 128, scalar_t, acc_t> :
+            static_cast<decltype(kn_ck_mla_fwd_splictkv_prefill_combine<Traits, 32, scalar_t, acc_t>)*>(nullptr);
         TORCH_CHECK(kn_comb != nullptr, "num_splits is larger than expected (<=128) !");
         kn_attn<<<grid_attn, Traits::kNumThreads, 0, stream>>>(params);
         kn_comb<<<grid_comb, Traits::kNumThreadsCombine, 0, stream>>>(params);
     }
     else
     {
-        auto kn_attn = &kn_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, kIsCausal, kIsRopeSeparate, false>;
+        auto kn_attn = &kn_ck_mla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, kIsCausal, kIsRopeSeparate, false>;
         kn_attn<<<grid_attn, Traits::kNumThreads, 0, stream>>>(params);
     }
 }
@@ -759,7 +759,7 @@ void dispatch_fmla_fwd_splictkv_prefill(
 // =====================================================================================================================
 // Interfaces
 //
-#define FMLA_CASE(IS_CAUSAL, IS_ROPE_SEPARATE, ...)                    \
+#define CK_MLA_CASE(IS_CAUSAL, IS_ROPE_SEPARATE, ...)                  \
     if(is_causal == IS_CAUSAL && is_rope_separate == IS_ROPE_SEPARATE) \
     {                                                                  \
         constexpr bool Is_causal        = IS_CAUSAL;                   \
@@ -767,25 +767,25 @@ void dispatch_fmla_fwd_splictkv_prefill(
         __VA_ARGS__;                                                   \
     }
 
-#define DISPATCH_FMLA_TYPES(TYPE, NAME, ...)                                     \
+#define DISPATCH_CK_MLA_TYPES(TYPE, NAME, ...)                                   \
     switch((TYPE))                                                               \
     {                                                                            \
     case at::ScalarType::BFloat16: {                                             \
         using scalar_t = ck_tile::bf16_t;                                        \
         using out_t    = std::conditional_t<kForceOutAcc, acc_t, scalar_t>;      \
-        FMLA_CASE(true, true, __VA_ARGS__)                                       \
-        FMLA_CASE(true, false, __VA_ARGS__)                                      \
-        FMLA_CASE(false, true, __VA_ARGS__)                                      \
-        FMLA_CASE(false, false, __VA_ARGS__)                                     \
+        CK_MLA_CASE(true, true, __VA_ARGS__)                                     \
+        CK_MLA_CASE(true, false, __VA_ARGS__)                                    \
+        CK_MLA_CASE(false, true, __VA_ARGS__)                                    \
+        CK_MLA_CASE(false, false, __VA_ARGS__)                                   \
         break;                                                                   \
     }                                                                            \
     case at::ScalarType::Half: {                                                 \
         using scalar_t = ck_tile::fp16_t;                                        \
         using out_t    = std::conditional_t<kForceOutAcc, acc_t, scalar_t>;      \
-        FMLA_CASE(true, true, __VA_ARGS__)                                       \
-        FMLA_CASE(true, false, __VA_ARGS__)                                      \
-        FMLA_CASE(false, true, __VA_ARGS__)                                      \
-        FMLA_CASE(false, false, __VA_ARGS__)                                     \
+        CK_MLA_CASE(true, true, __VA_ARGS__)                                     \
+        CK_MLA_CASE(true, false, __VA_ARGS__)                                    \
+        CK_MLA_CASE(false, true, __VA_ARGS__)                                    \
+        CK_MLA_CASE(false, false, __VA_ARGS__)                                   \
         break;                                                                   \
     }                                                                            \
     default: TORCH_CHECK(false, NAME " does't support ", toString((TYPE)), "."); \
@@ -867,17 +867,18 @@ int32_t calculate_num_splits(
 }
 
 std::vector<torch::Tensor>
-flash_mla_fwd_prefill_with_kvcache_impl(torch::Tensor& query_nope,
-                                        const torch::Tensor& key_nope_cache,
-                                        const torch::Tensor& value_cache,
-                                        const int32_t head_size_v,
-                                        const torch::Tensor& seqlens_qo,
-                                        const torch::Tensor& seqlens_kv,
-                                        const torch::Tensor& block_table,
-                                        const float softmax_scale,
-                                        const bool is_causal,
-                                        std::optional<torch::Tensor>& query_rope,
-                                        const std::optional<torch::Tensor>& key_rope_cache)
+ck_mla_fwd_prefill_with_kvcache_impl(
+    torch::Tensor& query_nope,
+    const torch::Tensor& key_nope_cache,
+    const torch::Tensor& value_cache,
+    const int32_t head_size_v,
+    const torch::Tensor& seqlens_qo,
+    const torch::Tensor& seqlens_kv,
+    const torch::Tensor& block_table,
+    const float softmax_scale,
+    const bool is_causal,
+    std::optional<torch::Tensor>& query_rope,
+    const std::optional<torch::Tensor>& key_rope_cache)
 {
     const bool is_rope_separate = query_rope.has_value() && key_rope_cache.has_value();
 
@@ -891,8 +892,8 @@ flash_mla_fwd_prefill_with_kvcache_impl(torch::Tensor& query_nope,
     // warp4 + load_once=true + occ=1
     //                             dqk  dv   m0  n0  n1   #warp  wave_occu
     using Traits = std::conditional_t<kKVLoadOnce,
-        FlashMlaPrefillKernelTrait<576, 512, 64, 16, 512, 8,     1,   kKVLoadOnce, kEnableXqa>,
-        FlashMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4,     2,   kKVLoadOnce, kEnableXqa>>;
+        CkMlaPrefillKernelTrait<576, 512, 64, 16, 512, 8,     1,   kKVLoadOnce, kEnableXqa>,
+        CkMlaPrefillKernelTrait<576, 512, 64, 64, 256, 4,     2,   kKVLoadOnce, kEnableXqa>>;
     constexpr bool kForceOutAcc = false;
     using acc_t                 = float;
 
@@ -939,7 +940,7 @@ flash_mla_fwd_prefill_with_kvcache_impl(torch::Tensor& query_nope,
                                (kForceOutAcc && !do_splits) ? opts_acc : opts);
     auto softmax_lse = torch::empty({batch_size, num_heads_q_ori, max_seqlen_qo_ori}, opts_acc);
 
-    FlashMlaPrefillFwdParams params = {};
+    CkMlaPrefillFwdParams params = {};
 
     params.num_splits    = num_splits;
     params.p_seqlens_qo  = seqlens_qo.data_ptr<int32_t>();
@@ -1008,18 +1009,18 @@ flash_mla_fwd_prefill_with_kvcache_impl(torch::Tensor& query_nope,
         params.stride_sp_lseacc   = softmax_lseaccum.stride(1);
     }
 
-    DISPATCH_FMLA_TYPES(
+    DISPATCH_CK_MLA_TYPES(
         query_nope.scalar_type(),
-        "fmla_fwd",
+        "ck_mla_fwd",
         [&](){
-            dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal, Is_rope_separate>(params);
+            dispatch_ck_mla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, Is_causal, Is_rope_separate>(params);
         }();
     );
     // assert(is_causal == false);
     // assert(query.scalar_type() == at::ScalarType::BFloat16);
     // using scalar_t = ck_tile::bf16_t;
     // using out_t = std::conditional_t<kForceOutAcc, acc_t, scalar_t>;
-    // dispatch_fmla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, false>(params);
+    // dispatch_ck_mla_fwd_splictkv_prefill<Traits, scalar_t, acc_t, out_t, false>(params);
 
 
     return {output.to(opts), softmax_lse};

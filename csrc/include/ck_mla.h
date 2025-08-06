@@ -18,7 +18,7 @@ std::vector<torch::Tensor> get_mla_metadata(
 // Returns
 //   [0] output:      [batch size, seqlen of q,     head count of q, head dim of v]
 //   [1] softmax_lse: [batch size, head count of q, seqlen of q]
-std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
+std::vector<torch::Tensor> ck_mla_fwd_with_kvcache_impl(
     torch::Tensor&                      query_nope,                // [batch size,  seqlen of q, head count of q,  head dim of qk]
     const torch::Tensor&                key_nope_cache,            // [block count, block size,  head count of kv, head dim of qk]
     const torch::Tensor&                value_cache,               // [block count, block size,  head count of kv, head dim of v ]
@@ -34,7 +34,7 @@ std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
     const std::optional<torch::Tensor>& key_rope_cache
 );
 
-std::vector<torch::Tensor> flash_mla_fwd_decode_with_kvcache_impl(
+std::vector<torch::Tensor> ck_mla_fwd_decode_with_kvcache_impl(
     torch::Tensor&       query,
     const torch::Tensor& key_cache,
     const torch::Tensor& value_cache,
@@ -48,7 +48,7 @@ std::vector<torch::Tensor> flash_mla_fwd_decode_with_kvcache_impl(
 );
 
 std::vector<torch::Tensor>
-flash_mla_fwd_prefill_with_kvcache_impl(
+ck_mla_fwd_prefill_with_kvcache_impl(
     torch::Tensor&                      query_nope,
     const torch::Tensor&                key_nope_cache,
     const torch::Tensor&                value_cache,

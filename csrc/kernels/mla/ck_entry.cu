@@ -15,7 +15,7 @@ std::vector<torch::Tensor> get_mla_metadata(
     return {ret};
 }
 
-std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
+std::vector<torch::Tensor> ck_mla_fwd_with_kvcache_impl(
     torch::Tensor&                      query_nope,               // [batch size,  seqlen of q, head count of q,  head dim of qk]
     const torch::Tensor&                key_nope_cache,           // [block count, block size,  head count of kv, head dim of qk]
     const torch::Tensor&                value_cache,              // [block count, block size,  head count of kv, head dim of v ]
@@ -34,7 +34,7 @@ std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
     const bool is_rope_separate = query_rope.has_value() && key_rope_cache.has_value();
     if(seqlen_q < 32 && !is_rope_separate) // TODO: not support nope/rope split
     {
-        return flash_mla_fwd_decode_with_kvcache_impl(
+        return ck_mla_fwd_decode_with_kvcache_impl(
             query_nope,
             key_nope_cache,
             value_cache,
@@ -49,7 +49,7 @@ std::vector<torch::Tensor> flash_mla_fwd_with_kvcache_impl(
     }
     else
     {
-        return flash_mla_fwd_prefill_with_kvcache_impl(
+        return ck_mla_fwd_prefill_with_kvcache_impl(
             query_nope,
             key_nope_cache,
             value_cache,

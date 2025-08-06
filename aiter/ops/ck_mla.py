@@ -29,7 +29,7 @@ def get_mla_metadata(
 
 
 @compile_ops("module_ck_mla_fwd")
-def flash_mla_fwd_with_kvcache_impl(
+def ck_mla_fwd_with_kvcache_impl(
     q_nope: Tensor,
     k_nope_cache: Tensor,
     v_cache: Tensor,
@@ -47,7 +47,7 @@ def flash_mla_fwd_with_kvcache_impl(
 
 
 @compile_ops("module_ck_mla_fwd")
-def flash_mla_fwd_prefill_with_kvcache_impl(
+def ck_mla_fwd_prefill_with_kvcache_impl(
     q_nope: Tensor,
     k_nope_cache: Tensor,
     v_cache: Tensor,
@@ -62,7 +62,7 @@ def flash_mla_fwd_prefill_with_kvcache_impl(
 ) -> Tuple[Tensor, Tensor]: ...
 
 
-def flash_mla_fwd_with_kvcache(
+def ck_mla_fwd_with_kvcache(
     q_nope: Tensor,
     k_nope_cache: Tensor,
     block_table: Tensor,
@@ -97,7 +97,7 @@ def flash_mla_fwd_with_kvcache(
             softmax_scale = q_nope.shape[-1] ** (-0.5)
         else:
             softmax_scale = (q_nope.shape[-1] + q_rope.shape[-1]) ** (-0.5)
-    out_, softmax_lse = flash_mla_fwd_with_kvcache_impl(
+    out_, softmax_lse = ck_mla_fwd_with_kvcache_impl(
         q_nope,
         k_nope_cache,
         k_nope_cache,
@@ -114,7 +114,7 @@ def flash_mla_fwd_with_kvcache(
     return out_, softmax_lse
 
 
-def flash_mla_fwd_prefill_with_kvcache(
+def ck_mla_fwd_prefill_with_kvcache(
     q_nope: Tensor,
     k_nope_cache: Tensor,
     seqlens_qo: Tensor,
@@ -131,7 +131,7 @@ def flash_mla_fwd_prefill_with_kvcache(
             softmax_scale = q_nope.shape[-1] ** (-0.5)
         else:
             softmax_scale = (q_nope.shape[-1] + q_rope.shape[-1]) ** (-0.5)
-    out_, softmax_lse = flash_mla_fwd_prefill_with_kvcache_impl(
+    out_, softmax_lse = ck_mla_fwd_prefill_with_kvcache_impl(
         q_nope,
         k_nope_cache,
         k_nope_cache,

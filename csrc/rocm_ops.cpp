@@ -14,6 +14,7 @@
 #include "attention_v1.h"
 #include "batched_gemm_a8w8.h"
 #include "cache.h"
+#include "ck_mla.h"
 #include "communication_asm.h"
 #include "custom.h"
 #include "custom_all_reduce.h"
@@ -32,7 +33,6 @@
 #include "rocsolgemm.cuh"
 #include "rope.h"
 #include "smoothquant.h"
-#include "ck_mla.h"
 #include <torch/extension.h>
 
 // #include "torch/mha_batch_prefill.h"
@@ -94,6 +94,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
     CACHE_PYBIND;
     HIPBSOLGEMM_PYBIND;
     ROCSOLGEMM_PYBIND;
-    FLASH_MLA_FWD_PYBIND;
+    CK_MLA_FWD_PYBIND;
 }
 #endif

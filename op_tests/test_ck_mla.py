@@ -103,7 +103,7 @@ def scaled_dot_product_attention(query, key, value, h_q, h_kv, is_causal=False):
 
 
 @torch.inference_mode()
-def test_flash_mla(
+def test_ck_mla(
     dtype,
     b,
     s_q,
@@ -168,8 +168,8 @@ def test_flash_mla(
     #     seqlens_kv, s_q * h_q // h_kv, h_kv
     # )
 
-    def flash_mla():
-        # return aiter.flash_mla_fwd_with_kvcache(
+    def ck_mla():
+        # return aiter.ck_mla_fwd_with_kvcache(
         #     q,
         #     blocked_k,
         #     block_table,
@@ -180,7 +180,7 @@ def test_flash_mla(
         #     causal=causal,
         # )
         if nope_rope_separate:
-            return aiter.flash_mla_fwd_prefill_with_kvcache(
+            return aiter.ck_mla_fwd_prefill_with_kvcache(
                 q_nope,
                 blocked_k_nope,
                 seqlens_qo,
@@ -192,7 +192,7 @@ def test_flash_mla(
                 k_rope_cache=blocked_k_rope,
             )
         else:
-            return aiter.flash_mla_fwd_prefill_with_kvcache(
+            return aiter.ck_mla_fwd_prefill_with_kvcache(
                 q, blocked_k, seqlens_qo, block_table, seqlens_kv, dv, causal=causal
             )
 
@@ -230,7 +230,7 @@ def test_flash_mla(
 
     if test_quality:
         out_torch, lse_torch = ref_mla()
-        out_flash, lse_flash = flash_mla()
+        out_flash, lse_flash = ck_mla()
         for i in range(b):
             end_qo = seqlens_qo[i]
             checkAllclose(
@@ -245,7 +245,7 @@ def test_flash_mla(
             )
 
     if test_perf:
-        _, t = run_perftest(flash_mla, num_iters=2, num_warmup=0)
+        _, t = run_perftest(ck_mla, num_iters=2, num_warmup=0)
         FLOPS = mean_seqlens_qo * total_seqlens_kv * h_q * (d + dv) * 2
         bytes = (
             total_seqlens_kv * h_kv * d
@@ -285,7 +285,7 @@ if __name__ == "__main__":
         (False, True)[:],
         (False, True)[:],
     ):
-        test_flash_mla(
+        test_ck_mla(
             dtype,
             b,
             s_q,
@@ -311,11 +311,11 @@ if __name__ == "__main__":
     #     (False, True)[:1],
     #     (False, True)[1:]
     # ):
-    #     test_flash_mla(dtype, b, s, s, h_q, h_kv, d, dv, page_block_size, causal, varlen, False, True)
+    #     test_ck_mla(dtype, b, s, s, h_q, h_kv, d, dv, page_block_size, causal, varlen, False, True)
 
     # rope/nope separation
-    # test_flash_mla(torch.bfloat16, 32, 6001, 6001, 1, 1, d, dv, 64, True, False, True, True, True)
-    # test_flash_mla(torch.bfloat16, 32, 3, 6001, 16, 1, d, dv, 64, True, False, True, True, True)
+    # test_ck_mla(torch.bfloat16, 32, 6001, 6001, 1, 1, d, dv, 64, True, False, True, True, True)
+    # test_ck_mla(torch.bfloat16, 32, 3, 6001, 16, 1, d, dv, 64, True, False, True, True, True)
     # rope/nope no-separation
-    # test_flash_mla(torch.bfloat16, 32, 6001, 6001, 1, 1, d, dv, 64, True, False, False, True, True)
-    # test_flash_mla(torch.bfloat16, 32, 3, 6001, 16, 1, d, dv, 64, True, False, False, True, True)
+    # test_ck_mla(torch.bfloat16, 32, 6001, 6001, 1, 1, d, dv, 64, True, False, False, True, True)
+    # test_ck_mla(torch.bfloat16, 32, 3, 6001, 16, 1, d, dv, 64, True, False, False, True, True)

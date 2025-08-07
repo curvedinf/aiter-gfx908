@@ -360,9 +360,9 @@ def kernel_unified_attention_3d(
     NUM_SEGMENTS_PER_SEQ: tl.constexpr,  # int
     ALL_DECODE: tl.constexpr,
 ):
-    q_block_global_idx = tl.program_id(2)
-    kv_head_idx = tl.program_id(0)
-    segm_idx = tl.program_id(1)
+    q_block_global_idx = tl.program_id(0)
+    kv_head_idx = tl.program_id(1)
+    segm_idx = tl.program_id(2)
 
     tl.assume(kv_head_idx >= 0)
     tl.assume(q_block_global_idx >= 0)
@@ -623,7 +623,7 @@ def reduce_segments(
     segm_mask = tl.arange(0, NUM_SEGMENTS_PER_SEQ) < tl.full(
         [NUM_SEGMENTS_PER_SEQ], act_num_segments, dtype=tl.int32
     )
-    dim_mask = tl.where(tl.arange(0, HEAD_SIZE_PADDED) < HEAD_SIZE, 1, 0).to(tl.int1)
+    dim_mask = tl.arange(0, HEAD_SIZE_PADDED) < HEAD_SIZE
 
     # load segment maxima
     segm_offset = (
@@ -837,7 +837,7 @@ def unified_attention(
             device=q.device,
         )
 
-        kernel_unified_attention_3d[(num_kv_heads, NUM_SEGMENTS, total_num_q_blocks)](
+        kernel_unified_attention_3d[(total_num_q_blocks, num_kv_heads, NUM_SEGMENTS)](
             segm_output_ptr=segm_output,
             segm_max_ptr=segm_max,
             segm_expsum_ptr=segm_expsum,

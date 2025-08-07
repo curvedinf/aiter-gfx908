@@ -335,46 +335,32 @@ def mla_decode_fwd(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
     final_lse = torch.zeros((total_s, nhead), dtype=dtypes.fp32, device=device)
-    # import pdb;pdb.set_trace()
-
-    aiter.mla_decode_stage1_asm_fwd(
-        q,
-        kv_buffer,
-        qo_indptr,
-        kv_indptr,
-        kv_indices,
-        kv_last_page_lens,
-        # num_kv_splits_indptr,
-        # None,
-        # None,
-        None,
-        work_indptr,
-        work_info_set,
-        max_seqlen_q,
-        sm_scale,
-        logits,
-        attn_lse,
-        o,
-    )
-    # import pdb; pdb.set_trace()
-
-    aiter.mla_reduce_v1(
-        logits,
-        attn_lse,
-        reduce_indptr,
-        reduce_final_map,
-        reduce_partial_map,
-        o,
-        final_lse,
-    )
-
-    if num_kv_splits_indptr == None:
+    
+    if num_kv_splits_indptr is not None:
         if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
             return logits.view(total_s, nhead, v_head_dim), attn_lse
         Lv = v_head_dim
         BLOCK_DV = triton.next_power_of_2(Lv)
         grid = (bs, nhead)
         extra_kargs = {"waves_per_eu": 4}
+
+        aiter.mla_decode_stage1_asm_fwd(
+            q,
+            kv_buffer,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            num_kv_splits_indptr,
+            None,
+            None,
+            max_seqlen_q,
+            sm_scale,
+            logits,
+            attn_lse,
+            o,
+        )
+
         _fwd_kernel_stage2_asm[grid](
             logits,
             attn_lse,
@@ -396,6 +382,35 @@ def mla_decode_fwd(
             num_stages=2,
             **extra_kargs,
         )
+        return
+
+    aiter.mla_decode_stage1_asm_fwd(
+        q,
+        kv_buffer,
+        qo_indptr,
+        kv_indptr,
+        kv_indices,
+        kv_last_page_lens,
+        num_kv_splits_indptr,
+        work_indptr,
+        work_info_set,
+        max_seqlen_q,
+        sm_scale,
+        logits,
+        attn_lse,
+        o,
+    )
+
+    aiter.mla_reduce_v1(
+        logits,
+        attn_lse,
+        reduce_indptr,
+        reduce_final_map,
+        reduce_partial_map,
+        o,
+        final_lse,
+    )
+
     return logits, final_lse
 
 

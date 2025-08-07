@@ -395,6 +395,9 @@ def test_mla(
     )
     print(work_indptr)
     print(work_info_set)
+    print(reduce_indptr)
+    print(reduce_final_map)
+    print(reduce_partial_map)
 
     (attn_logits, attn_lse), us_asm_decode = run_perftest(
         aiter.mla.mla_decode_fwd_dispatch,
@@ -428,10 +431,6 @@ def test_mla(
         varlen,
         0.0,
         None,
-        num_kv_splits_indptr,
-        batch_split_table,
-        split_table,
-        num_splits,
     )
     # print(f"{out_ref.view(total_q, -1)=}")
     # print(f"{out_asm.view(total_q, -1)=}")

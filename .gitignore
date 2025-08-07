@@ -49,6 +49,6 @@ __pycache__
 debug
 aiter_logs
 *.log
-.analysis
+.amd
 .rocprofv3
 scripts

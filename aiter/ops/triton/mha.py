@@ -1032,7 +1032,7 @@ def _attn_fwd_persistent_static(
         0
     )  # workgroup id ranging: 0,1,2,...., (BATCH * NUM_Q_HEADS * NUM_BLOCKS - 1)
 
-    num_tiles = NUM_Q_HEADS * NUM_BLOCKS * BATCH
+    num_tiles = NUM_Q_HEADS * total_num_q_blocks
     batch_per_round = max((256 // (NUM_Q_HEADS * NUM_BLOCKS)), 1)
 
 
@@ -1133,11 +1133,6 @@ def _attn_fwd_persistent_static(
 
     # while tile_id < num_tiles:
     for tile_id in tl.range(workgroup_id, num_tiles, NUM_WGS, flatten=True):
-        # off_q_head = tile_id % NUM_Q_HEADS
-        # off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS, NUM_XCD)
-        # start_m = (tile_id // NUM_Q_HEADS) % NUM_BLOCKS
-        # off_z = (tile_id // (NUM_BLOCKS * NUM_Q_HEADS)) % BATCH
-
         off_q_head = tile_id % NUM_Q_HEADS
         off_q_head = remap_xcd(off_q_head, NUM_Q_HEADS, NUM_XCD)
         global_q_index = (tile_id // NUM_Q_HEADS) % total_num_q_blocks
@@ -1150,15 +1145,17 @@ def _attn_fwd_persistent_static(
         )
 
         cur_batch_start_idx = tl.load(cu_seqlens_q + off_z)
-        # cur_batch_end_idx = tl.load(cu_seqlens_q + off_z + 1)
+        cur_batch_end_idx = tl.load(cu_seqlens_q + off_z + 1)
 
         q_block_start_idx = cur_batch_start_idx // BLOCK_M + off_z
 
         start_m = global_q_index - q_block_start_idx
+            # NUM_BLOCKS = (SEQLEN_Q + BLOCK_M - 1) // BLOCK_M
 
+        NUM_BLOCKS_cur_batch = (cur_batch_end_idx - cur_batch_start_idx + BLOCK_M - 1)// BLOCK_M
 
-        if (off_z // batch_per_round) % 2 == 1:
-            start_m = (NUM_BLOCKS - 1) - start_m
+        # if (off_z // batch_per_round) % 2 == 1:
+        #     start_m = (NUM_BLOCKS_cur_batch - 1) - start_m
 
         # offsets
         offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)

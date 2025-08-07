@@ -783,9 +783,9 @@ def test_mha_backward_varlen(
 
 if __name__ == "__main__":
     test_mha_varlen(
-        BATCH=1,
-        SEQLEN_Q=16384,
-        SEQLEN_K=16384,
+        BATCH=32,
+        SEQLEN_Q=512,
+        SEQLEN_K=512,
         NUM_Q_HEADS=64,
         NUM_K_HEADS=64,
         HEAD_SZ=128,

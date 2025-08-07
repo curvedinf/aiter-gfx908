@@ -233,6 +233,7 @@ struct MlaMetadataTraits
 {
     static constexpr int32_t kPackedQoLenPerWg = kPackedQoLenPerWg_;
     static constexpr int32_t kMaxClusterSize   = kMaxClusterSize_;
+    static constexpr int32_t kSplitTolerance   = 16;
 };
 
 //
@@ -391,7 +392,11 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
             const auto [cid_top, accum_cost_top] = cost_heap.top();
             const int32_t remaining_capability_top =
                 get_remaining_kv_capability(kv_len_limit_global, cal_kv_len(accum_cost_top, cluster_len_q));
-            const bool split_kv = (remaining_kv_len > remaining_capability_top);
+            const int32_t num_splits_estimated =
+                ck_tile::integer_divide_ceil(remaining_kv_len, remaining_capability_top);
+            // For the case of #splits==2, make sure that the tailing tile is smaller than Traits::kSplitTolerance.
+            const bool split_kv = (num_splits_estimated == 2) ?
+                ((remaining_kv_len - remaining_capability_top) > Traits::kSplitTolerance) : (num_splits_estimated > 1);
 
             do
             {
@@ -400,7 +405,13 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
                 cost_heap.pop();
                 const int32_t remaining_capability =
                     get_remaining_kv_capability(kv_len_limit_global, cal_kv_len(accum_cost, cluster_len_q));
-                const int32_t kv_len_limit_local = remaining_capability > 64 ? remaining_capability : 128;
+                const int32_t kv_len_limit_local =
+                [&]() {
+                    const int32_t limit_ori = remaining_capability > 64 ? remaining_capability : 128;
+                    const int32_t tail_size = (remaining_kv_len > limit_ori) ? (remaining_kv_len - limit_ori) : 0x7fffffff;
+                    const int32_t limit_fin = (tail_size <= Traits::kSplitTolerance) ? remaining_kv_len : limit_ori;
+                    return limit_fin;
+                }();
                 const int32_t kv_len_consuming = ck_tile::min(remaining_kv_len, kv_len_limit_local);
                 const int32_t cost = cal_cost(cluster_len_q, kv_len_consuming);
 #if PRINT_DBG
@@ -505,4 +516,3 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
             reduce_final_map_tsr.to(input_opts),
             reduce_partial_map_tsr.to(input_opts)};
 }
-

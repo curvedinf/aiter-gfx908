@@ -352,4 +352,3 @@ void mla_reduce_v1(
         );
     }
 }
-

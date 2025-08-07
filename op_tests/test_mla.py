@@ -343,43 +343,58 @@ def test_mla(
     # aiter implementation
     kv_last_page_lens = torch.ones(batch_size, dtype=torch.int)
     out_asm = torch.zeros((total_q, nhead, v_head_dim), dtype=dtype).fill_(-1)
-    max_cu_num = 400
-    batch_split_table = torch.empty(
-        (max_cu_num), dtype=torch.int32, device="cuda"
-    )
-    split_table = torch.empty(
-        (max_cu_num), dtype=torch.int32, device="cuda"
-    )
-    num_kv_splits_indptr = torch.empty(
-        (batch_size + 1), dtype=torch.int32, device="cuda"
-    )
-    kv_seq_les = torch.empty(
-        (batch_size + 1), dtype=torch.int32, device="cuda"
-    )
-    num_splits = torch.empty(
-        (1), dtype=torch.int32, device="cuda"
-    )
+    # max_cu_num = 400
+    # batch_split_table = torch.empty(
+    #     (max_cu_num), dtype=torch.int32, device="cuda"
+    # )
+    # split_table = torch.empty(
+    #     (max_cu_num), dtype=torch.int32, device="cuda"
+    # )
+    # num_kv_splits_indptr = torch.empty(
+    #     (batch_size + 1), dtype=torch.int32, device="cuda"
+    # )
+    # kv_seq_les = torch.empty(
+    #     (batch_size + 1), dtype=torch.int32, device="cuda"
+    # )
+    # num_splits = torch.empty(
+    #     (1), dtype=torch.int32, device="cuda"
+    # )
+    #
+    # # if varlen == False or mtp == 1 or batch_size < 32 or kv_indptr[batch_size] < 128 * 160:
+    # cu_num = torch.ones((1), dtype=torch.int32, device="cuda")
+    # if varlen == False or mtp == 1 or kv_indptr[-1] < 16 * 128:
+    #     split_table = None
+    #     batch_split_table = None
+    #     num_kv_splits_indptr = None
+    # else:
+    #     # num_kv_splits, num_kv_splits_indptr, batch_split_table, split_table, cu_num = aiter.mla.get_meta_param_balanced(
+    #     aiter.get_mla_metadata_impl(
+    #         kv_indptr,
+    #         num_kv_splits_indptr,
+    #         batch_split_table,
+    #         split_table,
+    #         num_splits,
+    #     )
+    #     if num_kv_splits_indptr[0] == -1:
+    #         num_kv_splits_indptr=None
+    #         batch_split_table=None
+    #         split_table=None
 
-    # if varlen == False or mtp == 1 or batch_size < 32 or kv_indptr[batch_size] < 128 * 160:
-    cu_num = torch.ones((1), dtype=torch.int32, device="cuda")
-    if varlen == False or mtp == 1 or kv_indptr[-1] < 16 * 128:
-        split_table = None
-        batch_split_table = None
-        num_kv_splits_indptr = None
-    else:
-        # num_kv_splits, num_kv_splits_indptr, batch_split_table, split_table, cu_num = aiter.mla.get_meta_param_balanced(
-        aiter.get_mla_metadata_impl(
-            kv_indptr,
-            num_kv_splits_indptr,
-            batch_split_table,
-            split_table,
-            num_splits,
-        )
-        if num_kv_splits_indptr[0] == -1:
-            num_kv_splits_indptr=None
-            batch_split_table=None
-            split_table=None
-
+    (
+        work_indptr,
+        work_info_set,
+        reduce_indptr,
+        reduce_final_map,
+        reduce_partial_map,
+    ) = aiter.get_mla_metadata_v1(
+        qo_indptr,
+        kv_indptr,
+        nhead // nhead_kv,
+        nhead_kv,
+        True,
+    )
+    print(work_indptr)
+    print(work_info_set)
 
     (attn_logits, attn_lse), us_asm_decode = run_perftest(
         aiter.mla.mla_decode_fwd_dispatch,
@@ -392,13 +407,11 @@ def test_mla(
         kv_last_page_lens,
         max_seqlen_qo,
         sm_scale,
-        varlen,
-        0.0,
-        None,
-        num_kv_splits_indptr,
-        batch_split_table,
-        split_table,
-        num_splits,
+        work_indptr=work_indptr,
+        work_info_set=work_info_set,
+        reduce_indptr=reduce_indptr,
+        reduce_final_map=reduce_final_map,
+        reduce_partial_map=reduce_partial_map,
     )
 
     out_ref_asm = torch.empty_like(out_asm)

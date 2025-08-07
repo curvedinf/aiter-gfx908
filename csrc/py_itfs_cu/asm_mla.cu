@@ -88,7 +88,6 @@ void mla_decode_stage1_asm_fwd(
     args.scalar      = softmax_scale;
     args.s_MQA       = gqa_ratio * max_seqlen_q;
     args.s_kv_split  = kv_split;
-    args.ptr_STP     = num_kv_splits_indptr.value().data_ptr();
     args.s_Q_Bs      = stride_Q;
     args.s_Bs        = stride_Page;
     args.s_log2_plen = log2_page;

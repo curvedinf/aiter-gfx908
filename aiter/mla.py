@@ -559,6 +559,11 @@ def mla_decode_fwd_dispatch(
             sm_scale,
             logit_cap,
             num_kv_splits,
+            work_indptr=work_indptr,
+            work_info_set=work_info_set,
+            reduce_indptr=reduce_indptr,
+            reduce_final_map=reduce_final_map,
+            reduce_partial_map=reduce_partial_map,
         )
     else:
         return mla_decode_fwd_balenced(

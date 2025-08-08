@@ -21,7 +21,7 @@ from aiter.ops.triton.utils.moe_config_utils import get_optimal_moe_config_func
 def model_benchmark_configs(args):
     config_file = args.model_configs
     configs = get_model_configs(
-        config_path=config_file, models="mistral" if args.model is None else args.model
+        config_path=config_file, models="mixtral" if args.model is None else args.model
     )
     moe_configs = []
     M = args.M if args.M else 128  # check size

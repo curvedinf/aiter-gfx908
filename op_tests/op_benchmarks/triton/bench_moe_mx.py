@@ -84,14 +84,7 @@ def run_benchmark(args):
             num_tokens_post_padded,
             top_k,
             config,
-        ) = input_helper(
-        M,
-        N,
-        K,
-        top_k,
-        E,
-        a_dtype_str,
-        b_dtype_str)
+        ) = input_helper(M, N, K, top_k, E, a_dtype_str, b_dtype_str)
         # (M, K) * (top_k, N, K) -> (M, top_k, N). 2 for multiplication and accumulation
         flops = 2.0 * M * top_k * K * N
         # The weight is applied on the gemm product which has the shape of (M, top_k, N)

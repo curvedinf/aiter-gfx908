@@ -57,6 +57,7 @@ float mha_bwd(mha_bwd_args args,
               int how_v3_bf16_cvt)
 {{
     GPUArch arch;
+    std::cout<<"in mha_bwd, get_gpu_arch(): "<<get_gpu_arch()<<std::endl;
     if (get_gpu_arch() == "gfx942") {{
         arch = GPUArch::gfx942;
     }} else if (get_gpu_arch() == "gfx950") {{

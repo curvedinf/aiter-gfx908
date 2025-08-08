@@ -127,10 +127,13 @@ static const std::string get_gpu_arch() {
     hipGetDeviceProperties(&prop, 0);
 
     std::string arch_full = prop.gcnArchName;
+    std::cout<<"in aiter::get_gpu_arch, arch_full: "<<arch_full<<std::endl;
     size_t colon_pos = arch_full.find(':');
     if (colon_pos != std::string::npos) {
+        std::cout<<"in aiter::get_gpu_arch, arch_full.substr(0, colon_pos): "<<arch_full.substr(0, colon_pos)<<std::endl;
         return arch_full.substr(0, colon_pos);
     } else {
+        std::cout<<"in aiter::get_gpu_arch, arch_full: "<<arch_full<<std::endl;
         return arch_full;
     }
 }

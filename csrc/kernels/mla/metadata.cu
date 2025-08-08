@@ -263,7 +263,8 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     const torch::Tensor& seqlens_kv_indptr,     // [batch size + 1]
     const int32_t        num_heads_per_head_k,
     const int32_t        num_heads_k,
-    const bool           is_causal)
+    const bool           is_causal,
+    const bool           no_redundant)
 {
     // This default settings is for our ASM MLA decode kernel. This kernel supports num_heads=16 and qo size from 1 to 4
     // without support to split qo for each workgroup. This means that kPackedQoLenPerWg should be 4*16=64 to prevent 
@@ -357,7 +358,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     // Step.3.1. Allocates output buffers except indptrs
     std::vector<std::vector<MlaWorkInfo>> work_info_set(num_clusters, std::vector<MlaWorkInfo>());
     std::vector<std::vector<index_t>> reduce_partial_map(num_qo_clusters_indptr.back(), std::vector<index_t>());
-    std::vector<MlaPartialTileInfo> reduce_partial_info(num_qo_clusters_indptr.back(), {-1, 0});
+    std::vector<MlaPartialTileInfo> reduce_partial_info(num_qo_clusters_indptr.back(), {-1, -2});
 
     // Step.3.2. Declare priority queue
     using ClusterCost = std::tuple<int32_t, int32_t>; // cluster_id(cid), cost
@@ -472,23 +473,25 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     work_indptr.push_back(0);
     for (int32_t cid = 0; cid < num_clusters; ++cid)
     {
-        if (work_info_set[cid].empty() == false)
+        if ((work_info_set[cid].empty() == false) || (no_redundant == false))
         {
             work_indptr.push_back(work_indptr.back() + work_info_set[cid].size());
         }
     }
     const int32_t num_works = work_indptr.back();
 
+    const int32_t reduce_final_map_size = no_redundant ? num_reduce_row : num_qo_clusters_indptr.back();
+    const int32_t reduce_indptr_size = reduce_final_map_size + 1;
     std::vector<MlaPartialTileInfo> reduce_final_map;
     std::vector<index_t> reduce_indptr;
-    reduce_final_map.reserve(num_reduce_row);
-    reduce_indptr.reserve(num_reduce_row + 1);
+    reduce_final_map.reserve(reduce_final_map_size);
+    reduce_indptr.reserve(reduce_indptr_size);
     reduce_indptr.push_back(0);
     for (auto [global_cluster_q_idx ,rid] = std::tuple{0, 0};
-         (global_cluster_q_idx < num_qo_clusters_indptr.back()) && (rid < num_reduce_row);
+         (global_cluster_q_idx < num_qo_clusters_indptr.back()) && ((rid < num_reduce_row) || (no_redundant == false));
          ++global_cluster_q_idx)
     {
-        if (reduce_partial_map[global_cluster_q_idx].empty() == false)
+        if ((reduce_partial_map[global_cluster_q_idx].empty() == false) || (no_redundant == false))
         {
             reduce_indptr.push_back(reduce_indptr.back() + reduce_partial_map[global_cluster_q_idx].size());
             reduce_final_map.push_back(reduce_partial_info[global_cluster_q_idx]);
@@ -504,8 +507,8 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     auto int_opts = torch::TensorOptions().dtype(torch::kInt32);
     auto work_info_set_tsr = torch::from_blob(work_info_set_flatten.data(), {num_works, kSizeMlaWorkInfoInDw}, int_opts);
     auto work_indptr_tsr = torch::from_blob(work_indptr.data(), {static_cast<int32_t>(work_indptr.size())}, int_opts);
-    auto reduce_indptr_tsr = torch::from_blob(reduce_indptr.data(), {num_reduce_row + 1}, int_opts);
-    auto reduce_final_map_tsr = torch::from_blob(reduce_final_map.data(), {num_reduce_row, kSizeMlaPartialTileInfoInDw}, int_opts);
+    auto reduce_indptr_tsr = torch::from_blob(reduce_indptr.data(), {reduce_indptr_size}, int_opts);
+    auto reduce_final_map_tsr = torch::from_blob(reduce_final_map.data(), {reduce_final_map_size, kSizeMlaPartialTileInfoInDw}, int_opts);
     auto reduce_partial_map_tsr = torch::from_blob(reduce_partial_map_flatten.data(), {num_partial_outputs}, int_opts);
 
     // Last step. Copy to the device of input and return the results.

@@ -38,10 +38,18 @@ def bench_gemm_fn(
     )
     # flops
     flops = 2.0 * M * N * K
+    if BIAS_DIM == 2:
+        flops += M * N
     if activation is not None:
         flops += M * N  # elementwise ops on the GEMM output
     # memory transfer
-    mem_read = (M * K) * x.element_size() + (N * K) * w.element_size()
+    if BIAS_DIM == 1:
+        mem_read_bias = N * b.element_size()
+    elif BIAS_DIM == 2:
+        mem_read_bias = M * N * b.element_size()
+    else:
+        mem_read_bias = 0
+    mem_read = (M * K) * x.element_size() + (N * K) * w.element_size() + mem_read_bias
     mem_write = (M * N) * x.element_size()
     mem = mem_read + mem_write
 

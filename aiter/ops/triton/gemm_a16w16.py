@@ -94,12 +94,6 @@ def _gemm_a16_w16_kernel(
         bias_mask = offs_biasn < N
         accumulator = tl.load(bias_ptrs, mask=bias_mask)
         accumulator = tl.broadcast_to(accumulator[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N)).to(acc_dtype)
-    elif BIAS_DIM == 2:
-        offs_biasm = pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-        offs_biasn = pid_n.to(tl.int64) * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-        bias_ptrs = bias_ptr + stride_biasm * offs_biasm[:, None] + stride_biasn * offs_biasn[None, :]
-        bias_mask = (offs_am[:, None] < M) & (offs_bn[None, :] < N)
-        accumulator = tl.load(bias_ptrs, mask=bias_mask).to(acc_dtype)
     else:
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=acc_dtype)
 
@@ -124,15 +118,18 @@ def _gemm_a16_w16_kernel(
         a_ptrs += BLOCK_SIZE_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * stride_bk
 
-    if use_activation:
-        accumulator = activation(accumulator)
-    c = accumulator.to(c_ptr.type.element_ty)
-
     # Write back the block of the output matrix C with masks.
     offs_cm = pid_m.to(tl.int64) * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     offs_cn = pid_n.to(tl.int64) * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+    if BIAS_DIM == 2:
+        bias_ptrs = bias_ptr + stride_biasm * offs_cm[:, None] + stride_biasn * offs_cn[None, :]
+        bias = tl.load(bias_ptrs, mask=c_mask)
+        accumulator += bias
+    if use_activation:
+        accumulator = activation(accumulator)
+    c = accumulator.to(c_ptr.type.element_ty)
     tl.store(c_ptrs, c, mask=c_mask)
 
 

@@ -2,20 +2,14 @@ import argparse
 import sys
 import torch
 import triton
-from aiter.ops.triton.utils.types import torch_to_triton_dtype, str_to_torch_dtype
+from aiter.ops.triton.utils.types import torch_to_triton_dtype
 import aiter.ops.triton.utils.arch_info as arch_info
 from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
-from op_tests.triton_tests.test_moe import torch_moe_align_block_size_ref
-from op_tests.triton_tests.test_moe_mx import (
-    input_helper,
-    alloc_rand,
-    torch_dynamic_mxfp4_quant,
-)
+from op_tests.triton_tests.test_moe_mx import input_helper
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_available_models,
     get_model_configs,
 )
-from aiter.ops.triton.utils.moe_config_utils import get_optimal_moe_config_func
 
 
 def model_benchmark_configs(args):

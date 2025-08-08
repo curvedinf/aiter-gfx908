@@ -8,7 +8,8 @@ from aiter.ops.triton.reduce_db import reduce_db
 class TritonGemm(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x, w, b):
-        y = gemm_a16w16(x, w.t(), b)
+        dtype = x.dtype
+        y = gemm_a16w16(x, w.t(), b, dtype=dtype)
         
         ctx.save_for_backward(x, w, b)
 
@@ -17,16 +18,16 @@ class TritonGemm(torch.autograd.Function):
     @staticmethod
     def backward(ctx, dy):
         x, w, b = ctx.saved_tensors
+        dtype = x.dtype
         dx = dw = db = None
 
         if ctx.needs_input_grad[0]:
-            dx = gemm_a16w16(dy, w)
+            dx = gemm_a16w16(dy, w, dtype=dtype)
         if ctx.needs_input_grad[1]:
-            dw = gemm_a16w16_atomic(x.t(), dy.t(), dtype=torch.float32).to(torch.bfloat16)
+            dw = gemm_a16w16_atomic(x.t(), dy.t(), dtype=torch.float32).to(dtype)
         if ctx.needs_input_grad[2]:
             if b.dim() == 1:
-                db = reduce_db(dy).to(torch.bfloat16)
-                #db = dy.sum(0)
+                db = reduce_db(dy).to(dtype)
             elif b.dim() == 2:
                 db = dy
 

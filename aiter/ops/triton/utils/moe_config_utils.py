@@ -20,7 +20,7 @@ def get_config_dtype_str(
     use_int8_w8a8: Optional[bool] = False,
     use_fp8_w8a8: Optional[bool] = False,
     use_int4_w4a16: Optional[bool] = False,
-    use_mxfp4: Optional[bool] = False
+    use_mxfp4: Optional[bool] = False,
 ):
     if use_fp8_w8a8:
         return "FP8_W8A8"
@@ -114,7 +114,7 @@ def get_optimal_moe_config_func(
     use_int8_w8a8: Optional[bool] = False,
     use_fp8_w8a8: Optional[bool] = False,
     use_int4_w4a16: Optional[bool] = False,
-    use_mxfp4: Optional[bool] = False
+    use_mxfp4: Optional[bool] = False,
 ):
     return functools.partial(
         get_optimal_moe_config,
@@ -123,5 +123,5 @@ def get_optimal_moe_config_func(
         use_int8_w8a8,
         use_fp8_w8a8,
         use_int4_w4a16,
-        use_mxfp4
+        use_mxfp4,
     )

@@ -186,13 +186,8 @@ def alloc_rand(shape, device, dtype, requires_grad=True):
 
 
 def input_helper(
-    M: int,
-    N: int,
-    K: int,
-    top_k: int,
-    E: int,
-    a_dtype_str: str,
-    b_dtype_str: str):
+    M: int, N: int, K: int, top_k: int, E: int, a_dtype_str: str, b_dtype_str: str
+):
 
     is_a_mixed_input = a_dtype_str.startswith("mx")
     is_b_mixed_input = b_dtype_str.startswith("mx")
@@ -251,7 +246,6 @@ def input_helper(
         top_k,
         config,
     )
-
 
 
 # Note: Eventually all these combinations will be supported
@@ -321,14 +315,7 @@ def test_fused_moe(
         num_tokens_post_padded,
         top_k,
         config,
-    ) = input_helper(
-    M,
-    N,
-    K,
-    top_k,
-    E,
-    a_dtype_str,
-    b_dtype_str)
+    ) = input_helper(M, N, K, top_k, E, a_dtype_str, b_dtype_str)
 
     a_ref, b_ref, c_ref = a_tri.clone(), b_tri.clone(), c_tri.clone()
     is_a_mixed_input = a_dtype_str.startswith("mx")

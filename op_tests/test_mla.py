@@ -380,24 +380,32 @@ def test_mla(
     #         batch_split_table=None
     #         split_table=None
 
-    (
-        work_indptr,
-        work_info_set,
-        reduce_indptr,
-        reduce_final_map,
-        reduce_partial_map,
-    ) = aiter.get_mla_metadata_v1(
+    work_indptr        = torch.empty([81], dtype=torch.int32, device="cuda")
+    work_info_set      = torch.empty([batch_size + 80, 8], dtype=torch.int32, device="cuda")
+    reduce_indptr      = torch.empty([batch_size * 80], dtype=torch.int32, device="cuda")
+    reduce_final_map   = torch.empty([batch_size * 80, 2], dtype=torch.int32, device="cuda")
+    reduce_partial_map = torch.empty([batch_size * 80], dtype=torch.int32, device="cuda")
+    # num_reduce_tile    = torch.empty([1], dtype=torch.int32, device="cuda")
+    
+    aiter.get_mla_metadata_v1(
         qo_indptr,
         kv_indptr,
         nhead // nhead_kv,
         nhead_kv,
         True,
+        work_info_set,
+        work_indptr,
+        reduce_indptr,
+        reduce_final_map,
+        reduce_partial_map,
+        # num_reduce_tile,
     )
-    print(work_indptr)
-    print(work_info_set)
-    print(reduce_indptr)
-    print(reduce_final_map)
-    print(reduce_partial_map)
+
+    # print(work_indptr)
+    # print(work_info_set)
+    # print(reduce_indptr)
+    # print(reduce_final_map)
+    # print(reduce_partial_map)
 
     (attn_logits, attn_lse), us_asm_decode = run_perftest(
         aiter.mla.mla_decode_fwd_dispatch,

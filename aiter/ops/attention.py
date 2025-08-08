@@ -299,6 +299,13 @@ def get_mla_metadata_v1(
     num_heads_per_head_k: int,
     num_heads_k: int,
     is_causal: bool,
+
+    work_info_set_tsr: torch.Tensor,
+    work_indptr_tsr: torch.Tensor,
+    reduce_indptr_tsr: torch.Tensor,
+    reduce_final_map_tsr: torch.Tensor,
+    reduce_partial_map_tsr: torch.Tensor,
+    # num_reduce_tile_tensor: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Arguments:

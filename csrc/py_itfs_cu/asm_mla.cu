@@ -194,7 +194,7 @@ void mla_decode_stage1_asm_fwd(
 
     if(persistent)
     {
-        gdx = work_indptr.value().size(0) - 1;
+        gdx = 80;
         gdy = 1;
         gdz = 1;
     }

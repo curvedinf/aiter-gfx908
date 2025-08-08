@@ -44,13 +44,21 @@ get_mla_metadata_v1(const torch::Tensor& seqlens_qo_indptr, // [batch size + 1]
                     const torch::Tensor& seqlens_kv_indptr, // [batch size + 1]
                     const int32_t num_heads_per_head_k,
                     const int32_t num_heads_k,
-                    const bool is_causal);
+                    const bool is_causal,
+
+                    torch::Tensor& work_info_set_tsr,
+                    torch::Tensor& work_indptr_tsr,
+                    torch::Tensor& reduce_indptr_tsr,
+                    torch::Tensor& reduce_final_map_tsr,
+                    torch::Tensor& reduce_partial_map_tsr);
+                    // torch::Tensor& num_reduce_tile_tensor);
 
 void mla_reduce_v1(const torch::Tensor& partial_output,
                    const torch::Tensor& partial_lse,
                    const torch::Tensor& reduce_indptr,
                    const torch::Tensor& reduce_final_map,
                    const torch::Tensor& reduce_partial_map,
+                   // const torch::Tensor& num_reduce_tile_tensor,
                    torch::Tensor& final_output,
                    std::optional<torch::Tensor>& final_lse);
 

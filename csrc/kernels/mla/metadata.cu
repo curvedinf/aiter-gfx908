@@ -6,6 +6,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include "aiter_hip_common.h"
 #include "mla.h"
+#include <iostream>
 
 
 #define PRINT_DBG 0
@@ -199,6 +200,18 @@ inline int32_t get_remaining_kv_capability(
     return ck_tile::integer_least_multiple(kv_len_upper_bound - kv_len_used, 16);
 }
 
+inline void tensor_pad(
+    std::vector<uint32_t> &work_indptr,
+    const int32_t pad_size)
+{
+    int32_t num_works = work_indptr.size();
+    int32_t work_indptr_end = work_indptr[num_works - 1];
+    for (int i = work_indptr.size(); i <= pad_size; ++i)
+    {
+        work_indptr.emplace_back(work_indptr_end);
+    }
+}
+
 template <typename T>
 std::vector<T> flatten(
     const std::vector<std::vector<T>>& vec, 
@@ -263,7 +276,15 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     const torch::Tensor& seqlens_kv_indptr,     // [batch size + 1]
     const int32_t        num_heads_per_head_k,
     const int32_t        num_heads_k,
-    const bool           is_causal)
+    const bool           is_causal,
+
+
+    torch::Tensor& work_info_set_tsr,
+    torch::Tensor& work_indptr_tsr,
+    torch::Tensor& reduce_indptr_tsr,
+    torch::Tensor& reduce_final_map_tsr,
+    torch::Tensor& reduce_partial_map_tsr)
+    // torch::Tensor& num_reduce_tile_tensor)
 {
     // This default settings is for our ASM MLA decode kernel. This kernel supports num_heads=16 and qo size from 1 to 4
     // without support to split qo for each workgroup. This means that kPackedQoLenPerWg should be 4*16=64 to prevent 
@@ -502,11 +523,40 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
 
     // Step.7. Create tensors.
     auto int_opts = torch::TensorOptions().dtype(torch::kInt32);
-    auto work_info_set_tsr = torch::from_blob(work_info_set_flatten.data(), {num_works, kSizeMlaWorkInfoInDw}, int_opts);
-    auto work_indptr_tsr = torch::from_blob(work_indptr.data(), {static_cast<int32_t>(work_indptr.size())}, int_opts);
-    auto reduce_indptr_tsr = torch::from_blob(reduce_indptr.data(), {num_reduce_row + 1}, int_opts);
-    auto reduce_final_map_tsr = torch::from_blob(reduce_final_map.data(), {num_reduce_row, kSizeMlaPartialTileInfoInDw}, int_opts);
-    auto reduce_partial_map_tsr = torch::from_blob(reduce_partial_map_flatten.data(), {num_partial_outputs}, int_opts);
+
+    // work_info_set_tsr = torch::from_blob(work_info_set_flatten.data(), {num_works, kSizeMlaWorkInfoInDw}, int_opts);
+    // work_indptr_tsr   = torch::from_blob(work_indptr.data(), {static_cast<int32_t>(work_indptr.size())}, int_opts);
+    // reduce_indptr_tsr = torch::from_blob(reduce_indptr.data(), {num_reduce_row + 1}, int_opts);
+    // reduce_final_map_tsr   = torch::from_blob(reduce_final_map.data(), {num_reduce_row, kSizeMlaPartialTileInfoInDw}, int_opts);
+    // reduce_partial_map_tsr = torch::from_blob(reduce_partial_map_flatten.data(), {num_partial_outputs}, int_opts);
+
+    tensor_pad(work_indptr, work_indptr_tsr.size(0));
+    tensor_pad(reduce_indptr, reduce_indptr_tsr.size(0));
+
+    HIP_CALL(hipMemcpy(work_info_set_tsr.data_ptr(),
+                       work_info_set_flatten.data(),
+                       num_works * kSizeMlaWorkInfoInDw * sizeof(int32_t),
+                       hipMemcpyHostToDevice));
+    HIP_CALL(hipMemcpy(work_indptr_tsr.data_ptr(),
+                       work_indptr.data(),
+                       static_cast<int32_t>(work_indptr.size()) * sizeof(int32_t),
+                       hipMemcpyHostToDevice));
+    HIP_CALL(hipMemcpy(reduce_indptr_tsr.data_ptr(),
+                       reduce_indptr.data(),
+                       static_cast<int32_t>(reduce_indptr.size()) * sizeof(int32_t),
+                       hipMemcpyHostToDevice));
+    HIP_CALL(hipMemcpy(reduce_final_map_tsr.data_ptr(),
+                       reduce_final_map.data(),
+                       (num_reduce_row * kSizeMlaPartialTileInfoInDw) * sizeof(int32_t),
+                       hipMemcpyHostToDevice));
+    HIP_CALL(hipMemcpy(reduce_partial_map_tsr.data_ptr(),
+                       reduce_partial_map_flatten.data(),
+                       num_partial_outputs * sizeof(int32_t),
+                       hipMemcpyHostToDevice));
+    // HIP_CALL(hipMemcpy(num_reduce_tile_tensor.data_ptr(),
+    //                    &num_reduce_row,
+    //                    sizeof(int32_t),
+    //                    hipMemcpyHostToDevice));
 
     // Last step. Copy to the device of input and return the results.
     auto input_opts = seqlens_qo_indptr.options();
@@ -515,4 +565,5 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
             reduce_indptr_tsr.to(input_opts),
             reduce_final_map_tsr.to(input_opts),
             reduce_partial_map_tsr.to(input_opts)};
+            // num_reduce_tile_tensor.to(input_opts)};
 }

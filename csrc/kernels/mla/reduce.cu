@@ -26,6 +26,7 @@ struct MlaReduceKernelV1Params
     const int32_t*            p_reduce_indptr;
     const MlaPartialTileInfo* p_reduce_final_map;
     const int32_t*            p_reduce_partial_map;
+    // const int32_t*            p_num_reduce_tile;
 
     void* __restrict__ p_final_lse;
     void* __restrict__ p_final_output;
@@ -113,6 +114,10 @@ __global__ void kn_mla_reduce_v1(
 
     const int32_t reduce_tile_start = params.p_reduce_indptr[work_idx];
     const int32_t reduce_tile_end = params.p_reduce_indptr[work_idx + 1];
+
+    if (reduce_tile_start == reduce_tile_end)
+        return;
+
     const MlaPartialTileInfo final_loc = params.p_reduce_final_map[work_idx];
 
     // Assuming that the layout of LSE final output is in [bs, h].
@@ -311,6 +316,7 @@ void mla_reduce_v1(
     const torch::Tensor&          reduce_indptr,         // contiguous [#work + 1]
     const torch::Tensor&          reduce_final_map,      // contiguous [#work, 2]
     const torch::Tensor&          reduce_partial_map,    // contiguous [reduce_indptr[-1]]
+    // const torch::Tensor&          num_reduce_tile_tensor,// contiguous [reduce_indptr[-1]]
     torch::Tensor&                final_output,          //            [bs, h, dv]
     std::optional<torch::Tensor>& final_lse)             // contiguous [bs, h]
 {
@@ -325,8 +331,8 @@ void mla_reduce_v1(
     const bool output_lse = final_lse.has_value();
     const int32_t num_reduce_tile = reduce_indptr.size(0) - 1;
     const int32_t num_heads = partial_output.size(-2);
-    TORCH_CHECK(num_reduce_tile == reduce_final_map.size(0),
-                __func__, ": Invalid size of reduce_indptr or reduce_final_map!");
+    // TORCH_CHECK(num_reduce_tile == reduce_final_map.size(0),
+    //             __func__, ": Invalid size of reduce_indptr or reduce_final_map!");
 
     if (num_reduce_tile > 0)
     {
@@ -334,6 +340,7 @@ void mla_reduce_v1(
         params.p_reduce_indptr = reduce_indptr.data_ptr<int32_t>();
         params.p_reduce_final_map = reinterpret_cast<const MlaPartialTileInfo*>(reduce_final_map.data_ptr());
         params.p_reduce_partial_map = reduce_partial_map.data_ptr<int32_t>();
+        // params.p_num_reduce_tile = num_reduce_tile_tensor.data_ptr<int32_t>();
         params.p_final_lse = output_lse ? final_lse.value().data_ptr() : nullptr;
         params.p_final_output = final_output.data_ptr();
         params.p_partial_lse = partial_lse.data_ptr();

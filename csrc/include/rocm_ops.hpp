@@ -33,10 +33,13 @@
           py::arg("kv_page_indices"),      \
           py::arg("kv_last_page_lens"),    \
           py::arg("num_kv_splits_indptr"), \
+          py::arg("work_indptr"),          \
+          py::arg("work_info_set"),        \
           py::arg("max_seqlen_q"),         \
           py::arg("softmax_scale"),        \
           py::arg("splitData"),            \
-          py::arg("splitLse"));            \
+          py::arg("splitLse"),             \
+          py::arg("output"));              \
     m.def("mla_prefill_asm_fwd",           \
           &mla_prefill_asm_fwd,            \
           "mla_prefill_asm_fwd",           \
@@ -984,3 +987,9 @@
 #define FLASH_MLA_FWD_PYBIND                                                        \
       m.def("flash_mla_fwd_inline_impl", &flash_mla_fwd_inline_impl);               \
       m.def("get_mla_metadata_impl", &get_mla_metadata_impl);
+
+#define MLA_METADATA_PYBIND                             \
+    m.def("get_mla_metadata_v0", &get_mla_metadata_v0); \
+    m.def("get_mla_metadata_v1", &get_mla_metadata_v1);
+
+#define MLA_REDUCE_PYBIND m.def("mla_reduce_v1", &mla_reduce_v1);

@@ -2,7 +2,7 @@
 # Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import torch
-from typing import Optional
+from typing import Tuple, Optional
 from ..jit.core import (
     compile_ops,
 )
@@ -238,12 +238,17 @@ def mla_decode_stage1_asm_fwd(
     kv_page_indices: torch.Tensor,
     # [batch_size]
     kv_last_page_lens: torch.Tensor,
+    num_kv_splits_indptr: Optional[torch.Tensor],
+    work_indptr: Optional[torch.Tensor],
+    work_info_set: Optional[torch.Tensor],
     max_seqlen_q: int,
     softmax_scale: float,
     # [batch_size, num_kv_splits, num_heads, v_head_dim]
     splitData: torch.Tensor,
     # [batch_size, num_kv_splits, num_heads,  1]
     splitLse: torch.Tensor,
+    output: torch.Tensor,
+    # [batch_size, num_heads, v_head_dim]
 ): ...
 
 
@@ -267,4 +272,75 @@ def mla_prefill_asm_fwd(
     splitData: torch.Tensor,
     # [batch_size, num_kv_splits, num_heads,  1]
     splitLse: torch.Tensor,
+): ...
+
+
+@compile_ops("module_mla_metadata")
+def get_mla_metadata_v0(
+    seqlens: torch.Tensor,
+    num_heads_per_head_k: int,
+    num_heads_k: int,
+) -> Tuple[torch.Tensor, int]:
+    """
+    Arguments:
+        cumulated seqlens: (batch_size + 1), dtype torch.int32.
+        num_heads_per_head_k: Equals to num_heads_q // num_heads_k.
+        num_heads_k: num_heads_k.
+    Returns:
+        cumulated num_kv_splits: (batch_size + 1), dtype torch.int32.
+        max_num_splits: (1), dtype torch.int32.
+    """
+    ...
+
+@compile_ops("module_mla_metadata")
+def get_mla_metadata_v1(
+    seqlens_qo_indptr: torch.Tensor,
+    seqlens_kv_indptr: torch.Tensor,
+    num_heads_per_head_k: int,
+    num_heads_k: int,
+    is_causal: bool,
+
+    work_info_set_tsr: torch.Tensor,
+    work_indptr_tsr: torch.Tensor,
+    reduce_indptr_tsr: torch.Tensor,
+    reduce_final_map_tsr: torch.Tensor,
+    reduce_partial_map_tsr: torch.Tensor,
+    # num_reduce_tile_tensor: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Arguments:
+        cumulated seqlens of q/o: (batch_size + 1), dtype torch.int32.
+        cumulated seqlens of k/v: (batch_size + 1), dtype torch.int32.
+        num_heads_per_head_k: Equals to num_heads_q // num_heads_k.
+        num_heads_k: num_heads_k.
+        is_causal: whether causal mask is enabled.
+    Returns:
+        [0] work_indptr:        (#cu_part + 1),      The IDs of work handled by each cu_part.
+        [1] work information    (#work, 8)
+        [1.0] bs_index:         (#work),             The index of batch handled by each work.
+        [1.1] partial_index:    (#work),             The index of tile in output buffer when splits. -1 means no split.
+        [1.2] q_start:          (#work),             The global index in seq where q/o starts. Use global index here can
+                                                     reduce memory access count in kernel.
+        [1.3] q_end:            (#work),             The global index in seq where q/o ends (not included).
+        [1.4] kv_start:         (#work),             The global index in seq where k/v starts.
+        [1.5] kv_end:           (#work),             The global index in seq where k/v ends (not included).
+        [1.6] pad               (#work, 2),          Pad to 8 DWs.
+        [2] reduce_indptr:      (#reduce_tiles + 1), The IDs in reduce_partial_map indicates the tiles should be merged
+                                                     together.
+        [3] reduce_final_map:   (#reduce_tiles),     The final output location of each group of tiles.
+        [4] reduce_partial_map: (#partial_tiles),    The locations in partial buffer of partial tiles waiting for being
+                                                     reduced.
+    """
+    ...
+
+
+@compile_ops("module_mla_reduce")
+def mla_reduce_v1(
+    partial_output: torch.Tensor,
+    partial_lse: torch.Tensor,
+    reduce_indptr: torch.Tensor,
+    reduce_final_map: torch.Tensor,
+    reduce_partial_map: torch.Tensor,
+    final_output: torch.Tensor,
+    final_lse: Optional[torch.Tensor] = None,
 ): ...

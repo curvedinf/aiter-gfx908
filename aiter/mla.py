@@ -249,7 +249,6 @@ def get_meta_param_balanced(kv_indptr,
     return num_kv_splits, num_kv_splits_indptr, batch_split_table, split_table, cu_num
 
 
-
 @functools.lru_cache()
 def get_meta_param(num_kv_splits, bs, total_kv, nhead, max_seqlen_q, device):
     if num_kv_splits is None:
@@ -290,8 +289,14 @@ def mla_decode_fwd(
     max_seqlen_q,
     sm_scale=None,  # 1.0 / (qk_head_dim**0.5)
     logit_cap=0.0,
-    num_kv_splits=None,
-    num_kv_splits_indptr=None,
+    num_kv_splits=None,  # for experts only!!!
+    num_kv_splits_indptr=None,  # for experts only!!!
+    work_indptr=None,
+    work_info_set=None,
+    reduce_indptr=None,
+    reduce_final_map=None,
+    reduce_partial_map=None,
+    num_reduce_tile=None,
 ):
     device = q.device
     assert logit_cap <= 0, f"{logit_cap=} is not support yet"
@@ -303,11 +308,12 @@ def mla_decode_fwd(
     bs = qo_indptr.shape[0] - 1
     total_kv = kv_indices.shape[0]
 
-    if num_kv_splits_indptr is None:
+    if num_kv_splits_indptr is None and work_indptr is None:
         num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(
             None, bs, total_kv, nhead, max_seqlen_q, device
         )
 
+    num_kv_splits = 80
     if nhead == 16 and max_seqlen_q == 1:
         # special case for 16 heads and max_seqlen_q == 1
         logits = torch.empty(
@@ -318,7 +324,6 @@ def mla_decode_fwd(
         MAYBE_FINAL_OUT = False
     elif nhead in [16, 128]:
         MAYBE_FINAL_OUT = True
-        num_kv_splits = 16
         logits = torch.empty(
             (total_s, num_kv_splits, nhead, v_head_dim),
             dtype=dtypes.fp32,
@@ -327,12 +332,58 @@ def mla_decode_fwd(
     else:
         assert False, f"{nhead=} not supported"
 
-    attn_lse = torch.empty(
+    attn_lse = torch.zeros(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
+    final_lse = torch.zeros((total_s, nhead), dtype=dtypes.fp32, device=device)
+    
+    if num_kv_splits_indptr is not None:
+        if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
+            return logits.view(total_s, nhead, v_head_dim), attn_lse
+        Lv = v_head_dim
+        BLOCK_DV = triton.next_power_of_2(Lv)
+        grid = (bs, nhead)
+        extra_kargs = {"waves_per_eu": 4}
 
-    Lv = v_head_dim
-    BLOCK_DV = triton.next_power_of_2(Lv)
+        aiter.mla_decode_stage1_asm_fwd(
+            q,
+            kv_buffer,
+            qo_indptr,
+            kv_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            num_kv_splits_indptr,
+            None,
+            None,
+            max_seqlen_q,
+            sm_scale,
+            logits,
+            attn_lse,
+            o,
+        )
+
+        _fwd_kernel_stage2_asm[grid](
+            logits,
+            attn_lse,
+            o,
+            qo_indptr,
+            kv_indptr,
+            num_kv_splits_indptr,
+            attn_lse.stride(0),
+            attn_lse.stride(2),
+            attn_lse.stride(1),
+            o.stride(0),
+            o.stride(1),
+            MAYBE_FINAL_OUT=MAYBE_FINAL_OUT,
+            BATCH_NUM=bs,
+            BLOCK_DV=BLOCK_DV,
+            Lv=Lv,
+            mgc=mgc,
+            num_warps=4,
+            num_stages=2,
+            **extra_kargs,
+        )
+        return
 
     aiter.mla_decode_stage1_asm_fwd(
         q,
@@ -342,40 +393,26 @@ def mla_decode_fwd(
         kv_indices,
         kv_last_page_lens,
         num_kv_splits_indptr,
+        work_indptr,
+        work_info_set,
         max_seqlen_q,
         sm_scale,
         logits,
         attn_lse,
+        o,
     )
 
-    if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
-        return logits.view(total_s, nhead, v_head_dim), attn_lse
-
-    grid = (bs, nhead)
-    extra_kargs = {"waves_per_eu": 4}
-    _fwd_kernel_stage2_asm[grid](
+    aiter.mla_reduce_v1(
         logits,
         attn_lse,
+        reduce_indptr,
+        reduce_final_map,
+        reduce_partial_map,
         o,
-        qo_indptr,
-        kv_indptr,
-        num_kv_splits_indptr,
-        attn_lse.stride(0),
-        attn_lse.stride(2),
-        attn_lse.stride(1),
-        o.stride(0),
-        o.stride(1),
-        MAYBE_FINAL_OUT=MAYBE_FINAL_OUT,
-        BATCH_NUM=bs,
-        BLOCK_DV=BLOCK_DV,
-        Lv=Lv,
-        mgc=mgc,
-        num_warps=4,
-        num_stages=2,
-        **extra_kargs,
+        final_lse,
     )
 
-    return logits, attn_lse
+    return logits, final_lse
 
 
 def mla_decode_fwd_balenced(
@@ -519,6 +556,12 @@ def mla_decode_fwd_dispatch(
     cu_num=None, 
     q_rope=None,
     k_rope=None, 
+    work_indptr=None,
+    work_info_set=None,
+    reduce_indptr=None,
+    reduce_final_map=None,
+    reduce_partial_map=None,
+    num_reduce_tile=None,
 ):
     if batch_split_table is None:
         return mla_decode_fwd(
@@ -533,6 +576,11 @@ def mla_decode_fwd_dispatch(
             sm_scale,
             logit_cap,
             num_kv_splits,
+            work_indptr=work_indptr,
+            work_info_set=work_info_set,
+            reduce_indptr=reduce_indptr,
+            reduce_final_map=reduce_final_map,
+            reduce_partial_map=reduce_partial_map,
         )
     else:
         return mla_decode_fwd_balenced(

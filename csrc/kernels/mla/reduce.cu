@@ -68,16 +68,17 @@ CK_TILE_DEVICE static constexpr auto MakeOutputTileDistribution()
     constexpr int32_t kVectorN     = GetVectorSizeForTile<Traits::kNumWarps, 1, Traits::kSizeDV, scalar_t>();
     constexpr int32_t kThrPerWarpN = ck_tile::get_warp_size();
     constexpr int32_t kNumWarpN    = Traits::kNumWarps;
+    constexpr int32_t kNumRepeat   = ck_tile::max(1, Traits::kSizeDV / kThrPerWarpN / kNumWarpN / kVectorN);
 
     return ck_tile::make_static_tile_distribution(
         ck_tile::tile_distribution_encoding<
             ck_tile::sequence<>,    // no replicate
             ck_tile::tuple<ck_tile::sequence<1>,
-                           ck_tile::sequence<kNumWarpN, kThrPerWarpN, kVectorN>>,
+                           ck_tile::sequence<kNumRepeat, kNumWarpN, kThrPerWarpN, kVectorN>>,
             ck_tile::tuple<ck_tile::sequence<2>, ck_tile::sequence<2>>,
-            ck_tile::tuple<ck_tile::sequence<0>, ck_tile::sequence<1>>,
-            ck_tile::sequence<1, 2>,
-            ck_tile::sequence<0, 2>>{});
+            ck_tile::tuple<ck_tile::sequence<1>, ck_tile::sequence<2>>,
+            ck_tile::sequence<2, 1, 2>,
+            ck_tile::sequence<0, 0, 3>>{});
 }
 
 template <typename Traits, typename scalar_t>
@@ -98,7 +99,7 @@ CK_TILE_DEVICE static auto MakeTileWindow(
                             ck_tile::number<Traits::kSizeDV>{}),
         {0, 0});                                                // origin
 
-    return ck_tile::make_tile_window(tile_window, MakeOutputTileDistribution<Traits, scalar_t>());
+    return tile_window;
 }
 
 template <typename Traits, typename lse_t, typename out_t>
@@ -206,7 +207,8 @@ __global__ void kn_mla_reduce_v1(
         __builtin_amdgcn_sched_barrier(0);
         ck_tile::block_sync_lds();
 
-        auto oaccu_window = MakeTileWindow<Traits, const float>(nullptr);
+        auto oaccu_window = ck_tile::make_tile_window(MakeTileWindow<Traits, const float>(nullptr),
+                                                      MakeOutputTileDistribution<Traits, const float>());
         auto reg_out = ck_tile::make_static_distributed_tensor<float>(
             decltype(ck_tile::load_tile(oaccu_window))::get_tile_distribution());
         ck_tile::set_tile(reg_out, 0.f);

@@ -520,6 +520,18 @@ NONE_WRAPPED_OP = [
     "compile_mha_bwd",
 ]
 
+SPECIAL_OPS_MUTATES_ARGS = {
+    "topk_softmax": [
+        "arg0",
+        "arg1",
+        "arg2",
+    ],  # "topk_weights", "topk_indices", "token_expert_indices"
+    "biased_grouped_topk_hip": ["topk_weights", "topk_ids"],
+    "moe_fused_gate": ["topk_weights", "topk_ids"],
+    "grouped_topk": ["topk_weights", "topk_ids"],
+    "mha_varlen_fwd": ["out"],
+}
+
 
 def generate_schema(func) -> str:
     import inspect
@@ -528,17 +540,29 @@ def generate_schema(func) -> str:
 
     sig = inspect.signature(func)
     parameters = []
-
+    mutates_args = SPECIAL_OPS_MUTATES_ARGS.get(func.__name__, [])
     for idx, (name, param) in enumerate(sig.parameters.items()):
         param_type = param.annotation
         flag = True
+        is_mutates = False
+        if name in mutates_args:
+            is_mutates = True
 
         if param_type is torch.Tensor:
-            type_str = f"Tensor(a{idx}!)"
+            if is_mutates:
+                type_str = f"Tensor(a{idx}!)"
+            else:
+                type_str = "Tensor"
         elif param_type == Optional[torch.Tensor]:
-            type_str = f"Tensor(a{idx}!)?"
+            if is_mutates:
+                type_str = f"Tensor(a{idx}!)?"
+            else:
+                type_str = "Tensor?"
         elif get_origin(param_type) is Union and torch.Tensor in get_args(param_type):
-            type_str = f"Tensor(a{idx}!)?"
+            if is_mutates:
+                type_str = f"Tensor(a{idx}!)?"
+            else:
+                type_str = "Tensor?"
         elif param_type in (torch.SymInt, int):
             type_str = "SymInt"
         elif param_type in (float, bool, str):
@@ -549,9 +573,14 @@ def generate_schema(func) -> str:
             get_origin(param_type) in (list, List)
             and get_args(param_type)[0] is torch.Tensor
         ):
-            type_str = f"Tensor(a{idx}!)[]"
+            if is_mutates:
+                type_str = f"Tensor(a{idx}!)[]"
+            else:
+                type_str = "Tensor[]"
         elif get_origin(param_type) in (list, List) and get_args(param_type)[0] is int:
             type_str = "int[]"
+        elif param_type == Optional[torch.dtype]:
+            type_str = "ScalarType?"
         else:
             type_str = "*"
             flag = False
@@ -606,6 +635,7 @@ def compile_ops(
 
         @functools.wraps(func)
         def wrapper(*args, custom_build_args={}, **kwargs):
+
             loadName = fc_name
             md_name = _md_name
             if fc_name is None:
@@ -807,12 +837,9 @@ def compile_ops(
                 schema = generate_schema(func)
             else:
                 sig = inspect.signature(func)
-                mutates_args = []
-                for name, param in sig.parameters.items():
-                    if param.annotation is torch.Tensor:
-                        mutates_args.append(name)
+                mutates_args = SPECIAL_OPS_MUTATES_ARGS.get(func.__name__, [])
                 if hasattr(torch.library, "infer_schema"):
-                    sig = torch.library.infer_schema(func, mutates_args="unknown")
+                    sig = torch.library.infer_schema(func, mutates_args=mutates_args)
                 else:
                     # for pytorch 2.4
                     import torch._custom_op.impl
@@ -823,21 +850,17 @@ def compile_ops(
 
         schema = wrapper_register(func)
 
+        import torch
+
+        loadName = func.__name__
+        if not hasattr(torch.ops.aiter, f"wrapper_{loadName}"):
+            op_schema = f"aiter::wrapper_{loadName}" + schema
+            aiter_lib.define(op_schema, tags=())
+            aiter_lib.impl(f"aiter::wrapper_{loadName}", wrapper, dispatch_key="CUDA")
+            aiter_lib.impl(f"aiter::wrapper_{loadName}", wrapper, dispatch_key="CPU")
+            aiter_lib._register_fake(f"wrapper_{loadName}", abstract_impl)
+
         def wrapper_custom(*args, custom_build_args={}, **kwargs):
-            import torch
-
-            loadName = func.__name__
-            if not hasattr(torch.ops.aiter, f"wrapper_{loadName}"):
-                op_schema = f"aiter::wrapper_{loadName}" + schema
-                aiter_lib.define(op_schema, tags=())
-                aiter_lib.impl(
-                    f"aiter::wrapper_{loadName}", wrapper, dispatch_key="CUDA"
-                )
-                aiter_lib.impl(
-                    f"aiter::wrapper_{loadName}", wrapper, dispatch_key="CPU"
-                )
-                aiter_lib._register_fake(f"wrapper_{loadName}", abstract_impl)
-
             return getattr(torch.ops.aiter, f"wrapper_{loadName}")(*args, **kwargs)
 
         return wrapper_custom

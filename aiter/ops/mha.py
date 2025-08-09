@@ -1324,6 +1324,7 @@ class FlashAttnFunc(torch.autograd.Function):
             return_softmax=return_softmax and dropout_p > 0,
         )
         if is_grad:
+            assert return_lse
             ctx.save_for_backward(q, k, v, out_padded, softmax_lse, rng_state)
             ctx.dropout_p = dropout_p
             ctx.softmax_scale = softmax_scale
@@ -1750,6 +1751,7 @@ class FlashAttnVarlenFunc(torch.autograd.Function):
             out=out,
         )
         if is_grad:
+            assert return_lse
             ctx.save_for_backward(
                 q, k, v, out_padded, softmax_lse, cu_seqlens_q, cu_seqlens_k, rng_state
             )

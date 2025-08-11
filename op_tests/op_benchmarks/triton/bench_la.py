@@ -1,11 +1,15 @@
 # SPDX-License-Identifier: MIT
-# Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 import sys
 import torch
 import triton
 
-from aiter.ops.triton.lean_atten import persistent_lean_attention
+from aiter.ops.triton.lean_atten import (
+    _persistent_lean_attention,
+)
+
+from bisect import bisect_right
 
 configs = []
 configs.append(
@@ -79,10 +83,10 @@ configs.append(
                 torch.float16,
                 128,
                 64,
-                1,
+                2,
                 4,
             ),  # Causal=1,
-            (True, 2, 64, 2048, [2048, 2048], 128, 304, torch.float16, 128, 64, 1, 4),
+            (True, 2, 64, 2048, [2048, 2048], 128, 304, torch.float16, 128, 64, 2, 4),
         ],
         line_arg="provider",
         line_vals=["triton"],
@@ -114,6 +118,7 @@ def bench_lean_attention(
     provider,
     device="cuda",
 ):
+
     assert batch == len(n_ctx)
 
     try:
@@ -157,7 +162,7 @@ def bench_lean_attention(
     locks = torch.zeros((total_programs,), device=q.device, dtype=torch.int32)
 
     # Triton LeanAttention output
-    fn = lambda: persistent_lean_attention(  # noqa: E731
+    fn = lambda: _persistent_lean_attention(  # noqa: E731
         q,
         k,
         v,

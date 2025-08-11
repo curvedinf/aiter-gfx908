@@ -66,7 +66,7 @@
           py::arg("out_")           = std::nullopt, \
           py::arg("qo_indptr")      = std::nullopt, \
           py::arg("high_precision") = 1,            \
-          py::arg("kernelName")     = "");
+          py::arg("kernelName")     = std::nullopt);
 
 #define ATTENTION_CK_PYBIND            \
     m.def("pa_fwd_naive",              \
@@ -547,38 +547,42 @@
           py::arg("rng_state")    = std::nullopt, \
           py::arg("gen")          = std::nullopt);
 
-#define MOE_CK_2STAGES_PYBIND                        \
-    m.def("ck_moe_stage1",                           \
-          &ck_moe_stage1,                            \
-          py::arg("hidden_states"),                  \
-          py::arg("w1"),                             \
-          py::arg("w2"),                             \
-          py::arg("sorted_token_ids"),               \
-          py::arg("sorted_expert_ids"),              \
-          py::arg("num_valid_ids"),                  \
-          py::arg("out"),                            \
-          py::arg("topk"),                           \
-          py::arg("kernelName"),                     \
-          py::arg("w1_scale")       = std::nullopt,  \
-          py::arg("a1_scale")       = std::nullopt,  \
-          py::arg("block_m")        = 32,            \
-          py::arg("sorted_weights") = std::nullopt); \
-                                                     \
-    m.def("ck_moe_stage2",                           \
-          &ck_moe_stage2,                            \
-          py::arg("inter_states"),                   \
-          py::arg("w1"),                             \
-          py::arg("w2"),                             \
-          py::arg("sorted_token_ids"),               \
-          py::arg("sorted_expert_ids"),              \
-          py::arg("num_valid_ids"),                  \
-          py::arg("out"),                            \
-          py::arg("topk"),                           \
-          py::arg("kernelName"),                     \
-          py::arg("w2_scale")       = std::nullopt,  \
-          py::arg("a2_scale")       = std::nullopt,  \
-          py::arg("block_m")        = 32,            \
-          py::arg("sorted_weights") = std::nullopt);
+#define MOE_CK_2STAGES_PYBIND                       \
+    m.def("ck_moe_stage1",                          \
+          &ck_moe_stage1,                           \
+          py::arg("hidden_states"),                 \
+          py::arg("w1"),                            \
+          py::arg("w2"),                            \
+          py::arg("sorted_token_ids"),              \
+          py::arg("sorted_expert_ids"),             \
+          py::arg("num_valid_ids"),                 \
+          py::arg("out"),                           \
+          py::arg("topk"),                          \
+          py::arg("kernelName")     = std::nullopt, \
+          py::arg("w1_scale")       = std::nullopt, \
+          py::arg("a1_scale")       = std::nullopt, \
+          py::arg("block_m")        = 32,           \
+          py::arg("sorted_weights") = std::nullopt, \
+          py::arg("quant_type")     = 0,            \
+          py::arg("activation")     = 0);               \
+                                                    \
+    m.def("ck_moe_stage2",                          \
+          &ck_moe_stage2,                           \
+          py::arg("inter_states"),                  \
+          py::arg("w1"),                            \
+          py::arg("w2"),                            \
+          py::arg("sorted_token_ids"),              \
+          py::arg("sorted_expert_ids"),             \
+          py::arg("num_valid_ids"),                 \
+          py::arg("out"),                           \
+          py::arg("topk"),                          \
+          py::arg("kernelName")     = std::nullopt, \
+          py::arg("w2_scale")       = std::nullopt, \
+          py::arg("a2_scale")       = std::nullopt, \
+          py::arg("block_m")        = 32,           \
+          py::arg("sorted_weights") = std::nullopt, \
+          py::arg("quant_type")     = 0,            \
+          py::arg("activation")     = 0);
 
 #define MHA_VARLEN_FWD_PYBIND                     \
     m.def("mha_varlen_fwd",                       \
@@ -641,7 +645,7 @@
           py::arg("num_expert_group"),                                                        \
           py::arg("topk_grp"),                                                                \
           py::arg("need_renorm"),                                                             \
-          py::arg("scoring_func")          = "softmax",                                       \
+          py::arg("scoring_func")          = true,                                            \
           py::arg("routed_scaling_factor") = 1.0f,                                            \
           "Apply grouped topk softmax/sigmodd to the gating outputs.");                       \
     m.def("biased_grouped_topk",                                                              \
@@ -721,7 +725,22 @@
           py::arg("fc2_smooth_scale") = std::nullopt,                                         \
           py::arg("activation")       = ActivationType::Silu);                                      \
     m.def("fmoe_int8_g1u0_a16", &fmoe_int8_g1u0_a16);                                         \
-    m.def("fmoe_g1u1_a16", &fmoe_g1u1_a16);                                                   \
+    m.def("fmoe_g1u1_a16",                                                                    \
+          &fmoe_g1u1_a16,                                                                     \
+          py::arg("out"),                                                                     \
+          py::arg("input"),                                                                   \
+          py::arg("gate"),                                                                    \
+          py::arg("down"),                                                                    \
+          py::arg("sorted_token_ids"),                                                        \
+          py::arg("sorted_weights"),                                                          \
+          py::arg("sorted_expert_ids"),                                                       \
+          py::arg("num_valid_ids"),                                                           \
+          py::arg("topk"),                                                                    \
+          py::arg("fc1_scale"),                                                               \
+          py::arg("fc2_scale"),                                                               \
+          py::arg("fc1_smooth_scale"),                                                        \
+          py::arg("fc2_smooth_scale"),                                                        \
+          py::arg("activation") = ActivationType::Silu);                                      \
     m.def("fmoe_fp8_blockscale_g1u1",                                                         \
           &fmoe_fp8_blockscale_g1u1,                                                          \
           py::arg("out"),                                                                     \
@@ -782,8 +801,8 @@
           py::arg("input"),                                       \
           py::arg("weight"),                                      \
           py::arg("bias"),                                        \
-          py::arg("epsilon"),                                     \
-          py::arg("x_bias") = std::nullopt);                      \
+          py::arg("epsilon") = 1e-5f,                             \
+          py::arg("x_bias")  = std::nullopt);                      \
     m.def("layernorm2d_fwd_with_add",                             \
           &layernorm2d_with_add,                                  \
           py::arg("out"),                                         \
@@ -843,31 +862,31 @@
     m.def("rotary_embedding_fwd", &rotary_embedding, "rotary_embedding"); \
     m.def("batched_rotary_embedding", &batched_rotary_embedding, "batched_rotary_embedding");
 
-#define QUANT_PYBIND                                                       \
-    m.def("static_per_tensor_quant", &aiter::static_per_tensor_quant);     \
-    m.def("dynamic_per_tensor_quant", &aiter::dynamic_per_tensor_quant);   \
-    m.def("dynamic_per_token_scaled_quant",                                \
-          &aiter::dynamic_per_token_scaled_quant,                          \
-          py::arg("out"),                                                  \
-          py::arg("input"),                                                \
-          py::arg("scales"),                                               \
-          py::arg("scale_ub")        = std::nullopt,                       \
-          py::arg("shuffle_scale")   = false,                              \
-          py::arg("num_rows")        = std::nullopt,                       \
-          py::arg("num_rows_factor") = 1);                                 \
-    m.def("dynamic_per_group_scaled_quant_fp4",                            \
-          &aiter::dynamic_per_group_scaled_quant_fp4,                      \
-          py::arg("out"),                                                  \
-          py::arg("input"),                                                \
-          py::arg("scales"),                                               \
-          py::arg("group_size")    = 32,                                   \
-          py::arg("shuffle_scale") = true,                                 \
-          py::arg("num_rows")        = std::nullopt,                       \
-          py::arg("num_rows_factor") = 1);                                 \
-    m.def("partial_transpose",                                             \
-          &aiter::partial_transpose,                                       \
-          py::arg("out"),                                                  \
-          py::arg("input"),                                                \
+#define QUANT_PYBIND                                                     \
+    m.def("static_per_tensor_quant", &aiter::static_per_tensor_quant);   \
+    m.def("dynamic_per_tensor_quant", &aiter::dynamic_per_tensor_quant); \
+    m.def("dynamic_per_token_scaled_quant",                              \
+          &aiter::dynamic_per_token_scaled_quant,                        \
+          py::arg("out"),                                                \
+          py::arg("input"),                                              \
+          py::arg("scales"),                                             \
+          py::arg("scale_ub")        = std::nullopt,                     \
+          py::arg("shuffle_scale")   = false,                            \
+          py::arg("num_rows")        = std::nullopt,                     \
+          py::arg("num_rows_factor") = 1);                               \
+    m.def("dynamic_per_group_scaled_quant_fp4",                          \
+          &aiter::dynamic_per_group_scaled_quant_fp4,                    \
+          py::arg("out"),                                                \
+          py::arg("input"),                                              \
+          py::arg("scales"),                                             \
+          py::arg("group_size")      = 32,                               \
+          py::arg("shuffle_scale")   = true,                             \
+          py::arg("num_rows")        = std::nullopt,                     \
+          py::arg("num_rows_factor") = 1);                               \
+    m.def("partial_transpose",                                           \
+          &aiter::partial_transpose,                                     \
+          py::arg("out"),                                                \
+          py::arg("input"),                                              \
           py::arg("num_rows"));
 
 #define RMSNORM_PYBIND                                                                             \
@@ -891,7 +910,15 @@
           py::arg("weight"),                                                                       \
           py::arg("epsilon"),                                                                      \
           py::arg("use_model_sensitive_rmsnorm") = 0);                                             \
-    m.def("rmsnorm2d_fwd_with_smoothquant", &rmsnorm2d_with_smoothquant);                          \
+    m.def("rmsnorm2d_fwd_with_smoothquant",                                                        \
+          &rmsnorm2d_with_smoothquant,                                                             \
+          py::arg("out"),                                                                          \
+          py::arg("input"),                                                                        \
+          py::arg("xscale"),                                                                       \
+          py::arg("yscale"),                                                                       \
+          py::arg("weight"),                                                                       \
+          py::arg("epsilon"),                                                                      \
+          py::arg("use_model_sensitive_rmsnorm") = 0);                                             \
     m.def("rmsnorm2d_fwd_with_add_smoothquant",                                                    \
           &rmsnorm2d_with_add_smoothquant,                                                         \
           py::arg("out"),                                                                          \
@@ -979,3 +1006,6 @@
         .value("Silu", ActivationType::Silu)             \
         .value("Gelu", ActivationType::Gelu)             \
         .export_values();
+
+#define GEMM_COMMON_PYBIND \
+    m.def("get_padded_m", &getPaddedM, py::arg("M"), py::arg("N"), py::arg("K"), py::arg("gl"));

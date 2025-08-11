@@ -4,6 +4,7 @@ import functools
 import os
 import re
 import subprocess
+from torch_guard import torch_compile_guard
 
 from cpp_extension import executable_path
 
@@ -28,27 +29,35 @@ def get_gfx():
     return gfx
 
 
+@torch_compile_guard()
+def get_cu_num_custom_op() -> int:
+    cu_num = int(os.getenv("CU_NUM", 0))
+    if cu_num == 0:
+        try:
+            rocminfo = executable_path("rocminfo")
+            result = subprocess.run(
+                [rocminfo], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            output = result.stdout
+            devices = re.split(r"Agent\s*\d+", output)
+            gpu_compute_units = []
+            for device in devices:
+                for line in device.split("\n"):
+                    if "Device Type" in line and line.find("GPU") != -1:
+                        match = re.search(r"Compute Unit\s*:\s*(\d+)", device)
+                        if match:
+                            gpu_compute_units.append(int(match.group(1)))
+                        break
+        except Exception as e:
+            raise RuntimeError(f"Get GPU Compute Unit from rocminfo failed {str(e)}")
+        assert len(set(gpu_compute_units)) == 1
+        cu_num = gpu_compute_units[0]
+    return cu_num
+
+
 @functools.lru_cache(maxsize=1)
 def get_cu_num():
-    try:
-        rocminfo = executable_path("rocminfo")
-        result = subprocess.run(
-            [rocminfo], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-        )
-        output = result.stdout
-        devices = re.split(r"Agent\s*\d+", output)
-        gpu_compute_units = []
-        for device in devices:
-            for line in device.split("\n"):
-                if "Device Type" in line and line.find("GPU") != -1:
-                    match = re.search(r"Compute Unit\s*:\s*(\d+)", device)
-                    if match:
-                        gpu_compute_units.append(int(match.group(1)))
-                    break
-    except Exception as e:
-        raise RuntimeError(f"Get GPU Compute Unit from rocminfo failed {str(e)}")
-    assert len(set(gpu_compute_units)) == 1
-    return gpu_compute_units[0]
+    return get_cu_num_custom_op()
 
 
 def get_device_name():

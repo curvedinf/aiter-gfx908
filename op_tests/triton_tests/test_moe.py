@@ -1181,9 +1181,9 @@ if __name__ == "__main__":
     
     print("Running end to end fused moe")
     test_moe_e2e(
-        M=64,
-        N=14336,
-        K=4096,
+        M=2048,
+        N=4096,
+        K=2048,
         top_k=2,
         E=8,
         routed_weight=False,

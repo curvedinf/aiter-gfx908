@@ -186,7 +186,7 @@ def _e2e_moe_kernel(
             accumulator.to(tl.float32).reshape(BLOCK_SIZE_M, BLOCK_SIZE_HALF, 2).split()
         )
         silu_acc = silu_acc / (1.0 + tl.exp2(-(silu_acc * 1.44269504089)))
-        accumulator = (silu_acc * mul_acc).to(tl.float16)
+        accumulator = (silu_acc * mul_acc)
 
         # Do the partial output compute with the accumulator
         offs_cn = pid_n * BLOCK_SIZE_HALF + tl.arange(0, BLOCK_SIZE_HALF)
@@ -207,7 +207,7 @@ def _e2e_moe_kernel(
                 o_mask = o_mask & (offs_k2[None, :] < K - k * BLOCK_SIZE_K2)
 
             # Epilogue
-            partial_output = tl.dot(accumulator, c)
+            partial_output = tl.dot(accumulator.to(c.dtype), c)
             tl.atomic_add(o_ptrs, partial_output, mask=o_mask, sem="relaxed")
 
             # Advance the ptrs to the next K block.
@@ -245,9 +245,10 @@ def e2e_moe(
     assert topk_weights.stride(1) == 1
     assert sorted_token_ids.stride(0) == 1
 
+    BLOCK_M = config["BLOCK_SIZE_M"]
 
     config = {
-        "BLOCK_SIZE_M": 128,
+        "BLOCK_SIZE_M": BLOCK_M,
         "BLOCK_SIZE_N": 128,
         "BLOCK_SIZE_K": 128,
         "BLOCK_SIZE_K2": 128,
@@ -300,6 +301,9 @@ def e2e_moe(
         top_k=top_k,
         **config,
     )
+
+    
+
 
     return C
     

@@ -286,8 +286,6 @@ def torch_e2e_moe(
     else:
         w2_indexed = w2[topk_ids]
 
-    print(intermidiate.shape)
-
     silu_out = torch.zeros([M * top_k, N // 2], dtype=a.dtype, device=a.device)
     silu_out = torch_silu_and_mul_ref(intermidiate.view(-1, N))
 
@@ -1156,10 +1154,32 @@ def test_moe_e2e(
         print(f"triton_out={triton_out}")
         print(f"torch_out={torch_out}")
     # Validate correctness
+    print("Triton output:", triton_out)
+    print("Torch output:", torch_out)
+
+
     torch.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
 
 
 if __name__ == "__main__":
+    
+    print("Running baseline fused moe")
+    
+    test_fused_moe(
+        M=64,
+        N=14336,
+        K=4096,
+        top_k=2,
+        E=8,
+        routed_weight=False,
+        fp8_w8a8=False,
+        int8_w8a16=False,
+        persistent=False,
+        silu_fused=False,
+        dtype=torch.bfloat16,
+    )
+    
+    print("Running end to end fused moe")
     test_moe_e2e(
         M=64,
         N=14336,
@@ -1169,6 +1189,6 @@ if __name__ == "__main__":
         routed_weight=False,
         fp8_w8a8=False,
         int8_w8a16=False,
-        persistent=True,
-        dtype=torch.float16,
+        persistent=False,
+        dtype=torch.bfloat16,
     )

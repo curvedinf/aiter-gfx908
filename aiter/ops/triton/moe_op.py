@@ -1121,6 +1121,8 @@ def fused_moe(
                 ),
             )
 
+            print("C.shape", C.shape)
+            
             _fused_moe_persistent_kernel[grid](
                 A,
                 B,

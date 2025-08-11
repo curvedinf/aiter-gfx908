@@ -1119,7 +1119,6 @@ def test_moe_e2e(
         a,
         w1,
         w2,
-        intermediate,
         triton_out,
         a_scale,
         w1_scale,
@@ -1158,3 +1157,18 @@ def test_moe_e2e(
         print(f"torch_out={torch_out}")
     # Validate correctness
     torch.testing.assert_close(triton_out, torch_out, atol=1e-1, rtol=1e-1)
+
+
+if __name__ == "__main__":
+    test_moe_e2e(
+        M=64,
+        N=14336,
+        K=4096,
+        top_k=2,
+        E=8,
+        routed_weight=False,
+        fp8_w8a8=False,
+        int8_w8a16=False,
+        persistent=True,
+        dtype=torch.float16,
+    )

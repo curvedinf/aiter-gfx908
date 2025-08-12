@@ -310,7 +310,7 @@ def get_mla_metadata_v1(
                       ------------------------------------------------------------
                       no_redundant      true                    false
                       ------------------------------------------------------------
-                      work_indptr       (#work + 1)             (#cu_part + 1)
+                      work_indptr       (#work_cu + 1)          (#cu_part + 1)
                       reduce_indptr     (#reduce_tiles + 1)     (sum(qo_seqlen_blk_count) + 1)
                       reduce_final_map  (#reduce_tiles)         (sum(qo_seqlen_blk_count))
     Returns:

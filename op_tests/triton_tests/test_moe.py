@@ -24,29 +24,9 @@ from aiter.ops.triton.moe_op_gelu import (
 import aiter.ops.triton.utils.arch_info as arch_info
 from aiter.ops.triton.utils.moe_config_utils import get_optimal_moe_config_func
 from aiter.ops.triton.utils.types import torch_to_triton_dtype
+from aiter.ops.triton.utils.moe_common import torch_silu_and_mul_ref
 
 DEBUG_MODE = False
-
-
-def torch_silu_and_mul_ref(input):
-    """
-    Performs the SiLU activation on the first half of the input tensor and
-    multiplies it element-wise with the second half.
-    Args:
-        input (torch.Tensor): Input tensor of shape [..., 2 * d].
-        param (float): Parameter for the SiLU activation function.
-    Returns:
-        torch.Tensor: Output tensor of shape [..., d].
-    """
-    dtype = input.dtype
-    d = input.size(-1) // 2
-    A, B = input[:, :d], input[:, d:]
-
-    silu_A = A / (1.0 + torch.exp(-A.float()))
-
-    output = silu_A * B
-
-    return output.to(dtype)
 
 
 def torch_moe_ref(

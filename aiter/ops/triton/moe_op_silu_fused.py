@@ -296,7 +296,6 @@ def _fused_moe_silu_kernel_gptq_awq(
     silu_acc, mul_acc = (
         accumulator.to(tl.float32).reshape(BLOCK_SIZE_M, BLOCK_SIZE_HALF, 2).split()
     )
-    # silu_acc = silu_acc / (1.0 + tl.exp2(-(silu_acc * 1.44269504089)))
     silu_acc = _silu_exp2(silu_acc)
     accumulator = (silu_acc * mul_acc).to(compute_type)
 
@@ -542,7 +541,7 @@ def _fused_moe_persistent_silu_kernel_gptq_awq(
         silu_acc, mul_acc = (
             accumulator.to(tl.float32).reshape(BLOCK_SIZE_M, BLOCK_SIZE_HALF, 2).split()
         )
-        silu_acc = silu_acc / (1.0 + tl.exp2(-(silu_acc * 1.44269504089)))
+        silu_acc = _silu_exp2(silu_acc)
         accumulator = (silu_acc * mul_acc).to(compute_type)
 
         # -----------------------------------------------------------
@@ -775,7 +774,7 @@ def _fused_moe_silu_kernel(
     silu_acc, mul_acc = (
         accumulator.to(tl.float32).reshape(BLOCK_SIZE_M, BLOCK_SIZE_HALF, 2).split()
     )
-    silu_acc = silu_acc / (1.0 + tl.exp2(-(silu_acc * 1.44269504089)))
+    silu_acc = _silu_exp2(silu_acc)
     accumulator = (silu_acc * mul_acc).to(compute_type)
 
     # -----------------------------------------------------------
@@ -991,7 +990,7 @@ def _fused_moe_persistent_silu_kernel(
         silu_acc, mul_acc = (
             accumulator.to(tl.float32).reshape(BLOCK_SIZE_M, BLOCK_SIZE_HALF, 2).split()
         )
-        silu_acc = silu_acc / (1.0 + tl.exp2(-(silu_acc * 1.44269504089)))
+        silu_acc = _silu_exp2(silu_acc)
         accumulator = (silu_acc * mul_acc).to(compute_type)
 
         # -----------------------------------------------------------

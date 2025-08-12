@@ -8,6 +8,7 @@ import torch
 import triton
 import time
 import csv
+import json
 import pandas as pd
 from rpdTracerControl import rpdTracerControl
 from aiter.ops.triton.gemm_a16w16 import gemm_a16w16
@@ -148,19 +149,26 @@ def prune_configs(M, N, K, configs, elemBytes_a, elemBytes_b):
 
     return pruned_configs
 
-#tune
-    #loop over all shapes
-        #get valid configs for this shape
-        #loop over all configs
-            #call the wrapper for the gemm op. Do we need to run a few times
-            #
-            #collect time from rocprof
-            #append times and config
-        #determine best config for this shape
-        #store the best config for this shape in a file
-
 def get_shapes(args):
-    return [(args.M, args.N, args.K, args.layout)]
+    BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "."))
+    if args.M != 0 and args.N !=0 and args.K !=0:
+        return [(args.M, args.N, args.K, args.layout)]
+    else:
+        config_path = os.path.join(os.path.dirname(__file__), args.shapes_file)
+        print(f"config_path={config_path}")
+        shapes = []
+        with open(config_path, "r") as f:
+            configs = json.load(f)
+            for model, variants in configs.items():
+                for params, config in variants.items():
+                    print(f"{model}_{params}: {config}")
+                    shapes.append((args.M, config["intermediate_size"], config["hidden_size"], args.layout))
+                    shapes.append((args.M, config["intermediate_size"] // 2, config["hidden_size"], args.layout))
+                    shapes.append((args.M, config["hidden_size"], config["intermediate_size"], args.layout))
+                    shapes.append((args.M, config["hidden_size"], config["intermediate_size"] // 2, args.layout))
+
+        return shapes
+
 
 #arg parser
 def parse_args():
@@ -183,6 +191,7 @@ def main():
     op = "gemm_a16w16"
 
     shapes = get_shapes(args)
+    print(f"{shapes}")
 
     configs_full = get_full_tuning_space()
 
@@ -190,13 +199,16 @@ def main():
 
     parent_path = Path("__file__").parent
     num_runs = 10
+    device = "MI300"
+    json_config_path = os.path.join(parent_path, f"output/{op}/{device}-{op}.json")
+    best_configs = {}
     for shape in shapes:
         (M, N, K, layout) = shape
         configs = prune_configs(M, N, K, configs_full, 2, 2) #Bf16 for now
         print(f"SHAPE={shape} configs_full={len(configs_full)} pruned_configs={len(configs)}")
         best_cfg = ""
         best_time = 10e7
-        for cfg in configs[0:9]:
+        for cfg in configs[0:2]:
             #print(f"cfg={cfg}")
             x, w, out_dtype, y = generate_gemm_a16w16_inputs(M, N, K, torch.bfloat16, layout=layout, output=True)
 
@@ -254,8 +266,19 @@ for i in range({num_runs}):
             if avg_time < best_time:
                 best_cfg, best_time = cfg, avg_time
             
-        print(f"SHAPE={shape} BEST_CFG={best_cfg} best_avg_time={best_avg_time}")
-        
+        s = [str(e) for e in shape]
+        s = "-".join(s)
+        print(f"{s}")
+        print(f"SHAPE={s} BEST_CFG={best_cfg} best_avg_time={best_time}")
+        best_configs[s] = best_cfg
+
+    print(f"best_config={best_configs}")
+    with open(json_config_path, "w") as file:
+        config_str = json.dumps(best_configs, indent=4)
+        file.write(config_str)
+        file.close()
+
+
 #main
 if __name__ == "__main__":
     sys.exit(main())

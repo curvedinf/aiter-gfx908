@@ -4,11 +4,17 @@ import torch
 import triton
 from aiter.ops.triton.utils.types import torch_to_triton_dtype, str_to_torch_dtype
 from aiter.ops.triton.moe_op import fused_moe as triton_moe
-from op_tests.triton_tests.test_moe import input_helper, input_helper_int4_w4a16
+from aiter.ops.triton.moe_op_silu_fused import fused_moe_silu as triton_moe_silu_fused
+from op_tests.triton_tests.test_moe import input_helper, input_helper_int4_w4a16, input_helper_e2e, torch_e2e_moe
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_model_configs,
     get_available_models,
     print_vgpr,
+)
+
+
+from aiter.ops.triton.moe_op_e2e import (
+    e2e_moe as triton_e2e_moe
 )
 
 
@@ -147,6 +153,161 @@ def fused_moe(
             use_int4_w4a16=False,
             config=config,
         )
+
+def run_e2e_benchmark(args):
+    routed_weight = args.routed_weight
+    int8_w8a16 = args.int8_w8a16
+    fp8_w8a8 = args.fp8_w8a8
+    int4_w4a16 = args.int4_w4a16
+    group_size = args.group_size
+    has_zp = args.has_zp
+    print_time = args.print_time
+    dtype = str_to_torch_dtype[args.dtype]
+    fp8_type = str_to_torch_dtype[args.fp8_type]
+
+    persistent=True
+
+    if int4_w4a16:
+        assert group_size != None, "set group_size with -group_size"
+
+    kernel_name = "_fused_moe_kernel"
+    if (int8_w8a16 or int4_w4a16) and (group_size is not None) and group_size > 0:
+        kernel_name = "_fused_moe_kernel_gptq_awq"
+
+    x_vals_list = model_benchmark_configs(args)
+    x_names = ["model", "M", "N", "K", "E", "top_k"]
+
+
+    line_names = ["ms"]
+    line_vals = ["ms"]
+
+
+    benchmark = triton.testing.Benchmark(
+        x_names=x_names,
+        x_vals=x_vals_list,
+        line_arg="metric",
+        line_vals=line_vals,
+        line_names=line_names,
+        styles=[("red", "-"), ("blue", "-"), ("yellow", "-")],
+        ylabel="ms / TFLOPS / GB/s",
+        plot_name=f"{kernel_name}-benchmark",
+        args={},
+    )
+
+    @triton.testing.perf_report([benchmark])
+    def bench_moe_gemm(M, N, K, E, top_k, metric, model=None):
+
+        # (M, K) * (top_k, N, K) -> (M, top_k, N). 2 for multiplication and accumulation
+        flops = 2.0 * M * top_k * K * N + 2.0 * M * top_k * K * N//2 + M*N
+        # The weight is applied on the gemm product which has the shape of (M, top_k, N)
+        
+        (
+        a,
+        w1,
+        w2,
+        triton_out,
+        a_scale,
+        w1_scale,
+        w2_scale,
+        topk_weights,
+        topk_ids,
+        sorted_token_ids,
+        expert_ids,
+        num_tokens_post_padded,
+        config,
+        ) = input_helper_e2e(
+            M,
+            N,
+            K,
+            top_k,
+            E,
+            routed_weight=routed_weight,
+            dtype=dtype,
+            fp8_w8a8=fp8_w8a8,
+            int8_w8a16=int8_w8a16,
+            persistent=persistent,
+        )
+
+        provider = "e2e"
+
+
+        if provider == "e2e":
+            def fn():
+                triton_e2e_moe(
+                    a,
+                    w1,
+                    w2,
+                    triton_out,
+                    a_scale,
+                    w1_scale,
+                    w2_scale,
+                    topk_weights,
+                    sorted_token_ids,
+                    topk_ids,
+                    expert_ids,
+                    num_tokens_post_padded,
+                    routed_weight,
+                    top_k,
+                    fp8_w8a8,
+                    int8_w8a16,
+                    config,
+                )
+        else:
+            
+            def fn():   
+                triton_out_silu = torch.zeros(
+                    (M * top_k, N // 2), dtype=torch.float32, device="cuda"
+                )
+                
+                
+
+                config = {
+                    "BLOCK_SIZE_M": 256,
+                    "BLOCK_SIZE_N": 256,
+                    "BLOCK_SIZE_K": 64,
+                    "GROUP_SIZE_M": 8,
+                    "num_warps": 8,
+                    "num_stages": 2,
+                    "waves_per_eu": 0,
+                    "matrix_instr_nonkdim": 16,
+                    "kpack": 1
+                }
+
+                triton_moe_silu_fused(
+                    a,
+                    w1,
+                    triton_out_silu,
+                    None,
+                    None,
+                    None,
+                    topk_weights,
+                    topk_ids,
+                    sorted_token_ids,
+                    expert_ids,
+                    num_tokens_post_padded,
+                    routed_weight,
+                    top_k,
+                    torch_to_triton_dtype[dtype],
+                    False,
+                    False,
+                    False,
+                    None,
+                    config=config,
+                )
+                triton_moe(triton_out_silu.to(dtype), w2, triton_out, None, None, None, topk_weights,topk_ids, sorted_token_ids,expert_ids,num_tokens_post_padded, False,top_k, torch_to_triton_dtype[dtype], False, False, False, None, config=config)
+
+
+        ms = triton.testing.do_bench(fn, warmup=25, rep=100)
+
+        tflops = flops / ms * 1e-9
+
+        # Return exactly one scalar depending on which metric is active
+        return ms
+
+    bench_moe_gemm.run(save_path="." if args.o else None, print_data=True)
+
+
+
 
 
 def run_benchmark(args):
@@ -299,12 +460,12 @@ def main():
         print("Retrieving VGPR usage for Triton kernels...")
 
         def fun():
-            return run_benchmark(args)
+            return run_e2e_benchmark(args)
 
         print_vgpr(fun, "_fused_moe_kernel-benchmark")
         return 0
-    run_benchmark(args)
-
+    # run_benchmark(args)
+    run_e2e_benchmark(args)
 
 if __name__ == "__main__":
     sys.exit(main())

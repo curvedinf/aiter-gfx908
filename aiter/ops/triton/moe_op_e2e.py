@@ -250,9 +250,9 @@ def e2e_moe(
 
     config = {
         "BLOCK_SIZE_M": BLOCK_M,
-        "BLOCK_SIZE_N": 64,
-        "BLOCK_SIZE_K": 64,
-        "BLOCK_SIZE_K2": 64,
+        "BLOCK_SIZE_N": 128,
+        "BLOCK_SIZE_K": 128,
+        "BLOCK_SIZE_K2": 128,
     }
 
     EM = sorted_token_ids.shape[0]

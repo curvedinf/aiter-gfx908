@@ -166,6 +166,7 @@ def run_e2e_benchmark(args):
     fp8_type = str_to_torch_dtype[args.fp8_type]
 
     persistent=True
+    two_stages=False
 
     if int4_w4a16:
         assert group_size != None, "set group_size with -group_size"
@@ -226,12 +227,11 @@ def run_e2e_benchmark(args):
             fp8_w8a8=fp8_w8a8,
             int8_w8a16=int8_w8a16,
             persistent=persistent,
+            two_stages=two_stages
         )
 
-        provider = "e2e"
 
-
-        if provider == "e2e":
+        if not two_stages:
             def fn():
                 triton_e2e_moe(
                     a,
@@ -253,26 +253,11 @@ def run_e2e_benchmark(args):
                     config,
                 )
         else:
-            
-            def fn():   
-                triton_out_silu = torch.zeros(
+            triton_out_silu = torch.zeros(
                     (M * top_k, N // 2), dtype=torch.float32, device="cuda"
                 )
+            def fn():   
                 
-                
-
-                config = {
-                    "BLOCK_SIZE_M": 256,
-                    "BLOCK_SIZE_N": 256,
-                    "BLOCK_SIZE_K": 64,
-                    "GROUP_SIZE_M": 8,
-                    "num_warps": 8,
-                    "num_stages": 2,
-                    "waves_per_eu": 0,
-                    "matrix_instr_nonkdim": 16,
-                    "kpack": 1
-                }
-
                 triton_moe_silu_fused(
                     a,
                     w1,
@@ -302,7 +287,7 @@ def run_e2e_benchmark(args):
         tflops = flops / ms * 1e-9
 
         # Return exactly one scalar depending on which metric is active
-        return ms
+        return tflops
 
     bench_moe_gemm.run(save_path="." if args.o else None, print_data=True)
 

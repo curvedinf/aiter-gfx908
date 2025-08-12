@@ -80,6 +80,7 @@ def _e2e_moe_kernel(
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
     BLOCK_SIZE_K2: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr,
     EVEN_K: tl.constexpr,
     EVEN_K2: tl.constexpr,
     NUM_WGS: tl.constexpr,
@@ -128,7 +129,16 @@ def _e2e_moe_kernel(
 
     num_tiles = num_pid_m * num_pid_n
 
-    for tile_id in tl.range(start_tile, num_tiles, step=NUM_WGS):
+    compute_dtype = c_ptr.type.element_ty
+    output_dtype = o_ptr.type.element_ty
+    EPILOGUE_SUBTILE: tl.constexpr = False
+
+    BLOCK_SIZE_HALF: tl.constexpr = BLOCK_SIZE_N // 2
+    i = tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
+
+    BLOCK_SIZE_K2_HALF: tl.constexpr = BLOCK_SIZE_K2 // 2
+
+    for tile_id in tl.range(start_tile, num_tiles, step=NUM_WGS, flatten=True):
         pid_m = tile_id // num_pid_n
         pid_n = tile_id % num_pid_n
 
@@ -139,8 +149,7 @@ def _e2e_moe_kernel(
         off_experts = tl.load(expert_ids_ptr + pid_m).to(tl.int64)
 
         # silu ptrs
-        BLOCK_SIZE_HALF: tl.constexpr = BLOCK_SIZE_N // 2
-        i = tl.arange(0, BLOCK_SIZE_N).to(tl.int64)
+        
         # [0, 0, 1, 1, ..., BLOCK_SIZE_HALF - 1, BLOCK_SIZE_HALF - 1]
         i_floor = i // 2
         offs_half = (pid_n * (BLOCK_SIZE_N // 2) + i_floor) % (N // 2)
@@ -162,7 +171,7 @@ def _e2e_moe_kernel(
 
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
-        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):            
+        for k in tl.range(0, tl.cdiv(K, BLOCK_SIZE_K), flatten=True):            
             # (first iter is part of the prologue)
             if EVEN_K:
                 a = tl.load(a_ptrs, mask=token_mask[:, None], other=0.0)
@@ -186,18 +195,20 @@ def _e2e_moe_kernel(
             accumulator.to(tl.float32).reshape(BLOCK_SIZE_M, BLOCK_SIZE_HALF, 2).split()
         )
         silu_acc = silu_acc / (1.0 + tl.exp2(-(silu_acc * 1.44269504089)))
-        accumulator = (silu_acc * mul_acc).to(c_ptr.type.element_ty) # (BLOCK_SIZE_M, BLOCK_SIZE_N // 2)
+        accumulator = (silu_acc * mul_acc).to(compute_dtype) # (BLOCK_SIZE_M, BLOCK_SIZE_N // 2)
 
         # Do the partial output compute with the accumulator
         offs_cn = pid_n * BLOCK_SIZE_HALF + tl.arange(0, BLOCK_SIZE_HALF)
         offs_k2 = tl.arange(0, BLOCK_SIZE_K2)
 
         c_ptrs = c_ptr + stride_cn * offs_cn[:, None] + stride_ck * offs_k2[None, :] + off_experts * stride_ce
-        o_ptrs = o_ptr + stride_om * offs_token[:, None] + stride_ok * offs_k2[None, :]
+        if EPILOGUE_SUBTILE:
+            o_ptrs = o_ptr + stride_om * offs_token[:, None] + stride_ok * tl.arange(0, BLOCK_SIZE_K2_HALF)[None, :]
+        else:
+            o_ptrs = o_ptr + stride_om * offs_token[:, None] + stride_ok * offs_k2[None, :]
 
-       
         
-        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K2)):
+        for k in tl.range(0, tl.cdiv(K, BLOCK_SIZE_K2), flatten=True):
             if EVEN_K2:
                 c = tl.load(c_ptrs)
                 o_mask = token_mask[:, None]
@@ -209,7 +220,22 @@ def _e2e_moe_kernel(
 
             # Epilogue
             partial_output = tl.dot(accumulator, c)
-            tl.atomic_add(o_ptrs, partial_output, mask=o_mask, sem="relaxed")
+            
+            if EPILOGUE_SUBTILE:
+                po = tl.reshape(partial_output, (BLOCK_SIZE_M, 2, BLOCK_SIZE_K2 // 2))
+                po = tl.permute(po, (0, 2, 1))
+                po0, po1 = tl.split(po)
+                po0 = po0.to(output_dtype)
+                # c_desc.store([offs_am_c, offs_bn_c], c0)
+                tl.atomic_add(o_ptrs, po0, mask=o_mask, sem="relaxed")
+                po1 = po1.to(output_dtype)
+                # c_desc.store([offs_am_c, offs_bn_c + BLOCK_SIZE_N // 2], c1)
+                tl.atomic_add(o_ptrs + BLOCK_SIZE_K2_HALF * stride_ok, po1, mask=o_mask, sem="relaxed")
+            else:
+                partial_output = partial_output.to(output_dtype)
+                tl.atomic_add(o_ptrs, partial_output, mask=o_mask, sem="relaxed")
+                # tl.store(o_ptrs, partial_output, mask=o_mask)
+
 
             # Advance the ptrs to the next K block.
             c_ptrs += BLOCK_SIZE_K2 * stride_ck
@@ -246,15 +272,6 @@ def e2e_moe(
     assert topk_weights.stride(1) == 1
     assert sorted_token_ids.stride(0) == 1
 
-    BLOCK_M = config["BLOCK_SIZE_M"]
-
-    config = {
-        "BLOCK_SIZE_M": BLOCK_M,
-        "BLOCK_SIZE_N": 128,
-        "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_K2": 128,
-    }
-
     EM = sorted_token_ids.shape[0]
     if A.shape[0] < config["BLOCK_SIZE_M"]:
         # optimize for small batch_size.
@@ -266,7 +283,7 @@ def e2e_moe(
     N = W1.shape[1]
     K = A.shape[1] - _PADDING_SIZE
 
-    NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count
+    NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count 
     grid = (NUM_WGS,)
 
     # print("A.shape", A.shape, "W1.shape", W1.shape, "W2.shape", W2.shape, "C.shape", C.shape)

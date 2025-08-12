@@ -320,22 +320,18 @@ def get_default_config() -> Dict[str, int]:
     return config
 
 
-def get_default_config_moe_e2e(persistent: bool) -> Dict[str, int]:
-    if persistent:
-        return {
-            "BLOCK_SIZE_M": 64,
-            "BLOCK_SIZE_N1": 128,
-            "BLOCK_SIZE_N2": 64,
-            "BLOCK_SIZE_K1": 64,
-            "BLOCK_SIZE_K2": 64,
-        }
+def get_default_config_moe_e2e() -> Dict[str, int]:
     return {
         "BLOCK_SIZE_M": 64,
-        "BLOCK_SIZE_N": 128,
-        "BLOCK_SIZE_K1": 64,
-        "BLOCK_SIZE_K2": 64,
-        "GROUP_SIZE_M": 2,
-    }  # TODO setting GROUP_SIZE_M = 1 gives set fault, why?
+        "BLOCK_SIZE_N": 512,
+        "BLOCK_SIZE_K": 32,
+        "BLOCK_SIZE_K2": 32,
+        "GROUP_SIZE_M": 1,
+        "num_warps": 8,
+        "num_stages": 3,
+        "waves_per_eu": 2,
+        "matrix_instr_nonkdim": 16,
+    }
 
 
 def quantize_fp8(
@@ -576,6 +572,7 @@ def input_helper_e2e(
     fp8_w8a8: bool,
     int8_w8a16: bool,
     persistent: bool,
+    two_stages: bool = False, # moe_silu_fused + moe or e2e_moe
 ):
     assert not (fp8_w8a8 and int8_w8a16)
 
@@ -601,7 +598,15 @@ def input_helper_e2e(
     softmax_vals = torch.softmax(values, dim=1)
     topk_weights, topk_ids = torch.topk(softmax_vals, k=top_k, dim=1)
 
-    config = get_default_config_moe_e2e(persistent)
+    if two_stages:
+        moe_config_func = get_optimal_moe_config_func(
+            dtype, use_int8_w8a16=False, use_fp8_w8a8=False
+        )
+        config = moe_config_func(M)
+    else:
+        config = get_default_config_moe_e2e()
+    
+    
     sorted_token_ids, expert_ids, num_tokens_post_padded = (
         torch_moe_align_block_size_ref(topk_ids, config["BLOCK_SIZE_M"], E)
     )

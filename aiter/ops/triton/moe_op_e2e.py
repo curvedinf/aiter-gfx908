@@ -128,7 +128,7 @@ def _e2e_moe_kernel(
 
     num_tiles = num_pid_m * num_pid_n
 
-    for tile_id in range(start_tile, num_tiles, step=NUM_WGS):
+    for tile_id in tl.range(start_tile, num_tiles, step=NUM_WGS):
         pid_m = tile_id // num_pid_n
         pid_n = tile_id % num_pid_n
 
@@ -195,16 +195,17 @@ def _e2e_moe_kernel(
         c_ptrs = c_ptr + stride_cn * offs_cn[:, None] + stride_ck * offs_k2[None, :] + off_experts * stride_ce
         o_ptrs = o_ptr + stride_om * offs_token[:, None] + stride_ok * offs_k2[None, :]
 
-        o_mask = token_mask[:, None]
+       
         
         for k in range(0, tl.cdiv(K, BLOCK_SIZE_K2)):
             if EVEN_K2:
                 c = tl.load(c_ptrs)
+                o_mask = token_mask[:, None]
             else:
                 c = tl.load(
-                    c_ptrs, mask=offs_k2[:, None] < (K - k * BLOCK_SIZE_K2), other=0.0
+                    c_ptrs, mask=offs_k2[None, :] < (K - k * BLOCK_SIZE_K2), other=0.0
                 )
-                o_mask = o_mask & (offs_k2[None, :] < (K - k * BLOCK_SIZE_K2))
+                o_mask = token_mask[:, None] & (offs_k2[None, :] < (K - k * BLOCK_SIZE_K2))
 
             # Epilogue
             partial_output = tl.dot(accumulator, c)
@@ -249,9 +250,9 @@ def e2e_moe(
 
     config = {
         "BLOCK_SIZE_M": BLOCK_M,
-        "BLOCK_SIZE_N": 128,
-        "BLOCK_SIZE_K": 128,
-        "BLOCK_SIZE_K2": 128,
+        "BLOCK_SIZE_N": 64,
+        "BLOCK_SIZE_K": 64,
+        "BLOCK_SIZE_K2": 64,
     }
 
     EM = sorted_token_ids.shape[0]
@@ -267,6 +268,8 @@ def e2e_moe(
 
     NUM_WGS = torch.cuda.get_device_properties("cuda").multi_processor_count
     grid = (NUM_WGS,)
+
+    # print("A.shape", A.shape, "W1.shape", W1.shape, "W2.shape", W2.shape, "C.shape", C.shape)
 
     _e2e_moe_kernel[grid](
         A,

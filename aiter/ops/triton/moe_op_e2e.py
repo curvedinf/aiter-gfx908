@@ -202,7 +202,7 @@ def _e2e_moe_kernel(
                 c = tl.load(c_ptrs)
             else:
                 c = tl.load(
-                    c, mask=offs_k2[:, None] < (K - k * BLOCK_SIZE_K2), other=0.0
+                    c_ptrs, mask=offs_k2[:, None] < (K - k * BLOCK_SIZE_K2), other=0.0
                 )
                 o_mask = o_mask & (offs_k2[None, :] < (K - k * BLOCK_SIZE_K2))
 

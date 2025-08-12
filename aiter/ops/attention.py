@@ -314,20 +314,22 @@ def get_mla_metadata_v1(
                       reduce_indptr     (#reduce_tiles + 1)     (sum(qo_seqlen_blk_count) + 1)
                       reduce_final_map  (#reduce_tiles)         (sum(qo_seqlen_blk_count))
     Returns:
-        [0] work_indptr:        as above,           The IDs of work handled by each cu_part.
-        [1] work information    (#work, 8)
-        [1.0] bs_index:         (#work),            The index of batch handled by each work.
-        [1.1] partial_index:    (#work),            The index of tile in output buffer when splits. -1 means no split.
-        [1.2] q_start:          (#work),            The global index in seq where q/o starts. Use global index here can
+        [0] work_ptrs           (2)                 Two 64-bits pointers point to the 1st element of work_indptr and
+                                                    work_info.
+        [1] work_indptr:        as above,           The IDs of work handled by each cu_part.
+        [2] work_info           (#work, 8)
+        [2.0] bs_index:         (#work),            The index of batch handled by each work.
+        [2.1] partial_index:    (#work),            The index of tile in output buffer when splits. -1 means no split.
+        [2.2] q_start:          (#work),            The global index in seq where q/o starts. Use global index here can
                                                     reduce memory access count in kernel.
-        [1.3] q_end:            (#work),            The global index in seq where q/o ends (not included).
-        [1.4] kv_start:         (#work),            The global index in seq where k/v starts.
-        [1.5] kv_end:           (#work),            The global index in seq where k/v ends (not included).
-        [1.6] pad               (#work, 2),         Pad to 8 DWs.
-        [2] reduce_indptr:      as above,           The IDs in reduce_partial_map indicates the tiles should be merged
+        [2.3] q_end:            (#work),            The global index in seq where q/o ends (not included).
+        [2.4] kv_start:         (#work),            The global index in seq where k/v starts.
+        [2.5] kv_end:           (#work),            The global index in seq where k/v ends (not included).
+        [2.6] pad               (#work, 2),         Pad to 8 DWs.
+        [3] reduce_indptr:      as above,           The IDs in reduce_partial_map indicates the tiles should be merged
                                                     together.
-        [3] reduce_final_map:   as above,           The final output location of each group of tiles.
-        [4] reduce_partial_map: (#partial_tiles),   The locations in partial buffer of partial tiles waiting for being
+        [4] reduce_final_map:   as above,           The final output location of each group of tiles.
+        [5] reduce_partial_map: (#partial_tiles),   The locations in partial buffer of partial tiles waiting for being
                                                     reduced.
     """
     ...

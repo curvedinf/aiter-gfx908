@@ -254,11 +254,12 @@ struct MlaMetadataTraits
 struct MlaMetadataV1KernelParameter
 {
     // Outputs
-    int32_t* p_work_indptr;
-    int32_t* p_work_info_set_raw;
-    int32_t* p_reduce_indptr;
-    int32_t* p_reduce_final_map;
-    int32_t* p_reduce_partial_map;
+    uint64_t* p_work_ptrs;
+    int32_t*  p_work_indptr;
+    int32_t*  p_work_info_set_raw;
+    int32_t*  p_reduce_indptr;
+    int32_t*  p_reduce_final_map;
+    int32_t*  p_reduce_partial_map;
 
     // Inputs
     const int32_t* p_seqlens_qo_indptr;
@@ -278,6 +279,9 @@ __global__ void kn_get_mla_metadata_v1(
  
     if (threadIdx.x == 0)
     {
+        params.p_work_ptrs[0] = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(params.p_work_indptr));
+        params.p_work_ptrs[1] = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(params.p_work_info_set_raw));
+
         // Step.1. Calculate the size of cluster and some related information. The size is the number of workgroups
         //         composing each cluster. The size is determined by average packed qo length.
         int32_t sum_packed_qo_len = 0;
@@ -569,8 +573,8 @@ std::vector<torch::Tensor> get_mla_metadata_v1_device(
 
     TORCH_CHECK(lds_size_in_bytes <= dev_prop.maxSharedMemoryPerMultiProcessor,
                 __func__, ": There is no enough LDS.");
-    printf("[RJM] dev_prop.maxSharedMemoryPerMultiProcessor=%zu\n", dev_prop.maxSharedMemoryPerMultiProcessor);
 
+    auto work_ptrs          = torch::empty({2}, opts.dtype(torch::kUInt64));
     auto work_indptr        = torch::empty({num_cu + 1}, opts);
     auto work_info_set      = torch::empty({max_works, kSizeMlaWorkInfoInDw}, opts);
     auto reduce_indptr      = torch::empty({max_qo_tiles + 1}, opts);
@@ -579,6 +583,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1_device(
 
     // kernel input parameters
     MlaMetadataV1KernelParameter params = {};
+    params.p_work_ptrs          = work_ptrs.data_ptr<uint64_t>();
     params.p_work_indptr        = work_indptr.data_ptr<int32_t>();
     params.p_work_info_set_raw  = work_info_set.data_ptr<int32_t>();
     params.p_reduce_indptr      = reduce_indptr.data_ptr<int32_t>();
@@ -596,7 +601,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1_device(
     const int32_t num_thr = dev_prop.warpSize; // only use 1 warp for simplicity
     kn_get_mla_metadata_v1<Traits><<<grid, num_thr, dev_prop.maxSharedMemoryPerMultiProcessor, stream>>>(params);
 
-    return {work_indptr, work_info_set, reduce_indptr, reduce_final_map, reduce_partial_map};
+    return {work_ptrs, work_indptr, work_info_set, reduce_indptr, reduce_final_map, reduce_partial_map};
 }
 
 template <typename Traits>
@@ -842,43 +847,48 @@ std::vector<torch::Tensor> get_mla_metadata_v1_host(
     auto reduce_partial_map_flatten = flatten(reduce_partial_map, num_partial_outputs);
 
     // Step.7. Create tensors.
+    auto input_opts = seqlens_qo_indptr.options();
     auto int_opts = torch::TensorOptions().dtype(torch::kInt32);
-    auto work_info_set_tsr = torch::from_blob(work_info_set_flatten.data(), {num_works, kSizeMlaWorkInfoInDw}, int_opts);
-    auto work_indptr_tsr = torch::from_blob(work_indptr.data(), {static_cast<int32_t>(work_indptr.size())}, int_opts);
-    auto reduce_indptr_tsr = torch::from_blob(reduce_indptr.data(), {reduce_indptr_size}, int_opts);
-    auto reduce_final_map_tsr = torch::from_blob(reduce_final_map.data(), {reduce_final_map_size, kSizeMlaPartialTileInfoInDw}, int_opts);
-    auto reduce_partial_map_tsr = torch::from_blob(reduce_partial_map_flatten.data(), {num_partial_outputs}, int_opts);
+    auto work_ptrs_tsr = torch::empty({2}, torch::TensorOptions().dtype(torch::kUInt64));
+    auto work_info_set_tsr = torch::from_blob(work_info_set_flatten.data(), {num_works, kSizeMlaWorkInfoInDw}, int_opts).to(input_opts);
+    auto work_indptr_tsr = torch::from_blob(work_indptr.data(), {static_cast<int32_t>(work_indptr.size())}, int_opts).to(input_opts);
+    auto reduce_indptr_tsr = torch::from_blob(reduce_indptr.data(), {reduce_indptr_size}, int_opts).to(input_opts);
+    auto reduce_final_map_tsr = torch::from_blob(reduce_final_map.data(), {reduce_final_map_size, kSizeMlaPartialTileInfoInDw}, int_opts).to(input_opts);
+    auto reduce_partial_map_tsr = torch::from_blob(reduce_partial_map_flatten.data(), {num_partial_outputs}, int_opts).to(input_opts);
+
+    work_ptrs_tsr.index_put_({0}, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(work_indptr_tsr.data_ptr())));
+    work_ptrs_tsr.index_put_({1}, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(work_info_set_tsr.data_ptr())));
 
     // Last step. Copy to the device of input and return the results.
-    auto input_opts = seqlens_qo_indptr.options();
-    return {work_indptr_tsr.to(input_opts),
-            work_info_set_tsr.to(input_opts),
-            reduce_indptr_tsr.to(input_opts),
-            reduce_final_map_tsr.to(input_opts),
-            reduce_partial_map_tsr.to(input_opts)};
+    return {work_ptrs_tsr.to(input_opts),
+            work_indptr_tsr,
+            work_info_set_tsr,
+            reduce_indptr_tsr,
+            reduce_final_map_tsr,
+            reduce_partial_map_tsr};
 }
 
 //
 // Persistent thread group solution which take variable query/output lengths into consideration as well.
 //
 // Returns
-//   [0] work_indptr:        (#cu_part + 1),      The IDs of work handled by each cu_part.
-//   [1] work information    (#work, 8)
-//   [1.0] bs_index:         (#work),             The index of batch handled by each work.
-//   [1.1] partial_qo_loc:   (#work),             The location in qo of tile in output buffer when splits. -1 means no split.
-//   [1.2] q_start:          (#work),             The global index in seq where q/o starts.
-//   [1.3] q_end:            (#work),             The global index in seq where q/o ends (not included).
-//   [1.4] kv_start:         (#work),             The global index in seq where k/v starts.
-//   [1.5] kv_end:           (#work),             The global index in seq where k/v ends (not included).
-//   [1.6] kv_offset:        (#work),             The delta between kv_end and seqlens_kv_indptr[batch_idx].
-//   [1.7] paddings:         (#work, 1),          Pad to 8 DWs.
-//   [2] reduce_indptr:      (#reduce_tiles + 1), The IDs in reduce_partial_map indicates the tiles should be merged
-//                                                together.
-//   [3] reduce_final_map:   (#reduce_tiles, 2),  The final output location and length of each group of tiles.
-//   [3.0] q_start           (#reduce_tiles),     The global index in seq where q/o starts.
-//   [3.1] q_end             (#reduce_tiles),     The global index in seq where q/o ends (not included).
-//   [4] reduce_partial_map: (#partial_tiles),    The locations in partial buffer of partial tiles waiting for being
-//                                                reduced.
+//   [0] work_ptrs           (2)                 Two 64-bits pointers point to the 1st element of work_indptr and
+//                                               work_info.
+//   [1] work_indptr:        as above,           The IDs of work handled by each cu_part.
+//   [2] work_info           (#work, 8)
+//   [2.0] bs_index:         (#work),            The index of batch handled by each work.
+//   [2.1] partial_index:    (#work),            The index of tile in output buffer when splits. -1 means no split.
+//   [2.2] q_start:          (#work),            The global index in seq where q/o starts. Use global index here can
+//                                               reduce memory access count in kernel.
+//   [2.3] q_end:            (#work),            The global index in seq where q/o ends (not included).
+//   [2.4] kv_start:         (#work),            The global index in seq where k/v starts.
+//   [2.5] kv_end:           (#work),            The global index in seq where k/v ends (not included).
+//   [2.6] pad               (#work, 2),         Pad to 8 DWs.
+//   [3] reduce_indptr:      as above,           The IDs in reduce_partial_map indicates the tiles should be merged
+//                                               together.
+//   [4] reduce_final_map:   as above,           The final output location of each group of tiles.
+//   [5] reduce_partial_map: (#partial_tiles),   The locations in partial buffer of partial tiles waiting for being
+//                                               reduced.
 //
 std::vector<torch::Tensor> get_mla_metadata_v1(
     const torch::Tensor& seqlens_qo_indptr,     // [batch size + 1]

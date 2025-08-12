@@ -660,7 +660,15 @@ void fmoe_g1u1(torch::Tensor& out,                            // [token_cnt, dim
         else if(activation == ActivationType::Silu)
         {
             if(enable_vskip != nullptr && strcmp(enable_vskip, "1") == 0)
-                config_map = &silu_kernel_fp8_vs_configs;
+            {
+                if(inter_dim % 256 == 0)
+                {
+                    config_map   = &silu_kernel_fp8_vs_configs;
+                    selectedTile = 256;
+                }
+                else
+                    TORCH_CHECK(false, __func__, "Only supports inter_dim divisible by 256.");
+            }
             else
                 config_map = &silu_kernel_fp8_configs;
         }

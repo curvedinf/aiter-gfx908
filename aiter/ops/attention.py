@@ -300,7 +300,7 @@ def get_mla_metadata_v1(
     num_heads_per_head_k: int,
     num_heads_k: int,
     is_causal: bool,
-    no_redundant: bool,
+    no_redundant: bool=True,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Arguments:

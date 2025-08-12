@@ -120,6 +120,8 @@ def mla_decode_fwd(
     kv_indices,
     kv_last_page_lens,
     max_seqlen_q,
+    q_scale=1.0,    # default 1.0 with fp32 dirctly cast to fp8
+    kv_scale=1.0,   # default 1.0 with fp32 dirctly cast to fp8
     sm_scale=None,  # 1.0 / (qk_head_dim**0.5)
     logit_cap=0.0,
     num_kv_splits=None,  # for experts only!!!

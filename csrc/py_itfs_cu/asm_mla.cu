@@ -39,8 +39,12 @@ struct __attribute__((packed)) KernelArgs
     p2 _p18;
     void* ptr_STP;
     p2 _p19;
-	void* ptr_RP;
-	p2 _p20;
+    void* ptr_RP;
+    p2 _p20;
+    void* ptr_QSCALE;
+    p2 _p19;
+    void* ptr_KVSCALE;
+    p2 _p20;
 };
 
 void mla_decode_stage1_asm_fwd(
@@ -107,6 +111,7 @@ void mla_decode_stage1_asm_fwd(
         hipMemcpy(dev_PS_META_DATA, persistent_meta_data, buf_size_META, hipMemcpyHostToDevice);
 
         args.ptr_STP = dev_PS_META_DATA;
+        // args.ptr_STP = work_indptr.value().data_ptr();
     }
     else
     {
@@ -181,6 +186,32 @@ void mla_decode_stage1_asm_fwd(
                     "_ZN5aiter39mla_a16w16_qh16_m32x4_n16x1_coex0_mask1E",
                     "/mla/mla_a16w16_qh16_m32x4_n16x1_coex0_mask1.co");
                 impl_ptr = &impl_a16w16_bf16;
+            }
+        }
+    }
+    else if(Q.dtype() == at::ScalarType::Float8_e4m3fn) // at::ScalarType::Float8_e4m3fnuz or at::ScalarType::Float8_e4m3fn ?
+    {
+        if(gqa_ratio == 16)
+        {
+            if(max_seqlen_q == 2)
+            {
+                sub_Q = 128;
+                static AiterAsmKernel impl_fp8(
+                    "mla_kernel_func",
+                    "/mla/mla_a16w16_qh16_m16x4_n16x1_coex0_mask1_fp8_mtp2.co");
+                impl_ptr = &impl_fp8;
+            }
+            else if(max_seqlen_q <= 4)
+            {
+                sub_Q = 128;
+                static AiterAsmKernel impl_fp8(
+                    "mla_kernel_func",
+                    "/mla/mla_a16w16_qh16_m16x4_n16x1_coex0_mask1_fp8.co");
+                impl_ptr = &impl_fp8;
+            }
+            else
+            {
+                assert(false);
             }
         }
     }

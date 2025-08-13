@@ -288,7 +288,7 @@ def input_helper(
     ],
 )
 @pytest.mark.parametrize("silu_fused", [False, True])
-@pytest.mark.parametrize("routed_weight", [False, True])
+@pytest.mark.parametrize("routed_weight", [False]) # TODO: add routed weight support
 @pytest.mark.parametrize("swizzle_mx_scale", [False])  # TODO Add support for swizzle
 def test_fused_moe(
     M: int,

@@ -381,7 +381,7 @@ def _fused_moe_kernel_mxfp4_silu(
     # Write back the block of the output
     offs_cn = pid_n * BLOCK_SIZE_HALF + tl.arange(0, BLOCK_SIZE_HALF)
     c_ptrs = c_ptr + stride_cm * offs_token[:, None] + stride_cn * offs_cn[None, :]
-    c_mask = token_mask[:, None] & (offs_cn[None, :] < N)
+    c_mask = token_mask[:, None] & (offs_cn[None, :] < N // 2)
     tl.store(c_ptrs, accumulator, mask=c_mask)
 
 

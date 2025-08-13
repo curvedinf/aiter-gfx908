@@ -254,7 +254,7 @@ struct MlaMetadataTraits
 struct MlaMetadataV1KernelParameter
 {
     // Outputs
-    uint64_t* p_work_ptrs;
+    uint64_t* p_work_metadata_ptrs;
     int32_t*  p_work_indptr;
     int32_t*  p_work_info_set_raw;
     int32_t*  p_reduce_indptr;
@@ -279,8 +279,8 @@ __global__ void kn_get_mla_metadata_v1(
  
     if (threadIdx.x == 0)
     {
-        params.p_work_ptrs[0] = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(params.p_work_indptr));
-        params.p_work_ptrs[1] = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(params.p_work_info_set_raw));
+        params.p_work_metadata_ptrs[0] = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(params.p_work_indptr));
+        params.p_work_metadata_ptrs[1] = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(params.p_work_info_set_raw));
 
         // Step.1. Calculate the size of cluster and some related information. The size is the number of workgroups
         //         composing each cluster. The size is determined by average packed qo length.
@@ -522,13 +522,19 @@ __global__ void kn_get_mla_metadata_v1(
 }
 
 template <typename Traits>
-std::vector<torch::Tensor> get_mla_metadata_v1_device(
+void get_mla_metadata_v1_device(
     const torch::Tensor& seqlens_qo_indptr,     // [batch size + 1]
     const torch::Tensor& seqlens_kv_indptr,     // [batch size + 1]
     const int32_t        num_heads_per_head_k,
     const int32_t        num_heads_k,
     const bool           is_causal,
-    const bool           no_redundant)
+    const bool           no_redundant,
+    torch::Tensor&       work_metadata_ptrs,
+    torch::Tensor&       work_indptr,
+    torch::Tensor&       work_info_set,
+    torch::Tensor&       reduce_indptr,
+    torch::Tensor&       reduce_final_map,
+    torch::Tensor&       reduce_partial_map)
 {
     TORCH_CHECK(seqlens_qo_indptr.stride(0) == 1,
                 __func__, ": seqlens_qo_indptr should be continuous!");
@@ -557,7 +563,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1_device(
     {
         int32_t lds_size = 0;
         // this is maximun #clusters
-        const int32_t num_clusters = dev_prop.multiProcessorCount * sizeof(int32_t);
+        const int32_t num_clusters = dev_prop.multiProcessorCount;
         // Memory for indptr about #cluster for each batch in direction of qo
         lds_size += (num_batches + 1) * sizeof(int32_t);
         // Memory for cost. Its size should be the same as #clusters
@@ -574,16 +580,16 @@ std::vector<torch::Tensor> get_mla_metadata_v1_device(
     TORCH_CHECK(lds_size_in_bytes <= dev_prop.maxSharedMemoryPerMultiProcessor,
                 __func__, ": There is no enough LDS.");
 
-    auto work_ptrs          = torch::empty({2}, opts.dtype(torch::kUInt64));
-    auto work_indptr        = torch::empty({num_cu + 1}, opts);
-    auto work_info_set      = torch::empty({max_works, kSizeMlaWorkInfoInDw}, opts);
-    auto reduce_indptr      = torch::empty({max_qo_tiles + 1}, opts);
-    auto reduce_final_map   = torch::empty({max_qo_tiles, kSizeMlaPartialTileInfoInDw}, opts);
-    auto reduce_partial_map = torch::empty({max_works}, opts);
+    // auto work_ptrs          = torch::empty({2}, opts.dtype(torch::kUInt64));
+    // auto work_indptr        = torch::empty({num_cu + 1}, opts);
+    // auto work_info_set      = torch::empty({max_works, kSizeMlaWorkInfoInDw}, opts);
+    // auto reduce_indptr      = torch::empty({max_qo_tiles + 1}, opts);
+    // auto reduce_final_map   = torch::empty({max_qo_tiles, kSizeMlaPartialTileInfoInDw}, opts);
+    // auto reduce_partial_map = torch::empty({max_works}, opts);
 
     // kernel input parameters
     MlaMetadataV1KernelParameter params = {};
-    params.p_work_ptrs          = work_ptrs.data_ptr<uint64_t>();
+    params.p_work_metadata_ptrs = work_metadata_ptrs.data_ptr<uint64_t>();
     params.p_work_indptr        = work_indptr.data_ptr<int32_t>();
     params.p_work_info_set_raw  = work_info_set.data_ptr<int32_t>();
     params.p_reduce_indptr      = reduce_indptr.data_ptr<int32_t>();
@@ -600,8 +606,6 @@ std::vector<torch::Tensor> get_mla_metadata_v1_device(
     const dim3 grid = dim3(1, 1, 1);
     const int32_t num_thr = dev_prop.warpSize; // only use 1 warp for simplicity
     kn_get_mla_metadata_v1<Traits><<<grid, num_thr, dev_prop.maxSharedMemoryPerMultiProcessor, stream>>>(params);
-
-    return {work_ptrs, work_indptr, work_info_set, reduce_indptr, reduce_final_map, reduce_partial_map};
 }
 
 template <typename Traits>
@@ -849,18 +853,18 @@ std::vector<torch::Tensor> get_mla_metadata_v1_host(
     // Step.7. Create tensors.
     auto input_opts = seqlens_qo_indptr.options();
     auto int_opts = torch::TensorOptions().dtype(torch::kInt32);
-    auto work_ptrs_tsr = torch::empty({2}, torch::TensorOptions().dtype(torch::kUInt64));
+    auto work_metadata_ptrs_tsr = torch::empty({2}, torch::TensorOptions().dtype(torch::kUInt64));
     auto work_info_set_tsr = torch::from_blob(work_info_set_flatten.data(), {num_works, kSizeMlaWorkInfoInDw}, int_opts).to(input_opts);
     auto work_indptr_tsr = torch::from_blob(work_indptr.data(), {static_cast<int32_t>(work_indptr.size())}, int_opts).to(input_opts);
     auto reduce_indptr_tsr = torch::from_blob(reduce_indptr.data(), {reduce_indptr_size}, int_opts).to(input_opts);
     auto reduce_final_map_tsr = torch::from_blob(reduce_final_map.data(), {reduce_final_map_size, kSizeMlaPartialTileInfoInDw}, int_opts).to(input_opts);
     auto reduce_partial_map_tsr = torch::from_blob(reduce_partial_map_flatten.data(), {num_partial_outputs}, int_opts).to(input_opts);
 
-    work_ptrs_tsr.index_put_({0}, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(work_indptr_tsr.data_ptr())));
-    work_ptrs_tsr.index_put_({1}, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(work_info_set_tsr.data_ptr())));
+    work_metadata_ptrs_tsr.index_put_({0}, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(work_indptr_tsr.data_ptr())));
+    work_metadata_ptrs_tsr.index_put_({1}, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(work_info_set_tsr.data_ptr())));
 
     // Last step. Copy to the device of input and return the results.
-    return {work_ptrs_tsr.to(input_opts),
+    return {work_metadata_ptrs_tsr.to(input_opts),
             work_indptr_tsr,
             work_info_set_tsr,
             reduce_indptr_tsr,
@@ -872,9 +876,9 @@ std::vector<torch::Tensor> get_mla_metadata_v1_host(
 // Persistent thread group solution which take variable query/output lengths into consideration as well.
 //
 // Returns
-//   [0] work_ptrs           (2)                 Two 64-bits pointers point to the 1st element of work_indptr and
+//   [0] work_metadata_ptrs  (2)                 Two 64-bits pointers point to the 1st element of work_indptr and
 //                                               work_info.
-//   [1] work_indptr:        as above,           The IDs of work handled by each cu_part.
+//   [1] work_indptr:        (#cu_part + 1),     The IDs of work handled by each cu_part.
 //   [2] work_info           (#work, 8)
 //   [2.0] bs_index:         (#work),            The index of batch handled by each work.
 //   [2.1] partial_index:    (#work),            The index of tile in output buffer when splits. -1 means no split.
@@ -884,19 +888,26 @@ std::vector<torch::Tensor> get_mla_metadata_v1_host(
 //   [2.4] kv_start:         (#work),            The global index in seq where k/v starts.
 //   [2.5] kv_end:           (#work),            The global index in seq where k/v ends (not included).
 //   [2.6] pad               (#work, 2),         Pad to 8 DWs.
-//   [3] reduce_indptr:      as above,           The IDs in reduce_partial_map indicates the tiles should be merged
+//   [3] reduce_indptr:      (sum(qo_seqlen_blk_count) + 1),
+//                                               The IDs in reduce_partial_map indicates the tiles should be merged
 //                                               together.
-//   [4] reduce_final_map:   as above,           The final output location of each group of tiles.
+//   [4] reduce_final_map:   (sum(qo_seqlen_blk_count)),
+//                                               The final output location of each group of tiles.
 //   [5] reduce_partial_map: (#partial_tiles),   The locations in partial buffer of partial tiles waiting for being
 //                                               reduced.
 //
-std::vector<torch::Tensor> get_mla_metadata_v1(
+void get_mla_metadata_v1(
     const torch::Tensor& seqlens_qo_indptr,     // [batch size + 1]
     const torch::Tensor& seqlens_kv_indptr,     // [batch size + 1]
     const int32_t        num_heads_per_head_k,
     const int32_t        num_heads_k,
     const bool           is_causal,
-    const bool           no_redundant)
+    torch::Tensor&       work_metadata_ptrs,
+    torch::Tensor&       work_indptr,
+    torch::Tensor&       work_info_set,
+    torch::Tensor&       reduce_indptr,
+    torch::Tensor&       reduce_final_map,
+    torch::Tensor&       reduce_partial_map)
 {
     const at::cuda::OptionalCUDAGuard device_guard(device_of(seqlens_kv_indptr));
 
@@ -906,26 +917,41 @@ std::vector<torch::Tensor> get_mla_metadata_v1(
     //                                PackedQoLenPerWg, MaxClusterSize
     using Traits  = MlaMetadataTraits<64,               1>;
 
-    constexpr bool kUseDevice = true;
+    get_mla_metadata_v1_device<Traits>(
+        seqlens_qo_indptr,
+        seqlens_kv_indptr,
+        num_heads_per_head_k,
+        num_heads_k,
+        is_causal,
+        false,
+        work_metadata_ptrs,
+        work_indptr,
+        work_info_set,
+        reduce_indptr,
+        reduce_final_map,
+        reduce_partial_map);
+}
 
-    if (kUseDevice && (no_redundant == false))
-    {
-        return get_mla_metadata_v1_device<Traits>(
-            seqlens_qo_indptr,
-            seqlens_kv_indptr,
-            num_heads_per_head_k,
-            num_heads_k,
-            is_causal,
-            no_redundant);
-    }
-    else
-    {
-        return get_mla_metadata_v1_host<Traits>(
-            seqlens_qo_indptr,
-            seqlens_kv_indptr,
-            num_heads_per_head_k,
-            num_heads_k,
-            is_causal,
-            no_redundant);
-    }
+std::vector<torch::Tensor> get_mla_metadata_v1_no_redundant(
+    const torch::Tensor& seqlens_qo_indptr,     // [batch size + 1]
+    const torch::Tensor& seqlens_kv_indptr,     // [batch size + 1]
+    const int32_t        num_heads_per_head_k,
+    const int32_t        num_heads_k,
+    const bool           is_causal)
+{
+    const at::cuda::OptionalCUDAGuard device_guard(device_of(seqlens_kv_indptr));
+
+    // This default settings is for our ASM MLA decode kernel. This kernel supports num_heads=16 and qo size from 1 to 4
+    // without support to split qo for each workgroup. This means that kPackedQoLenPerWg should be 4*16=64 to prevent 
+    // spliting in any case supported by it.
+    //                                PackedQoLenPerWg, MaxClusterSize
+    using Traits  = MlaMetadataTraits<64,               1>;
+
+    return get_mla_metadata_v1_host<Traits>(
+        seqlens_qo_indptr,
+        seqlens_kv_indptr,
+        num_heads_per_head_k,
+        num_heads_k,
+        is_causal,
+        true);
 }

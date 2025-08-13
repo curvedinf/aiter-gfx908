@@ -24,7 +24,6 @@
 #include <algorithm>
 #include "dtype_fp8.cuh"
 #include "quant_utils.cuh"
-#include <limits>
 #include "pa_common.cuh"
 #include "pa_kernels.cuh"
 
@@ -48,7 +47,6 @@
 #define DIVIDE_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
 
 #if defined(__HIP__GFX9__)
-
 // grid (num_seqs, num_partitions, num_kv_heads)
 // block (256)
 // clang-format off
@@ -342,7 +340,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
   if constexpr (KV_DTYPE != vllm::Fp8KVCacheDataType::kAuto) {
     // multiply by k_scale if fp8 kv cache
     scale2 *= *k_scale;
-    scale2 /= q_scale;
+    scale2 *= q_scale;
   }
 
   floatx4 d_out[GQA_RATIO_LOOP][MTP_PER_THREAD][TLOOP];
@@ -517,7 +515,7 @@ __launch_bounds__(NUM_THREADS) void paged_attention_ll4mi_QKV_mfma16_kernel(
         }
       }
     }
-  }else{
+  } else {
     int rowid_8x8 = rowid / 2;
     int offset    = rowid % 2;
     for (int token_depth = 0; token_depth < TLOOP; token_depth++) {

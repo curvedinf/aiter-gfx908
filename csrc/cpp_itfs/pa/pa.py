@@ -180,7 +180,7 @@ def paged_attention_rocm(
         q_stride,
         kv_block_stride,
         kv_head_stride,
-        torch.cuda.current_stream(),
+        torch.cuda.current_stream(query.device),
     )
     q_scale_ptr = (
         ctypes.cast(q_scale.data_ptr(), ctypes.POINTER(ctypes.c_float))

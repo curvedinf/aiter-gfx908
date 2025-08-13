@@ -31,6 +31,7 @@ class gemm_op:
         self.elemBytes_b = 2
         self.best_configs = {}
         self.device = ""
+        self.batched = False
 
         parent_path = Path("__file__").parent
         driver_file_dir = os.path.join(parent_path, f"{self.output_base_path}/{self.name}/")
@@ -48,12 +49,14 @@ class gemm_op:
     def __str__(self):
         return f"{self.name} {self.module_import_path} {self.input_import_path}"
 
+    def is_batched(self):
+        return self.batched
+
     def set_device(self, device):
         self.device = device
         parent_path = Path("__file__").parent
         self.output_json_config_path = os.path.join(parent_path, f"{self.output_base_path}/{self.name}/{self.device}-{self.name}.json")
     
-    #configs
     def _determine_full_tuning_space(self):
         configs = []
 
@@ -167,17 +170,15 @@ class gemm_op:
     def _generate_driver_file(self,shape, cfg, num_runs=10):
         self.num_runs = num_runs
         M, N, K, layout = shape
-        driver_file_str = f"""
-import torch
-import triton
-
-from {self.module_import_path} import {self.func} 
-from {self.input_import_path} import {self.input_func}
-
-x, w, out_dtype, y = {self.input_func}({M}, {N}, {K}, torch.bfloat16, layout="{layout}", output=True)
-for i in range({num_runs}):
-    {self.func}(x, w, out_dtype, y, {cfg})
-"""
+        driver_file_str = (
+            "import torch\n" +
+            "import triton\n" +
+            f"from {self.module_import_path} import {self.func}\n" +
+            f"from {self.input_import_path} import {self.input_func}\n" +
+            f"x, w, out_dtype, y = {self.input_func}({M}, {N}, {K}, torch.bfloat16, layout=\"{layout}\", output=True)\n" +
+            f"for i in range({num_runs}):\n"+
+            f"  {self.func}(x, w, out_dtype, y, {cfg})\n"
+        )
         #print(f"driver_file_str={driver_file_str}")
         with open(self.driver_file_path, "w") as file:
             file.write(driver_file_str)
@@ -186,7 +187,10 @@ for i in range({num_runs}):
     def profile_op(self, shapes):
         best_configs = {}
         for shape in shapes:
-            (M, N, K, layout) = shape
+            if self.batched:
+                (B, M, N, K, layout) = shape
+            else:
+                (M, N, K, layout) = shape
             shape_str = [str(e) for e in shape]
             shape_str = "-".join(shape_str)
             configs = self._prune_configs(M, N, K)
@@ -217,9 +221,13 @@ for i in range({num_runs}):
             file.write(config_str)
             file.close()
 
-
 class gemm_a8w8(gemm_op):
-    #configs
+
+    def __init__(self):
+        super().__init__("gemm_a8w8", "gemm_a8w8", "gemm_a8w8", "test_gemm_a8w8", "generate_gemm_a8w8_inputs")
+        self.elemBytes_a = 1
+        self.elemBytes_b = 1
+
     def _determine_full_tuning_space(self):
         configs = []
 
@@ -228,9 +236,6 @@ class gemm_a8w8(gemm_op):
         #split_k_range = [1, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
         num_warps_range = [1, 2, 4, 8]
         group_m_range = [1, 2, 4, 8, 16, 32]
-        # For now we see better perf with num_stages=2 for all gemm configs we care
-        # But keep this explicit so that we do not forget we may need to set it to
-        # other values in the future
         num_stage_range = [2]
         waves_per_eu_range = [0]
         matrix_instr_nonkdim_range = [16, 32]
@@ -250,18 +255,115 @@ class gemm_a8w8(gemm_op):
     def _generate_driver_file(self,shape, cfg, num_runs=10):
         self.num_runs = num_runs
         M, N, K, layout = shape
-        driver_file_str = f"""
-import torch
-import triton
+        driver_file_str =  (
+            "import torch\n" +
+            "import triton\n" +
+            "from aiter.ops.triton.utils.types import str_to_torch_dtype\n" +
+            f"from {self.module_import_path} import {self.func}\n" +
+            f"from {self.input_import_path} import {self.input_func}\n" +
+            f"x, weight, x_scale, w_scale, bias, y = {self.input_func}({M}, {N}, {K}, str_to_torch_dtype[\"fp8e4m3\"], torch.bfloat16, layout=\"{layout}\", output=True)\n" +
+            f"for i in range({num_runs}):\n"+
+            f"   {self.func}(x, weight, x_scale, w_scale, bias, torch.bfloat16, y, {cfg})\n" 
+        )
+        print(f"driver_file_str={driver_file_str}")
+        with open(self.driver_file_path, "w") as file:
+            file.write(driver_file_str)
+            file.close()
 
-from {self.module_import_path} import {self.func} 
-from {self.input_import_path} import {self.input_func}
+class gemm_afp4wfp4(gemm_op):
+    def __init__(self):
+        super().__init__("gemm_afp4wfp4", "gemm_afp4wfp4", "gemm_afp4wfp4", "test_gemm_afp4wfp4", "generate_gemm_afp4wfp4_inputs")
+        self.elemBytes_a = 1
+        self.elemBytes_b = 1
 
-x, weight, x_scale, w_scale, bias, y = {self.input_func}({M}, {N}, {K}, torch.float8_e4m3fnuz, torch.bfloat16, layout="{layout}", output=True)
-for i in range({num_runs}):
-    {self.func}(x, weight, x_scale, w_scale, bias, torch.bfloat16, y, {cfg}) 
-"""
-        #print(f"driver_file_str={driver_file_str}")
+    def _determine_full_tuning_space(self):
+        configs = []
+
+        block_mn_range = [16, 32, 64, 128, 256]
+        block_k_range = [16, 32, 64, 128, 256]
+        #split_k_range = [1, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
+        num_warps_range = [1, 2, 4, 8]
+        group_m_range = [1, 2, 4, 8, 16, 32]
+        num_stage_range = [2]
+        waves_per_eu_range = [0]
+        matrix_instr_nonkdim_range = [16, 32]
+        cache_modifier = ["", ".cg"]
+        num_ksplit = [16, 1]
+
+        space = itertools.product(block_mn_range, block_mn_range, block_k_range, num_warps_range, group_m_range,
+                                num_stage_range, waves_per_eu_range, matrix_instr_nonkdim_range, cache_modifier, num_ksplit)
+
+        for instance in space:
+            block_m, block_n, block_k, num_warps, group_m, num_stages, waves_per_eu, matrix_instr_nonkdim, cache_modifier, num_ksplit = instance
+            configs.append({
+                'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m,
+                'num_warps': num_warps, 'num_stages': num_stages, 'waves_per_eu': waves_per_eu,
+                'matrix_instr_nonkdim': matrix_instr_nonkdim, "cache_modifier": cache_modifier, "NUM_KSPLIT": num_ksplit})
+
+        self.configs = configs
+
+    def _generate_driver_file(self,shape, cfg, num_runs=10):
+        self.num_runs = num_runs
+        M, N, K, layout = shape
+        driver_file_str =  (
+            "import torch\n" +
+            "import triton\n" +
+            "from aiter.ops.triton.utils.types import str_to_torch_dtype\n" +
+            f"from {self.module_import_path} import {self.func}\n" +
+            f"from {self.input_import_path} import {self.input_func}\n" +
+            f"x, weight, x_scale, w_scale, x_scales_triton, w_scales_triton, out_dtype, y = {self.input_func}({M}, {N}, {K}, torch.bfloat16, layout=\"{layout}\", output=True)\n" +
+            f"for i in range({num_runs}):\n"+
+            f"   {self.func}(x, weight, x_scales_triton, w_scales_triton, out_dtype, y, {cfg})\n" 
+        )
+        print(f"driver_file_str={driver_file_str}")
+        with open(self.driver_file_path, "w") as file:
+            file.write(driver_file_str)
+            file.close()
+
+class batched_gemm_a8w8(gemm_op):
+    def __init__(self):
+        super().__init__("batched_gemm_a8w8", "batched_gemm_a8w8", "batched_gemm_a8w8", "test_batched_gemm_a8w8", "generate_batched_gemm_a8w8_inputs")
+        self.batched = True
+        self.elemBytes_a = 1
+        self.elemBytes_b = 1
+
+    def _determine_full_tuning_space(self):
+        configs = []
+
+        block_mn_range = [16, 32, 64, 128, 256]
+        block_k_range = [16, 32, 64, 128, 256]
+        #split_k_range = [1, 2, 4, 5, 6, 8, 10, 12, 16, 18, 24]
+        num_warps_range = [1, 2, 4, 8]
+        group_m_range = [1, 2, 4, 8, 16, 32]
+        num_stage_range = [2]
+        waves_per_eu_range = [0]
+        matrix_instr_nonkdim_range = [16, 32]
+
+        space = itertools.product(block_mn_range, block_mn_range, block_k_range, num_warps_range, group_m_range,
+                                num_stage_range, waves_per_eu_range, matrix_instr_nonkdim_range)
+
+        for instance in space:
+            block_m, block_n, block_k, num_warps, group_m, num_stages, waves_per_eu, matrix_instr_nonkdim = instance
+            configs.append({
+                'BLOCK_SIZE_M': block_m, 'BLOCK_SIZE_N': block_n, 'BLOCK_SIZE_K': block_k, 'GROUP_SIZE_M': group_m,
+                'num_warps': num_warps, 'num_stages': num_stages, 'waves_per_eu': waves_per_eu,
+                'matrix_instr_nonkdim': matrix_instr_nonkdim})
+
+        self.configs = configs
+
+    def _generate_driver_file(self,shape, cfg, num_runs=10):
+        self.num_runs = num_runs
+        B, M, N, K, layout = shape
+        driver_file_str =  (
+            "import torch\n" +
+            "import triton\n" +
+            f"from {self.module_import_path} import {self.func}\n" +
+            f"from {self.input_import_path} import {self.input_func}\n" +
+            f"x, weight, x_scale, w_scale, bias, y = {self.input_func}({B}, {M}, {N}, {K}, torch.bfloat16, output=True, layout=\"{layout}\")\n" +
+            f"for i in range({num_runs}):\n"+
+            f"   {self.func}(x, weight, x_scale, w_scale, bias, torch.bfloat16, splitK=None, YQ=y, config={cfg})\n" 
+        )
+        print(f"driver_file_str={driver_file_str}")
         with open(self.driver_file_path, "w") as file:
             file.write(driver_file_str)
             file.close()
@@ -269,7 +371,9 @@ for i in range({num_runs}):
 
 OPS = {
     "gemm_a16w16": gemm_op("gemm_a16w16", "gemm_a16w16", "gemm_a16w16", "test_gemm_a16w16", "generate_gemm_a16w16_inputs"),
-    "gemm_a8w8": gemm_a8w8("gemm_a8w8", "gemm_a8w8", "gemm_a8w8", "test_gemm_a8w8", "generate_gemm_a8w8_inputs"),
+    "gemm_a8w8": gemm_a8w8(),
+    "batched_gemm_a8w8": batched_gemm_a8w8(),
+    "gemm_afp4wfp4": gemm_afp4wfp4(),
 }
 
 def run_bash_command(commandstring, capture=True):
@@ -293,25 +397,44 @@ def get_device():
     
     return device
 
-def get_shapes(args):
+def get_shapes(args, batched):
     BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "."))
-    if args.M != 0 and args.N !=0 and args.K !=0:
-        return [(args.M, args.N, args.K, args.layout)]
-    else:
-        config_path = os.path.join(os.path.dirname(__file__), args.shapes_file)
-        print(f"config_path={config_path}")
-        shapes = []
-        with open(config_path, "r") as f:
-            configs = json.load(f)
-            for model, variants in configs.items():
-                for params, config in variants.items():
-                    print(f"{model}_{params}: {config}")
-                    shapes.append((args.M, config["intermediate_size"], config["hidden_size"], args.layout))
-                    shapes.append((args.M, config["intermediate_size"] // 2, config["hidden_size"], args.layout))
-                    shapes.append((args.M, config["hidden_size"], config["intermediate_size"], args.layout))
-                    shapes.append((args.M, config["hidden_size"], config["intermediate_size"] // 2, args.layout))
+    if batched:
+        if args.B !=0 and args.M != 0 and args.N !=0 and args.K !=0:
+            return [(args.B, args.M, args.N, args.K, args.layout)]
+        else:
+            config_path = os.path.join(os.path.dirname(__file__), args.shapes_file)
+            print(f"config_path={config_path}")
+            shapes = []
+            with open(config_path, "r") as f:
+                configs = json.load(f)
+                for model, variants in configs.items():
+                    for params, config in variants.items():
+                        print(f"{model}_{params}: {config}")
+                        shapes.append((args.B, args.M, config["intermediate_size"], config["hidden_size"], args.layout))
+                        shapes.append((args.B, args.M, config["intermediate_size"] // 2, config["hidden_size"], args.layout))
+                        shapes.append((args.B, args.M, config["hidden_size"], config["intermediate_size"], args.layout))
+                        shapes.append((args.B, args.M, config["hidden_size"], config["intermediate_size"] // 2, args.layout))
 
-        return shapes
+            return shapes
+    else:
+        if args.M != 0 and args.N !=0 and args.K !=0:
+            return [(args.M, args.N, args.K, args.layout)]
+        else:
+            config_path = os.path.join(os.path.dirname(__file__), args.shapes_file)
+            print(f"config_path={config_path}")
+            shapes = []
+            with open(config_path, "r") as f:
+                configs = json.load(f)
+                for model, variants in configs.items():
+                    for params, config in variants.items():
+                        print(f"{model}_{params}: {config}")
+                        shapes.append((args.M, config["intermediate_size"], config["hidden_size"], args.layout))
+                        shapes.append((args.M, config["intermediate_size"] // 2, config["hidden_size"], args.layout))
+                        shapes.append((args.M, config["hidden_size"], config["intermediate_size"], args.layout))
+                        shapes.append((args.M, config["hidden_size"], config["intermediate_size"] // 2, args.layout))
+
+            return shapes
 
 def get_op(args):
     print(OPS.keys())
@@ -324,6 +447,7 @@ def get_op(args):
 def parse_args():
     parser = argparse.ArgumentParser(description="Tune AITER Triton GEMM Kernels")
 
+    parser.add_argument("-B", type=int, default=0)
     parser.add_argument("-M", type=int, default=0)
     parser.add_argument("-N", type=int, default=0)
     parser.add_argument("-K", type=int, default=0)
@@ -343,7 +467,7 @@ def main():
     device = get_device()
     print(f"{device}")
     
-    shapes = get_shapes(args)
+    shapes = get_shapes(args, op.is_batched())
     print(f"{shapes}")
 
     run_bash_command("rm -rf ~/.triton/cache")

@@ -728,12 +728,16 @@ def unified_attention(
     ALL_DECODE = max_seqlen_q == 1
 
     # call 2d if sliding window is used
-    if SLIDING_WINDOW > 0 or num_2d_prgms >= target_num_prgms or max_seqlen_k <= 1024:
+    if (
+        SLIDING_WINDOW > 0
+        or max_seqlen_k <= 512
+        or (num_2d_prgms > target_num_prgms and not ALL_DECODE)
+    ):
         if ALL_DECODE == False:
             num_stages_2d = 4
             num_warps = 4
         else:
-            num_stages_2d = 3
+            num_stages_2d = 2
             num_warps = 2
         # make the block_m bigger if we already have enough parallelism
         if num_2d_prgms >= 2 * target_num_prgms:
@@ -749,14 +753,14 @@ def unified_attention(
             BLOCK_Q = BLOCK_M // num_queries_per_kv
             total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
 
-        if max_seqlen_q >= 512 and block_size == 64:
+        if max_seqlen_q >= 256 and block_size == 64:
             BLOCK_M = 128
             num_stages_2d = 1
             num_warps = 4
             BLOCK_Q = BLOCK_M // num_queries_per_kv
             total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
-
-        kernel_unified_attention_2d[
+        num_stages_2d = min(num_stages_2d, math.ceil(max_seqlen_k / (block_size * 2)))
+        kernel = kernel_unified_attention_2d[
             (
                 num_kv_heads,
                 total_num_q_blocks,
@@ -805,11 +809,7 @@ def unified_attention(
             num_stages=num_stages_2d,
         )
     else:
-        # TODO: cagri: total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
-        # q.shape[0] is sum(query_lens) which becomes same as batch size
-        # so it is static dim. for decode, should be okay to use it in heuristics
-        # make the block_m bigger if we already have enough parallelism
-        NUM_SEGMENTS = math.ceil(target_num_prgms / (total_num_q_blocks * num_kv_heads))
+        NUM_SEGMENTS = math.ceil(target_num_prgms / num_2d_prgms)
         NUM_SEGMENTS = triton.next_power_of_2(NUM_SEGMENTS)
         NUM_SEGMENTS = min(NUM_SEGMENTS, 256)
         MIN_SEGMENTS = 16 if block_size <= 16 else 8

@@ -356,8 +356,8 @@ gemm_a8w8_bpreshuffle_cktile_impl(torch::Tensor& XQ,
     ck_tile::ScaleFlatmmHostArgs<ScaleM, ScaleN> args;
     args.a_ptr = (void*)XQ.data_ptr();
     args.b_ptr = (void*)WQ.data_ptr();
-    args.scale_m = reinterpret_cast<AccDataType *> (x_scale.data_ptr());
-    args.scale_n = reinterpret_cast<AccDataType *> (w_scale.data_ptr());
+    args.scale_m = ck_tile::FlatmmScalePointer<1>{reinterpret_cast<AccDataType*>(x_scale.data_ptr()),m};
+    args.scale_n = ck_tile::FlatmmScalePointer<1>{reinterpret_cast<AccDataType*>(w_scale.data_ptr()),n};
     args.e_ptr = (void*)out.data_ptr();
 
     args.k_batch  = 1;
@@ -367,6 +367,7 @@ gemm_a8w8_bpreshuffle_cktile_impl(torch::Tensor& XQ,
     args.stride_A = k;
     args.stride_B = k;
     args.stride_C = n;
+    args.stride_E = n;
 
     const at::cuda::OptionalCUDAGuard device_guard(device_of(XQ));
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();

@@ -707,8 +707,6 @@ def unified_attention(
     head_size = q.shape[2]
     BLOCK_M = 16
     BLOCK_Q = BLOCK_M // num_queries_per_kv
-    # TODO (cagri): what happens when BLOCK_M < num_queries_per_kv?
-    # should we consider that case?
     if BLOCK_Q == 0:
         BLOCK_M = triton.next_power_of_2(num_queries_per_kv)
         BLOCK_Q = BLOCK_M // num_queries_per_kv
@@ -733,20 +731,25 @@ def unified_attention(
         or max_seqlen_k <= 512
         or (num_2d_prgms > target_num_prgms and not ALL_DECODE)
     ):
+        # in case head_size is big
+        max_num_stages_2d = 4
+        if head_size > 128:
+            max_num_stages_2d = 2
+        half_max_num_stages_2d = max_num_stages_2d // 2
         if ALL_DECODE == False:
-            num_stages_2d = 4
+            num_stages_2d = max_num_stages_2d
             num_warps = 4
         else:
-            num_stages_2d = 2
+            num_stages_2d = half_max_num_stages_2d
             num_warps = 2
         # make the block_m bigger if we already have enough parallelism
         if num_2d_prgms >= 2 * target_num_prgms:
             if num_2d_prgms <= 4 * target_num_prgms:
                 BLOCK_M = 64
-                num_stages_2d = 2 if SLIDING_WINDOW > 0 else 4
+                num_stages_2d = half_max_num_stages_2d if SLIDING_WINDOW > 0 else max_num_stages_2d
             elif num_2d_prgms <= 8 * target_num_prgms:
                 BLOCK_M = 64
-                num_stages_2d = 1 if SLIDING_WINDOW > 0 else 2
+                num_stages_2d = 1 if SLIDING_WINDOW > 0 else half_max_num_stages_2d
             else:
                 BLOCK_M = 64
                 num_stages_2d = 1
@@ -760,7 +763,7 @@ def unified_attention(
             BLOCK_Q = BLOCK_M // num_queries_per_kv
             total_num_q_blocks = q.shape[0] // BLOCK_Q + num_seqs
         num_stages_2d = min(num_stages_2d, math.ceil(max_seqlen_k / (block_size * 2)))
-        kernel = kernel_unified_attention_2d[
+        kernel_unified_attention_2d[
             (
                 num_kv_heads,
                 total_num_q_blocks,

@@ -8,7 +8,7 @@
 #include "mla.h"
 
 
-#define PRINT_DBG 0
+#define PRINT_DBG 1
 
 // ===================================================================================================================
 // MLA Metadata V0
@@ -304,6 +304,8 @@ CK_TILE_DEVICE void GenerateWork(
     const bool split_kv = (num_splits_estimated == 2) ?
         ((remaining_kv_len - remaining_capability_top) > Traits::kSplitTolerance) :
                                                             (num_splits_estimated > 1);
+    const int32_t kv_len_limit_floor =
+        ck_tile::integer_least_multiple(ck_tile::integer_divide_ceil(kv_len, num_clusters), 16);
 
     do
     {
@@ -313,7 +315,7 @@ CK_TILE_DEVICE void GenerateWork(
             get_remaining_kv_capability(kv_len_limit_global, cal_kv_len(accum_cost, cluster_len_q));
         const int32_t kv_len_limit_local =
         [&]() {
-            const int32_t limit_ori = remaining_capability > 64 ? remaining_capability : 128;
+            const int32_t limit_ori = ck_tile::max(remaining_capability, kv_len_limit_floor);
             const int32_t tail_size = (remaining_kv_len > limit_ori) ? (remaining_kv_len - limit_ori) : 0x7fffffff;
             const int32_t limit_fin = (tail_size <= Traits::kSplitTolerance) ? remaining_kv_len : limit_ori;
             return limit_fin;
@@ -323,11 +325,7 @@ CK_TILE_DEVICE void GenerateWork(
         const int32_t new_cost = accum_cost + cost;
         p_cost_heap[cid] = new_cost;
 
-        if constexpr (kGatherWorkCount)
-        {
-            ++p_cluster_work_counter[cid];
-        }
-        else
+        if constexpr (kGatherWorkCount == false)
         {
             // Record work
             MlaWorkInfo work_info{};
@@ -356,14 +354,15 @@ CK_TILE_DEVICE void GenerateWork(
             }
 
             const int32_t work_info_set_idx = p_work_indptr[cid] + p_cluster_work_counter[cid];
-            ++p_cluster_work_counter[cid];
             p_work_info_set[work_info_set_idx] = work_info;
 
 #if PRINT_DBG
-            printf("[metadata] - cost heap updated: cid=%d, pre_cost=%d, new_cost=%d, tot_cost=%d, kv_len_cons=%d\n",
-                    cid, accum_cost, cost, accum_cost+cost, kv_len_consuming);
+            printf("[metadata] - cost heap updated: work_loc=%d, cid=%d, pre_cost=%d, new_cost=%d, tot_cost=%d, kv_len_cons=%d\n",
+                    work_info_set_idx, cid, accum_cost, cost, accum_cost+cost, kv_len_consuming);
 #endif
         }
+
+        ++p_cluster_work_counter[cid];
 
         // Update state
         remaining_kv_len -= kv_len_consuming;

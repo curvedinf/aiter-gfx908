@@ -746,7 +746,9 @@ def unified_attention(
         if num_2d_prgms >= 2 * target_num_prgms:
             if num_2d_prgms <= 4 * target_num_prgms:
                 BLOCK_M = 64
-                num_stages_2d = half_max_num_stages_2d if SLIDING_WINDOW > 0 else max_num_stages_2d
+                num_stages_2d = (
+                    half_max_num_stages_2d if SLIDING_WINDOW > 0 else max_num_stages_2d
+                )
             elif num_2d_prgms <= 8 * target_num_prgms:
                 BLOCK_M = 64
                 num_stages_2d = 1 if SLIDING_WINDOW > 0 else half_max_num_stages_2d

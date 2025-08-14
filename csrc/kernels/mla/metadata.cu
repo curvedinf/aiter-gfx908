@@ -215,7 +215,7 @@ CK_TILE_DEVICE auto get_cost_top(
 
 template <typename T>
 std::vector<T> flatten(
-    const std::vector<std::vector<T>>& vec, 
+    const std::vector<std::vector<T>>& vec,
     const int size_after_flatten)
 {
     std::vector<T> result;
@@ -270,13 +270,115 @@ struct MlaMetadataV1KernelParameter
     bool           is_causal;
 };
 
+template <typename Traits, bool kGatherWorkCount>
+CK_TILE_DEVICE void GenerateWork(
+    const int32_t       batch_idx,
+    const int32_t       tile_idx,
+    const int32_t       qo_len,
+    const int32_t       kv_len,
+    const int32_t       cluster_len_q,
+    const int32_t       qo_batch_start,
+    const int32_t       kv_batch_start,
+    const int32_t       kv_batch_end,
+    const int32_t       kv_len_limit_global,
+    const int32_t       num_clusters,
+    const int32_t*      p_work_indptr,
+    const int32_t*      p_num_qo_clusters_indptr,
+    int32_t*            p_loc_partial_outputs,
+    int32_t*            p_num_partial_outputs,
+    MlaWorkInfo*        p_work_info_set,
+    MlaPartialTileInfo* p_reduce_final_map,
+    MlaPartialTileInfo* p_reduce_partial_map,
+    int32_t*            p_cost_heap,
+    int32_t*            p_cluster_work_counter)
+{
+    int32_t remaining_kv_len = kv_len;
+    int32_t kv_start_local = 0;
+
+    const auto [cid_top, accum_cost_top] = get_cost_top(p_cost_heap, num_clusters);
+    const int32_t remaining_capability_top =
+        get_remaining_kv_capability(kv_len_limit_global, cal_kv_len(accum_cost_top, cluster_len_q));
+    const int32_t num_splits_estimated =
+        ck_tile::integer_divide_ceil(remaining_kv_len, remaining_capability_top);
+    // For the case of #splits==2, make sure that the tailing tile is smaller than Traits::kSplitTolerance.
+    const bool split_kv = (num_splits_estimated == 2) ?
+        ((remaining_kv_len - remaining_capability_top) > Traits::kSplitTolerance) :
+                                                            (num_splits_estimated > 1);
+
+    do
+    {
+        // Check and update cost_heap
+        auto [cid, accum_cost] = get_cost_top(p_cost_heap, num_clusters);
+        const int32_t remaining_capability =
+            get_remaining_kv_capability(kv_len_limit_global, cal_kv_len(accum_cost, cluster_len_q));
+        const int32_t kv_len_limit_local =
+        [&]() {
+            const int32_t limit_ori = remaining_capability > 64 ? remaining_capability : 128;
+            const int32_t tail_size = (remaining_kv_len > limit_ori) ? (remaining_kv_len - limit_ori) : 0x7fffffff;
+            const int32_t limit_fin = (tail_size <= Traits::kSplitTolerance) ? remaining_kv_len : limit_ori;
+            return limit_fin;
+        }();
+        const int32_t kv_len_consuming = ck_tile::min(remaining_kv_len, kv_len_limit_local);
+        const int32_t cost = cal_cost(cluster_len_q, kv_len_consuming);
+        const int32_t new_cost = accum_cost + cost;
+        p_cost_heap[cid] = new_cost;
+
+        if constexpr (kGatherWorkCount)
+        {
+            ++p_cluster_work_counter[cid];
+        }
+        else
+        {
+            // Record work
+            MlaWorkInfo work_info{};
+            work_info.bs_index  = batch_idx;
+            work_info.q_start   = tile_idx * cluster_len_q + qo_batch_start;
+            work_info.q_end     = ck_tile::min(work_info.q_start + cluster_len_q, qo_batch_start + qo_len);
+            work_info.kv_start  = kv_start_local + kv_batch_start;
+            work_info.kv_end    = work_info.kv_start + kv_len_consuming;
+            work_info.kv_offset = kv_batch_end - work_info.kv_end;
+            if (split_kv)
+            {
+                const int32_t global_cluster_q_idx = p_num_qo_clusters_indptr[batch_idx] + tile_idx;
+                work_info.partial_qo_loc = *p_loc_partial_outputs;
+                if (p_reduce_partial_map[global_cluster_q_idx].q_start == -1)
+                {
+                    p_reduce_partial_map[global_cluster_q_idx].q_start = *p_loc_partial_outputs;
+                    p_reduce_final_map[global_cluster_q_idx] = { work_info.q_start, work_info.q_end };
+                }
+                ++(*p_num_partial_outputs);
+                *p_loc_partial_outputs += (work_info.q_end - work_info.q_start);
+                p_reduce_partial_map[global_cluster_q_idx].q_end = *p_loc_partial_outputs;
+            }
+            else
+            {
+                work_info.partial_qo_loc = -1;
+            }
+
+            const int32_t work_info_set_idx = p_work_indptr[cid] + p_cluster_work_counter[cid];
+            ++p_cluster_work_counter[cid];
+            p_work_info_set[work_info_set_idx] = work_info;
+
+#if PRINT_DBG
+            printf("[metadata] - cost heap updated: cid=%d, pre_cost=%d, new_cost=%d, tot_cost=%d, kv_len_cons=%d\n",
+                    cid, accum_cost, cost, accum_cost+cost, kv_len_consuming);
+#endif
+        }
+
+        // Update state
+        remaining_kv_len -= kv_len_consuming;
+        kv_start_local += kv_len_consuming;
+    }
+    while (remaining_kv_len > 0);
+}
+
 template <typename Traits>
 __launch_bounds__(ck_tile::get_warp_size(), 1)
 __global__ void kn_get_mla_metadata_v1(
     const MlaMetadataV1KernelParameter params)
 {
     extern __shared__ uint8_t p_smem[];
- 
+
     if (threadIdx.x == 0)
     {
         params.p_work_metadata_ptrs[0] = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(params.p_work_indptr));
@@ -336,6 +438,10 @@ __global__ void kn_get_mla_metadata_v1(
             else limit = ck_tile::integer_least_multiple(avg_kv_lens, 16);
             return limit;
         }();
+#if PRINT_DBG
+    printf("[metadata] kv_len_limit_global=%d\n",
+           kv_len_limit_global);
+#endif
 
         // Step.3.1. Initialize lds
         int32_t* p_cost_heap = p_num_qo_clusters_indptr + params.num_batches + 1;
@@ -362,36 +468,16 @@ __global__ void kn_get_mla_metadata_v1(
 
             for (int32_t tid = 0; tid < num_qo_tiles; ++tid)
             {
-                int32_t remaining_kv_len =
-                    cal_packed_causal_kv_len(qo_len, kv_len, tid, cluster_len_q, num_qo_tiles, params.num_heads, params.is_causal);
+                const int32_t tile_kv_len =
+                    cal_packed_causal_kv_len(
+                        qo_len, kv_len, tid, cluster_len_q, num_qo_tiles, params.num_heads, params.is_causal);
 
-                do
-                {
-                    // Check and update cost_heap
-                    auto [cid, accum_cost] = get_cost_top(p_cost_heap, num_clusters);
-                    const int32_t remaining_capability =
-                        get_remaining_kv_capability(kv_len_limit_global, cal_kv_len(accum_cost, cluster_len_q));
-                    const int32_t kv_len_limit_local =
-                    [&]() {
-                        const int32_t limit_ori = remaining_capability > 64 ? remaining_capability : 128;
-                        const int32_t tail_size = (remaining_kv_len > limit_ori) ? (remaining_kv_len - limit_ori) : 0x7fffffff;
-                        const int32_t limit_fin = (tail_size <= Traits::kSplitTolerance) ? remaining_kv_len : limit_ori;
-                        return limit_fin;
-                    }();
-                    const int32_t kv_len_consuming = ck_tile::min(remaining_kv_len, kv_len_limit_local);
-                    const int32_t cost = cal_cost(cluster_len_q, kv_len_consuming);
-                    const int32_t new_cost = accum_cost + cost;
-                    p_cost_heap[cid] = new_cost;
-
-                    ++p_cluster_work_counter[cid];
-
-                    // Update state
-                    remaining_kv_len -= kv_len_consuming;
-                }
-                while (remaining_kv_len > 0);
+                GenerateWork<Traits, true>(
+                    bid, tid, qo_len, tile_kv_len, cluster_len_q, qo_batch_start, kv_batch_start, kv_batch_end,
+                    kv_len_limit_global, num_clusters, nullptr, p_num_qo_clusters_indptr,
+                    nullptr, nullptr, nullptr, nullptr, nullptr, p_cost_heap, p_cluster_work_counter);
             }
         }
-
         // Step.4.2. Re-init cost heap and cumulative sum cluster_work_tot
         int32_t cum_cluster_work = 0;
         params.p_work_indptr[0] = 0;
@@ -425,75 +511,21 @@ __global__ void kn_get_mla_metadata_v1(
             const int32_t packed_qo_len  = qo_len * params.num_heads;
             const int32_t num_qo_tiles   = ck_tile::integer_divide_ceil(packed_qo_len, cluster_len_q);
 
+#if PRINT_DBG
+            printf("[metadata] Dividing batch=%d, qo_len=%d, kv_len=%d\n", bid, qo_len, kv_len);
+#endif
+
             for (int32_t tid = 0; tid < num_qo_tiles; ++tid)
             {
-                int32_t remaining_kv_len =
-                    cal_packed_causal_kv_len(qo_len, kv_len, tid, cluster_len_q, num_qo_tiles, params.num_heads, params.is_causal);
-                int32_t kv_start_local = 0;
+                const int32_t tile_kv_len =
+                    cal_packed_causal_kv_len(
+                        qo_len, kv_len, tid, cluster_len_q, num_qo_tiles, params.num_heads, params.is_causal);
 
-                const auto [cid_top, accum_cost_top] = get_cost_top(p_cost_heap, num_clusters);
-                const int32_t remaining_capability_top =
-                    get_remaining_kv_capability(kv_len_limit_global, cal_kv_len(accum_cost_top, cluster_len_q));
-                const int32_t num_splits_estimated =
-                    ck_tile::integer_divide_ceil(remaining_kv_len, remaining_capability_top);
-                // For the case of #splits==2, make sure that the tailing tile is smaller than Traits::kSplitTolerance.
-                const bool split_kv = (num_splits_estimated == 2) ?
-                    ((remaining_kv_len - remaining_capability_top) > Traits::kSplitTolerance) :
-                                                                     (num_splits_estimated > 1);
-
-                do
-                {
-                    // Check and update cost_heap
-                    auto [cid, accum_cost] = get_cost_top(p_cost_heap, num_clusters);
-                    const int32_t remaining_capability =
-                        get_remaining_kv_capability(kv_len_limit_global, cal_kv_len(accum_cost, cluster_len_q));
-                    const int32_t kv_len_limit_local =
-                    [&]() {
-                        const int32_t limit_ori = remaining_capability > 64 ? remaining_capability : 128;
-                        const int32_t tail_size = (remaining_kv_len > limit_ori) ? (remaining_kv_len - limit_ori) : 0x7fffffff;
-                        const int32_t limit_fin = (tail_size <= Traits::kSplitTolerance) ? remaining_kv_len : limit_ori;
-                        return limit_fin;
-                    }();
-                    const int32_t kv_len_consuming = ck_tile::min(remaining_kv_len, kv_len_limit_local);
-                    const int32_t cost = cal_cost(cluster_len_q, kv_len_consuming);
-                    const int32_t new_cost = accum_cost + cost;
-                    p_cost_heap[cid] = new_cost;
-
-                    // Record work
-                    MlaWorkInfo work_info{};
-                    work_info.bs_index  = bid;
-                    work_info.q_start   = tid * cluster_len_q + qo_batch_start;
-                    work_info.q_end     = ck_tile::min(work_info.q_start + cluster_len_q, qo_batch_start + qo_len);
-                    work_info.kv_start  = kv_start_local + kv_batch_start;
-                    work_info.kv_end    = work_info.kv_start + kv_len_consuming;
-                    work_info.kv_offset = kv_batch_end - work_info.kv_end;
-                    if (split_kv)
-                    {
-                        const int32_t global_cluster_q_idx = p_num_qo_clusters_indptr[bid] + tid;
-                        work_info.partial_qo_loc = loc_partial_outputs;
-                        if (p_reduce_partial_map[global_cluster_q_idx].q_start == -1)
-                        {
-                            p_reduce_partial_map[global_cluster_q_idx].q_start = loc_partial_outputs;
-                            p_reduce_final_map[global_cluster_q_idx] = { work_info.q_start, work_info.q_end };
-                        }
-                        ++num_partial_outputs;
-                        loc_partial_outputs += (work_info.q_end - work_info.q_start);
-                        p_reduce_partial_map[global_cluster_q_idx].q_end = loc_partial_outputs;
-                    }
-                    else
-                    {
-                        work_info.partial_qo_loc = -1;
-                    }
-
-                    const int32_t work_info_set_idx = params.p_work_indptr[cid] + p_cluster_work_counter[cid];
-                    ++p_cluster_work_counter[cid];
-                    p_work_info_set[work_info_set_idx] = work_info;
-
-                    // Update state
-                    remaining_kv_len -= kv_len_consuming;
-                    kv_start_local += kv_len_consuming;
-                }
-                while (remaining_kv_len > 0);
+                GenerateWork<Traits, false>(
+                    bid, tid, qo_len, tile_kv_len, cluster_len_q, qo_batch_start, kv_batch_start, kv_batch_end,
+                    kv_len_limit_global, num_clusters, params.p_work_indptr, p_num_qo_clusters_indptr,
+                    &loc_partial_outputs, &num_partial_outputs, p_work_info_set, p_reduce_final_map, p_reduce_partial_map,
+                    p_cost_heap, p_cluster_work_counter);
             }
         }
 
@@ -518,6 +550,14 @@ __global__ void kn_get_mla_metadata_v1(
             params.p_reduce_final_map[2 * global_cluster_q_idx] = final_info.q_start;
             params.p_reduce_final_map[2 * global_cluster_q_idx + 1] = final_info.q_end;
         }
+
+#if PRINT_DBG
+        printf("[metadata] Final Cost Heap Status:\n");
+        for (int32_t cid = 0; cid < num_clusters; ++cid)
+        {
+            printf("[metadata] - cid=%d, cost=%d\n", cid, p_cost_heap[cid]);
+        }
+#endif
     }
 }
 
@@ -912,7 +952,7 @@ void get_mla_metadata_v1(
     const at::cuda::OptionalCUDAGuard device_guard(device_of(seqlens_kv_indptr));
 
     // This default settings is for our ASM MLA decode kernel. This kernel supports num_heads=16 and qo size from 1 to 4
-    // without support to split qo for each workgroup. This means that kPackedQoLenPerWg should be 4*16=64 to prevent 
+    // without support to split qo for each workgroup. This means that kPackedQoLenPerWg should be 4*16=64 to prevent
     // spliting in any case supported by it.
     //                                PackedQoLenPerWg, MaxClusterSize
     using Traits  = MlaMetadataTraits<64,               1>;
@@ -942,7 +982,7 @@ std::vector<torch::Tensor> get_mla_metadata_v1_no_redundant(
     const at::cuda::OptionalCUDAGuard device_guard(device_of(seqlens_kv_indptr));
 
     // This default settings is for our ASM MLA decode kernel. This kernel supports num_heads=16 and qo size from 1 to 4
-    // without support to split qo for each workgroup. This means that kPackedQoLenPerWg should be 4*16=64 to prevent 
+    // without support to split qo for each workgroup. This means that kPackedQoLenPerWg should be 4*16=64 to prevent
     // spliting in any case supported by it.
     //                                PackedQoLenPerWg, MaxClusterSize
     using Traits  = MlaMetadataTraits<64,               1>;

@@ -369,7 +369,6 @@ def _fused_moe_kernel_mxfp4_silu(
     if MUL_ROUTED_WEIGHT:
         moe_weight = tl.load(topk_weights_ptr + offs_token, mask=token_mask, other=0)
         accumulator = accumulator * moe_weight[:, None]
-    accumulator = accumulator.to(compute_type)
 
     silu_acc, mul_acc = (
         accumulator.to(tl.float32).reshape(BLOCK_SIZE_M, BLOCK_SIZE_HALF, 2).split()

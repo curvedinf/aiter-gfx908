@@ -5,6 +5,7 @@ import triton
 from aiter.ops.triton.utils.types import torch_to_triton_dtype
 import aiter.ops.triton.utils.arch_info as arch_info
 from aiter.ops.triton.moe_op_mxfp4 import fused_moe_mxfp4
+from aiter.ops.triton.moe_op_mxfp4_silu_fused import fused_moe_mxfp4_silu
 from op_tests.triton_tests.test_moe_mx import input_helper
 from op_tests.op_benchmarks.triton.utils.benchmark_utils import (
     get_available_models,
@@ -42,6 +43,7 @@ def run_benchmark(args):
     a_dtype_str = args.a_dtype
     b_dtype_str = "mxfp4_e2m1"
     swizzle_mx = args.swizzle_mx
+    silu_fused = args.silu_fused
 
     x_vals_list = model_benchmark_configs(args)
     x_names = ["model", "M", "N", "K", "E", "top_k"]
@@ -63,10 +65,13 @@ def run_benchmark(args):
 
     @triton.testing.perf_report([benchmark])
     def bench_moe_gemm(M, N, K, E, top_k, metric, a_dtype, swizzle_mx, model=None):
+
+                
         (
             a_tri,
             b_tri,
             c_tri,
+            c_tri_silu,
             a_scale,
             b_scale,
             a_mx_scales,
@@ -90,12 +95,23 @@ def run_benchmark(args):
             a_tri.numel() * a_tri.element_size() + b_tri.numel() * b_tri.element_size()
         )
         mem_write = c_tri.numel() * c_tri.element_size()
+        
+        if silu_fused:
+            mem = mem_read + (mem_write // 2)
+            flops += M * top_k * N
+        else:
+            mem = mem_read + mem_write
+        
         mem = mem_read + mem_write
 
-        fn = lambda: fused_moe_mxfp4(  # noqa: E731
+        fused_moe = fused_moe_mxfp4_silu if silu_fused else fused_moe_mxfp4
+        output_tensor = c_tri_silu if silu_fused else c_tri
+
+
+        fn = lambda: fused_moe(  # noqa: E731
             a_tri,
             b_tri,
-            c_tri,
+            output_tensor,
             a_scale,
             b_scale,
             a_mx_scales,
@@ -152,6 +168,7 @@ def parse_args():
     parser.add_argument("-M", type=int, help="M dimension")
     parser.add_argument("--routed-weight", action="store_true")
     parser.add_argument("--swizzle-mx", action="store_true")
+    parser.add_argument("-silu_fused", action="store_true", default=False)
     parser.add_argument(
         "-A",
         "--a-dtype",

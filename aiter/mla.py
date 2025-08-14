@@ -291,12 +291,12 @@ def mla_decode_fwd(
     logit_cap=0.0,
     num_kv_splits=None,  # for experts only!!!
     num_kv_splits_indptr=None,  # for experts only!!!
+    work_meta_data=None,
     work_indptr=None,
     work_info_set=None,
     reduce_indptr=None,
     reduce_final_map=None,
     reduce_partial_map=None,
-    num_reduce_tile=None,
 ):
     device = q.device
     assert logit_cap <= 0, f"{logit_cap=} is not support yet"
@@ -308,7 +308,7 @@ def mla_decode_fwd(
     bs = qo_indptr.shape[0] - 1
     total_kv = kv_indices.shape[0]
 
-    if num_kv_splits_indptr is None and work_indptr is None:
+    if num_kv_splits_indptr is None and work_meta_data is None:
         num_kv_splits, num_kv_splits_indptr, mgc = get_meta_param(
             None, bs, total_kv, nhead, max_seqlen_q, device
         )
@@ -332,10 +332,10 @@ def mla_decode_fwd(
     else:
         assert False, f"{nhead=} not supported"
 
-    attn_lse = torch.zeros(
+    attn_lse = torch.empty(
         (total_s, num_kv_splits, nhead, 1), dtype=dtypes.fp32, device=device
     )
-    final_lse = torch.zeros((total_s, nhead), dtype=dtypes.fp32, device=device)
+    final_lse = torch.empty((total_s, nhead), dtype=dtypes.fp32, device=device)
     
     if num_kv_splits_indptr is not None:
         if num_kv_splits == 1 and not (max_seqlen_q == 1 and nhead == 16):
@@ -353,6 +353,7 @@ def mla_decode_fwd(
             kv_indices,
             kv_last_page_lens,
             num_kv_splits_indptr,
+            None,
             None,
             None,
             max_seqlen_q,
@@ -383,7 +384,7 @@ def mla_decode_fwd(
             num_stages=2,
             **extra_kargs,
         )
-        return
+        return logits, final_lse
 
     aiter.mla_decode_stage1_asm_fwd(
         q,
@@ -393,6 +394,7 @@ def mla_decode_fwd(
         kv_indices,
         kv_last_page_lens,
         num_kv_splits_indptr,
+        work_meta_data,
         work_indptr,
         work_info_set,
         max_seqlen_q,
@@ -556,12 +558,12 @@ def mla_decode_fwd_dispatch(
     cu_num=None, 
     q_rope=None,
     k_rope=None, 
+    work_meta_data=None,
     work_indptr=None,
     work_info_set=None,
     reduce_indptr=None,
     reduce_final_map=None,
     reduce_partial_map=None,
-    num_reduce_tile=None,
 ):
     if batch_split_table is None:
         return mla_decode_fwd(
@@ -576,6 +578,7 @@ def mla_decode_fwd_dispatch(
             sm_scale,
             logit_cap,
             num_kv_splits,
+            work_meta_data=work_meta_data,
             work_indptr=work_indptr,
             work_info_set=work_info_set,
             reduce_indptr=reduce_indptr,

@@ -33,6 +33,7 @@
           py::arg("kv_page_indices"),      \
           py::arg("kv_last_page_lens"),    \
           py::arg("num_kv_splits_indptr"), \
+          py::arg("work_meta_data"),       \
           py::arg("work_indptr"),          \
           py::arg("work_info_set"),        \
           py::arg("max_seqlen_q"),         \
@@ -990,6 +991,7 @@
 
 #define MLA_METADATA_PYBIND                             \
     m.def("get_mla_metadata_v0", &get_mla_metadata_v0); \
-    m.def("get_mla_metadata_v1", &get_mla_metadata_v1);
+    m.def("get_mla_metadata_v1", &get_mla_metadata_v1); \
+    m.def("get_mla_metadata_v2", &get_mla_metadata_v2);
 
 #define MLA_REDUCE_PYBIND m.def("mla_reduce_v1", &mla_reduce_v1);

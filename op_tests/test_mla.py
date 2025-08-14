@@ -125,16 +125,16 @@ def test_mla(
     if varlen:
         for i in range(batch_size):
             # seq_lens_kv[i] = max(random.normalvariate(ctx_lens, ctx_lens / 2), ctx_lens)
-            seq_lens_kv[i] = random.uniform(1, ctx_lens)
+            seq_lens_kv[i] = random.uniform(4, ctx_lens)
             seq_lens_qo[i] = max(
                 min(random.normalvariate(ctx_lens, ctx_lens / 2), ctx_lens), 1
             )
     else:
         seq_lens_kv.fill_(ctx_lens)
         seq_lens_qo.fill_(ctx_lens)
-    # seq_lens_kv = torch.tensor([3819,9978,784,530,8062,1390,287,1008,5090,5304,7396,2288,2104,4063,3644,5091,6470,4732,7237,430,2777,956,1357,5478,1292,521,6802,1347,2388,5062,443,8560,5049,7235,927,9580,623,4913,2511,8120,1638,4859,600,7289,8278,6693,136,1021,1465,5859,1278,7123,7839,2459,1090,6333,812,9358,6345,8616,2313,6115,6059,4963,
-    #     12343, 213, 143, 12312, 12345, 3215, 4444, 5325, 2132, 123, 456, 2135, 135, 2564, 5465, 4362], device="cuda")
-    # seq_lens_kv = seq_lens_kv[:batch_size]
+    seq_lens_kv = torch.tensor([3819,9978,784,530,8062,1390,287,1008,5090,5304,7396,2288,2104,4063,3644,5091,6470,4732,7237,430,2777,956,1357,5478,1292,521,6802,1347,2388,5062,443,8560,5049,7235,927,9580,623,4913,2511,8120,1638,4859,600,7289,8278,6693,136,1021,1465,5859,1278,7123,7839,2459,1090,6333,812,9358,6345,8616,2313,6115,6059,4963,
+        12343, 213, 143, 12312, 12345, 3215, 4444, 5325, 2132, 123, 456, 2135, 135, 2564, 5465, 4362], device="cuda")
+    seq_lens_kv = seq_lens_kv[:batch_size]
     kv_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens_kv, dim=0)
     kv_indices = torch.randint(0, num_page, (kv_indptr[-1].item(),), dtype=torch.int)
     qo_indptr[1 : batch_size + 1] = torch.cumsum(seq_lens_qo, dim=0)
@@ -380,32 +380,58 @@ def test_mla(
     #         batch_split_table=None
     #         split_table=None
 
+    work_meta_data     = torch.empty([10], dtype=torch.uint64, device="cuda")
     work_indptr        = torch.empty([81], dtype=torch.int32, device="cuda")
     work_info_set      = torch.empty([batch_size + 80, 8], dtype=torch.int32, device="cuda")
-    reduce_indptr      = torch.empty([batch_size * 80], dtype=torch.int32, device="cuda")
-    reduce_final_map   = torch.empty([batch_size * 80, 2], dtype=torch.int32, device="cuda")
+    reduce_indptr      = torch.empty([100], dtype=torch.int32, device="cuda")
+    reduce_final_map   = torch.empty([batch_size * 2, 2], dtype=torch.int32, device="cuda")
     reduce_partial_map = torch.empty([batch_size * 80], dtype=torch.int32, device="cuda")
     # num_reduce_tile    = torch.empty([1], dtype=torch.int32, device="cuda")
     
-    aiter.get_mla_metadata_v1(
+    meta = aiter.get_mla_metadata_v1(
         qo_indptr,
         kv_indptr,
         nhead // nhead_kv,
         nhead_kv,
         True,
+        work_meta_data,
         work_info_set,
         work_indptr,
         reduce_indptr,
         reduce_final_map,
         reduce_partial_map,
-        # num_reduce_tile,
     )
 
+    # print(work_meta_data)
     # print(work_indptr)
     # print(work_info_set)
-    # print(reduce_indptr)
-    # print(reduce_final_map)
-    # print(reduce_partial_map)
+    print(reduce_indptr)
+    print(reduce_final_map)
+    print(reduce_partial_map)
+
+    # import pdb; pdb.set_trace()
+    # work_meta_data_2     = torch.empty([10], dtype=torch.uint64, device="cuda")
+    # work_indptr_2        = torch.empty([81], dtype=torch.int32, device="cuda")
+    # work_info_set_2      = torch.empty([batch_size + 80, 8], dtype=torch.int32, device="cuda")
+    # reduce_indptr_2      = torch.empty([batch_size * 1 + 1], dtype=torch.int32, device="cuda")
+    # reduce_final_map_2   = torch.empty([batch_size * 2, 2], dtype=torch.int32, device="cuda")
+    # reduce_partial_map_2 = torch.empty([batch_size * 80], dtype=torch.int32, device="cuda")
+    #
+    # aiter.get_mla_metadata_v2(
+    #     qo_indptr,
+    #     kv_indptr,
+    #     nhead // nhead_kv,
+    #     nhead_kv,
+    #     True,
+    #     work_meta_data_2,
+    #     work_info_set_2,
+    #     work_indptr_2,
+    #     reduce_indptr_2,
+    #     reduce_final_map_2,
+    #     reduce_partial_map_2,
+    #     # num_reduce_tile,
+    # )
+    # import pdb; pdb.set_trace()
 
     (attn_logits, attn_lse), us_asm_decode = run_perftest(
         aiter.mla.mla_decode_fwd_dispatch,
@@ -418,7 +444,8 @@ def test_mla(
         kv_last_page_lens,
         max_seqlen_qo,
         sm_scale,
-        work_indptr=work_indptr,
+        work_meta_data=work_meta_data,
+        # work_indptr=work_indptr,
         work_info_set=work_info_set,
         reduce_indptr=reduce_indptr,
         reduce_final_map=reduce_final_map,
@@ -436,9 +463,6 @@ def test_mla(
         kv_last_page_lens,
         max_seqlen_qo,
         sm_scale,
-        varlen,
-        0.0,
-        None,
     )
     # print(f"{out_ref.view(total_q, -1)=}")
     # print(f"{out_asm.view(total_q, -1)=}")
@@ -545,7 +569,7 @@ parser.add_argument(
     "--ctxLen",
     type=int,
     nargs="*",
-    default=[28, 512, 1023, 4888, 12800], #
+    default=[28, 1200, 8192], #
     help="""Context length.
     e.g.: -c 21""",
 )

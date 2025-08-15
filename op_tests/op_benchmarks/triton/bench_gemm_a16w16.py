@@ -44,7 +44,9 @@ def bench_gemm_fn(
         )
     else:
         ms = triton.testing.do_bench(
-            lambda: gemm_a16w16(x, w, bias, c_dtype, y), warmup=25, rep=100  # noqa: E731
+            lambda: gemm_a16w16(x, w, bias, c_dtype, y),
+            warmup=25,
+            rep=100,  # noqa: E731
         )
 
     # Return exactly one scalar depending on which metric is active

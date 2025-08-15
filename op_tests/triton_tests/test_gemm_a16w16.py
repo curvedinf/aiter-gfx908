@@ -80,7 +80,9 @@ def get_x_vals():
 @pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
 @pytest.mark.parametrize("output", [True, False])
 def test_gemm_a16_w16(M: int, N: int, K: int, dtype, output):
-    x, w, bias, out_dtype, y = generate_gemm_a16w16_inputs(M, N, K, dtype, output=output, bias=True)
+    x, w, bias, out_dtype, y = generate_gemm_a16w16_inputs(
+        M, N, K, dtype, output=output, bias=True
+    )
 
     torch_out = F.linear(x, w, bias=bias)
 

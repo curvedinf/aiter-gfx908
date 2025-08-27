@@ -271,7 +271,7 @@ from aiter.ops.triton.utils.logger import AiterTritonLogger
             num_stages=2,
         ),
     ],
-    key=["M", "N", "K"],
+    key=["next_M_2", "N", "K"],
 )
 @triton.heuristics(
     {
@@ -293,6 +293,7 @@ def _gemm_a16_w16_kernel(
     stride_bn,
     stride_cm,
     stride_cn,
+    next_M_2,
     # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
@@ -457,6 +458,7 @@ def gemm_a16w16(
         y.stride(0),
         y.stride(1),
         ADD_BIAS=(bias is not None),
+        next_M_2=triton.next_power_of_2(M),
     )
 
     return y

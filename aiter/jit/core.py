@@ -553,6 +553,8 @@ SPECIAL_OPS_MUTATES_ARGS = {
     "grouped_topk": ["topk_weights", "topk_ids"],
     "rope_cached_positions_2c_fwd_impl": ["input_x", "input_y"],
     "rotary_embedding_fwd": ["query", "key"],
+    "reshape_and_cache": ["key_cache", "value_cache"],
+    "reshape_and_cache_with_pertoken_quant": ["key_cache", "value_cache"],
 }
 
 
@@ -640,6 +642,19 @@ def generate_schema(func) -> str:
         and get_args(return_annotation)[0] is torch.Tensor
     ):
         return_type = "Tensor[]"
+    elif get_origin(return_annotation) is tuple:
+        args = get_args(return_annotation)
+        type_strings = []
+        for arg in args:
+            if arg is torch.Tensor:
+                type_strings.append("Tensor")
+            elif arg is int:
+                type_strings.append("int")
+            elif arg is float:
+                type_strings.append("float")
+            elif arg is bool:
+                type_strings.append("bool")
+        return_type = f"({', '.join(type_strings)})"
     else:
         return_type = "Any"
 

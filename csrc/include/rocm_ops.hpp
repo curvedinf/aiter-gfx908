@@ -595,6 +595,7 @@
           py::arg("topk_weight")    = std::nullopt,  \
           py::arg("x_scale")        = std::nullopt,  \
           py::arg("w_scale")        = std::nullopt,  \
+          py::arg("exp_bias")       = std::nullopt,  \
           py::arg("block_m")        = 32);           \
                                                      \
                                                      \
@@ -611,6 +612,7 @@
           py::arg("topk_weight")    = std::nullopt,  \
           py::arg("x_scale")        = std::nullopt,  \
           py::arg("w_scale")        = std::nullopt,  \
+          py::arg("exp_bias")       = std::nullopt,  \
           py::arg("block_m")        = 32);           \
 
 #define MHA_VARLEN_FWD_PYBIND                     \

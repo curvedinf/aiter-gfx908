@@ -592,6 +592,8 @@
           py::arg("sorted_expert_ids"),              \
           py::arg("max_token_ids"),                  \
           py::arg("topk"),                           \
+          py::arg("n_padded_zeros")    = 0,          \
+          py::arg("k_padded_zeros")    = 0,          \
           py::arg("topk_weight")    = std::nullopt,  \
           py::arg("x_scale")        = std::nullopt,  \
           py::arg("w_scale")        = std::nullopt,  \
@@ -609,6 +611,8 @@
           py::arg("sorted_expert_ids"),              \
           py::arg("max_token_ids"),                  \
           py::arg("topk"),                           \
+          py::arg("n_padded_zeros")    = 0,          \
+          py::arg("k_padded_zeros")    = 0,          \
           py::arg("topk_weight")    = std::nullopt,  \
           py::arg("x_scale")        = std::nullopt,  \
           py::arg("w_scale")        = std::nullopt,  \

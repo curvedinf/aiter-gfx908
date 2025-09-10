@@ -80,7 +80,7 @@ torch::Tensor cktile_moe_gemm1(torch::Tensor& XQ,
         TORCH_CHECK(x_scale.value().dtype() == w_scale.value().dtype(),
                     "Scales should have the same dtype!");
     }
-    int M = reinterpret_cast<const ck_tile::index_t*>(max_token_ids.data_ptr())[0];
+    int M = sorted_ids.size(0);
     int N = WQ.size(1);
     int K = XQ.size(-1);
     int MPerBlock = block_m.value();
@@ -137,7 +137,7 @@ torch::Tensor cktile_moe_gemm2(torch::Tensor& XQ,
                         std::optional<torch::Tensor> exp_bias,
                         std::optional<int> block_m)
 {
-    int M = XQ.size(0) * XQ.size(1);
+    int M = sorted_ids.size(0);
     int N = WQ.size(1);
     int K = XQ.size(-1);
     int MPerBlock = block_m.value();

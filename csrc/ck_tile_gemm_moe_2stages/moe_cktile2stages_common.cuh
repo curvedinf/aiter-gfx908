@@ -55,8 +55,8 @@ struct MoeFlatmmConfig
     static constexpr bool UseStructuredSparsity = false;
 
     static constexpr int kBlockPerCu                = kBlockPerCu_;
-    static constexpr int TileParitionerGroupNum     = 8;
-    static constexpr int TileParitionerM01          = 4;
+    static constexpr int TileParitionerGroupNum     = 1;
+    static constexpr int TileParitionerM01          = 1;
     static constexpr auto Scheduler                 = ck_tile::GemmPipelineScheduler::Default;
     static constexpr ck_tile::index_t NumWaveGroups = 1;
     static constexpr bool DoubleSmemBuffer          = false;

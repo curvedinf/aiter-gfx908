@@ -2,35 +2,35 @@
 // Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 #pragma once
 
-#include <string>
 #include "ck_tile/core.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/ops/epilogue.hpp"
-#include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/flatmm.hpp"
+#include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/moe_flatmm.hpp"
 #include "moe_cktile2stages.h"
-#include <hip/hip_runtime.h>
 #include <ATen/ATen.h>
+#include <hip/hip_runtime.h>
+#include <string>
 
+#include <cstdlib>
+#include <initializer_list>
 #include <iostream>
 #include <numeric>
-#include <initializer_list>
-#include <cstdlib>
 
-#include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <torch/extension.h>
 
 template <typename DataType,
-          int M_Tile_, 
-          int N_Tile_, 
-          int K_Tile_, 
-          int M_Warp_, 
-          int N_Warp_, 
-          int M_Warp_Tile_, 
-          int N_Warp_Tile_, 
+          int M_Tile_,
+          int N_Tile_,
+          int K_Tile_,
+          int M_Warp_,
+          int N_Warp_,
+          int M_Warp_Tile_,
+          int N_Warp_Tile_,
           int K_Warp_Tile_,
           int kBlockPerCu_>
 struct MoeFlatmmConfig
@@ -80,7 +80,7 @@ template <typename FlatmmConfig,
           typename MoeFlatmmHostArgs>
 void moe_gemm(const MoeFlatmmHostArgs& args, const ck_stream_config& s)
 {
-        using CodegenFlatmmShape = ck_tile::TileGemmShape<
+    using CodegenFlatmmShape = ck_tile::TileGemmShape<
         ck_tile::sequence<FlatmmConfig::M_Tile, FlatmmConfig::N_Tile, FlatmmConfig::K_Tile>,
         ck_tile::sequence<FlatmmConfig::M_Warp, FlatmmConfig::N_Warp, FlatmmConfig::K_Warp>,
         ck_tile::sequence<FlatmmConfig::M_Warp_Tile,
@@ -168,7 +168,10 @@ void moe_gemm(const MoeFlatmmHostArgs& args, const ck_stream_config& s)
                                                               has_hot_loop_v,
                                                               tail_number_v>>;
 
-        constexpr int BlockedXDLN_PerWarp = (MXFP4_Pipeline || (moe_kind == ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up)) ? 2 : 1; // determined by scale shuffle pattern
+        constexpr int BlockedXDLN_PerWarp =
+            (MXFP4_Pipeline || (moe_kind == ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up))
+                ? 2
+                : 1; // determined by scale shuffle pattern
 
         using GemmEpilogue = ck_tile::CShuffleEpilogue<
             ck_tile::CShuffleEpilogueProblem<ComputeDataType,
@@ -229,7 +232,7 @@ void moe_gemm(const MoeFlatmmHostArgs& args, const ck_stream_config& s)
         //               << ", blocks: {" << blocks.x << ", " << blocks.y << ", " << blocks.z << "}"
         //               << std::endl;
         // }
-        // 
+        //
         // if(s.flush_cache_)
         // {
         //     std::cout << "Flushing cache..." << std::endl;
@@ -265,7 +268,8 @@ void moe_gemm(const MoeFlatmmHostArgs& args, const ck_stream_config& s)
         //         // clear c mem
         //         if(moe_kind == ck_tile::MoeFlatmmKind::kFFN_gemm2)
         //             hipGetErrorString(hipMemsetAsync(
-        //                 args.e_ptr, 0, args.NumTokens * args.N * sizeof(CDataType), s.stream_id_));
+        //                 args.e_ptr, 0, args.NumTokens * args.N * sizeof(CDataType),
+        //                 s.stream_id_));
         //         else if(args.k_batch > 1)
         //             hipGetErrorString(
         //                 hipMemsetAsync(args.e_ptr,
@@ -281,10 +285,11 @@ void moe_gemm(const MoeFlatmmHostArgs& args, const ck_stream_config& s)
         // }
         // else
         // {
-            ave_time =
-                ck_tile::launch_kernel(s,
-                                       ck_tile::make_kernel<blocks.x, FlatmmConfig::kBlockPerCu>(
-                                           Kernel{}, grids, blocks, 0, kargs));
+#if defined(__gfx950__)
+        ave_time = ck_tile::launch_kernel(s,
+                                          ck_tile::make_kernel<blocks.x, FlatmmConfig::kBlockPerCu>(
+                                              Kernel{}, grids, blocks, 0, kargs))
+#endif
         // }
         // return ave_time;
     };
@@ -309,12 +314,12 @@ void moe_gemm(const MoeFlatmmHostArgs& args, const ck_stream_config& s)
     if(tail_num == ck_tile::TailNumber::Odd)
     {
         RunSplitk(ck_tile::bool_constant<true>{},
-                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Odd>{});
+                  ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Odd>{});
     }
     else if(tail_num == ck_tile::TailNumber::Even)
     {
         RunSplitk(ck_tile::bool_constant<true>{},
-                ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Even>{});
+                  ck_tile::integral_constant<ck_tile::TailNumber, ck_tile::TailNumber::Even>{});
     }
     else
     {

@@ -5,38 +5,57 @@ import argparse
 from pathlib import Path
 import shutil
 import re
-from moe_cktile2stages_common import kernelInstance, get_gemm1_kernels_list, get_gemm2_kernels_list, get_heuristic_dispatch_template
-from aiter.jit.utils.chip_info import get_gfx
+from moe_cktile2stages_common import (
+    kernelInstance,
+    get_gemm1_kernels_list,
+    get_gemm2_kernels_list,
+    get_heuristic_dispatch_template,
+)
+import sys
+
+this_dir = os.path.dirname(os.path.abspath(__file__))
+AITER_CORE_DIR = os.path.abspath(f"{this_dir}/../../../")
+if os.path.exists(os.path.join(AITER_CORE_DIR, "aiter_meta")):
+    AITER_CORE_DIR = os.path.join(AITER_CORE_DIR, "aiter/jit/utils")  # pip install mode
+else:
+    AITER_CORE_DIR = os.path.abspath(
+        f"{this_dir}/../../aiter/jit/utils"
+    )  # develop mode
+sys.path.insert(0, AITER_CORE_DIR)
+
 
 class cktile_moe_2stage_gemm_codegen:
     def __init__(
-        self, 
-        working_path, 
+        self,
+        working_path,
         ab_dtype,
         acc_dtype,
         c_dtype,
         quant_type,
         activation,
         mul_routed_weight_stage,
-        istune=False):
-        self.working_path   = working_path
-        self.impl_path      = os.path.join(working_path, "impl")
+        istune=False,
+    ):
+        self.working_path = working_path
+        self.impl_path = os.path.join(working_path, "impl")
         self.instances_path = os.path.join(working_path, "instances")
-        self.istune         = istune
-        self.ab_dtype       = ab_dtype.lower()
-        self.acc_dtype      = acc_dtype.lower()
-        self.c_dtype        = c_dtype.lower()
-        self.quant_type     = quant_type
-        self.activation     = activation
+        self.istune = istune
+        self.ab_dtype = ab_dtype.lower()
+        self.acc_dtype = acc_dtype.lower()
+        self.c_dtype = c_dtype.lower()
+        self.quant_type = quant_type
+        self.activation = activation
         self.mul_routed_weight_stage = mul_routed_weight_stage
-        
+
     def get_suffix(self, stage: int) -> str:
-        return ("_").join(element for element in 
-            [
+        return ("_").join(
+            element
+            for element in [
                 self.quant_type,
                 "MulRoutedWeight" if self.mul_routed_weight_stage == stage else "",
                 "" if (stage == 2) else self.activation,
-            ] if element != ""
+            ]
+            if element != ""
         )
 
     def gen_instance(self, k: kernelInstance):
@@ -77,25 +96,25 @@ torch::Tensor
     return Y;
 }}}}
 
-"""     
-        #default no quant
+"""
+        # default no quant
         scaleGranA = "-1"
         scaleGranB = "-1"
         biasGran = "-1"
         xptr = "nullptr"
         wptr = "nullptr"
         biasptr = "nullptr"
-        if (k.QuantType == "per_tenser"):
+        if k.QuantType == "per_tenser":
             scaleGranA = "0"
             scaleGranB = "0"
             xptr = "static_cast<float>(x_scale.value().data_ptr()[0])"
             wptr = "static_cast<float>(w_scale.value().data_ptr()[0])"
-        elif (k.QuantType == "per_token"):
+        elif k.QuantType == "per_token":
             scaleGranA = "1"
             scaleGranB = "1"
             xptr = "static_cast<float*>(x_scale.value().data_ptr())"
             wptr = "static_cast<float*>(w_scale.value().data_ptr())"
-        elif (k.QuantType == "1x32"):
+        elif k.QuantType == "1x32":
             scaleGranA = "-1"
             scaleGranB = "1, 32"
             biasGran = "1"
@@ -106,8 +125,8 @@ torch::Tensor
         INSTANCE_CONTENT = f"""auto per_a_scale_dev_ptr = ck_tile::FlatmmScalePointer<{scaleGranA}>{{{xptr}}};
     auto per_b_scale_dev_ptr = ck_tile::FlatmmScalePointer<{scaleGranB}>{{{wptr}}};
     auto exp_bias_dev_ptr = ck_tile::FlatmmScalePointer<{biasGran}>{{{biasptr}}};
-    ck_tile::MoeFlatmmHostArgs<decltype(per_a_scale_dev_ptr), 
-                               decltype(per_b_scale_dev_ptr), 
+    ck_tile::MoeFlatmmHostArgs<decltype(per_a_scale_dev_ptr),
+                               decltype(per_b_scale_dev_ptr),
                                decltype(exp_bias_dev_ptr)> kernel_args{{
                 reinterpret_cast<const ck_tile::index_t*>(sorted_ids.data_ptr()),
                 sorted_weights_ptr,
@@ -144,26 +163,22 @@ torch::Tensor
         {k.Block_Per_CU}>;
     // Run kernel instance.
     auto stream_config = ck_stream_config{{at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream()}};
-    moe_gemm<TileConfig, 
-                ADataType, 
-                BDataType, 
-                ck_tile::tuple<>, 
-                AccDataType, 
-                CDataType, 
-                row_major, 
-                col_major, 
-                ck_tile::tuple<>, 
-                row_major, 
+    moe_gemm<TileConfig,
+                ADataType,
+                BDataType,
+                ck_tile::tuple<>,
+                AccDataType,
+                CDataType,
+                row_major,
+                col_major,
+                ck_tile::tuple<>,
+                row_major,
                 {"ck_tile::MoeFlatmmKind::kFFN_gemm1_gate_up" if k.stage == 1 else "ck_tile::MoeFlatmmKind::kFFN_gemm2"},
                 ck_tile::element_wise::PassThrough
                 >(kernel_args, stream_config);
 """
 
-        INSTANCE_IMPL_str = INSTANCE_IMPL.format(
-            INSTANCE_CONTENT=(
-                INSTANCE_CONTENT
-            )
-        )
+        INSTANCE_IMPL_str = INSTANCE_IMPL.format(INSTANCE_CONTENT=(INSTANCE_CONTENT))
 
         Path(os.path.join(self.impl_path, f"{k.name}.cuh")).write_text(
             INSTANCE_IMPL_str
@@ -190,6 +205,7 @@ template torch::Tensor
     std::optional<torch::Tensor> exp_bias);
 
 """
+
         # if self.istune:
         #     INSTANCE_abI8_dBF16_eBF16 = INSTANCE_template.format(
         #         name=k.name, dtypes="I8, B16"
@@ -209,11 +225,12 @@ template torch::Tensor
                     f"{name}_a{a_type}_b{b_type}_acc{acc_type}_C{c_type}.cpp",
                 )
             ).write_text(intsance)
+
         if (k.QuantType == "1x32") and (self.ab_dtype in ["bf16", "fp16"]):
             fill_template(k.name, self.ab_dtype, "pk_fp4", self.acc_dtype, self.c_dtype)
         else:
             for CDtype in ["bf16", "fp16"]:
-                for ABDtype in ["fp8"]: #"bf16", "fp16", 
+                for ABDtype in ["fp8"]:  # "bf16", "fp16",
                     for AccDtype in ["float"]:
                         fill_template(k.name, ABDtype, ABDtype, AccDtype, CDtype)
                         # intsance = INSTANCE_template.format(
@@ -226,16 +243,17 @@ template torch::Tensor
                         #     )
                         # ).write_text(intsance)
 
-    '''genarete heuristic dispatch'''
+    """genarete heuristic dispatch"""
+
     def gen_heuristic_dispatch(self, tag, kernels_dict):
-        HEURISTIC_template =  get_heuristic_dispatch_template(tag)
+        HEURISTIC_template = get_heuristic_dispatch_template(tag)
         # print(HEURISTIC_template)
-       
+
         def validate_and_format(template: str, mapping: dict) -> str:
-            #check all format element in dict.
+            # check all format element in dict.
             str_mapping = {str(key): value.name for key, value in mapping.items()}
-            cleaned_template = template.replace('{{', '').replace('}}', '')
-            placeholders = re.findall(r'\{([^{}]*)\}', cleaned_template)
+            cleaned_template = template.replace("{{", "").replace("}}", "")
+            placeholders = re.findall(r"\{([^{}]*)\}", cleaned_template)
             missing = [p for p in placeholders if p not in str_mapping]
             # print(placeholders)
             # print(str_mapping)
@@ -247,8 +265,11 @@ template torch::Tensor
             # return result
             return template.format(**{k: v for k, v in str_mapping.items()})
 
-        #create heuristic heirarchy
-        with open(os.path.join(self.working_path, "moe_cktile2stages_heuristic_dispatch.h"), "w") as f:
+        # create heuristic heirarchy
+        with open(
+            os.path.join(self.working_path, "moe_cktile2stages_heuristic_dispatch.h"),
+            "w",
+        ) as f:
             f.write(validate_and_format(HEURISTIC_template, kernels_dict))
             # arch = get_gfx()
             # inst_k = "32" if self.quant_type == "1x32" else ("128" if arch == "gfx950" else "64")
@@ -260,8 +281,8 @@ template torch::Tensor
             #     )
             # )
 
+    """generate lookup.h linking MNK/datatype to specific instance"""
 
-    '''generate lookup.h linking MNK/datatype to specific instance'''
     def gen_lookup_dict(self, kernels_dict):
         LOOKUP_head = """#pragma once
 // SPDX-License-Identifier: MIT
@@ -281,12 +302,16 @@ template torch::Tensor
 
 // #endif // USE_ROCM
 """
-        with open(os.path.join(self.working_path, "moe_cktile2stages_lookup.h"), "w") as f:
+        with open(
+            os.path.join(self.working_path, "moe_cktile2stages_lookup.h"), "w"
+        ) as f:
             f.write(LOOKUP_head)
             for mnk, k in kernels_dict.items():
-                print( ":", k.name)
+                print(":", k.name)
                 # if not tunning, tuned mnk = {stage, m, n, k}
-                if not self.istune and (isinstance(mnk, tuple) and (len(mnk) == 4) and mnk[1] > 0):
+                if not self.istune and (
+                    isinstance(mnk, tuple) and (len(mnk) == 4) and mnk[1] > 0
+                ):
                     f.write(
                         LOOKUP_template.format(
                             MNK="{"
@@ -300,7 +325,8 @@ template torch::Tensor
                     f.write(LOOKUP_template.format(MNK=mnk, kernel_name=k.name))
             f.write(LOOKUP_end)
 
-    '''generate manifest.h for instance header'''
+    """generate manifest.h for instance header"""
+
     def gen_manifest_head(self, kernels_dict):
         MAINFEST_head = """#pragma once
 // SPDX-License-Identifier: MIT
@@ -335,13 +361,16 @@ torch::Tensor
 // endif // USE_ROCM
 """
 
-        with open(os.path.join(self.working_path, "moe_cktile2stages_manifest.h"), "w") as f:
+        with open(
+            os.path.join(self.working_path, "moe_cktile2stages_manifest.h"), "w"
+        ) as f:
             f.write(MAINFEST_head)
             for mnk, k in kernels_dict.items():
                 f.write(MAINFEST_template.format(kernel_name=k.name))
             f.write(MAINFEST_end)
 
-    '''generate all instances and headers'''
+    """generate all instances and headers"""
+
     def gen_instances(self, tag, kernels_dict):
         if os.path.exists(self.impl_path):
             shutil.rmtree(self.impl_path)
@@ -377,7 +406,9 @@ torch::Tensor
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate ck_tile 2stage gemm instance.")
+    parser = argparse.ArgumentParser(
+        description="Generate ck_tile 2stage gemm instance."
+    )
 
     # Add arguments
     # the directory for list_blobs/gen_blobs to write files into
@@ -508,31 +539,22 @@ if __name__ == "__main__":
     #         codegen.generate_instance_and_lookUpTable()
     # else:
 
-
-    #single UT
+    # single UT
     # a_type = "fp8"
     # b_type = "fp8"
     # quant_type = "per_token"
-    
+
     a_type = "bf16"
     b_type = "fp4"
     quant_type = "1x32"
 
-
     acc_type = "float"
-    c_type ="bf16"
+    c_type = "bf16"
     act_type = "silu"
     codegen = cktile_moe_2stage_gemm_codegen(
-        args.working_path,
-        a_type,
-        acc_type,
-        c_type,
-        quant_type,
-        act_type,
-        2,
-        False
+        args.working_path, a_type, acc_type, c_type, quant_type, act_type, 2, False
     )
-    #gen all instances for gemm1 and gemm2
+    # gen all instances for gemm1 and gemm2
     _, gemm1_kernel_list = get_gemm1_kernels_list(
         a_type,
         b_type,
@@ -547,8 +569,10 @@ if __name__ == "__main__":
         "",
         True,
     )
-    #merge gemm1/gemm2 dict with key = {stage, key}
-    kernel_dict_merge = {**{(1, key): value for key, value in gemm1_kernel_list.items()},
-                         **{(2, key): value for key, value in gemm2_kernel_list.items()}}
+    # merge gemm1/gemm2 dict with key = {stage, key}
+    kernel_dict_merge = {
+        **{(1, key): value for key, value in gemm1_kernel_list.items()},
+        **{(2, key): value for key, value in gemm2_kernel_list.items()},
+    }
     # print(kernel_dict_merge)
     codegen.gen_instances(tag, kernel_dict_merge)

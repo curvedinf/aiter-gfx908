@@ -1,7 +1,20 @@
 # SPDX-License-Identifier: MIT
 # Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 from dataclasses import dataclass
-from aiter.jit.utils.chip_info import get_gfx
+import os
+import sys
+
+this_dir = os.path.dirname(os.path.abspath(__file__))
+AITER_CORE_DIR = os.path.abspath(f"{this_dir}/../../../")
+if os.path.exists(os.path.join(AITER_CORE_DIR, "aiter_meta")):
+    AITER_CORE_DIR = os.path.join(AITER_CORE_DIR, "aiter/jit/utils")  # pip install mode
+else:
+    AITER_CORE_DIR = os.path.abspath(
+        f"{this_dir}/../../aiter/jit/utils"
+    )  # develop mode
+sys.path.insert(0, AITER_CORE_DIR)
+
+from chip_info import get_gfx  # noqa: E402
 
 
 @dataclass
@@ -23,8 +36,9 @@ class kernelInstance:
 
     @property
     def name(self) -> str:
-        return ("_").join(element for element in 
-            [
+        return ("_").join(
+            element
+            for element in [
                 f"moe_cktile2stages_gemm{self.stage}",
                 ("x").join(
                     map(
@@ -38,13 +52,20 @@ class kernelInstance:
                     )
                 ),
                 ("x").join(map(lambda x: str(x), [self.WAVE_MAP_M, self.WAVE_MAP_N])),
-                ("x").join(map(lambda x: str(x), [self.WAVE_TILE_M, self.WAVE_TILE_N, self.WAVE_TILE_K])),
+                ("x").join(
+                    map(
+                        lambda x: str(x),
+                        [self.WAVE_TILE_M, self.WAVE_TILE_N, self.WAVE_TILE_K],
+                    )
+                ),
                 str(self.Block_Per_CU) + "perCU",
                 self.QuantType,
                 "MulRoutedWeight" if self.MulRoutedWeight else "",
                 "" if (self.stage == 2) else self.ActOP,
-            ] if element != ""
+            ]
+            if element != ""
         )
+
 
 # fmt: off
 # gemm1 out:bf16/fp16 AB:fp8/i8
@@ -127,11 +148,11 @@ gemm1_kernels_dict = {
 gemm2_kernels_dict = {
     "a8w8_gfx950": a8w8_gemm2_kernels_list_gfx950,
     "a8w8": a8w8_gemm2_kernels_list,
-    "a16w4_gfx950": a16w4_gemm2_kernels_list_gfx950
+    "a16w4_gfx950": a16w4_gemm2_kernels_list_gfx950,
 }
 
 
-a8w8_gfx950_heuristic_dispatch= """#pragma once
+a8w8_gfx950_heuristic_dispatch = """#pragma once
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 #include "moe_cktile2stages.h"
@@ -195,7 +216,7 @@ MoeKernel moe_gemm2_heuristic_dispatch(int M, int N, int K, int block_m)
 }}
 """
 
-a16w4_gfx950_heuristic_dispatch= """#pragma once
+a16w4_gfx950_heuristic_dispatch = """#pragma once
 // SPDX-License-Identifier: MIT
 // Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 #include "moe_cktile2stages.h"
@@ -262,10 +283,8 @@ MoeKernel moe_gemm2_heuristic_dispatch(int M, int N, int K, int block_m)
 heuristic_dispatch_dict = {
     "a8w8_gfx950": a8w8_gfx950_heuristic_dispatch,
     # "a8w8": a8w8_gemm2_kernels_list,
-    "a16w4_gfx950": a16w4_gfx950_heuristic_dispatch
+    "a16w4_gfx950": a16w4_gfx950_heuristic_dispatch,
 }
-
-
 
 
 bit8_list = ["f8", "i8", "fp8"]
@@ -297,20 +316,20 @@ def get_gemm1_kernels_list(
         kernel.ActOP = ActOP
         kernel.QuantType = QuantType
         # if tag == "a8w4":
-            # kernel.CDEElementOp = "MulABScaleWint4"
+        # kernel.CDEElementOp = "MulABScaleWint4"
         # elif tag == "a8w8blkscale":
-            # kernel.CDEElementOp = "MulABScaleExpertWeightA8W8blkscale"
+        # kernel.CDEElementOp = "MulABScaleExpertWeightA8W8blkscale"
         # elif tag == "a8w8" or tag == "a4w4":
-            # kernel.CDEElementOp = "MulABScale"
+        # kernel.CDEElementOp = "MulABScale"
         # elif tag == "a16w16":
-            # if MulRoutedWeight:
-                # kernel.CDEElementOp = "TypeCastExpertWeight"
-            # else:
-                # kernel.CDEElementOp = "TypeCast"
+        # if MulRoutedWeight:
+        # kernel.CDEElementOp = "TypeCastExpertWeight"
+        # else:
+        # kernel.CDEElementOp = "TypeCast"
     return tag, kernels_list
 
 
-def get_gemm2_kernels_list(    
+def get_gemm2_kernels_list(
     Adtype: str,
     Bdtype: str,
     QuantType: str = "",
@@ -345,7 +364,8 @@ def get_gemm2_kernels_list(
         #         kernel.CDEElementOp = "TypeCast"
     return tag, kernels_list
 
+
 def get_heuristic_dispatch_template(tag):
-    if (tag not in heuristic_dispatch_dict.keys()):
+    if tag not in heuristic_dispatch_dict.keys():
         raise ValueError(f"Unsupported type for heuristic_dispatch: {tag}")
     return heuristic_dispatch_dict[tag]

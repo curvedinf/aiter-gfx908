@@ -288,7 +288,7 @@ void moe_gemm(const MoeFlatmmHostArgs& args, const ck_stream_config& s)
 #if defined(__gfx950__)
         ave_time = ck_tile::launch_kernel(s,
                                           ck_tile::make_kernel<blocks.x, FlatmmConfig::kBlockPerCu>(
-                                              Kernel{}, grids, blocks, 0, kargs))
+                                              Kernel{}, grids, blocks, 0, kargs));
 #endif
         // }
         // return ave_time;

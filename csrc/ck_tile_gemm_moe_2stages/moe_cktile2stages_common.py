@@ -124,7 +124,7 @@ a16w4_gemm1_kernels_list_gfx950= {
     # 5: kernelInstance(       1,        256,       16,        512,       256,           16,         16,          32,          1,           4,          4,),
     1: kernelInstance(       1,        256,       32,        256,       256,           16,         16,          32,          1,           4,          2,),
     3: kernelInstance(       1,        256,       64,        256,       256,           16,         16,          32,          1,           4,          1,),
-    4: kernelInstance(       1,        256,      128,        256,       256,           16,         16,          32,          1,           4,          1,),
+    # 4: kernelInstance(       1,        256,      128,        256,       256,           16,         16,          32,          1,           4,          1,),
 }
 # gemm1 out:bf16/fp16 AB:bf16/fp4
 a16w4_gemm1_kernels_list= {
@@ -153,7 +153,7 @@ a16w4_gemm2_kernels_list_gfx950= {
     # 5: kernelInstance(       2,        256,       16,        512,       256,           16,         16,          32,          1,        4,            4,),
     1: kernelInstance(       2,        256,       32,        256,       256,           16,         16,          32,          1,        4,            2,),
     3: kernelInstance(       2,        256,       64,        256,       256,           16,         16,          32,          1,        4,            1,),
-    4: kernelInstance(       2,        256,      128,        256,       256,           16,         16,          32,          1,        4,            1,),
+    # 4: kernelInstance(       2,        256,      128,        256,       128,           16,         16,          32,          1,        4,            1,),
     # 4: kernelInstance(       2,        256,      256,        256,       256,           16,         16,          32,          1,        4,),
     # 4: kernelInstance(       2,        256,      256,        128,       128,           16,         16,          32,          1,        4,),
 }
@@ -191,10 +191,10 @@ MoeKernel moe_gemm1_heuristic_dispatch(int M, int N, int K, int block_m)
     {{
         return {(1, 2)}<ADataType, BDataType, AccDataType, CDataType>;
     }}
-    else if (block_m == 128)
-    {{
-        return {(1, 4)}<ADataType, BDataType, AccDataType, CDataType>;
-    }}
+    //else if (block_m == 128)
+    //{{
+    //    return {(1, 4)}<ADataType, BDataType, AccDataType, CDataType>;
+    //}}
     //else if (block_m == 256)
     //{{
     //    return {(1, 6)}<ADataType, BDataType, AccDataType, CDataType>;
@@ -220,10 +220,10 @@ MoeKernel moe_gemm2_heuristic_dispatch(int M, int N, int K, int block_m)
     {{
         return {(2, 1)}<ADataType, BDataType, AccDataType, CDataType>;
     }}
-    else if (block_m == 128)
-    {{
-        return {(2, 2)}<ADataType, BDataType, AccDataType, CDataType>;
-    }}
+    //else if (block_m == 128)
+    //{{
+    //    return {(2, 2)}<ADataType, BDataType, AccDataType, CDataType>;
+    //}}
     //else if (block_m == 256)
     //{{
     //    return {(2, 3)}<ADataType, BDataType, AccDataType, CDataType>;
@@ -259,10 +259,10 @@ MoeKernel moe_gemm1_heuristic_dispatch(int M, int N, int K, int block_m)
     {{
         return {(1, 3)}<ADataType, BDataType, AccDataType, CDataType>;
     }}
-    else if (block_m == 128)
-    {{
-        return {(1, 4)}<ADataType, BDataType, AccDataType, CDataType>;
-    }}
+    //else if (block_m == 128)
+    //{{
+    //    return {(1, 4)}<ADataType, BDataType, AccDataType, CDataType>;
+    //}}
     else
     {{
         TORCH_CHECK(
@@ -288,10 +288,10 @@ MoeKernel moe_gemm2_heuristic_dispatch(int M, int N, int K, int block_m)
     {{
         return {(2, 3)}<ADataType, BDataType, AccDataType, CDataType>;
     }}
-    else if (block_m == 128)
-    {{
-        return {(2, 4)}<ADataType, BDataType, AccDataType, CDataType>;
-    }}
+    //else if (block_m == 128)
+    //{{
+    //return {(2, 4)}<ADataType, BDataType, AccDataType, CDataType>;
+    //}}
     else
     {{
         TORCH_CHECK(

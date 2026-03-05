@@ -239,9 +239,11 @@ class AITER_CONFIG(object):
             config_path.mkdir(parents=True, exist_ok=True)
         new_file_path = f"{config_path}/{merge_name}.csv"
         lock_path = f"{new_file_path}.lock"
+        tmp_file_path = f"{new_file_path}.tmp"
 
         def write_config():
-            merge_df.to_csv(new_file_path, index=False)
+            merge_df.to_csv(tmp_file_path, index=False)
+            os.replace(tmp_file_path, new_file_path)
 
         mp_lock(lock_path, write_config)
         return new_file_path

@@ -6,28 +6,19 @@ import os
 from dataclasses import dataclass
 from typing import Callable, Optional
 
-import torch
-
 import aiter
+import torch
 
 # from aiter import get_torch_quant as get_quant
 from aiter import ActivationType, QuantType, dtypes
 from aiter import get_hip_quant as get_quant
 from aiter import logger
-from aiter.jit.core import (
-    AITER_CONFIGS,
-    AITER_CSRC_DIR,
-    PY,
-    bd_dir,
-    mp_lock,
-)
+from aiter.jit.core import AITER_CONFIGS, AITER_CSRC_DIR, PY, bd_dir, mp_lock
 from aiter.jit.utils.chip_info import get_cu_num, get_gfx
 from aiter.jit.utils.torch_guard import torch_compile_guard
+from aiter.ops.flydsl.utils import is_flydsl_available
 from aiter.ops.triton.quant.fused_mxfp4_quant import fused_dynamic_mxfp4_quant_moe_sort
 from aiter.utility import fp4_utils
-
-
-from aiter.ops.flydsl.utils import is_flydsl_available
 
 BLOCK_SIZE_M = 32
 
@@ -851,15 +842,27 @@ def get_2stage_cfgs(
             elif q_type != QuantType.per_1x32:
                 run_1stage = token < 256
 
-        block_m = (
-            BLOCK_SIZE_M
-            if run_1stage
-            else (
-                (64 if token > 32 else 16)
-                if q_type == QuantType.per_1x128
-                else get_block_size_M(token, topk, expert, inter_dim)
+        def get_block_m() -> int:
+            block_m = (
+                BLOCK_SIZE_M
+                if run_1stage
+                else (
+                    (64 if token > 32 else 16)
+                    if q_type == QuantType.per_1x128
+                    else get_block_size_M(token, topk, expert, inter_dim)
+                )
             )
-        )
+            if q_dtype_a == dtypes.fp8:
+                return 32
+            else:
+                return 16 if token < 2048 else 32 if token < 16384 else 64
+            # TODO: enable this approach for other quant types and archs
+            if q_type == QuantType.per_1x128 and get_gfx() == "gfx950":
+                tkn_per_epr = token * topk // expert
+                block_m = 64 if tkn_per_epr > 32 else block_m
+            return block_m
+
+        block_m = get_block_m()
         ksplit = (
             ksplit
             if (run_1stage)
@@ -885,17 +888,7 @@ def get_2stage_cfgs(
         f"[fused_moe] using {'1stage' if run_1stage else '2stage'} {'default' if cfg is None else tag} for {keys} "
     )
 
-    def get_block_m() -> int:
-        if q_dtype_a == dtypes.fp8:
-            return 32
-        else:
-            return 16 if token < 2048 else 32 if token < 16384 else 64
-
     if run_1stage:
-        # TODO: enable this approach for other quant types and archs
-        if q_type == QuantType.per_1x128 and get_gfx() == "gfx950":
-            tkn_per_epr = token * topk // expert
-            block_m = 64 if tkn_per_epr > 32 else block_m
         return MOEMetadata(
             functools.partial(
                 fused_moe_1stage,
@@ -926,7 +919,7 @@ def get_2stage_cfgs(
                 k_pad_zeros=intermediate_pad // 128 * 128,
                 activation=activation,
             ),
-            get_block_m(),
+            block_m,
             ksplit,
             False,
             True,

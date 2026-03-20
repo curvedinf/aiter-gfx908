@@ -59,7 +59,8 @@ std::string get_heuristic_kernel_mla(std::string q_type,
                                      int causal,
                                      int qseqlen,
                                      std::string arch_id,
-                                     CFG* cfgs)
+                                     CFG* cfgs,
+                                     int lse = 0)
 {
     for(const auto& el : *cfgs)
     {
@@ -73,6 +74,8 @@ std::string get_heuristic_kernel_mla(std::string q_type,
             continue;
         if (cfg.causal != causal || cfg.qSeqLen != qseqlen)
             continue;
+        if (cfg.lse != lse)
+            continue;
         return el.first;
     }
     
@@ -85,7 +88,8 @@ std::string get_heuristic_kernel_mla(std::string q_type,
                 " ps:", ps,
                 " prefill:", prefill,
                 " causal:", causal,
-                " qseqlen:", qseqlen);
+                " qseqlen:", qseqlen,
+                " lse:", lse);
     return "";
 }
 
@@ -324,7 +328,8 @@ void mla_decode_stage1_asm_fwd(
         }
     }
 
-    std::string kernelName = get_heuristic_kernel_mla(q_type, kv_type, gqa_ratio, ps, prefill, causal, config_max_seqlen_q, arch_id, config_map);
+    int lse_flag = (lse != nullptr) ? 1 : 0;
+    std::string kernelName = get_heuristic_kernel_mla(q_type, kv_type, gqa_ratio, ps, prefill, causal, config_max_seqlen_q, arch_id, config_map, lse_flag);
     
     AITER_CHECK(!kernelName.empty(), __func__, ": cannot find suitable kernel");
     

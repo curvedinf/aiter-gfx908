@@ -114,6 +114,7 @@ def test_topk_softmax(dtype, token, E, topk, renormalize=True):
             and dtype in [dtypes.bf16, dtypes.fp32]
         ):
             continue
+        gating_output = gating_output.contiguous() if tag == "asm" else gating_output
         (topk_weights, topk_ids), us = func(gating_output, topk, renormalize)
         topk_ids = topk_ids.to(dtypes.i32)
         id, _ref = torch.sort(topk_ids)
@@ -178,7 +179,7 @@ def check_topk_softmax_allclose(
     is_close_i = torch.isclose(r_idx, t_idx)  # use high resolution for index
 
     scores_for_choice = scores.view(original_shape)
-    if bias != None:
+    if bias is not None:
         scores_for_choice = scores_for_choice + bias.unsqueeze(0)
 
     if is_close_v.all():
@@ -196,7 +197,6 @@ def check_topk_softmax_allclose(
         else:
             # this case there must be some duplicate value, and due to compare order, index maybe different
             mask = ~(is_close_i)
-            val_mask = torch.zeros(original_shape, dtype=torch.bool)
             mismatch_r = scores_for_choice.gather(-1, r_idx.to(dtype=torch.int64))[mask]
             mismatch_t = scores_for_choice.gather(-1, t_idx.to(dtype=torch.int64))[mask]
 
@@ -217,7 +217,7 @@ def check_topk_softmax_allclose(
                         if r_idx[i_row, i_col] != t_idx[i_row, i_col]:
                             sr = scores_for_choice[i_row, r_idx[i_row, i_col]]
                             st = scores_for_choice[i_row, t_idx[i_row, i_col]]
-                            is_close_ = torch.isclose(sr, st, rtol=rtol, atol=atol)
+                            torch.isclose(sr, st, rtol=rtol, atol=atol)
                             logger.info(
                                 f"{msg} [{i_row}x{i_col}], r:{r_idx[i_row, i_col]}->{sr}, t:{t_idx[i_row, i_col]}->{st}"
                             )

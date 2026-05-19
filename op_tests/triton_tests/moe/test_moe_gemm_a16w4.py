@@ -12,7 +12,8 @@ from aiter.ops.triton.moe.moe_routing.routing import routing
 from aiter.ops.triton.moe.moe_op_gemm_a16w4 import (
     moe_gemm_a16w4,
     moe_gemm_torch,
-    swizzle_scales,
+    swizzle_scales_gfx950,
+    swizzle_scales_gfx1250,
 )
 
 # numerics utilities
@@ -211,6 +212,7 @@ class Case:
 )
 @pytest.mark.parametrize("has_y_gammas", [False, True])
 @pytest.mark.parametrize("apply_swiglu", [False, True])
+@pytest.mark.parametrize("use_gluon", [True, False])
 def test_op(
     m,
     n,
@@ -219,6 +221,7 @@ def test_op(
     do_scatter,
     has_y_gammas,
     apply_swiglu,
+    use_gluon,
     n_expts_tot,
     n_expts_act,
     hbm_swizzling,
@@ -301,5 +304,6 @@ def test_op(
         swizzle_mx_scale,
         out_dtype,
         apply_swiglu,
+        use_gluon=use_gluon,
     )
     assert_close(ref_y, tri_y, maxtol=maxtol, rmstol=rmstol)

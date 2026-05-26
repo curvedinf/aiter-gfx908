@@ -1216,6 +1216,7 @@ def get_2stage_cfgs(
         )
     is_flydsl1 = bool(kernelName1) and kernelName1.startswith("flydsl_")
     is_flydsl2 = bool(kernelName2) and kernelName2.startswith("flydsl_")
+    is_cktile2 = bool(kernelName2) and kernelName2.startswith("cktile_")
     if (is_flydsl1 or is_flydsl2) and is_flydsl_available():
         enable_bias = (
             _needs_swiglu_bias_support(dtype, q_type) and q_dtype_w == dtypes.fp4x2
@@ -1246,6 +1247,13 @@ def get_2stage_cfgs(
                 kernelName=kernelName2,
                 inter_dim_pad=intermediate_pad,
                 model_dim_pad=hidden_pad,
+            )
+        elif is_cktile2:
+            stage2_func = functools.partial(
+                cktile_moe_stage2,
+                n_pad_zeros=hidden_pad // 64 * 64,
+                k_pad_zeros=intermediate_pad // 128 * 128,
+                activation=activation,
             )
         else:
             stage2_func = functools.partial(
@@ -1486,6 +1494,13 @@ def get_2stage_cfgs(
                 inter_dim_pad=intermediate_pad,
                 model_dim_pad=hidden_pad,
             )
+        elif kernelName2 and kernelName2.startswith("cktile_"):
+            stage2_func = functools.partial(
+                cktile_moe_stage2,
+                n_pad_zeros=hidden_pad // 64 * 64,
+                k_pad_zeros=intermediate_pad // 128 * 128,
+                activation=activation,
+            )
         else:
             stage2_func = functools.partial(
                 aiter.ck_moe_stage2_fwd,
@@ -1516,6 +1531,21 @@ def get_2stage_cfgs(
         tag = ""
         block_m = ([el for el in tmpList if block_m < el] + [128])[0]
 
+    if kernelName2 and kernelName2.startswith("cktile_"):
+        stage2_func = functools.partial(
+            cktile_moe_stage2,
+            n_pad_zeros=hidden_pad // 64 * 64,
+            k_pad_zeros=intermediate_pad // 128 * 128,
+            activation=activation,
+        )
+    else:
+        stage2_func = functools.partial(
+            aiter.ck_moe_stage2_fwd,
+            kernelName=kernelName2,
+            activation=activation,
+            quant_type=q_type,
+            use_non_temporal_load=use_non_temporal_load,
+        )
     return MOEMetadata(
         functools.partial(
             asm_stage1,
@@ -1523,13 +1553,7 @@ def get_2stage_cfgs(
             activation=activation,
             quant_type=q_type,
         ),
-        functools.partial(
-            aiter.ck_moe_stage2_fwd,
-            kernelName=kernelName2,
-            activation=activation,
-            quant_type=q_type,
-            use_non_temporal_load=use_non_temporal_load,
-        ),
+        stage2_func,
         block_m,
         ksplit,
         run_1stage,

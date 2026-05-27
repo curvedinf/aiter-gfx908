@@ -349,6 +349,7 @@ def moe_gemm_a8w4(
                 else config["num_stages"]
             ),
             SWIZZLE_MX_SCALE=swizzle_mx_scale,
+            EVEN_K=K % config["block_k"] == 0,
             MASK_K_LIMIT=K % config["block_k"],
             W_CACHE_MODIFIER=config["w_cache_modifier"],
             num_warps=config["num_warps"],

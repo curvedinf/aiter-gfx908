@@ -5,6 +5,7 @@ import triton.experimental.gluon.language as gl
 from aiter.ops.triton.utils._triton.pid_preprocessing import remap_xcd, pid_grid
 from aiter.ops.triton._triton_kernels.moe.quant_moe import _compute_static_fp8_quant
 from aiter.ops.triton._triton_kernels.moe.activations import _swiglu
+from triton.experimental.gluon.language.amd.gfx1250 import async_copy
 
 
 def matmul_launch_metadata(grid, kernel, args):
@@ -145,7 +146,7 @@ def _moe_gemm_a8w4(
 
     is_x_microscaled: gl.constexpr = XMxScale is not None
     MX_PACK_DIVISOR: gl.constexpr = 32
-    NUM_TDM_OPS: gl.constexpr = 4 if is_x_microscaled else 3
+    NUM_TDM_OPS: gl.constexpr = 3
     w_type: gl.constexpr = W.dtype.element_ty
     gl.static_assert(w_type == gl.uint8, "mx_weight_ptr must be uint8 or fp8")
     gl.static_assert(
@@ -298,25 +299,6 @@ def _moe_gemm_a8w4(
         layout=SHARED_LAYOUT_W_SCALES,
     )
 
-    if is_x_microscaled:
-        if GatherIndx is None:
-            XMxScale += start_m * stride_x_mx_m
-            x_scales_desc = gl.amd.gfx1250.tdm.make_tensor_descriptor(
-                base=XMxScale,
-                shape=(M, tl.cdiv(K, MX_PACK_DIVISOR)),
-                strides=(stride_x_mx_m, stride_x_mx_k),
-                block_shape=(BLOCK_M, MX_SCALE_BLOCK_K),
-                layout=SHARED_LAYOUT_X_SCALES,
-            )
-        else:
-            x_scales_desc = gl.amd.gfx1250.tdm.make_tensor_descriptor(
-                base=XMxScale,
-                shape=(num_tokens, tl.cdiv(K, MX_PACK_DIVISOR)),
-                strides=(stride_x_mx_m, stride_x_mx_k),
-                block_shape=(BLOCK_M, MX_SCALE_BLOCK_K),
-                layout=SHARED_LAYOUT_X_SCALES,
-            )
-
     if BLOCK_M == 16:
         WMMA_LAYOUT: gl.constexpr = gl.amd.AMDWMMALayout(
             3,
@@ -356,6 +338,37 @@ def _moe_gemm_a8w4(
         DOT_LAYOUT_X_SCALES: gl.constexpr = gl.amd.gfx1250.get_wmma_scale_layout(
             DOT_LAYOUT_X, [BLOCK_M, MX_SCALE_BLOCK_K]
         )
+        X_SCALES_LOAD_LAYOUT: gl.constexpr = gl.BlockedLayout(
+            [1, MX_SCALE_BLOCK_K], [32, 1], [num_warps, 1], [1, 0]
+        )
+
+        offs_xs_m = off_x_m + gl.arange(
+            0, BLOCK_M, layout=gl.SliceLayout(1, X_SCALES_LOAD_LAYOUT)
+        )
+        offs_xs_k = gl.arange(
+            0, MX_SCALE_BLOCK_K, layout=gl.SliceLayout(0, X_SCALES_LOAD_LAYOUT)
+        )
+        mask_xs_m = offs_xs_m < M
+        if GatherIndx is None:
+            XMxScale += start_m * stride_x_mx_m
+            x_scales_desc = gl.amd.gfx1250.tdm.make_tensor_descriptor(
+                base=XMxScale,
+                shape=(M, tl.cdiv(K, MX_PACK_DIVISOR)),
+                strides=(stride_x_mx_m, stride_x_mx_k),
+                block_shape=(BLOCK_M, MX_SCALE_BLOCK_K),
+                layout=SHARED_LAYOUT_X_SCALES,
+            )
+            xs_row = offs_xs_m
+        else:
+            x_scales_desc = gl.amd.gfx1250.tdm.make_tensor_descriptor(
+                base=XMxScale,
+                shape=(num_tokens, tl.cdiv(K, MX_PACK_DIVISOR)),
+                strides=(stride_x_mx_m, stride_x_mx_k),
+                block_shape=(BLOCK_M, MX_SCALE_BLOCK_K),
+                layout=SHARED_LAYOUT_X_SCALES,
+            )
+            xs_row = gl.load(GatherIndx + offs_xs_m) // N_EXPTS_ACT
+        xs_ptrs_base = XMxScale + xs_row.to(index_type)[:, None] * stride_x_mx_m
 
     x_buffer = gl.allocate_shared_memory(
         x_desc.dtype, shape=[NUM_BUFFERS] + x_desc.block_shape, layout=x_desc.layout
@@ -402,11 +415,14 @@ def _moe_gemm_a8w4(
             w_scales_buffer.index(write_idx % NUM_BUFFERS),
         )
         if is_x_microscaled:
-            gl.amd.gfx1250.tdm.async_load(
-                x_scales_desc,
-                [off_x_m, write_idx * MX_SCALE_BLOCK_K],
+            xs_k = write_idx * MX_SCALE_BLOCK_K + offs_xs_k
+            async_copy.global_to_shared(
                 x_scales_buffer.index(write_idx % NUM_BUFFERS),
+                xs_ptrs_base + xs_k.to(index_type)[None, :],
+                mask=mask_xs_m[:, None],
+                other=0.0,
             )
+            async_copy.commit_group()
         write_idx += 1
 
     num_k_iter = tl.cdiv(K, BLOCK_K)
@@ -414,6 +430,8 @@ def _moe_gemm_a8w4(
     # After TDM prologue there are NUM_BUFFERS*3 ops in-flight; waiting for
     # (NUM_BUFFERS-1)*3 lets exactly one tile (tile 0) complete.
     gl.amd.gfx1250.tdm.async_wait((NUM_BUFFERS - 1) * NUM_TDM_OPS)
+    if is_x_microscaled:
+        async_copy.wait_group(NUM_BUFFERS - 1)
 
     # Register pre-load prologue: wait for tile 0 then read it into cur_x/cur_w/cur_w_scales.
     cur_x = x_buffer.index(read_idx % NUM_BUFFERS).load(layout=DOT_LAYOUT_X)
@@ -471,14 +489,19 @@ def _moe_gemm_a8w4(
             w_scales_buffer.index(write_idx % NUM_BUFFERS),
         )
         if is_x_microscaled:
-            gl.amd.gfx1250.tdm.async_load(
-                x_scales_desc,
-                [off_x_m, write_idx * MX_SCALE_BLOCK_K],
+            xs_k = write_idx * MX_SCALE_BLOCK_K + offs_xs_k
+            async_copy.global_to_shared(
                 x_scales_buffer.index(write_idx % NUM_BUFFERS),
+                xs_ptrs_base + xs_k.to(index_type)[None, :],
+                mask=mask_xs_m[:, None],
+                other=0.0,
             )
+            async_copy.commit_group()
         write_idx += 1
 
         gl.amd.gfx1250.tdm.async_wait((NUM_BUFFERS - 1) * NUM_TDM_OPS)
+        if is_x_microscaled:
+            async_copy.wait_group(NUM_BUFFERS - 1)
 
         next_x = x_buffer.index(read_idx % NUM_BUFFERS).load(layout=DOT_LAYOUT_X)
         next_w = (
@@ -534,6 +557,8 @@ def _moe_gemm_a8w4(
             )
 
         gl.amd.gfx1250.tdm.async_wait((NUM_BUFFERS - 2 - k_ep) * NUM_TDM_OPS)
+        if is_x_microscaled:
+            async_copy.wait_group(NUM_BUFFERS - 2 - k_ep)
 
         next_x = x_buffer.index(read_idx % NUM_BUFFERS).load(layout=DOT_LAYOUT_X)
         next_w = (

@@ -138,6 +138,7 @@ def test_mla(
     decode_qlen,
     split_per_batch=None,
     return_lse=False,
+    is_causal=True,
 ):
     ret = {}
 
@@ -353,7 +354,7 @@ def test_mla(
         sm_scale,
         kv_lora_rank,
         qk_rope_head_dim,
-        is_causal=True,
+        is_causal=is_causal,
         dtype=out_dtype,
     )
 
@@ -564,6 +565,7 @@ def test_mla(
     err = None
     us_asm_decode = 1e12
     if (dtype == torch.bfloat16 and kvtype == torch.bfloat16) and nhead in [
+        8,
         16,
         32,
         64,
@@ -761,6 +763,7 @@ parser.add_argument(
     choices=[
         (4, 1),
         (8, 1),
+        (8, 2),
         (12, 1),
         (16, 1),
         (16, 2),
@@ -801,6 +804,13 @@ parser.add_argument(
     help="""return lse. Default: False.
     --lse # True""",
 )
+parser.add_argument(
+    "--causal",
+    action=argparse.BooleanOptionalAction,
+    default=True,
+    help="""Enable/disable causal masking. Default: True.
+    --causal / --no-causal""",
+)
 
 
 args = parser.parse_args()
@@ -826,6 +836,7 @@ for nhead, decode_qlen in args.nhead:
                 decode_qlen=decode_qlen,
                 split_per_batch=split_per_batch,
                 return_lse=args.return_lse,
+                is_causal=args.causal,
             )
             df.append(ret)
     df = pd.DataFrame(df)

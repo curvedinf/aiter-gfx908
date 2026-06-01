@@ -310,7 +310,12 @@ class CudaCommunicator(DeviceCommunicatorBase):
             )
             try:
                 result = self.ca_comm.custom_fused_ar_rms_per_group_quant(
-                    input_, res_inp_, weight_, eps, group_size, use_1stage,
+                    input_,
+                    res_inp_,
+                    weight_,
+                    eps,
+                    group_size,
+                    use_1stage,
                     emit_bf16=emit_bf16,
                 )
                 if emit_bf16:
@@ -335,7 +340,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
             assert bf16_out is not None
             return out, res_out, scale_out, bf16_out
         return out, res_out, scale_out
-    
+
     def fused_qknorm_allreduce(
         self,
         qkv_in,
@@ -343,9 +348,7 @@ class CudaCommunicator(DeviceCommunicatorBase):
         k_w,
         eps,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        q_out, k_out, v_out = self.ca_comm.custom_fused_qknorm_ar(
-            qkv_in, q_w, k_w, eps
-        )
+        q_out, k_out, v_out = self.ca_comm.custom_fused_qknorm_ar(qkv_in, q_w, k_w, eps)
         assert q_out is not None
         assert k_out is not None
         assert v_out is not None
@@ -406,12 +409,15 @@ class CudaCommunicator(DeviceCommunicatorBase):
     ):
         world_size = self.world_size
         ca_comm = self.ca_comm
+        # Custom kernel supports scatter on first/last/mid dims; gate via
+        # should_custom_rs which also rejects first-dim-non-vectorizable
+        # shapes (no naive fallback exists for that case, see C++ dispatch).
         if (
             ca_comm is not None
             and not ca_comm.disabled
-            and ca_comm.should_custom_ar(input_)
+            and ca_comm.should_custom_rs(input_, dim)
         ):
-            ca_comm.custom_reduce_scatter(input_, output_)
+            ca_comm.custom_reduce_scatter(input_, output_, dim)
         else:
             pynccl_comm = self.pynccl_comm
             assert pynccl_comm is not None

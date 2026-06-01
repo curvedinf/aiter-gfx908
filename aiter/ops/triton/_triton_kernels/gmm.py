@@ -317,6 +317,11 @@ def _gmm(
 
 
 @triton.jit
+def _inc(tile_counter_ptr):
+    return tl.atomic_add(tile_counter_ptr, 1, sem="relaxed", scope="gpu")
+
+
+@triton.jit
 def _work_stealing_gmm(
     # Tensor pointers:
     lhs_ptr,
@@ -324,7 +329,9 @@ def _work_stealing_gmm(
     group_sizes_ptr,
     out_ptr,
     bias_ptr,
+    # Work stealing parameters:
     tile_counter_ptr,
+    tiles_per_xcd: int,
     # Tensor shapes:
     K: int,
     N: int,
@@ -339,8 +346,13 @@ def _work_stealing_gmm(
     K_DIVISIBLE_BY_BLOCK_SIZE_K: tl.constexpr,
     GROUP_SIZE: tl.constexpr,
     USE_BIAS: tl.constexpr,
+    NUM_XCDS: tl.constexpr,
+    TILE_COUNTER_STRIDE: tl.constexpr,
     INT_TYPE: tl.constexpr,
 ):
+    tl.device_assert(tiles_per_xcd >= 0, "tiles_per_xcd < 0")
+
+    # Total tiles in GMM. Tile processing loop condition is (tile < total_tiles).
     total_tiles = _total_gmm_tiles(
         group_sizes_ptr,
         G,
@@ -351,9 +363,30 @@ def _work_stealing_gmm(
     )
     tl.device_assert(total_tiles > 0, "total_tiles <= 0")
 
-    tile = tl.program_id(0).to(INT_TYPE)
+    # Work stealing GMM is split in two phases:
+    # 1. Local XCD phase: claim next tile from the same XCD
+    # 2. Global phase: claim next tile from other XCDs, draining the remaining tiles
+    # The kernel starts in phase 1 and then proceeds to phase 2 when (tile >= xcd_phase_tiles).
+    xcd_phase_tiles = tiles_per_xcd * NUM_XCDS
+
+    # There are NUM_XCDS + 1 atomic tile counters:
+    # > assigned XCD tile counter, XCD mapping is round-robin
+    xcd = tl.program_id(0) % NUM_XCDS
+    xcd_tile_counter_ptr = tile_counter_ptr + xcd * TILE_COUNTER_STRIDE
+    # > last counter slot is global tile counter
+    global_title_counter_ptr = tile_counter_ptr + NUM_XCDS * TILE_COUNTER_STRIDE
+
+    # Claim first tile.
+    xcd_tile = _inc(xcd_tile_counter_ptr)
+    in_global_phase = xcd_tile >= tiles_per_xcd
+    if in_global_phase:
+        global_tile = _inc(global_title_counter_ptr)
+        tile = (xcd_phase_tiles + global_tile).to(INT_TYPE)
+    else:
+        tile = (xcd * tiles_per_xcd + xcd_tile).to(INT_TYPE)
 
     while tile < total_tiles:
+        # Resolve and process tile.
         g, m, num_m_tiles, last_m, tile_in_mm = _resolve_gmm_tile(
             group_sizes_ptr,
             tile,
@@ -388,7 +421,20 @@ def _work_stealing_gmm(
             GROUP_SIZE=GROUP_SIZE,
             USE_BIAS=USE_BIAS,
         )
-        tile = tl.atomic_add(tile_counter_ptr, 1, sem="relaxed").to(INT_TYPE)
+
+        # Claim next tile.
+        if in_global_phase:
+            global_tile = _inc(global_title_counter_ptr)
+            tile = (xcd_phase_tiles + global_tile).to(INT_TYPE)
+        else:
+            xcd_tile = _inc(xcd_tile_counter_ptr)
+            if xcd_tile >= tiles_per_xcd:
+                # Transition from XCD phase to global phase.
+                in_global_phase = True
+                global_tile = _inc(global_title_counter_ptr)
+                tile = (xcd_phase_tiles + global_tile).to(INT_TYPE)
+            else:
+                tile = (xcd * tiles_per_xcd + xcd_tile).to(INT_TYPE)
 
 
 @triton.heuristics(
@@ -424,7 +470,9 @@ def gmm_kernel(
     group_sizes_ptr,
     out_ptr,
     bias_ptr,
+    # Work stealing parameters:
     tile_counter_ptr,
+    tiles_per_xcd,
     # Tensor shapes:
     M: int,
     K: int,
@@ -440,7 +488,10 @@ def gmm_kernel(
     GROUP_SIZE: tl.constexpr,
     GRID_DIM: tl.constexpr,
     USE_BIAS: tl.constexpr,
+    # Work stealing meta-parameters:
     WORK_STEALING: tl.constexpr,
+    NUM_XCDS: tl.constexpr,
+    TILE_COUNTER_STRIDE: tl.constexpr,
 ):
     tl.assume(M > 0)
     tl.assume(K > 0)
@@ -460,7 +511,9 @@ def gmm_kernel(
             group_sizes_ptr,
             out_ptr,
             bias_ptr,
+            # Work stealing parameters:
             tile_counter_ptr,
+            tiles_per_xcd,
             # Tensor shapes:
             K,
             N,
@@ -475,6 +528,8 @@ def gmm_kernel(
             K_DIVISIBLE_BY_BLOCK_SIZE_K=K_DIVISIBLE_BY_BLOCK_SIZE_K,
             GROUP_SIZE=GROUP_SIZE,
             USE_BIAS=USE_BIAS,
+            NUM_XCDS=NUM_XCDS,
+            TILE_COUNTER_STRIDE=TILE_COUNTER_STRIDE,
             INT_TYPE=INT_TYPE,
         )
     else:

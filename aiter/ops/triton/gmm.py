@@ -6,6 +6,7 @@
 # ------------------------------------------------------------------------------
 
 # Python standard library
+from typing import Literal
 import warnings
 
 # PyTorch
@@ -41,21 +42,61 @@ from aiter.ops.triton._triton_kernels.gmm import (
 # GMM PyTorch wrapper.
 # ------------------------------------------------------------------------------
 
+_NUM_XCDS: int = 8
+_TILE_COUNTER_STRIDE: int = 64
 
-# Per-(device, stream) cache for the work stealing tile counter. A single `int32`
-# scratch buffer is reused across launches to avoid an allocator round-trip plus
-# 4-byte host to device copy on every call.
+# Per-(device, stream) cache for the work stealing tile counter.
+# Layout: [xcd_{0}_slot, ..., xcd{_NUM_XCDS-1}_slot, global_slot]
+# It's one slot per XCD plus a global slot at the last position.
+# Each slot _TILE_COUNTER_STRIDE int32 elements wide (256 B = 1 MI355X L2 line)
+# to avoid false-sharing across XCDs.
+# A single scratch buffer is reused across launches to avoid an allocator
+# round-trip on every call.
 _GMM_TILE_COUNTER_CACHE: dict[tuple[torch.device, int], Tensor] = {}
 
 
-def _get_gmm_tile_counter(device: torch.device, grid_dim: int) -> Tensor:
+def _get_gmm_tile_counter(device: torch.device) -> Tensor:
     stream = torch.cuda.current_stream(device=device).cuda_stream
     tile_counter = _GMM_TILE_COUNTER_CACHE.get((device, stream))
     if tile_counter is None:
-        tile_counter = torch.empty(1, dtype=torch.int32, device=device)
+        tile_counter = torch.zeros(
+            (_NUM_XCDS + 1) * _TILE_COUNTER_STRIDE, dtype=torch.int32, device=device
+        )
         _GMM_TILE_COUNTER_CACHE[(device, stream)] = tile_counter
-    tile_counter.fill_(grid_dim)
+    else:
+        tile_counter.zero_()
     return tile_counter
+
+
+def _gmm_tiles_per_xcd(
+    M: int,
+    N: int,
+    block_size_m: int,
+    block_size_n: int,
+    grid_dim: int,
+    mode: Literal["per_xcd", "hierarchical", "global"] = "global",
+) -> int:
+    assert M > 0, f"M must be positive, it's {M}."
+    assert N > 0, f"N must be positive, it's {N}."
+    assert is_power_of_2(
+        block_size_m
+    ), f"M-dimension tile size must be a power of 2 (it's {block_size_m})."
+    assert is_power_of_2(
+        block_size_n
+    ), f"N-dimension tile size must be a power of 2 (it's {block_size_n})."
+    assert grid_dim > 0, f"Grid dimension must be positive (it's {grid_dim})."
+    if mode == "global":
+        return 0
+    num_n_tiles = triton.cdiv(N, block_size_n)
+    num_m_tiles = triton.cdiv(M, block_size_m)  # estimate for number of tiles in M
+    num_tiles = num_m_tiles * num_n_tiles
+    tiles_per_xcd = triton.cdiv(num_tiles, _NUM_XCDS)
+    if mode == "per_xcd":
+        return tiles_per_xcd
+    if mode == "hierarchical":
+        tiles_per_cu = num_tiles / grid_dim
+        # TODO: Implement adaptative split based on `tiles_per_cu`.
+        return 0
 
 
 def _gmm_grid(
@@ -254,20 +295,31 @@ def gmm(
         config["GRID_DIM"],
     )
 
-    tile_counter: Tensor | None = (
-        _get_gmm_tile_counter(lhs.device, config["GRID_DIM"]) if work_stealing else None
-    )
+    tile_counter: Tensor | None
+    tiles_per_xcd: int | None
+    if work_stealing:
+        tile_counter = _get_gmm_tile_counter(lhs.device)
+        tiles_per_xcd = gmm_tiles_per_xcd(
+            M, N, config["BLOCK_SIZE_M"], config["BLOCK_SIZE_N"], config["GRID_DIM"]
+        )
+    else:
+        tile_counter, tiles_per_xcd = None, None
 
     # fmt: off
     gmm_kernel[grid](
         # Tensor pointers:
-        lhs, rhs, group_sizes, out, bias, tile_counter,
+        lhs, rhs, group_sizes, out, bias,
+        # Work stealing parameters:
+        tile_counter, tiles_per_xcd,
         # Tensor shapes:
         M, K, N, G,
         # Meta-parameters:
         TRANS_RHS=trans_rhs,
         USE_BIAS=use_bias,
+        # Work stealing meta-parameters:
         WORK_STEALING=work_stealing,
+        NUM_XCDS=_NUM_XCDS,
+        TILE_COUNTER_STRIDE=_TILE_COUNTER_STRIDE,
         **config,
     )
     # fmt: on

@@ -316,9 +316,10 @@ def _compile_deepgemm_fp8_paged_mqa_logits(
     fn_signature["CDNA_VERSION"] = "constexpr"
     fn_signature["IS_GFX1250"] = "constexpr"
 
+    effective_wave_per_eu = 1 if is_gfx1250 and not Preshuffle else WavePerEU
     options = {
         "num_warps": 4,
-        "waves_per_eu": WavePerEU,
+        "waves_per_eu": effective_wave_per_eu,
         "num_stages": 2,
         "num_ctas": 1,
         "cluster_dims": [1, 1, 1],
@@ -458,6 +459,9 @@ def deepgemm_fp8_paged_mqa_logits(
     batch_size, next_n, heads, hidden_dim = q_fp8.size()
     num_block, block_Size, _, index_dim = kv_cache.size()
     _, max_block_len = kv_indices.size()
+
+    if get_gfx() == "gfx1250" and not Preshuffle:
+        WavePerEU = 1
 
     TileQCount = batch_size * next_n
     SplitKV = (max(1, TotalCuCount // TileQCount) + 4) // 5 * 5 * WavePerEU

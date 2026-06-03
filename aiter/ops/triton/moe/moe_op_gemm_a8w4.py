@@ -58,6 +58,21 @@ def allocate_output(
     return matmul_output, final_output
 
 
+def preshuffle_weights_gfx1250(w: torch.Tensor) -> torch.Tensor:
+    assert w.ndim == 3, f"Expected 3D weight tensor (E, K, N), got {w.ndim}"
+    E, K, N = w.shape
+    assert K % 16 == 0, f"K ({K}) must be divisible by 16 for MFMA preshuffling"
+    assert N % 16 == 0, f"N ({N}) must be divisible by 16 for MFMA preshuffling"
+
+    w = w.transpose(1, 2)
+    w = w.view(E, N // 16, 16, K // 16, 16)
+    w = w.permute(0, 1, 3, 2, 4).contiguous()
+    w = w.view(E, N // 16, K * 16)
+    w = w.transpose(1, 2)
+
+    return w
+
+
 def get_kernel_config_triton(m, n, k, routing_data):
     block_m = routing_data.block_m
     group_m = 4
@@ -122,7 +137,6 @@ def get_kernel_config_gluon(m, n, k, routing_data):
     block_m = routing_data.block_m
     num_xcds = 1
     w_cache_modifier = ".cg" if block_m <= 32 else None
-    num_stages = 2
     split_k = 1
     block_k = 512
     num_buffers = 3
@@ -149,7 +163,6 @@ def get_kernel_config_gluon(m, n, k, routing_data):
         "block_n": block_n,
         "block_k": block_k,
         "num_warps": num_warps,
-        "num_stages": num_stages,
         "xcd_swizzle": num_xcds,
         "split_k": split_k,
         "w_cache_modifier": w_cache_modifier,
@@ -211,6 +224,7 @@ def moe_gemm_a8w4(
     alpha=1.0,
     limit=1.0,
     add_residual=True,
+    preshuffled=True,
     unpadded_N=None,
     unpadded_K=None,
 ):
@@ -220,6 +234,10 @@ def moe_gemm_a8w4(
         Y[idxs_y_m(e), :] += matmul(X[idxs_x_m(e), :], W[e, :, :])
     """
     use_gluon = get_arch() == "gfx1250"
+    if preshuffled:
+        assert (
+            use_gluon
+        ), "preshuffled weights are only supported by the gluon (gfx1250) kernel"
     assert w.stride(-2) == 1, "`w` must be column-major when it has data-type mxfp"
     x_has_mx = x_scales is not None
     if x_has_mx:
@@ -234,6 +252,9 @@ def moe_gemm_a8w4(
     num_tokens = x.shape[-2]
     M = num_tokens if gather_indx is None else gather_indx.shape[0]
     K, N = x.shape[-1], w.shape[-1]
+    if preshuffled:
+        # preshuffle layout is (E, K_packed*16, N//16); w.shape[-1] = N//16
+        N = w.shape[-1] * 16
     block_m = routing_data.block_m
     if unpadded_N and block_m == 16:
         N = unpadded_N
@@ -343,13 +364,9 @@ def moe_gemm_a8w4(
             config["block_n"],
             config["block_k"],
             XCD_SWIZZLE=config["xcd_swizzle"],
-            NUM_BUFFERS=(
-                config["num_buffers"]
-                if config["num_buffers"] is not None
-                else config["num_stages"]
-            ),
+            NUM_BUFFERS=config["num_buffers"],
             SWIZZLE_MX_SCALE=swizzle_mx_scale,
-            EVEN_K=K % config["block_k"] == 0,
+            PRESHUFFLED=preshuffled,
             MASK_K_LIMIT=K % config["block_k"],
             W_CACHE_MODIFIER=config["w_cache_modifier"],
             num_warps=config["num_warps"],
@@ -561,10 +578,10 @@ def main():
         help="Use mxfp8 microscaled activation instead of static fp8 (default: False).",
     )
     # PRESHUFFLE
-    # parser.add_argument(
-    #     "--preshuffled", action=argparse.BooleanOptionalAction, default=True,
-    #     help="Use preshuffled weights instead of shuffled weights (default: False).",
-    # )
+    parser.add_argument(
+        "--preshuffled", action=argparse.BooleanOptionalAction, default=True,
+        help="Use preshuffled weights instead of shuffled weights (default: False).",
+    )
     parser.add_argument("--device", type=str, default="cuda")
     args = parser.parse_args()
 
@@ -628,8 +645,8 @@ def main():
 
     w_tri, w_scale_tri = downcast_to_mxfp(w_bf16, torch.uint8, axis=1)
     w_ref = upcast_from_mxfp(w_tri, w_scale_tri, torch.bfloat16, axis=1)
-    # if args.preshuffled:
-    #     w_tri = preshuffle_weights_gfx1250(w_tri)
+    if args.preshuffled:
+        w_tri = preshuffle_weights_gfx1250(w_tri)
 
     swizzle_mx_scale = None
     if args.hbm_swizzling:
@@ -695,7 +712,7 @@ def main():
         quant_static_scale = ref_y.abs().max().float() / 448.0
         out_dtype = torch.float8_e4m3fn
 
-    # print("Preshuffled:", args.preshuffled)
+    print("Preshuffled:", args.preshuffled)
     tri_y = moe_gemm_a8w4(
         x_tri,
         w_tri,
@@ -713,7 +730,7 @@ def main():
         args.apply_swiglu,
         unpadded_N=N_padded,
         unpadded_K=K_padded,
-        # preshuffled=args.preshuffled,
+        preshuffled=args.preshuffled,
     )
     if args.fused_quant:
         tri_y = (tri_y.float() * quant_static_scale).to(ref_y.dtype)

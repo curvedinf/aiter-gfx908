@@ -6,7 +6,7 @@
 import functools
 import re
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 import torch
 
@@ -650,17 +650,17 @@ def _s1_args_fp4(
     if stream is None:
         stream = torch.cuda.current_stream()
     return (
-        _ptr_view_safe(out),
-        _ptr_view_safe(a),
-        _ptr_view_safe(w),
-        _ptr_view_safe(a_scale),
-        _ptr_view_safe(w_scale),
-        _ptr_view_safe(sorted_ids),
-        _ptr_view_safe(sorted_expert_ids),
-        _ptr_view_safe(sorted_weights),
-        _ptr_view_safe(num_valid_ids),
-        _ptr_view_safe(_bias),
-        _ptr_view_safe(out_scale_sorted),
+        _ptr_arg_safe(out),
+        _ptr_arg_safe(a),
+        _ptr_arg_safe(w),
+        _ptr_arg_safe(a_scale),
+        _ptr_arg_safe(w_scale),
+        _ptr_arg_safe(sorted_ids),
+        _ptr_arg_safe(sorted_expert_ids),
+        _ptr_arg_safe(sorted_weights),
+        _ptr_arg_safe(num_valid_ids),
+        _ptr_arg_safe(_bias),
+        _ptr_arg_safe(out_scale_sorted),
         token_num,
         n_in,
         k_in,
@@ -737,16 +737,16 @@ def _s2_args_fp4(
     if stream is None:
         stream = torch.cuda.current_stream()
     return (
-        _ptr_view_safe(target),
-        _ptr_view_safe(a),
-        _ptr_view_safe(w),
-        _ptr_view_safe(a_scale),
-        _ptr_view_safe(w_scale),
-        _ptr_view_safe(sorted_ids),
-        _ptr_view_safe(sorted_expert_ids),
-        _ptr_view_safe(sorted_weights),
-        _ptr_view_safe(num_valid_ids),
-        _ptr_view_safe(_bias),
+        _ptr_arg_safe(target),
+        _ptr_arg_safe(a),
+        _ptr_arg_safe(w),
+        _ptr_arg_safe(a_scale),
+        _ptr_arg_safe(w_scale),
+        _ptr_arg_safe(sorted_ids),
+        _ptr_arg_safe(sorted_expert_ids),
+        _ptr_arg_safe(sorted_weights),
+        _ptr_arg_safe(num_valid_ids),
+        _ptr_arg_safe(_bias),
         token_num,
         n_in,
         k_in,
@@ -868,7 +868,7 @@ def flydsl_moe_stage1(
     sorted_weights: Optional[torch.Tensor] = None,
     persist_m: int = 0,
     use_async_copy: bool = False,
-    k_batch=1,
+    k_batch: Union[int, str] = 1,
     waves_per_eu: int = 3,
     b_nt: int = 0,
     gate_mode: str = "separated",
@@ -1012,7 +1012,12 @@ def flydsl_moe_stage1(
     #   * Legacy post-quant kernels (silu_and_mul_fq via _gui_sk_fused,
     #     _gui_sk, _splitk_fp4): per-32 e8m0 in sorted-tile uint8 layout
     #     with padding. Unchanged.
-    _fused_fp8_in_gemm = _need_fp8 and not _is_splitk
+    # Restrict the per-row f32 layout to the FP8/FP8 blockscale GEMM. Other
+    # `out_dtype == "fp8"` configs (notably A8W4 wfp4) still expect the legacy
+    # fp8_e8m0 per-32 sorted layout that the wfp4 kernels read/write.
+    _fused_fp8_in_gemm = (
+        _need_fp8 and a_dtype == "fp8" and b_dtype == "fp8" and not _is_splitk
+    )
     if _fused_fp8_in_gemm:
         # Per-row f32 layout. Size = n_blocks_k * tokens*topk * 4 bytes.
         # Stage2 indexes as a2_scale[blk_k, t*topk + s].
@@ -1074,8 +1079,8 @@ def flydsl_moe_stage1(
     else:
         # Fused fp8 stage1 (non-splitK) consumes out_scale_sorted_flat as a
         # real argument; other paths get a 1-byte placeholder (the kernel
-        # signature still requires the slot).
-        _fused_fp8_in_gemm = _need_fp8 and not _is_splitk
+        # signature still requires the slot). Reuse the outer
+        # `_fused_fp8_in_gemm` (already restricted to a=fp8/b=fp8).
         _s1_scale_arg = out_scale_sorted_flat.view(-1) if _fused_fp8_in_gemm else None
         args = _s1_args_std(
             _kernel_out.view(-1),

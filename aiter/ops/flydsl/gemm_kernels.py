@@ -70,8 +70,10 @@ SPLIT_K_GLOBAL_SIGNAL: dict[SplitKStreamKey, torch.Tensor] = {}
 
 
 def _ptr_view_safe(t: torch.Tensor):
-    # flyc.from_c_void_p was removed; use from_dlpack which returns a
-    # TensorAdaptor whose bare-pointer convention is consumed by AOT kernels.
+    # Prefer from_dlpack here because this launcher consumes shaped TensorAdaptors
+    # (AOT kernels use the TensorAdaptor's bare-pointer convention). Use
+    # flyc.from_c_void_p instead for kernels whose signature is `fx.Pointer`
+    # and call `fx.ptrtoint` directly (see _ptr_arg_safe in moe_kernels.py).
     type_name = type(t).__name__
     module_name = type(t).__module__
     if type_name == "FakeTensor" or "fake_tensor" in module_name:

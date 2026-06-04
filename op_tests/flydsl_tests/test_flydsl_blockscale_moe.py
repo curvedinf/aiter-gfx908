@@ -63,8 +63,9 @@ _RUN_PERF = os.environ.get("AITER_RUN_PERF", "0") in ("1", "true", "True", "yes"
 def _fp8_dtype():
     if not torch.cuda.is_available():
         return torch.float8_e4m3fn
-    arch = torch.cuda.get_device_properties(0).gcnArchName
-    return torch.float8_e4m3fn if "gfx95" in arch else torch.float8_e4m3fnuz
+    props = torch.cuda.get_device_properties(0)
+    arch = getattr(props, "gcnArchName", "")
+    return torch.float8_e4m3fn if "gfx95" in str(arch) else torch.float8_e4m3fnuz
 
 
 DTYPE_FP8 = _fp8_dtype()
@@ -387,11 +388,8 @@ def test_tier_c_kwargs_raise(kwarg, bad_value, expected_match):
 # ---------------------------------------------------------------------------
 # Split-K (k_batch) scaffolding tests
 #
-# Step 1 of the split-K plan lifts the adapter Tier-C gate but Steps 3-5
-# (grid expansion, K-loop slicing, atomic gate/up epilogue) are still TODO
-# in the upstream kernel. Until those land, k_batch>1 with otherwise-valid
-# config compiles down to a NotImplementedError raised by upstream after
-# adapter-side validation; bad K-slice still raises ValueError.
+# k_batch>1 is supported for the FP8/FP8 blockscale stage1 kernel. These tests
+# validate that valid K-slices compile and invalid K-slices raise ValueError.
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("k_batch", [1, 2, 4])
 def test_splitk_valid_config_compiles(k_batch):

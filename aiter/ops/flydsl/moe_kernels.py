@@ -603,9 +603,7 @@ def _ptr_view_safe(t: torch.Tensor):
     if type_name == "FakeTensor" or "fake_tensor" in module_name:
         # No real storage; hand a 1-byte placeholder so the launcher gets a
         # valid pointer.  The kernel will not be executed on fake tensors.
-        return flyc.from_dlpack(
-            torch.empty(1, dtype=torch.uint8, device="cuda")
-        )
+        return flyc.from_dlpack(torch.empty(1, dtype=torch.uint8, device="cuda"))
     return flyc.from_dlpack(view)
 
 
@@ -693,9 +691,7 @@ def _s1_args_std(
     if out_scale_sorted is None:
         # Stage1 kernel signature always includes `arg_out_scale_sorted` (only
         # used for fused fp8 epilogue). Non-fp8 paths pass a 1-byte placeholder.
-        out_scale_sorted = torch.empty(
-            1, dtype=torch.uint8, device=out.device
-        )
+        out_scale_sorted = torch.empty(1, dtype=torch.uint8, device=out.device)
     return (
         _ptr_view_safe(out),
         _ptr_view_safe(a),
@@ -1080,9 +1076,7 @@ def flydsl_moe_stage1(
         # real argument; other paths get a 1-byte placeholder (the kernel
         # signature still requires the slot).
         _fused_fp8_in_gemm = _need_fp8 and not _is_splitk
-        _s1_scale_arg = (
-            out_scale_sorted_flat.view(-1) if _fused_fp8_in_gemm else None
-        )
+        _s1_scale_arg = out_scale_sorted_flat.view(-1) if _fused_fp8_in_gemm else None
         args = _s1_args_std(
             _kernel_out.view(-1),
             a.view(-1),
@@ -1249,9 +1243,7 @@ def flydsl_moe_stage1(
     if _fuse_any_quant and _need_sort:
         if _fused_fp8_in_gemm:
             # Per-row f32 blockscale (n_blocks_k, tokens*topk).
-            out_scale = out_scale_sorted_flat.view(
-                inter_dim // 128, token_num * topk
-            )
+            out_scale = out_scale_sorted_flat.view(inter_dim // 128, token_num * topk)
             return out, out_scale
         from aiter.utility.dtypes import fp8_e8m0
 

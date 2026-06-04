@@ -7,8 +7,7 @@ Exercises the full aiter dispatcher path:
 
     aiter.ops.flydsl.moe_kernels.compile_flydsl_moe_stage{1,2}
        -> aiter.ops.flydsl.kernels.blockscale_moe_gemm_2stage
-       -> aiter.ops.flydsl.kernels._blockscale_moe_gemm_2stage_upstream
-       -> ROCm/FlyDSL ``kernels/moe_blockscale_2stage.py``
+       -> ROCm/FlyDSL ``kernels/moe_blockscale_2stage.py`` (vendored inline)
 
 Three groups:
   1. Adapter / dispatcher / Tier-C smoke tests (always run).
@@ -792,7 +791,9 @@ def test_pick_k_batch_dsr1_tp8(M, inter_dim, expected_k):
         tile_n=128,
         tile_k=128,
     )
-    assert k == expected_k, f"M={M} idim={inter_dim}: got k_batch={k}, expected {expected_k}"
+    assert (
+        k == expected_k
+    ), f"M={M} idim={inter_dim}: got k_batch={k}, expected {expected_k}"
 
 
 def test_pick_k_batch_invalid_kslice_falls_back():

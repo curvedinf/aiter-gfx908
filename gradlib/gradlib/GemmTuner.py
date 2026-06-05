@@ -742,8 +742,8 @@ class Gemm:
                         ),
                         {},
                         None,
-                        2e-2,
-                        1.0,
+                        self.rtol,
+                        self.atol,
                         None,  # compare_fn
                         None,  # max_abs_delta
                         ("out_asm",),  # output_keys: NaN-init the out tensor

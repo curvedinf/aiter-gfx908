@@ -337,14 +337,15 @@ def generate_data(
 
     # if scaleAB:
     #    scaleB = scaleB.t()
-    out_asm = torch.empty(m, n, dtype=outdtype, device=device)
+    out = torch.empty(m, n, dtype=outdtype, device=device)
     return {
         "inp": inp,
         "weights": weights,
         "weights_t": weights.t(),
         "bias": bias,
         "x_scale": x_scale,
-        "out_asm": out_asm,
+        "out_asm": out,  # legacy key kept for the asm path
+        "out": out,
         "shuffleweights": shuffleweights,
         "w_scale": w_scale,
     }
@@ -725,7 +726,7 @@ class Gemm:
                         ),
                         run_opus_gemm_bf16,
                         (
-                            ["inp", "weights", "out_asm", "bias"],
+                            ["inp", "weights", "out", "bias"],
                             kid,
                             sk,
                         ),
@@ -746,7 +747,7 @@ class Gemm:
                         self.atol,
                         None,  # compare_fn
                         None,  # max_abs_delta
-                        ("out_asm",),  # output_keys: NaN-init the out tensor
+                        ("out",),  # output_keys: NaN-init the out tensor
                     )
                 )
         logger.info(

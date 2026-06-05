@@ -76,6 +76,7 @@ if [[ "$TEST_TYPE" == "aiter" ]]; then
     FILE_TIMES[op_tests/test_mha_varlen.py]=562
     FILE_TIMES[op_tests/test_topk_plain.py]=404
     FILE_TIMES[op_tests/test_rope.py]=402
+    FILE_TIMES[op_tests/test_gated_delta_rule.py]=318
     FILE_TIMES[op_tests/test_topk_per_row.py]=278
     FILE_TIMES[op_tests/test_concat_cache_mla.py]=235
     FILE_TIMES[op_tests/test_gemm_a8w8.py]=208

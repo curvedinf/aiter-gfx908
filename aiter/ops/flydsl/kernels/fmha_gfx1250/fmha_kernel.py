@@ -2807,12 +2807,16 @@ def compile_fmha_fwd(*, is_causal: bool = False, return_lse: bool = False):
                     _sf = arith.addf(_sm, _pm)
                     _rsf[_mb] = _sf
                     _rsf[_mb + 1] = _sf
-                _l2e = arith.constant(0.6931471805599453, type=T.f32)
+                _ln2 = arith.constant(0.6931471805599453, type=T.f32)
                 _lse_vals = [None] * NUM_MSB
                 for _msb in fx.range_constexpr(NUM_MSB):
+                    # local_max is raw QK max (no scale);
+                    # rocdl.log = log2; * ln2 converts to ln
                     _mxs = arith.mulf(_lmf[_msb], scalar_f)
                     _lgs = rocdl.log(ty["f32"], _rsf[_msb])
-                    _lse_vals[_msb] = arith.addf(arith.mulf(_lgs, _l2e), _mxs)
+                    _lse_vals[_msb] = arith.addf(
+                        arith.mulf(_lgs, _ln2), _mxs
+                    )
 
                 # Store LSE to global: ptr_LSE layout (total_q, nheads) fp32
                 if const_expr(RETURN_LSE):

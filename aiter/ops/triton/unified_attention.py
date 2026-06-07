@@ -11,6 +11,18 @@ from aiter.ops.triton._triton_kernels.unified_attention import (
 )
 
 
+def _is_power_of_2(value):
+    return value > 0 and (value & (value - 1)) == 0
+
+
+def _select_tile_size(block_size, element_size, all_decode):
+    if all_decode and _is_power_of_2(block_size) and block_size <= 64:
+        return block_size
+    if all_decode:
+        return 32
+    return 32 if element_size <= 2 else 64
+
+
 def select_2d_config(
     block_size,
     head_size,
@@ -20,6 +32,7 @@ def select_2d_config(
     max_seqlen_k,
     num_queries_per_kv,
     num_2d_prgms,
+    element_size,
 ):
     BLOCK_M = (
         16 if num_queries_per_kv <= 16 else triton.next_power_of_2(num_queries_per_kv)
@@ -35,7 +48,7 @@ def select_2d_config(
     else:
         num_stages_2d = 3
         num_warps = 2
-        TILE_SIZE = block_size
+        TILE_SIZE = _select_tile_size(block_size, element_size, all_decode)
 
     if max_seqlen_q >= 256:
         BLOCK_M = 128
@@ -58,7 +71,7 @@ def select_3d_config(
 ):
     reduce_num_warps = 2
     attn_warps = 2
-    TILE_SIZE = block_size
+    TILE_SIZE = _select_tile_size(block_size, element_size, all_decode=True)
     MAX_SEGMENTS = min(128, math.ceil(max_seqlen_k / TILE_SIZE))
     num_segments = math.ceil(target_num_prgms / num_2d_prgms)
     num_segments = triton.next_power_of_2(num_segments)
@@ -178,6 +191,7 @@ def unified_attention(
             max_seqlen_k,
             num_queries_per_kv,
             num_2d_prgms,
+            q.element_size(),
         )
         assert config["BLOCK_Q"] >= 1
         total_num_q_blocks = q.shape[0] // config["BLOCK_Q"] + num_seqs

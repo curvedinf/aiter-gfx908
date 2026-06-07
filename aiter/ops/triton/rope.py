@@ -4,6 +4,7 @@
 import torch
 import triton
 import triton.language as tl
+import sys as _sys
 from torch import autograd
 from enum import IntEnum
 from typing import Tuple, Union
@@ -29,6 +30,12 @@ from aiter.ops.triton._triton_kernels.rope import (
 from aiter.ops.triton.utils.logger import AiterTritonLogger
 
 _LOGGER = AiterTritonLogger()
+
+# vLLM's gfx908 branch imports this module as a package path:
+# `aiter.ops.triton.rope.rope`. This AITER revision exposes the same symbols
+# as `aiter.ops.triton.rope`, so register a compatibility alias.
+__path__ = []
+_sys.modules.setdefault(__name__ + ".rope", _sys.modules[__name__])
 
 
 class RotateStyle(IntEnum):

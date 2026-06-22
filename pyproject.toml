@@ -1,0 +1,17 @@
+[build-system]
+requires = [
+    "pybind11>=3.0.1",
+    "setuptools>=45",
+    "setuptools_scm[toml]>=6.2",
+    "wheel",
+    "packaging",
+    "psutil",
+    "ninja",
+    "pandas",
+    "flydsl==0.2.1"
+]
+
+[tool.setuptools_scm]
+write_to = "aiter/_version.py"
+write_to_template = "__version__ = '{version}'\n"
+fallback_version = "0.1.0"

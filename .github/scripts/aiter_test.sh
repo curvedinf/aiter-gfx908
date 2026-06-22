@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MULTIGPU=${MULTIGPU:-FALSE}
+SHARD_TOTAL=${SHARD_TOTAL:-5}
+SHARD_IDX=${SHARD_IDX:-0}
+export CLANG_TOOLCHAIN_PROGRAM_TIMEOUT="${CLANG_TOOLCHAIN_PROGRAM_TIMEOUT:-300}"
+
+# Avoid per-invocation hipcc native arch probing (can timeout under heavy JIT
+# parallelism) by resolving the current GPU arch once for this job.
+if [[ -z "${GPU_ARCHS:-}" ]]; then
+    detected_arch=$(rocminfo 2>/dev/null | grep -m1 -oE 'gfx[0-9a-z]+' || true)
+    if [[ "$detected_arch" =~ ^gfx[0-9a-z]+$ ]]; then
+        export GPU_ARCHS="$detected_arch"
+    fi
+fi
+
+files=()
+failedFiles=()
+
+testFailed=false
+
+if [[ "$MULTIGPU" == "TRUE" ]]; then
+    # Recursively find all files under op_tests/multigpu_tests
+    mapfile -t files < <(find op_tests/multigpu_tests -type f -name "*.py" | sort)
+else
+    if [[ -z "${AITER_TEST:-}" ]]; then
+        echo "AITER_TEST is not set"
+        # Recursively find all files under op_tests, excluding op_tests/multigpu_tests
+        mapfile -t files < <(find op_tests -maxdepth 1 -type f -name "*.py" | sort)
+    else
+        # If AITER_TEST contains multiple files separated by whitespace, convert to an array
+        read -r -a files <<< "$AITER_TEST"
+    fi
+fi
+
+skip_tests=(
+    "op_tests/multigpu_tests/test_dispatch_combine.py"
+    "op_tests/multigpu_tests/test_communication.py"
+    "op_tests/multigpu_tests/test_mori_all2all.py"
+    "op_tests/multigpu_tests/test_fused_ar_rms.py"
+    "op_tests/multigpu_tests/triton_test/test_reduce_scatter_all_gather.py"
+    "op_tests/multigpu_tests/triton_test/test_fused_rs_rmsnorm_quant_ag.py"
+)
+
+# When AITER_TEST is set, files are already the exact list for this shard (from artifact).
+# Multi-GPU tests should always run all files without sharding.
+# Otherwise, apply modulo to split "all files" into shards by index.
+if [[ -n "${AITER_TEST:-}" ]] || [[ "$MULTIGPU" == "TRUE" ]]; then
+    sharded_files=("${files[@]}")
+else
+    sharded_files=()
+    for idx in "${!files[@]}"; do
+        if (( idx % SHARD_TOTAL == SHARD_IDX )); then
+            sharded_files+=("${files[$idx]}")
+        fi
+    done
+fi
+
+echo "Running ${sharded_files[@]} in shard $SHARD_IDX of $SHARD_TOTAL."
+echo "Using CLANG_TOOLCHAIN_PROGRAM_TIMEOUT=${CLANG_TOOLCHAIN_PROGRAM_TIMEOUT}" | tee -a latest_test.log
+echo "Using GPU_ARCHS=${GPU_ARCHS:-native}" | tee -a latest_test.log
+
+for file in "${sharded_files[@]}"; do
+    # Print a clear separator and test file name for readability
+    {
+        echo
+        echo "============================================================"
+        echo "Running test: $file (shard: $SHARD_IDX/$SHARD_TOTAL)"
+        echo "============================================================"
+        echo
+    } | tee -a latest_test.log
+    if [[ " ${skip_tests[@]} " =~ " $file " ]]; then
+        {
+            echo "Skipping test: $file"
+            echo "============================================================"
+            echo
+        } | tee -a latest_test.log
+        continue
+    fi
+    # Capture start time (nanoseconds since epoch)
+    start_time_ns=$(date +%s%N)
+    if ! timeout 60m python3 "$file" 2>&1 | tee -a latest_test.log; then
+        status="❌ Test failed"
+        testFailed=true
+        failedFiles+=("$file")
+    else
+        status="✅ Test passed"
+    fi
+    # Capture end time (nanoseconds since epoch)
+    end_time_ns=$(date +%s%N)
+    elapsed_ns=$((end_time_ns - start_time_ns))
+    # Convert to seconds with 3 decimals
+    elapsed_s=$(awk "BEGIN{printf \"%.3f\", ${elapsed_ns}/1000000000}")
+
+    {
+        echo
+        echo "--------------------"
+        echo "${status}: $file"
+        echo "⏱ Time elapsed of $file: ${elapsed_s} seconds"
+        echo "--------------------"
+        echo
+    } | tee -a latest_test.log
+done
+
+# Extra parameterized invocations for MLA bh16 gluon (bh16bn64 + bh16bn128, gfx950-only gates).
+# Run only in whichever shard actually owns test_mla.py — the shard layout can shift as tests
+# are added/removed, so we can't hardcode SHARD_IDX.
+mla_in_shard=false
+for f in "${sharded_files[@]}"; do
+    if [[ "$f" == "op_tests/test_mla.py" ]]; then
+        mla_in_shard=true
+        break
+    fi
+done
+if [[ "$mla_in_shard" == "true" && "$MULTIGPU" != "TRUE" ]]; then
+    for args in \
+        "-c 49152 -b 1 -n 16,1 -kvd bf16" \
+        "-c 98304 -b 1 -n 16,1 -kvd fp8" \
+        "-c 10000 100000 -b 1 3 4 -n 12,1 16,1 -kvd bf16 -lse" \
+        "-c 1 21 63 64 65 256 -b 1 -n 16,1 -kvd bf16 -lse"; do
+        echo "=== extra: test_mla.py $args ===" | tee -a latest_test.log
+        if ! timeout 10m python3 op_tests/test_mla.py $args 2>&1 | tee -a latest_test.log; then
+            testFailed=true
+            failedFiles+=("test_mla.py $args")
+        fi
+    done
+fi
+
+if [ "$testFailed" = true ]; then
+    {
+        echo "Failed test files (shard $SHARD_IDX):"
+        for f in "${failedFiles[@]}"; do
+            echo "  $f"
+        done
+    } | tee -a latest_test.log
+    exit 1
+else
+    echo "All tests passed in shard $SHARD_IDX." | tee -a latest_test.log
+    exit 0
+fi

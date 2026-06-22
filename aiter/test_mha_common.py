@@ -1,0 +1,670 @@
+# SPDX-License-Identifier: MIT
+# Copyright (C) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+
+import math
+from .bert_padding import pad_input, unpad_input
+from einops import rearrange, repeat
+import torch
+import torch.nn.functional as F
+from aiter import dtypes
+
+
+def ck_randval_to_dropout_mask(randval, p):
+    # If p = 0.3, randval in 255 * (0.7, 1.0] will be dropout
+    # randval in 255 * [0, 0.7] will be kept
+    # If return dropout_mask >=0, value will be kept
+    return math.floor(255.0 * (1 - p)) - randval.to(dtypes.fp32)
+
+
+def convert_flash_attn_S_to_softmax(
+    S,
+    seqlen_q,
+    seqlen_k,
+    query_padding_mask,
+    key_padding_mask,
+    head_dim,
+    is_dropout,
+    causal=False,
+    window_size=(-1, -1),  # -1 means infinite window size
+):
+    """FlashAttention stores the S matrix in a different way.
+    Arguments:
+        S: (batch_size, nheads, seqlen_q_rounded, seqlen_k_rounded)
+        query_padding_mask: (batch_size, seqlen_q_rounded)
+        key_padding_mask: (batch_size, seqlen_k_rounded)
+    """
+    if causal:
+        window_size = (window_size[0], 0)
+    seqlen_q_rounded, seqlen_k_rounded = S.shape[-2:]
+    S_converted = S
+    if window_size[0] >= 0 or window_size[1] >= 0:
+        local_mask = construct_local_mask(
+            seqlen_q,
+            seqlen_k,
+            window_size,
+            query_padding_mask,
+            key_padding_mask,
+            S.device,
+        )
+        local_mask = F.pad(
+            local_mask,
+            (0, seqlen_k_rounded - seqlen_k, 0, seqlen_q_rounded - seqlen_q),
+            value=True,
+        )
+        S_converted = S_converted.masked_fill(local_mask, 0.0)
+
+    # Need to zero out things not in attention_mask in case S was initialized with random values
+    # and some of those values aren't overwritten.
+    seqlen_q_og = (
+        query_padding_mask.shape[-1]
+        if query_padding_mask is not None
+        else seqlen_q_rounded
+    )
+    if query_padding_mask is not None:
+        query_padding_mask = F.pad(
+            query_padding_mask, (0, seqlen_q_rounded - seqlen_q_og)
+        )
+        S_converted = S_converted.masked_fill(
+            rearrange(~query_padding_mask, "b s -> b 1 s 1"), 0.0
+        )
+    seqlen_k_og = (
+        key_padding_mask.shape[-1] if key_padding_mask is not None else seqlen_k
+    )
+    if key_padding_mask is not None:
+        key_padding_mask = F.pad(key_padding_mask, (0, seqlen_k_rounded - seqlen_k_og))
+        S_converted = S_converted.masked_fill(
+            rearrange(~key_padding_mask, "b s -> b 1 1 s"), 0.0
+        )
+    S_converted = F.pad(S_converted, (0, 0, 0, seqlen_q_og - seqlen_q_rounded))
+    S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k_rounded))
+    return S_converted[:, :, :seqlen_q, :seqlen_k]
+
+
+def pad_rearrange_dropout_mask_hts_to_bhss(
+    S_dmask, cu_seqlens_q, seqlen_q_rounded, seqlen_k_rounded
+):
+    """pad + rearrange [nheads, total_q, max_seqlen_k] into [b, nheads, seqlen_q_rounded, seqlen_k_rounded]
+    Arguments:
+        S_dmask: (nheads, total_q, max_seqlen_k)
+        cu_seqlens_q: (b + 1)
+    Output:
+        S_dmask: (b, nheads, seqlen_q_rounded, seqlen_k_rounded)
+    """
+    batch_size = cu_seqlens_q.numel() - 1
+    seqlens_q = torch.roll(cu_seqlens_q, shifts=-1) - cu_seqlens_q
+    seqlens_q = seqlens_q[0:batch_size].tolist()
+    S_dmask = torch.split(S_dmask, seqlens_q, dim=1)
+    # [(nheads, seqlen_q0, max_seqlen_k), (nheads, seqlen_q1, max_seqlen_k), ..., (nheads, seqlen_qb, max_seqlen_k)]
+    masks = ()
+    for mask in S_dmask:
+        # (nheads, seqlen_qi, max_seqlen_k) -> (nheads, seqlen_q_rounded, seqlen_k_rounded)
+        mask = F.pad(
+            mask,
+            (
+                0,
+                seqlen_k_rounded - mask.shape[2],
+                0,
+                seqlen_q_rounded - mask.shape[1],
+                0,
+                0,
+            ),
+        ).unsqueeze(1)
+        masks = masks + (mask,)
+    S_dmask = torch.cat(masks, dim=1)
+
+    S_dmask = S_dmask.transpose(0, 1)
+    return S_dmask
+
+
+def attn_bias_from_alibi_slopes(
+    slopes,
+    seqlen_q,
+    seqlen_k,
+    query_padding_mask=None,
+    key_padding_mask=None,
+    causal=False,
+    key_leftpad=None,
+):
+    batch, nheads = slopes.shape
+    device = slopes.device
+    slopes = rearrange(slopes, "b h -> b h 1 1")
+    if causal:
+        return torch.arange(-seqlen_k + 1, 1, device=device, dtype=dtypes.fp32) * slopes
+    else:
+        row_idx = rearrange(
+            torch.arange(seqlen_q, device=device, dtype=torch.long), "s -> s 1"
+        )
+        col_idx = torch.arange(seqlen_k, device=device, dtype=torch.long)
+        if key_leftpad is not None:
+            key_leftpad = rearrange(key_leftpad, "b -> b 1 1 1")
+            col_idx = repeat(col_idx, "s -> b 1 1 s", b=key_leftpad.shape[0])
+            col_idx = torch.where(col_idx >= key_leftpad, col_idx - key_leftpad, 2**32)
+        sk = (
+            seqlen_k
+            if key_padding_mask is None
+            else rearrange(key_padding_mask.sum(-1), "b -> b 1 1 1")
+        )
+        sq = (
+            seqlen_q
+            if query_padding_mask is None
+            else rearrange(query_padding_mask.sum(-1), "b -> b 1 1 1")
+        )
+        relative_pos = torch.abs(row_idx + sk - sq - col_idx)
+        return -slopes * relative_pos.to(dtype=slopes.dtype)
+
+
+def generate_random_padding_mask(max_seqlen, batch_size, device, mode="random"):
+    assert mode in ["full", "random", "third"]
+    if mode == "full":
+        lengths = torch.full(
+            (batch_size, 1), max_seqlen, device=device, dtype=dtypes.i32
+        )
+    elif mode == "random":
+        lengths = torch.randint(
+            max(1, max_seqlen - 20), max_seqlen + 1, (batch_size, 1), device=device
+        )
+    elif mode == "third":
+        lengths = torch.randint(
+            max_seqlen // 3, max_seqlen + 1, (batch_size, 1), device=device
+        )
+    padding_mask = (
+        repeat(torch.arange(max_seqlen, device=device), "s -> b s", b=batch_size)
+        < lengths
+    )
+    return padding_mask
+
+
+def generate_qkv(
+    q,
+    k,
+    v,
+    query_padding_mask=None,
+    key_padding_mask=None,
+    kvpacked=False,
+    qkvpacked=False,
+    input_layout="BSHD",
+):
+    """
+    Arguments:
+        q: (batch_size, seqlen_q, nheads, d)
+        k: (batch_size, seqlen_k, nheads_k, d)
+        v: (batch_size, seqlen_k, nheads_k, d_v)
+        query_padding_mask: (batch_size, seqlen), bool
+        key_padding_mask: (batch_size, seqlen), bool
+        input_layout: "BSHD", "BHSD", "SBHD"
+    """
+    assert not (kvpacked and qkvpacked)
+    batch_size, seqlen_q, nheads, d = q.shape
+    _, seqlen_k, nheads_k, _ = k.shape
+    _, _, _, d_v = v.shape
+    assert k.shape == (batch_size, seqlen_k, nheads_k, d)
+    assert v.shape == (batch_size, seqlen_k, nheads_k, d_v)
+
+    if input_layout == "BHSD":
+        # BSHD-->BHSD
+        q = q.permute(0, 2, 1, 3).contiguous().permute(0, 2, 1, 3)
+        k = k.permute(0, 2, 1, 3).contiguous().permute(0, 2, 1, 3)
+        v = v.permute(0, 2, 1, 3).contiguous().permute(0, 2, 1, 3)
+    elif input_layout == "SBHD":
+        # BSHD-->SBHD
+        q = q.permute(1, 0, 2, 3).contiguous().permute(1, 0, 2, 3)
+        k = k.permute(1, 0, 2, 3).contiguous().permute(1, 0, 2, 3)
+        v = v.permute(1, 0, 2, 3).contiguous().permute(1, 0, 2, 3)
+
+    if query_padding_mask is not None:
+        q_unpad, indices_q, cu_seqlens_q, max_seqlen_q, _ = unpad_input(
+            q, query_padding_mask
+        )
+        output_pad_fn = lambda output_unpad: pad_input(
+            output_unpad, indices_q, batch_size, seqlen_q
+        )
+    else:
+        q_unpad = rearrange(q, "b s h d -> (b s) h d")
+        cu_seqlens_q = torch.arange(
+            0,
+            (batch_size + 1) * seqlen_q,
+            step=seqlen_q,
+            dtype=dtypes.i32,
+            device=q_unpad.device,
+        )
+        max_seqlen_q = seqlen_q
+        output_pad_fn = lambda output_unpad: rearrange(
+            output_unpad, "(b s) h d -> b s h d", b=batch_size
+        )
+
+    if key_padding_mask is not None:
+        k_unpad, indices_k, cu_seqlens_k, max_seqlen_k, _ = unpad_input(
+            k, key_padding_mask
+        )
+        v_unpad, _, _, _, _ = unpad_input(v, key_padding_mask)
+    else:
+        k_unpad = rearrange(k, "b s h d -> (b s) h d")
+        v_unpad = rearrange(v, "b s h d -> (b s) h d")
+        cu_seqlens_k = torch.arange(
+            0,
+            (batch_size + 1) * seqlen_k,
+            step=seqlen_k,
+            dtype=dtypes.i32,
+            device=k_unpad.device,
+        )
+        max_seqlen_k = seqlen_k
+
+    if qkvpacked:
+        assert (query_padding_mask is None and key_padding_mask is None) or (
+            query_padding_mask == key_padding_mask
+        ).all()
+        assert seqlen_q == seqlen_k
+        assert d == d_v
+        qkv_unpad = torch.cat([q_unpad, k_unpad, v_unpad], dim=1)
+        qkv = torch.cat([q, k, v], dim=2)
+        if query_padding_mask is not None:
+            dqkv_pad_fn = lambda dqkv_unpad: pad_input(
+                dqkv_unpad, indices_q, batch_size, seqlen_q
+            )
+        else:
+            dqkv_pad_fn = lambda dqkv_unpad: rearrange(
+                dqkv_unpad, "(b s) h d -> b s h d", b=batch_size
+            )
+        q_unpad, k_unpad, v_unpad = torch.split(
+            qkv_unpad, [q_unpad.shape[1], k_unpad.shape[1], v_unpad.shape[1]], dim=1
+        )
+        q, k, v = torch.split(qkv, [q.shape[2], k.shape[2], v.shape[2]], dim=2)
+        return (
+            q_unpad.detach().requires_grad_(),
+            k_unpad.detach().requires_grad_(),
+            v_unpad.detach().requires_grad_(),
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            q.detach().requires_grad_(),
+            k.detach().requires_grad_(),
+            v.detach().requires_grad_(),
+            output_pad_fn,
+            dqkv_pad_fn,
+            dqkv_pad_fn,
+        )
+    elif kvpacked:
+        assert d == d_v
+        kv_unpad = torch.stack([k_unpad, v_unpad], dim=1)
+        kv = torch.stack([k, v], dim=2)
+        dq_pad_fn = output_pad_fn
+        if key_padding_mask is not None:
+            dkv_pad_fn = lambda dkv_unpad: pad_input(
+                dkv_unpad, indices_k, batch_size, seqlen_k
+            )
+        else:
+            dkv_pad_fn = lambda dkv_unpad: rearrange(
+                dkv_unpad, "(b s) h d -> b s h d", b=batch_size
+            )
+
+        k_unpad, v_unpad = kv_unpad.unbind(dim=1)
+        k, v = kv.unbind(dim=2)
+        return (
+            q_unpad.detach().requires_grad_(),
+            k_unpad.detach().requires_grad_(),
+            v_unpad.detach().requires_grad_(),
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            q.detach().requires_grad_(),
+            k.detach().requires_grad_(),
+            v.detach().requires_grad_(),
+            output_pad_fn,
+            dq_pad_fn,
+            dkv_pad_fn,
+        )
+    else:
+        dq_pad_fn = output_pad_fn
+        if key_padding_mask is not None:
+            dk_pad_fn = lambda dk_unpad: pad_input(
+                dk_unpad, indices_k, batch_size, seqlen_k
+            )
+        else:
+            dk_pad_fn = lambda dk_unpad: rearrange(
+                dk_unpad, "(b s) h d -> b s h d", b=batch_size
+            )
+        return (
+            q_unpad.detach().requires_grad_(),
+            k_unpad.detach().requires_grad_(),
+            v_unpad.detach().requires_grad_(),
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            q.detach().requires_grad_(),
+            k.detach().requires_grad_(),
+            v.detach().requires_grad_(),
+            output_pad_fn,
+            dq_pad_fn,
+            dk_pad_fn,
+        )
+
+
+def construct_local_mask(
+    seqlen_q,
+    seqlen_k,
+    window_size=(-1, -1),  # -1 means infinite window size
+    query_padding_mask=None,
+    key_padding_mask=None,
+    device=None,
+    key_leftpad=None,
+):
+    row_idx = rearrange(
+        torch.arange(seqlen_q, device=device, dtype=torch.long), "s -> s 1"
+    )
+    col_idx = torch.arange(seqlen_k, device=device, dtype=torch.long)
+    if key_leftpad is not None:
+        key_leftpad = rearrange(key_leftpad, "b -> b 1 1 1")
+        col_idx = repeat(col_idx, "s -> b 1 1 s", b=key_leftpad.shape[0])
+        col_idx = torch.where(col_idx >= key_leftpad, col_idx - key_leftpad, 2**32)
+    sk = (
+        seqlen_k
+        if key_padding_mask is None
+        else rearrange(key_padding_mask.sum(-1), "b -> b 1 1 1")
+    )
+    sq = (
+        seqlen_q
+        if query_padding_mask is None
+        else rearrange(query_padding_mask.sum(-1), "b -> b 1 1 1")
+    )
+    if window_size[0] < 0:
+        return col_idx > row_idx + sk - sq + window_size[1]
+    else:
+        sk = torch.full_like(col_idx, seqlen_k) if key_padding_mask is None else sk
+        return torch.logical_or(
+            col_idx > torch.minimum(row_idx + sk - sq + window_size[1], sk),
+            col_idx < row_idx + sk - sq - window_size[0],
+        )
+
+
+def block_attn_mask_to_token_mask(
+    block_attn_mask,
+    seqlen_q,
+    seqlen_k,
+    BLOCK_M,
+    BLOCK_N,
+    device,
+):
+    """
+    Build a token-level attention mask from a block-level mask.
+
+    block_attn_mask: 3D (batch, num_q_blocks, num_kv_blocks) or
+        4D (batch, num_heads, num_q_blocks, num_kv_blocks) boolean.
+        True = may attend, False = must not attend.
+    Returns:
+        3D: (batch_size, seqlen_q, seqlen_k) boolean, True = may attend.
+        4D: (batch_size, num_heads, seqlen_q, seqlen_k) boolean, True = may attend.
+    """
+    nd = block_attn_mask.dim()
+    assert nd in (3, 4), "block_attn_mask must be 3D or 4D"
+    q_block_idx = (
+        torch.arange(seqlen_q, device=device)
+        .div(BLOCK_M, rounding_mode="floor")
+        .clamp(max=block_attn_mask.shape[nd - 2] - 1)
+    )
+    k_block_idx = (
+        torch.arange(seqlen_k, device=device)
+        .div(BLOCK_N, rounding_mode="floor")
+        .clamp(max=block_attn_mask.shape[nd - 1] - 1)
+    )
+    if nd == 3:
+        attn_mask = block_attn_mask[:, q_block_idx, :][
+            :, :, k_block_idx
+        ]  # (B, seqlen_q, seqlen_k)
+        return attn_mask
+    # 4D: (B, H, num_q_blocks, num_kv_blocks)
+    attn_mask = block_attn_mask[:, :, q_block_idx, :][
+        :, :, :, k_block_idx
+    ]  # (B, H, seqlen_q, seqlen_k)
+    return attn_mask
+
+
+def attention_ref_block_sparse(
+    q,
+    k,
+    v,
+    block_attn_mask,
+    BLOCK_M,
+    BLOCK_N,
+    query_padding_mask=None,
+    key_padding_mask=None,
+    attn_bias=None,
+    dropout_p=0.0,
+    dropout_mask=None,
+    softcap=0.0,
+    upcast=True,
+):
+    """
+    Reference attention with block-wise sparsity: only (q_block, kv_block) pairs
+    with block_attn_mask[b, qb, kb] == True are allowed to attend.
+
+    q, k, v: same as attention_ref (batch, seqlen_q, nheads, head_dim) in bshd.
+    block_attn_mask: 3D (batch, num_q_blocks, num_kv_blocks) or
+        4D (batch, num_heads, num_q_blocks, num_kv_blocks) boolean.
+    Returns: (output, attention_scores, lse) like attention_ref.
+    """
+    assert block_attn_mask.dim() in (3, 4), "block_attn_mask must be 3D or 4D"
+    dtype_og = q.dtype
+    if upcast:
+        q, k, v = q.float(), k.float(), v.float()
+    seqlen_q, seqlen_k = q.shape[1], k.shape[1]
+
+    # Check that the number of keys matches the number of values.
+    assert seqlen_k == v.shape[1]
+
+    k = repeat(k, "b s h d -> b s (h g) d", g=q.shape[2] // k.shape[2])
+    v = repeat(v, "b s h d -> b s (h g) d", g=q.shape[2] // v.shape[2])
+    d = q.shape[-1]
+    scores = torch.einsum("bthd,bshd->bhts", q / math.sqrt(d), k)
+    # Apply block-sparse mask: token_mask True = disallow -> -inf
+    allow_mask = block_attn_mask_to_token_mask(
+        block_attn_mask, seqlen_q, seqlen_k, BLOCK_M, BLOCK_N, q.device
+    )
+    token_mask = ~allow_mask  # True = disallow
+    if block_attn_mask.dim() == 3:
+        scores.masked_fill_(rearrange(token_mask, "b t s -> b 1 t s"), float("-inf"))
+    else:
+        scores.masked_fill_(token_mask, float("-inf"))
+    if key_padding_mask is not None:
+        scores.masked_fill_(
+            rearrange(~key_padding_mask, "b s -> b 1 1 s"), float("-inf")
+        )
+    if attn_bias is not None:
+        scores = scores + attn_bias
+    lse = torch.logsumexp(scores, dim=-1).to(v.dtype)
+    attention = torch.softmax(scores, dim=-1).to(v.dtype)
+    all_masked = token_mask.all(
+        dim=-1
+    )  # (batch, seqlen_q) or (batch, num_heads, seqlen_q)
+    if block_attn_mask.dim() == 3:
+        attention = attention.masked_fill(rearrange(all_masked, "b t -> b 1 t 1"), 0.0)
+    else:
+        attention = attention.masked_fill_(all_masked.unsqueeze(-1), 0.0)
+    if query_padding_mask is not None:
+        attention = attention.masked_fill(
+            rearrange(~query_padding_mask, "b s -> b 1 s 1"), 0.0
+        )
+    dropout_scaling = 1.0 / (1 - dropout_p)
+    if dropout_mask is not None:
+        attention_drop = attention.masked_fill(~dropout_mask, 0.0)
+    else:
+        attention_drop = attention
+    output = torch.einsum("bhts,bshd->bthd", attention_drop, v * dropout_scaling)
+    if query_padding_mask is not None:
+        output.masked_fill_(rearrange(~query_padding_mask, "b s -> b s 1 1"), 0.0)
+    return (
+        output.to(dtype=dtype_og),
+        attention.to(dtype=dtype_og),
+        lse.to(dtype=dtype_og),
+    )
+
+
+def attention_ref(
+    q,
+    k,
+    v,
+    query_padding_mask=None,
+    key_padding_mask=None,
+    attn_bias=None,
+    dropout_p=0.0,
+    dropout_mask=None,
+    causal=False,
+    window_size=(-1, -1),  # -1 means infinite window size
+    softcap=0.0,
+    upcast=True,
+    reorder_ops=False,
+    key_leftpad=None,
+    sink=None,
+):
+    """
+    Arguments:
+        q: (batch_size, seqlen_q, nheads, head_dim_q)
+        k: (batch_size, seqlen_k, nheads_k, head_dim_q)
+        v: (batch_size, seqlen_k, nheads_k, head_dim_v)
+        query_padding_mask: (batch_size, seqlen_q)
+        key_padding_mask: (batch_size, seqlen_k)
+        attn_bias: broadcastable to (batch_size, nheads, seqlen_q, seqlen_k)
+        dropout_p: float
+        dropout_mask: (batch_size, nheads, seqlen_q, seqlen_k)
+        causal: whether to apply causal masking
+        window_size: (int, int), left and right window size
+        upcast: whether to cast all inputs to fp32, do all computation in fp32, then cast
+            output back to fp16/bf16.
+        reorder_ops: whether to change the order of operations (scaling k instead of scaling q, etc.)
+            without changing the math. This is to estimate the numerical error from operation
+            reordering.
+        sink: (nheads,), attention sink scores (one per Q head), or None
+    Output:
+        output: (batch_size, seqlen_q, nheads, head_dim_v)
+        attention: (batch_size, nheads, seqlen_q, seqlen_k), softmax after dropout
+        lse: (batch_size, nheads, seqlen_q), logsumexp of scores
+    """
+    if causal:
+        window_size = (window_size[0], 0)
+    dtype_og = q.dtype
+    if upcast:
+        q, k, v = q.float(), k.float(), v.float()
+        if sink is not None:
+            sink = sink.float()
+    seqlen_q, seqlen_k = q.shape[1], k.shape[1]
+    k = repeat(k, "b s h d -> b s (h g) d", g=q.shape[2] // k.shape[2])
+    v = repeat(v, "b s h d -> b s (h g) d", g=q.shape[2] // v.shape[2])
+    d = q.shape[-1]
+    if not reorder_ops:
+        scores = torch.einsum("bthd,bshd->bhts", q / math.sqrt(d), k)
+    else:
+        scores = torch.einsum("bthd,bshd->bhts", q, k / math.sqrt(d))
+    if softcap > 0:
+        scores = scores / softcap
+        scores = scores.tanh()
+        scores = scores * softcap
+    if key_padding_mask is not None:
+        scores.masked_fill_(
+            rearrange(~key_padding_mask, "b s -> b 1 1 s"), float("-inf")
+        )
+    if window_size[0] >= 0 or window_size[1] >= 0:
+        local_mask = construct_local_mask(
+            seqlen_q,
+            seqlen_k,
+            window_size,
+            query_padding_mask,
+            key_padding_mask,
+            q.device,
+            key_leftpad=key_leftpad,
+        )
+        scores.masked_fill_(local_mask, float("-inf"))
+    if attn_bias is not None:
+        scores = scores + attn_bias
+    if sink is not None:
+        # Concatenate sink scores to the attention scores.
+        batch_size = scores.shape[0]
+        nheads = scores.shape[1]
+        sink_expanded = sink.view(1, nheads, 1, 1).expand(batch_size, -1, seqlen_q, -1)
+        scores = torch.cat([scores, sink_expanded], dim=-1)
+    lse = torch.logsumexp(scores, dim=-1).to(v.dtype)
+    attention = torch.softmax(scores, dim=-1).to(v.dtype)
+    if sink is not None:
+        # Remove sink attention weights before computing output.
+        attention = attention[..., :-1]
+    # Some rows might be completely masked out so we fill them with zero instead of NaN
+    if window_size[0] >= 0 or window_size[1] >= 0:
+        attention = attention.masked_fill(
+            torch.all(local_mask, dim=-1, keepdim=True), 0.0
+        )
+    # We want to mask here so that the attention matrix doesn't have any NaNs
+    # Otherwise we'll get NaN in dV
+    if query_padding_mask is not None:
+        attention = attention.masked_fill(
+            rearrange(~query_padding_mask, "b s -> b 1 s 1"), 0.0
+        )
+    dropout_scaling = 1.0 / (1 - dropout_p)
+    # attention_drop = attention.masked_fill(~dropout_mask, 0.0) * dropout_scaling
+    # output = torch.einsum('bhts,bshd->bthd', attention_drop , v)
+    if dropout_mask is not None:
+        attention_drop = attention.masked_fill(~dropout_mask, 0.0)
+    else:
+        attention_drop = attention
+    output = torch.einsum("bhts,bshd->bthd", attention_drop, v * dropout_scaling)
+    if query_padding_mask is not None:
+        output.masked_fill_(rearrange(~query_padding_mask, "b s -> b s 1 1"), 0.0)
+    return (
+        output.to(dtype=dtype_og),
+        attention.to(dtype=dtype_og),
+        lse.to(dtype=dtype_og),
+    )
+
+
+def attention_ref_with_tol(q, k, v, do, is_fp8=False, **kwargs):
+    """Run attention reference and compute adaptive tolerances.
+
+    Follows the upstream flash attention tolerance pattern
+    (see tests/test_flash_attn.py in Dao-AILab/flash-attention). Runs two
+    PyTorch references (upcast and non-upcast) and uses the gap between them as
+    a baseline for tolerance.
+
+    Returns (out, (dq, dk, dv), fwd_tol, [dq_tol, dk_tol, dv_tol])
+    where each tol is (atol, rtol).
+    """
+    has_dropout = kwargs.get("dropout_p", 0.0) > 0.0
+
+    def _run_ref(upcast, reorder_ops=False):
+        q_ = q.detach().clone().requires_grad_(True)
+        k_ = k.detach().clone().requires_grad_(True)
+        v_ = v.detach().clone().requires_grad_(True)
+        with torch.enable_grad():
+            out, _, _ = attention_ref(
+                q_, k_, v_, upcast=upcast, reorder_ops=reorder_ops, **kwargs
+            )
+        dq, dk, dv = torch.autograd.grad(out, (q_, k_, v_), do)
+        return out, dq, dk, dv
+
+    def _tol(ref_val, pt_val, is_forward=False):
+        baseline = (pt_val - ref_val).abs().max().item()
+        if is_fp8:
+            mult = 4
+            atol_floor = 5e-1 if is_forward else 1.0
+            rtol_floor = 1e-1
+        elif has_dropout:
+            # Dropout scaling (1/(1-p)) amplifies precision errors in the
+            # fused kernel differently than in the reference. The baseline
+            # between two references uses the same mask so it underestimates
+            # the kernel-vs-reference gap.
+            mult = 2
+            atol_floor = 1e-1 if is_forward else 2.0
+            rtol_floor = 1e-1
+        else:
+            mult = 2
+            atol_floor = 1e-2 if is_forward else 1.5e-2
+            rtol_floor = 1e-5
+        atol = max(mult * baseline, atol_floor)
+        return atol, rtol_floor
+
+    out, dq, dk, dv = _run_ref(upcast=True)
+    out_pt, dq_pt, dk_pt, dv_pt = _run_ref(upcast=False, reorder_ops=True)
+
+    fwd_tol = _tol(out, out_pt, is_forward=True)
+    bwd_tols = [_tol(dq, dq_pt), _tol(dk, dk_pt), _tol(dv, dv_pt)]
+
+    return out, (dq, dk, dv), fwd_tol, bwd_tols

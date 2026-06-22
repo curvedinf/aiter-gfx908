@@ -1,0 +1,567 @@
+name: Flash Attention Integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'aiter/ops/triton/_triton_kernels/flash_attn_triton_amd/**'
+      - 'aiter/ops/triton/attention/mha_v3.py'
+      - 'aiter/ops/triton/__init__.py'
+      - 'aiter/ops/mha.py'
+      - 'csrc/py_itfs_ck/mha_*'
+      - 'csrc/py_itfs_ck/attention_kernels.cu'
+      - 'setup.py'
+      - 'aiter/__init__.py'
+      - '.github/workflows/flash_attention_integration.yaml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'aiter/ops/triton/_triton_kernels/flash_attn_triton_amd/**'
+      - 'aiter/ops/triton/attention/mha_v3.py'
+      - 'aiter/ops/triton/__init__.py'
+      - 'aiter/ops/mha.py'
+      - 'csrc/py_itfs_ck/mha_*'
+      - 'csrc/py_itfs_ck/attention_kernels.cu'
+      - 'setup.py'
+      - 'aiter/__init__.py'
+      - '.github/workflows/flash_attention_integration.yaml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+env:
+  FA_BRANCH: main
+  FA_REPOSITORY_URL: https://github.com/Dao-AILab/flash-attention.git
+  BASE_IMAGE: rocm/pytorch:latest@sha256:683765a52c61341e1674fe730ab3be861a444a45a36c0a8caae7653a08a0e208
+  AITER_SUBMODULE_PATH: third_party/aiter
+  DOCKER_PULL_MAX_ATTEMPTS: "3"
+  DOCKER_PULL_RETRY_DELAY_SECONDS: "10"
+
+jobs:
+  check-signal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Wait for Checks workflow
+        run: ./.github/scripts/check_signal.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_SHA: ${{ github.sha }}
+
+  prechecks:
+    runs-on: ubuntu-latest
+    outputs:
+      run_triton: ${{ steps.gate.outputs.run_triton }}
+      run_ck: ${{ steps.gate.outputs.run_ck }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            shared:
+              - 'setup.py'
+              - 'aiter/__init__.py'
+              - '.github/workflows/flash_attention_integration.yaml'
+            triton:
+              - 'aiter/ops/triton/_triton_kernels/flash_attn_triton_amd/**'
+              - 'aiter/ops/triton/attention/mha_v3.py'
+              - 'aiter/ops/triton/__init__.py'
+            ck:
+              - 'aiter/ops/mha.py'
+              - 'csrc/py_itfs_ck/mha_*'
+              - 'csrc/py_itfs_ck/attention_kernels.cu'
+      - name: Compute job gates
+        id: gate
+        run: |
+          SHARED="${{ steps.filter.outputs.shared }}"
+          TRITON="${{ steps.filter.outputs.triton }}"
+          CK="${{ steps.filter.outputs.ck }}"
+          DISPATCH="${{ github.event_name == 'workflow_dispatch' }}"
+
+          if [ "$TRITON" = "true" ] || [ "$SHARED" = "true" ] || [ "$DISPATCH" = "true" ]; then
+            echo "run_triton=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$CK" = "true" ] || [ "$SHARED" = "true" ] || [ "$DISPATCH" = "true" ]; then
+            echo "run_ck=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # =============================================================================
+  # Triton Backend
+  # =============================================================================
+  flash_attention_triton:
+    if: ${{ needs.prechecks.outputs.run_triton == 'true' }}
+    name: Flash Attention - Triton / ${{ matrix.label }} (1 GPU)
+    needs: [check-signal, prechecks]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: linux-aiter-mi35x-1
+            label: MI35X
+          - runner: aiter-gfx1100
+            label: RDNA3
+            optional: true
+    continue-on-error: ${{ matrix.optional || false }}
+
+    steps:
+      - name: Checkout aiter repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Docker login
+        if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+        env:
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          for attempt in 1 2 3; do
+            if echo "$DOCKER_PASSWORD" | docker login -u rocmshared --password-stdin; then
+              echo "Docker login succeeded on attempt ${attempt}"
+              exit 0
+            fi
+            echo "Docker login attempt ${attempt} failed"
+            if [ "${attempt}" != 3 ]; then
+              sleep 10
+            fi
+          done
+          echo "Docker login failed after 3 attempts, continuing anyway"
+          exit 0
+
+      - name: Pull base image
+        run: bash .github/scripts/docker_pull_with_retry.sh "${{ env.BASE_IMAGE }}"
+
+      # ===========================================
+      # Flash Attention v2
+      # ===========================================
+      - name: Generate Dockerfile (v2)
+        run: |
+          cat <<'EOF' > Dockerfile.triton
+          FROM ${{ env.BASE_IMAGE }}
+
+          # Install test dependencies
+          RUN pip install --upgrade pip
+          RUN pip install pytest pytest-rerunfailures pytest-timeout einops
+
+          # Install FA (setup.py handles submodule init and installs its pinned aiter)
+          RUN git clone -b ${{ env.FA_BRANCH }} ${{ env.FA_REPOSITORY_URL }} /flash-attention && \
+              cd /flash-attention && \
+              FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE \
+              pip install --no-build-isolation .
+
+          # Override with PR aiter
+          COPY . /aiter
+          RUN pip uninstall -y amd-aiter && pip install --no-build-isolation -e /aiter
+
+          # Verify aiter is installed from PR branch
+          RUN pip show flash-attn && pip show amd-aiter && pip show triton && \
+              python -c "from importlib.metadata import distribution; d = distribution('amd-aiter'); loc = d.read_text('direct_url.json'); assert '/aiter' in loc, f'aiter not from PR branch: {loc}'"
+
+          WORKDIR /flash-attention
+          EOF
+
+      - name: Build Docker image (v2)
+        run: docker build -t fa_triton_test:ci -f Dockerfile.triton .
+
+      - name: Start CI container (v2)
+        run: |
+          docker ps -aq -f name=fa_triton_test | xargs -r docker stop | xargs -r docker rm || true
+
+          if [ -f "/etc/podinfo/gha-render-devices" ]; then
+            DEVICE_FLAG=$(cat /etc/podinfo/gha-render-devices)
+          else
+            DEVICE_FLAG="--device /dev/dri"
+          fi
+
+          docker run -dt --user root --device=/dev/kfd $DEVICE_FLAG \
+            --ipc=host --group-add video \
+            --network=host \
+            --shm-size 32g \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            -w /flash-attention \
+            --name fa_triton_test \
+            fa_triton_test:ci
+
+      - name: Run benchmarks (v2)
+        if: ${{ github.event_name != 'push' }}
+        timeout-minutes: 60
+        run: |
+          set -o pipefail
+          docker exec fa_triton_test bash -c "
+            cd /flash-attention
+            FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE \
+            python benchmarks/benchmark_flash_attention.py
+          " |& tee benchmark_fa_triton_${{ matrix.label }}.log
+          docker exec fa_triton_test bash -c "
+            cd /aiter
+            python op_tests/op_benchmarks/triton/bench_mha.py \
+              -impl dao_ai -metric throughput -o /tmp/bench_dao_ai
+          " |& tee benchmark_mha_daoai_${{ matrix.label }}.log
+          docker cp fa_triton_test:/tmp/bench_dao_ai/ bench_dao_ai_${{ matrix.label }}/ 2>/dev/null || true
+
+      - name: PR correctness tests (v2)
+        if: ${{ github.event_name != 'push' }}
+        timeout-minutes: 90
+        run: |
+          docker exec fa_triton_test bash -c "
+            cd /flash-attention
+            export FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE
+            export FLASH_ATTENTION_TRITON_AMD_AUTOTUNE=0
+            pytest -v --reruns 2 --timeout=120 \
+              tests/test_flash_attn_triton_amd.py::test_flash_attn_output \
+              -k '2048-2048' && \
+            pytest -v --reruns 2 --timeout=120 \
+              tests/test_flash_attn_triton_amd.py::test_flash_attn_varlen_output \
+              -k '1024-1024' && \
+            pytest -v --reruns 2 --timeout=120 \
+              tests/test_flash_attn_triton_amd.py::test_flash_attn_kvcache \
+              -k '16-20000'
+          "
+
+      - name: Post-merge correctness tests (v2)
+        if: ${{ github.event_name == 'push' && matrix.label == 'MI35X' }}
+        timeout-minutes: 360
+        run: |
+          docker exec fa_triton_test bash -c "
+            cd /flash-attention
+            FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE \
+            FLASH_ATTENTION_TRITON_AMD_AUTOTUNE=0 \
+            pytest -v --reruns 2 --timeout=120 \
+              tests/test_flash_attn_triton_amd.py
+          "
+
+      - name: Clean up v2 container
+        if: always()
+        run: |
+          docker stop fa_triton_test || true
+          docker rm -f fa_triton_test || true
+          docker rmi fa_triton_test:ci || true
+
+      # ===========================================
+      # Flash Attention v3 (Hopper)
+      # ===========================================
+      - name: Generate Dockerfile (v3)
+        if: ${{ matrix.label == 'MI35X' }}
+        run: |
+          cat <<'EOF' > Dockerfile.triton_v3
+          FROM ${{ env.BASE_IMAGE }}
+
+          RUN pip install --upgrade pip
+          RUN pip install pytest pytest-rerunfailures pytest-timeout einops
+
+          RUN git clone -b ${{ env.FA_BRANCH }} ${{ env.FA_REPOSITORY_URL }} /flash-attention && \
+              cd /flash-attention/hopper && \
+              FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE \
+              FLASH_ATTENTION_FORCE_BUILD=TRUE \
+              pip install --no-build-isolation .
+
+          COPY . /aiter
+          RUN pip uninstall -y amd-aiter && pip install --no-build-isolation -e /aiter
+
+          RUN pip show flash-attn-3 && pip show amd-aiter && pip show triton && \
+              python -c "from importlib.metadata import distribution; d = distribution('amd-aiter'); loc = d.read_text('direct_url.json'); assert '/aiter' in loc, f'aiter not from PR branch: {loc}'"
+
+          WORKDIR /flash-attention
+          EOF
+
+      - name: Build Docker image (v3)
+        if: ${{ matrix.label == 'MI35X' }}
+        run: docker build -t fa_triton_v3_test:ci -f Dockerfile.triton_v3 .
+
+      - name: Start CI container (v3)
+        if: ${{ matrix.label == 'MI35X' }}
+        run: |
+          docker ps -aq -f name=fa_triton_v3_test | xargs -r docker stop | xargs -r docker rm || true
+
+          if [ -f "/etc/podinfo/gha-render-devices" ]; then
+            DEVICE_FLAG=$(cat /etc/podinfo/gha-render-devices)
+          else
+            DEVICE_FLAG="--device /dev/dri"
+          fi
+
+          docker run -dt --user root --device=/dev/kfd $DEVICE_FLAG \
+            --ipc=host --group-add video \
+            --network=host \
+            --shm-size 32g \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            -w /flash-attention \
+            --name fa_triton_v3_test \
+            fa_triton_v3_test:ci
+
+      - name: PR correctness tests (v3)
+        if: ${{ github.event_name != 'push' && matrix.label == 'MI35X' }}
+        timeout-minutes: 90
+        run: |
+          docker exec fa_triton_v3_test bash -c "
+            cd /flash-attention
+            export FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE
+            export FLASH_ATTENTION_TRITON_AMD_AUTOTUNE=0
+            export PYTHONPATH=/flash-attention/hopper:\${PYTHONPATH:-}
+            pytest -v --reruns 2 --timeout=120 \
+              hopper/test_flash_attn_triton_amd.py::test_flash_attn_output \
+              -k '4096-4096' && \
+            pytest -v --reruns 2 --timeout=120 \
+              hopper/test_flash_attn_triton_amd.py::test_flash_attn_varlen_output \
+              -k '1024-1024' && \
+            pytest -v --reruns 2 --timeout=120 \
+              hopper/test_flash_attn_triton_amd.py::test_flash_attn_kvcache \
+              -k '16-20000'
+          "
+
+      - name: Post-merge correctness tests (v3)
+        if: ${{ github.event_name == 'push' && matrix.label == 'MI35X' }}
+        timeout-minutes: 360
+        run: |
+          docker exec fa_triton_v3_test bash -c "
+            cd /flash-attention
+            export FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE
+            export FLASH_ATTENTION_TRITON_AMD_AUTOTUNE=0
+            export PYTHONPATH=/flash-attention/hopper:\${PYTHONPATH:-}
+            pytest -v --reruns 2 --timeout=120 \
+              hopper/test_flash_attn_triton_amd.py
+          "
+
+      - name: Clean up v3 container
+        if: ${{ always() && matrix.label == 'MI35X' }}
+        run: |
+          docker stop fa_triton_v3_test || true
+          docker rm -f fa_triton_v3_test || true
+          docker rmi fa_triton_v3_test:ci || true
+
+      # ===========================================
+      # Artifacts
+      # ===========================================
+      - name: Upload benchmark results
+        if: ${{ success() && github.event_name != 'push' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: flash-attention-triton-benchmark-${{ matrix.label }}
+          path: |
+            benchmark_fa_triton_${{ matrix.label }}.log
+            benchmark_mha_daoai_${{ matrix.label }}.log
+            bench_dao_ai_${{ matrix.label }}/
+          retention-days: 7
+
+  # =============================================================================
+  # Windows Smoke Test
+  # =============================================================================
+  windows_smoke:
+    if: ${{ needs.prechecks.outputs.run_triton == 'true' }}
+    name: Windows Smoke Test
+    needs: [prechecks]
+    runs-on: windows-latest
+    steps:
+      - name: Checkout aiter repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install triton-windows
+        shell: bash
+
+      - name: Install aiter
+        run: pip install -e . --no-build-isolation
+        shell: bash
+
+      - name: Install flash-attention (Triton backend)
+        run: |
+          git clone -b ${{ env.FA_BRANCH }} ${{ env.FA_REPOSITORY_URL }} "$RUNNER_TEMP/flash-attention"
+          rm -rf "$RUNNER_TEMP/flash-attention/${{ env.AITER_SUBMODULE_PATH }}"
+          cp -a . "$RUNNER_TEMP/flash-attention/${{ env.AITER_SUBMODULE_PATH }}"
+          rm -rf "$RUNNER_TEMP/flash-attention/.git"
+          cd "$RUNNER_TEMP/flash-attention"
+          BUILD_TARGET=rocm FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE pip install --no-build-isolation --no-deps -e .
+        shell: bash
+
+      - name: Verify FA imports aiter Triton backend
+        run: |
+          cd "$RUNNER_TEMP/flash-attention"
+          FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE python -c "from flash_attn.flash_attn_interface import flash_attn_func; print('flash_attn_func loaded:', flash_attn_func)"
+
+          # Simulate partial ROCm install (fake hipconfig + ROCM_HOME) to catch OSError from cpp_extension.py
+          mkdir -p "$RUNNER_TEMP/fake_rocm/bin"
+          printf '#!/bin/bash\necho 6.4.0\n' > "$RUNNER_TEMP/fake_rocm/bin/hipconfig"
+          chmod +x "$RUNNER_TEMP/fake_rocm/bin/hipconfig"
+          ROCM_HOME="$RUNNER_TEMP/fake_rocm" PATH="$RUNNER_TEMP/fake_rocm/bin:$PATH" FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE \
+            python -c "from flash_attn.flash_attn_interface import flash_attn_func; print('flash_attn_func loaded (fake ROCm):', flash_attn_func)"
+        shell: bash
+
+  # AITER_TRITON_ONLY import contract (no C++ JIT, no GPU, no ROCm runtime).
+  triton_only_smoke:
+    if: ${{ needs.prechecks.outputs.run_triton == 'true' }}
+    name: Triton-only Smoke
+    needs: [prechecks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout aiter repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install torch (CPU, PyPI)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+        shell: bash
+
+      - name: Install aiter (Triton-only, no C++ build)
+        env:
+          AITER_TRITON_ONLY: 1
+        run: pip install -e . --no-build-isolation
+        shell: bash
+
+      - name: Import aiter (Triton ops only, no JIT)
+        env:
+          AITER_TRITON_ONLY: 1
+        run: python -X faulthandler -c "import aiter; import aiter.ops.triton; print('triton-only import OK')"
+        shell: bash
+
+  # =============================================================================
+  # CK Backend
+  # =============================================================================
+  flash_attention_ck:
+    if: false  # Disabled until CK tests are ready
+    # if: ${{ needs.prechecks.outputs.run_ck == 'true' }}
+    name: Flash Attention - CK (1 GPU)
+    needs: [check-signal, prechecks]
+    runs-on: linux-aiter-mi35x-1
+
+    steps:
+      - name: Checkout aiter repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Docker login
+        if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
+        env:
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          for attempt in 1 2 3; do
+            if echo "$DOCKER_PASSWORD" | docker login -u rocmshared --password-stdin; then
+              echo "Docker login succeeded on attempt ${attempt}"
+              exit 0
+            fi
+            echo "Docker login attempt ${attempt} failed"
+            if [ "${attempt}" != 3 ]; then
+              sleep 10
+            fi
+          done
+          echo "Docker login failed after 3 attempts, continuing anyway"
+          exit 0
+
+      - name: Pull base image
+        run: bash .github/scripts/docker_pull_with_retry.sh "${{ env.BASE_IMAGE }}"
+
+      - name: Generate Dockerfile
+        run: |
+          cat <<'EOF' > Dockerfile.ck
+          FROM ${{ env.BASE_IMAGE }}
+
+          # Install test dependencies
+          RUN pip install --upgrade pip
+          RUN pip install pytest pytest-rerunfailures pytest-timeout einops
+
+          # Clone and install flash-attention (CK backend)
+          # Override aiter submodule with local checkout
+          COPY . /aiter
+          RUN git clone -b ${{ env.FA_BRANCH }} ${{ env.FA_REPOSITORY_URL }} /flash-attention && \
+              rm -rf /flash-attention/${{ env.AITER_SUBMODULE_PATH }} && \
+              cp -a /aiter /flash-attention/${{ env.AITER_SUBMODULE_PATH }} && \
+              cd /flash-attention && \
+              pip install --no-build-isolation .
+
+          RUN echo "=== Installed versions ===" && \
+              pip show flash-attn && \
+              pip show amd-aiter
+
+          WORKDIR /flash-attention
+          EOF
+
+      - name: Show Dockerfile
+        run: cat Dockerfile.ck
+
+      - name: Build Docker image
+        run: docker build -t fa_ck_test:ci -f Dockerfile.ck .
+
+      - name: Start CI container
+        run: |
+          docker ps -aq -f name=fa_ck_test | xargs -r docker stop | xargs -r docker rm || true
+
+          if [ -f "/etc/podinfo/gha-render-devices" ]; then
+            DEVICE_FLAG=$(cat /etc/podinfo/gha-render-devices)
+          else
+            DEVICE_FLAG="--device /dev/dri"
+          fi
+
+          docker run -dt --user root --device=/dev/kfd $DEVICE_FLAG \
+            --ipc=host --group-add video \
+            --network=host \
+            --shm-size 32g \
+            --cap-add=SYS_PTRACE \
+            --security-opt seccomp=unconfined \
+            -w /flash-attention \
+            --name fa_ck_test \
+            fa_ck_test:ci
+
+      - name: Run correctness tests
+        timeout-minutes: 360
+        run: |
+          echo "CK tests not yet implemented - to be enabled by ChunYu Lai"
+          # docker exec fa_ck_test bash -c "
+          #   cd /flash-attention
+          #   pytest -v --reruns 2 --timeout=120 tests/test_flash_attn_ck.py
+          # "
+
+      - name: Run benchmarks
+        timeout-minutes: 30
+        run: |
+          echo "CK benchmarks not yet implemented - to be enabled by ChunYu Lai"
+          # set -o pipefail
+          # docker exec fa_ck_test bash -c "
+          #   cd /flash-attention
+          #   python benchmarks/benchmark_flash_attention.py
+          # " |& tee benchmark_fa_ck.log
+
+      - name: Upload benchmark results
+        if: success()
+        run: |
+          echo "CK benchmark upload not yet implemented - to be enabled by ChunYu Lai"
+
+      - name: Clean Up
+        if: always()
+        run: |
+          docker stop fa_ck_test || true
+          docker rm -f fa_ck_test || true
+          docker rmi fa_ck_test:ci || true
+

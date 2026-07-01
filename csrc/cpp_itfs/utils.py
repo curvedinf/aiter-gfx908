@@ -37,6 +37,7 @@ AITER_ROOT_DIR = os.environ.get("AITER_ROOT_DIR", f"{HOME_PATH}/.aiter")
 BUILD_DIR = os.path.abspath(os.path.join(AITER_ROOT_DIR, "build"))
 AITER_LOG_MORE = int(os.getenv("AITER_LOG_MORE", 0))
 AITER_DEBUG = int(os.getenv("AITER_DEBUG", 0))
+ROCM_PATH = os.environ.get("ROCM_PATH", "/opt/rocm")
 
 if AITER_REBUILD >= 1:
     subprocess.run(f"rm -rf {BUILD_DIR}/*", shell=True)
@@ -116,6 +117,7 @@ def validate_and_update_archs():
     # List of allowed architectures
     allowed_archs = [
         "native",
+        "gfx908",
         "gfx90a",
         "gfx940",
         "gfx941",
@@ -212,7 +214,9 @@ def compile_lib(src_file, folder, includes=None, sources=None, cxxflags=None):
         cxxflags += [f"--offload-arch={arch}" for arch in archs]
         cxxflags = [flag for flag in set(cxxflags) if hip_flag_checker(flag)]
         makefile_file = makefile_template.render(
-            includes=[f"-I{include_dir}"], sources=sources, cxxflags=cxxflags
+            includes=[f"-isystem {ROCM_PATH}/include", f"-I{include_dir}"],
+            sources=sources,
+            cxxflags=cxxflags,
         )
         with open(f"{sub_build_dir}/Makefile", "w") as f:
             f.write(makefile_file)

@@ -33,11 +33,3 @@ def is_tdm_avail():
 
 
 _LDS_CAP_BYTES = {"gfx950": 163840, "gfx942": 65536, "gfx908": 65536}
-
-# Number of XCDs/memory partitions per architecture.  MI100/gfx908 has 4;
-# CDNA2/CDNA3 and newer RDNA3+ use 8.
-_NUM_XCDS = {"gfx908": 4}
-
-
-def get_num_xcds():
-    return _NUM_XCDS.get(get_arch(), 8)

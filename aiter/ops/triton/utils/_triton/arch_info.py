@@ -2,10 +2,9 @@ import triton
 
 # For now, there is 1-to-1 correspondence between arch and device
 _ARCH_TO_DEVICE = {
-    # MI100 does not have dedicated AITER tuning tables in this revision.
-    # Tyler's vLLM gfx908 path gates AITER use to MI100-safe Triton kernels;
-    # use the closest CDNA config family for any remaining config lookups.
-    "gfx908": "MI300X",
+    # MI100 gets its own Triton GEMM tuning tables; CK/asm paths are still
+    # gated off in vLLM for gfx908.
+    "gfx908": "MI100",
     "gfx942": "MI300X",
     "gfx950": "MI350X",
 }

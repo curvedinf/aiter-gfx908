@@ -14,7 +14,7 @@ from aiter.ops.triton._triton_kernels.common.splitk_reduce import (
 from aiter.ops.triton._triton_kernels.activation import _get_activation_from_str
 from aiter.ops.triton.utils.gemm_config_utils import get_gemm_config
 from aiter.ops.triton.utils.logger import AiterTritonLogger
-from aiter.ops.triton.utils._triton.arch_info import get_arch
+from aiter.ops.triton.utils._triton.arch_info import get_arch, get_num_xcds
 from aiter.ops.triton.utils.common_utils import serialize_dict, deserialize_str
 from aiter.jit.utils.torch_guard import torch_compile_guard
 
@@ -300,6 +300,7 @@ def gemm_a16w16_(
         use_activation=activation is not None,
         ADD_BIAS=(bias is not None),
         SKIP_REDUCE=skip_reduce,
+        NUM_XCDS=get_num_xcds(),
         **config,
     )
 

@@ -24,6 +24,7 @@ _gemm_a16w16_repr = make_kernel_repr(
         "use_activation",
         "ADD_BIAS",
         "SKIP_REDUCE",
+        "NUM_XCDS",
     ],
 )
 
@@ -69,6 +70,7 @@ def _gemm_a16_w16_kernel(
     use_activation: tl.constexpr,
     ADD_BIAS: tl.constexpr,
     SKIP_REDUCE: tl.constexpr,
+    NUM_XCDS: tl.constexpr = 8,
 ):
     """Kernel for computing the matmul C = A x B.
     A has shape (M, K), B has shape (K, N) and C has shape (M, N)
@@ -88,7 +90,7 @@ def _gemm_a16_w16_kernel(
     pid_unified = tl.program_id(axis=0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    pid_unified = remap_xcd(pid_unified, num_pid_m * num_pid_n * NUM_KSPLIT, NUM_XCDS=8)
+    pid_unified = remap_xcd(pid_unified, num_pid_m * num_pid_n * NUM_KSPLIT, NUM_XCDS=NUM_XCDS)
     pid_k = pid_unified % NUM_KSPLIT
     pid = pid_unified // NUM_KSPLIT
 

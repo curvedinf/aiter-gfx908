@@ -94,6 +94,16 @@ def kernel_unified_attention_2d(
     stride_v_cache_2: tl.int64,  # int
     stride_v_cache_3: tl.constexpr,  # int
     query_start_len_ptr,  # [num_seqs+1]
+    # Per-token-head K/V scale caches; only dereferenced when
+    # USE_PER_TOKEN_HEAD_SCALES is True.
+    k_scale_cache_ptr,
+    v_scale_cache_ptr,
+    stride_ks_blk: tl.int64,
+    stride_ks_slot: tl.int64,
+    stride_ks_head: tl.int64,
+    stride_vs_blk: tl.int64,
+    stride_vs_slot: tl.int64,
+    stride_vs_head: tl.int64,
     BLOCK_Q: tl.constexpr,  # int
     num_seqs: tl.int32,
     BLOCK_M: tl.constexpr,  # int
@@ -102,6 +112,8 @@ def kernel_unified_attention_2d(
     ALL_DECODE: tl.constexpr = False,  # bool
     SHUFFLED_KV_CACHE: tl.constexpr = False,  # bool
     K_WIDTH: tl.constexpr = 0,  # int
+    USE_PER_TOKEN_HEAD_SCALES: tl.constexpr = False,  # bool
+    USE_INT8_QK_DOT: tl.constexpr = False,  # bool
 ):
     kv_head_idx = tl.program_id(0)
     q_block_global_idx = tl.program_id(1)
@@ -167,6 +179,15 @@ def kernel_unified_attention_2d(
         other=0.0,
         cache_modifier=Q_cache_modifier,
     )
+
+    # Optionally quantize Q to int8 for the QK dot product.  Scale is computed
+    # per query token (row).  This keeps the attention score math exact while
+    # allowing MI100 int8 tensor cores to be used for the most compute-heavy
+    # matmul.
+    if USE_INT8_QK_DOT:
+        q_absmax = tl.max(tl.abs(Q), axis=1)
+        q_token_scale = tl.where(q_absmax > 0, q_absmax / 127.0, 1.0)
+        Q_int8 = (Q / q_token_scale[:, None]).to(tl.int8)
 
     block_table_offset = seq_idx * block_table_stride
 
@@ -313,18 +334,46 @@ def kernel_unified_attention_2d(
             cache_modifier=KV_cache_modifier,
         )
 
-        K = K_load.to(Q.dtype)
-        if SHUFFLED_KV_CACHE:
-            K = (
-                K.reshape(
-                    HEAD_SIZE_PADDED // K_WIDTH,
-                    TILE_SIZE,
-                    K_WIDTH,
-                )
-                .permute(1, 0, 2)
-                .reshape(TILE_SIZE, HEAD_SIZE_PADDED)
-                .trans(1, 0)
+        if USE_PER_TOKEN_HEAD_SCALES:
+            k_scale_offs = (
+                physical_block_idx * stride_ks_blk
+                + (seq_offset % BLOCK_SIZE) * stride_ks_slot
+                + kv_head_idx * stride_ks_head
             )
+            k_token_scales = tl.load(
+                k_scale_cache_ptr + k_scale_offs,
+                mask=seq_offset < max_seq_prefix_len,
+                other=1.0,
+            )
+        if USE_INT8_QK_DOT:
+            K_int8 = K_load
+            if SHUFFLED_KV_CACHE:
+                K_int8 = (
+                    K_int8.reshape(
+                        HEAD_SIZE_PADDED // K_WIDTH,
+                        TILE_SIZE,
+                        K_WIDTH,
+                    )
+                    .permute(1, 0, 2)
+                    .reshape(TILE_SIZE, HEAD_SIZE_PADDED)
+                    .trans(1, 0)
+                )
+        else:
+            if USE_PER_TOKEN_HEAD_SCALES:
+                K = (K_load.to(tl.float32) * k_token_scales[None, :]).to(Q.dtype)
+            else:
+                K = K_load.to(Q.dtype)
+            if SHUFFLED_KV_CACHE:
+                K = (
+                    K.reshape(
+                        HEAD_SIZE_PADDED // K_WIDTH,
+                        TILE_SIZE,
+                        K_WIDTH,
+                    )
+                    .permute(1, 0, 2)
+                    .reshape(TILE_SIZE, HEAD_SIZE_PADDED)
+                    .trans(1, 0)
+                )
 
         # V : (TILE_SIZE, HEAD_SIZE)
         V_load = tl.load(
@@ -334,7 +383,20 @@ def kernel_unified_attention_2d(
             cache_modifier=KV_cache_modifier,
         )
 
-        V = V_load.to(Q.dtype)
+        if USE_PER_TOKEN_HEAD_SCALES:
+            v_scale_offs = (
+                physical_block_idx * stride_vs_blk
+                + (seq_offset % BLOCK_SIZE) * stride_vs_slot
+                + kv_head_idx * stride_vs_head
+            )
+            v_token_scales = tl.load(
+                v_scale_cache_ptr + v_scale_offs,
+                mask=seq_offset < max_seq_prefix_len,
+                other=1.0,
+            )
+            V = (V_load.to(tl.float32) * v_token_scales[:, None]).to(Q.dtype)
+        else:
+            V = V_load.to(Q.dtype)
         if SHUFFLED_KV_CACHE:
             V = (
                 V.reshape(
@@ -348,7 +410,11 @@ def kernel_unified_attention_2d(
 
         # S : (BLOCK_M, TILE_SIZE)
         # qk_scale = scale * RCP_LN2 (log_2 e) so that we can use exp2 later
-        S = qk_scale * tl.dot(Q, K)
+        if USE_INT8_QK_DOT:
+            S_int = tl.dot(Q_int8, K_int8).to(tl.float32)
+            S = qk_scale * S_int * q_token_scale[:, None] * k_token_scales[None, :]
+        else:
+            S = qk_scale * tl.dot(Q, K)
 
         if USE_SOFTCAP:
             # softcap here uses exp2 and consumes RCP_LN2 conversion.
@@ -453,6 +519,8 @@ kernel_unified_attention_3d_repr = make_kernel_repr(
         "SHUFFLED_KV_CACHE",
         "IS_Q_FP8",
         "IS_KV_FP8",
+        "USE_PER_TOKEN_HEAD_SCALES",
+        "USE_INT8_QK_DOT",
     ],
 )
 
@@ -501,6 +569,16 @@ def kernel_unified_attention_3d(
     stride_v_cache_2: tl.int64,  # int
     stride_v_cache_3: tl.constexpr,  # int
     query_start_len_ptr,  # [num_seqs+1]
+    # Per-token-head K/V scale caches; only dereferenced when
+    # USE_PER_TOKEN_HEAD_SCALES is True.
+    k_scale_cache_ptr,
+    v_scale_cache_ptr,
+    stride_ks_blk: tl.int64,
+    stride_ks_slot: tl.int64,
+    stride_ks_head: tl.int64,
+    stride_vs_blk: tl.int64,
+    stride_vs_slot: tl.int64,
+    stride_vs_head: tl.int64,
     BLOCK_Q: tl.constexpr,  # int
     num_seqs: tl.int32,
     BLOCK_M: tl.constexpr,  # int
@@ -513,6 +591,8 @@ def kernel_unified_attention_3d(
     K_WIDTH: tl.constexpr = 0,  # int
     IS_Q_FP8: tl.constexpr = False,  # bool
     IS_KV_FP8: tl.constexpr = False,  # bool
+    USE_PER_TOKEN_HEAD_SCALES: tl.constexpr = False,  # bool
+    USE_INT8_QK_DOT: tl.constexpr = False,  # bool
 ):
     q_block_global_idx = tl.program_id(0)
     kv_head_idx = tl.program_id(1)
@@ -585,6 +665,12 @@ def kernel_unified_attention_3d(
         mask=dim_mask[None, :] & query_mask_0[:, None] & query_mask_1[:, None],
         other=0.0,
     )
+
+    # Quantize Q to int8 for the QK dot product when requested.
+    if USE_INT8_QK_DOT:
+        q_absmax = tl.max(tl.abs(Q), axis=1)
+        q_token_scale = tl.where(q_absmax > 0, q_absmax / 127.0, 1.0)
+        Q_int8 = (Q / q_token_scale[:, None]).to(tl.int8)
 
     block_table_offset = seq_idx * block_table_stride
 
@@ -719,18 +805,46 @@ def kernel_unified_attention_3d(
             cache_modifier=KV_cache_modifier,
         )
 
-        K = K_load.to(Q.dtype)
-        if SHUFFLED_KV_CACHE:
-            K = (
-                K.reshape(
-                    HEAD_SIZE_PADDED // K_WIDTH,
-                    TILE_SIZE,
-                    K_WIDTH,
-                )
-                .permute(1, 0, 2)
-                .reshape(TILE_SIZE, HEAD_SIZE_PADDED)
-                .trans(1, 0)
+        if USE_PER_TOKEN_HEAD_SCALES:
+            k_scale_offs = (
+                physical_block_idx * stride_ks_blk
+                + (seq_offset % BLOCK_SIZE) * stride_ks_slot
+                + kv_head_idx * stride_ks_head
             )
+            k_token_scales = tl.load(
+                k_scale_cache_ptr + k_scale_offs,
+                mask=seq_offset < max_seq_prefix_len,
+                other=1.0,
+            )
+        if USE_INT8_QK_DOT:
+            K_int8 = K_load
+            if SHUFFLED_KV_CACHE:
+                K_int8 = (
+                    K_int8.reshape(
+                        HEAD_SIZE_PADDED // K_WIDTH,
+                        TILE_SIZE,
+                        K_WIDTH,
+                    )
+                    .permute(1, 0, 2)
+                    .reshape(TILE_SIZE, HEAD_SIZE_PADDED)
+                    .trans(1, 0)
+                )
+        else:
+            if USE_PER_TOKEN_HEAD_SCALES:
+                K = (K_load.to(tl.float32) * k_token_scales[None, :]).to(Q.dtype)
+            else:
+                K = K_load.to(Q.dtype)
+            if SHUFFLED_KV_CACHE:
+                K = (
+                    K.reshape(
+                        HEAD_SIZE_PADDED // K_WIDTH,
+                        TILE_SIZE,
+                        K_WIDTH,
+                    )
+                    .permute(1, 0, 2)
+                    .reshape(TILE_SIZE, HEAD_SIZE_PADDED)
+                    .trans(1, 0)
+                )
 
         # V : (TILE_SIZE, HEAD_SIZE)
         V_load = tl.load(
@@ -740,7 +854,20 @@ def kernel_unified_attention_3d(
             cache_modifier=KV_cache_modifier,
         )
 
-        V = V_load.to(Q.dtype)
+        if USE_PER_TOKEN_HEAD_SCALES:
+            v_scale_offs = (
+                physical_block_idx * stride_vs_blk
+                + (seq_offset % BLOCK_SIZE) * stride_vs_slot
+                + kv_head_idx * stride_vs_head
+            )
+            v_token_scales = tl.load(
+                v_scale_cache_ptr + v_scale_offs,
+                mask=seq_offset < max_seq_prefix_len,
+                other=1.0,
+            )
+            V = (V_load.to(tl.float32) * v_token_scales[:, None]).to(Q.dtype)
+        else:
+            V = V_load.to(Q.dtype)
         if SHUFFLED_KV_CACHE:
             V = (
                 V.reshape(
@@ -756,7 +883,11 @@ def kernel_unified_attention_3d(
 
         # S : (BLOCK_M, TILE_SIZE)
         # qk_scale = scale * RCP_LN2 (log_2 e) so that we can use exp2 later
-        S = qk_scale * tl.dot(Q, K)
+        if USE_INT8_QK_DOT:
+            S_int = tl.dot(Q_int8, K_int8).to(tl.float32)
+            S = qk_scale * S_int * q_token_scale[:, None] * k_token_scales[None, :]
+        else:
+            S = qk_scale * tl.dot(Q, K)
 
         if USE_SOFTCAP:
             # softcap here uses exp2 and consumes RCP_LN2 conversion.

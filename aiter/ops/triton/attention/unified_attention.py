@@ -131,8 +131,9 @@ def select_3d_config(
     assert kv_cache_dtype in (
         torch.float16,
         torch.bfloat16,
+        torch.int8,
         e4m3_dtype,
-    ), f"kv_cache_dtype only supports F16 ({torch.float16}) BF16 ({torch.bfloat16}), FP8 ({e4m3_dtype})"
+    ), f"kv_cache_dtype only supports F16 ({torch.float16}) BF16 ({torch.bfloat16}), INT8 ({torch.int8}), FP8 ({e4m3_dtype})"
     reduce_num_warps = 2
     attn_warps = 2
     waves_per_eu = 2
@@ -284,15 +285,28 @@ def unified_attention(
     sinks=None,
     shuffled_kv_cache: bool = False,
     skip_reduce: bool = False,
+    # Per-token-head K/V scales for int8/fp8 per-token-head KV caches.
+    # Shape: [num_blocks, block_size, num_kv_heads], dtype float32.
+    k_scale_cache=None,
+    v_scale_cache=None,
 ):
     assert causal, "Only causal attention is supported"
 
     use_alibi_slopes = alibi_slopes is not None
     use_qq_bias = qq_bias is not None
+    use_per_token_head_scales = (
+        k_scale_cache is not None and v_scale_cache is not None
+    )
+    if use_per_token_head_scales:
+        assert not shuffled_kv_cache, (
+            "Per-token-head KV scales are only supported for non-shuffled "
+            "flash layout in this version."
+        )
     SLIDING_WINDOW = 1 + window_size[0]
 
     q_dtype = q.dtype
     kv_cache_dtype = k.dtype
+    use_int8_qk_dot = use_per_token_head_scales and kv_cache_dtype == torch.int8
     num_tokens, num_query_heads, head_size = q.shape
 
     if sinks is not None:
@@ -313,6 +327,8 @@ def unified_attention(
         KV_CACHE_DTYPE = "nvfp4"
     elif kv_cache_dtype == e4m3_dtype:
         KV_CACHE_DTYPE = "fp8"
+    elif kv_cache_dtype == torch.int8:
+        KV_CACHE_DTYPE = "int8"
     else:
         KV_CACHE_DTYPE = "bf16"
 
@@ -465,10 +481,20 @@ def unified_attention(
                 stride_v_cache_2=v.stride(2),
                 stride_v_cache_3=v.stride(3),
                 query_start_len_ptr=cu_seqlens_q,
+                k_scale_cache_ptr=k_scale_cache if use_per_token_head_scales else None,
+                v_scale_cache_ptr=v_scale_cache if use_per_token_head_scales else None,
+                stride_ks_blk=k_scale_cache.stride(0) if use_per_token_head_scales else 0,
+                stride_ks_slot=k_scale_cache.stride(1) if use_per_token_head_scales else 0,
+                stride_ks_head=k_scale_cache.stride(2) if use_per_token_head_scales else 0,
+                stride_vs_blk=v_scale_cache.stride(0) if use_per_token_head_scales else 0,
+                stride_vs_slot=v_scale_cache.stride(1) if use_per_token_head_scales else 0,
+                stride_vs_head=v_scale_cache.stride(2) if use_per_token_head_scales else 0,
                 num_seqs=num_seqs,
                 ALL_DECODE=ALL_DECODE,
                 SHUFFLED_KV_CACHE=shuffled_kv_cache,
                 K_WIDTH=K_WIDTH,
+                USE_PER_TOKEN_HEAD_SCALES=use_per_token_head_scales,
+                USE_INT8_QK_DOT=use_int8_qk_dot,
                 **config,
             )
         return out
@@ -630,6 +656,14 @@ def unified_attention(
                 stride_v_cache_2=v.stride(2),
                 stride_v_cache_3=v.stride(3),
                 query_start_len_ptr=cu_seqlens_q,
+                k_scale_cache_ptr=k_scale_cache if use_per_token_head_scales else None,
+                v_scale_cache_ptr=v_scale_cache if use_per_token_head_scales else None,
+                stride_ks_blk=k_scale_cache.stride(0) if use_per_token_head_scales else 0,
+                stride_ks_slot=k_scale_cache.stride(1) if use_per_token_head_scales else 0,
+                stride_ks_head=k_scale_cache.stride(2) if use_per_token_head_scales else 0,
+                stride_vs_blk=v_scale_cache.stride(0) if use_per_token_head_scales else 0,
+                stride_vs_slot=v_scale_cache.stride(1) if use_per_token_head_scales else 0,
+                stride_vs_head=v_scale_cache.stride(2) if use_per_token_head_scales else 0,
                 BLOCK_Q=BLOCK_Q,
                 num_seqs=num_seqs,
                 BLOCK_M=BLOCK_M,
@@ -638,6 +672,8 @@ def unified_attention(
                 K_WIDTH=K_WIDTH,
                 IS_Q_FP8=(q_dtype == e4m3_dtype),
                 IS_KV_FP8=(kv_cache_dtype == e4m3_dtype),
+                USE_PER_TOKEN_HEAD_SCALES=use_per_token_head_scales,
+                USE_INT8_QK_DOT=use_int8_qk_dot,
                 **attn_config,
             )
 

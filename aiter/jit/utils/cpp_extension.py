@@ -1616,6 +1616,13 @@ def _write_ninja_file_to_build_library(
         system_includes += include_paths(with_cuda)
         system_includes = list(set(system_includes))
 
+    # torch_exclude=True drops the torch include paths above, but HIP
+    # extensions still need the ROCm headers (e.g. hip_runtime_api.h)
+    # to be found before any stale system copies.
+    if IS_HIP_EXTENSION:
+        system_includes.append(_join_rocm_home("include"))
+        system_includes = list(set(system_includes))
+
     # FIXME: build python module excluded with torch, use `pybind11`
     # But we can't use this now because all aiter op based on torch
     # which means pybind11 related build flags must from torch now

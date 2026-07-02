@@ -72,6 +72,11 @@ def select_2d_config(
     TILE_SIZE = 32 if arch.name in ("gfx1201", "gfx908") else 16 if arch.is_rdna else 64
     waves_per_eu = 8 if arch.name == "gfx1151" else 6 if arch.is_rdna else 2
 
+    # gfx908 int8 prefill: microbench shows waves_per_eu=1 is ~4.7x faster
+    # than 2 for single-seq 5000-token prefill with int8 KV cache.
+    if arch.name == "gfx908":
+        waves_per_eu = 1
+
     max_num_stages_2d = 2 if head_size > 128 else 4
 
     # base prefill, for short cases

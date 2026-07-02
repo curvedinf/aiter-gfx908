@@ -188,6 +188,10 @@ def select_3d_config(
         # latency by issuing more independent thread groups across the long-KV
         # attention dimension.
         waves_per_eu = 1
+        # Microbench sweep: num_warps=4 + num_stages=1 is 1.29x faster than
+        # the default num_warps=2 + num_stages=2 for int8 KV decode on MI100.
+        attn_warps = 4
+        attn_stages = 1
         occ = waves_per_eu * 4 // attn_warps
         target_num_prgms = target_num_prgms * occ
 

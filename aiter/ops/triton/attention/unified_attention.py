@@ -179,6 +179,10 @@ def select_3d_config(
         #     attn_warps = max(attn_warps, 1)
         #     attn_warps = min(attn_warps, 4)
     else:
+        # gfx908 / non-GFX12: lower waves_per_eu empirically improves decode
+        # latency by issuing more independent thread groups across the long-KV
+        # attention dimension.
+        waves_per_eu = 1
         occ = waves_per_eu * 4 // attn_warps
         target_num_prgms = target_num_prgms * occ
 

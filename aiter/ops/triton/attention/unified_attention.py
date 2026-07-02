@@ -69,7 +69,7 @@ def select_2d_config(
         16 if num_queries_per_kv <= 16 else triton.next_power_of_2(num_queries_per_kv)
     )
 
-    TILE_SIZE = 32 if arch.name == "gfx1201" else 16 if arch.is_rdna else 64
+    TILE_SIZE = 32 if arch.name in ("gfx1201", "gfx908") else 16 if arch.is_rdna else 64
     waves_per_eu = 8 if arch.name == "gfx1151" else 6 if arch.is_rdna else 2
 
     max_num_stages_2d = 2 if head_size > 128 else 4

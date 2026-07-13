@@ -547,7 +547,7 @@ def mla_decode_fwd(
         )
 
         if use_hk:
-            aiter.hk_mla_decode_fwd(
+            aiter.hk_mla_v32_decode_fwd(
                 q,
                 kv_buffer,
                 qo_indptr,
@@ -640,6 +640,141 @@ def mla_decode_fwd(
                     .reshape(ori_total_s, ori_nhead)
                     .contiguous()
                 )
+
+    return logits, final_lse
+
+
+# V4.0 layout constants (mirrored from op_tests/test_mla_v4_persistent.py).
+_V40_DIM_NOPE = 448
+_V40_DIM_ROPE = 64
+_V40_DIM_QK_PACKED = 512  # NOPE 448 + dup-E8M0 14 + unused trailing pad 50
+
+
+def mla_v40_decode_fwd(
+    q,  # [total_q, nhead, 512]                         FP8 (NOPE+scale+pad)
+    q_rope,  # [total_q, nhead, 64]                          BF16
+    kv_buffer,  # [num_page, page_size, 1, 512]                 FP8
+    kv_buffer_rope,  # [num_page, page_size, 1, 64]                  BF16
+    o,  # [total_q, nhead, 512]                         BF16
+    qo_indptr,
+    kv_indptr,
+    kv_indices,
+    kv_last_page_lens,
+    max_seqlen_q,
+    work_indptr,
+    work_info_set,
+    reduce_indptr,
+    reduce_final_map,
+    reduce_partial_map,
+    sm_scale=None,  # default 1.0/sqrt(512)
+    return_lse=False,
+    attn_sink=None,  # optional [nhead] fp32: per-head sink logit (virtual K, zero V)
+):
+    """
+    V4.0 MLA decode router. Picks a suitable backend (HK persistent today;
+    asm / triton / gluon / flydsl as they land) given the layout, dtype, and
+    target chip. Writes attention output into `o` in-place; returns
+    `(logits, final_lse)` for the caller (final_lse is None unless
+    return_lse=True).
+
+    attn_sink (optional): [nhead] fp32. Per-head bias logit treated as a
+    virtual K column with zero V. The kernel folds it into the LAST
+    split's running denominator (gated by kv_offset == 0); the reducer's
+    standard formula then routes exp(sink) into the global denominator
+    exactly once.
+    """
+    device = q.device
+    total_s, nhead, v_head_dim = o.shape
+
+    assert q.shape[-1] == _V40_DIM_QK_PACKED, (
+        f"mla_v40_decode_fwd: packed Q last dim must be {_V40_DIM_QK_PACKED}, "
+        f"got q.shape={tuple(q.shape)}"
+    )
+    assert kv_buffer.shape[-1] == _V40_DIM_QK_PACKED, (
+        f"mla_v40_decode_fwd: packed KV last dim must be {_V40_DIM_QK_PACKED}, "
+        f"got kv_buffer.shape={tuple(kv_buffer.shape)}"
+    )
+    assert q_rope.shape[-1] == _V40_DIM_ROPE, (
+        f"mla_v40_decode_fwd: Q rope last dim must be {_V40_DIM_ROPE}, "
+        f"got q_rope.shape={tuple(q_rope.shape)}"
+    )
+    assert kv_buffer_rope.shape[-1] == _V40_DIM_ROPE, (
+        f"mla_v40_decode_fwd: KV rope last dim must be {_V40_DIM_ROPE}, "
+        f"got kv_buffer_rope.shape={tuple(kv_buffer_rope.shape)}"
+    )
+
+    if sm_scale is None:
+        sm_scale = 1.0 / ((_V40_DIM_NOPE + _V40_DIM_ROPE) ** 0.5)  # 1/sqrt(512)
+
+    page_size = kv_buffer.shape[1]
+
+    logits = torch.empty(
+        (reduce_partial_map.size(0) * max_seqlen_q, 1, nhead, v_head_dim),
+        dtype=dtypes.fp32,
+        device=device,
+    )
+    attn_lse = torch.empty(
+        (reduce_partial_map.size(0) * max_seqlen_q, 1, nhead, 1),
+        dtype=dtypes.fp32,
+        device=device,
+    )
+    final_lse = (
+        torch.empty((total_s, nhead), dtype=dtypes.fp32, device=device)
+        if return_lse
+        else None
+    )
+
+    use_hk = (
+        get_gfx() == "gfx950"
+        and nhead * max_seqlen_q in (64, 128)
+        and q.dtype == dtypes.fp8
+        and kv_buffer.dtype == dtypes.fp8
+        and q_rope.dtype == dtypes.bf16
+        and kv_buffer_rope.dtype == dtypes.bf16
+        and page_size in (1, 64)
+        and is_experimental_enabled()
+    )
+
+    if use_hk:
+        aiter.hk_mla_v40_decode_fwd(
+            q,
+            q_rope,
+            kv_buffer,
+            kv_buffer_rope,
+            qo_indptr,
+            kv_indices,
+            kv_last_page_lens,
+            work_indptr,
+            work_info_set,
+            max_seqlen_q,
+            sm_scale,
+            logits,
+            attn_lse,
+            o,
+            attn_sink,
+        )
+    else:
+        # TODO: dispatch to asm / triton / gluon / flydsl V4.0 backends once
+        # they land. Today HK is the only available implementation.
+        raise NotImplementedError(
+            f"mla_v40_decode_fwd: no backend available for "
+            f"gfx={get_gfx()} nhead={nhead} max_seqlen_q={max_seqlen_q} "
+            f"q.dtype={q.dtype} kv_buffer.dtype={kv_buffer.dtype} "
+            f"q_rope.dtype={q_rope.dtype} kv_buffer_rope.dtype={kv_buffer_rope.dtype} "
+            f"page_size={page_size} experimental={is_experimental_enabled()}"
+        )
+
+    aiter.mla_reduce_v1(
+        logits,
+        attn_lse,
+        reduce_indptr,
+        reduce_final_map,
+        reduce_partial_map,
+        max_seqlen_q,
+        0,
+        o,
+        final_lse,
+    )
 
     return logits, final_lse
 

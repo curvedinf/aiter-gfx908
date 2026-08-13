@@ -2191,6 +2191,7 @@ namespace py = pybind11;
     m.def("rocb_findallsols", &RocFindAllSolIdxBlas, "rocblas_find_all_sols");
 
 #define TOP_K_PER_ROW_PYBIND                     \
+    AITER_SET_STREAM_PYBIND;                      \
     m.def("top_k_per_row_prefill",               \
           &top_k_per_row_prefill,                \
           py::arg("logits"),                     \
@@ -2222,10 +2223,13 @@ namespace py = pybind11;
           py::arg("stride0"),                    \
           py::arg("k"),                          \
           py::arg("is_decode"));                 \
-    m.def("topk_use_mulblocks",                  \
-          &topk_use_mulblocks,                   \
+    m.def("topk_ob_workspace_size",              \
+          &topk_ob_workspace_size,               \
           py::arg("numRows"),                    \
-          py::arg("stride0"));
+          py::arg("stride0"),                    \
+          py::arg("k"),                          \
+          py::arg("is_decode"));                 \
+    m.def("topk_use_mulblocks", &topk_use_mulblocks, py::arg("numRows"), py::arg("stride0"));
 
 #define MLA_METADATA_PYBIND                                 \
     m.def("get_mla_metadata_v1",                            \
@@ -2319,6 +2323,7 @@ namespace py = pybind11;
           py::arg("final_lse") = std::nullopt);
 
 #define TOPK_PLAIN_PYBIND                         \
+    AITER_SET_STREAM_PYBIND;                      \
     m.def("topk_plain",                           \
           &topk_plain,                            \
           py::arg("values"),                      \
@@ -2326,10 +2331,16 @@ namespace py = pybind11;
           py::arg("topk_out"),                    \
           py::arg("topk"),                        \
           py::arg("largest")   = true,            \
-          py::arg("rowStarts") = torch::Tensor(), \
-          py::arg("rowEnds")   = torch::Tensor(), \
+          py::arg("rowStarts") = std::nullopt,    \
+          py::arg("rowEnds")   = std::nullopt,    \
           py::arg("stride0")   = -1,              \
-          py::arg("stride1")   = 1);
+          py::arg("stride1")   = 1,               \
+          py::arg("workspace") = std::nullopt);   \
+    m.def("topk_plain_workspace_size",            \
+          &topk_plain_workspace_size,             \
+          py::arg("numRows"),                     \
+          py::arg("stride0"),                     \
+          py::arg("k"));
 
 #define RMSNORM_QUANT_PYBIND                 \
     AITER_SET_STREAM_PYBIND;                 \

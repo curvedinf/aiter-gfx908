@@ -1165,6 +1165,26 @@ DINLINE opus::vector_t<T, pack_size> packDequant(opus::vector_t<opus::fp8_t, pac
     return ret_val;
 }
 
+// int8 quant pack matching vLLM's _quantize_activation_per_block numerics:
+// torch computes x / scale elementwise in the tensor dtype (fp16/bf16), so the
+// fp32 quotient is rounded to T before the integer step; then clamp to the
+// int8 range and round to nearest even (rintf == torch.round). Uses no fp8
+// conversion builtins, so it is gfx908-safe.
+template <typename T, int pack_size>
+DINLINE opus::vector_t<opus::i8_t, pack_size> packQuantInt8(opus::vector_t<T, pack_size> inp_pack,
+                                                           T scale_functor)
+{
+    opus::vector_t<opus::i8_t, pack_size> ret_val;
+#pragma unroll
+    for(int i = 0; i < pack_size; ++i)
+    {
+        float q = upcast_s(downcast_s<T>(upcast_s(inp_pack[i]) / upcast_s(scale_functor)));
+        q       = fminf(fmaxf(q, -128.0f), 127.0f);
+        ret_val[i] = static_cast<opus::i8_t>(rintf(q));
+    }
+    return ret_val;
+}
+
 template <typename T, int pack_size, int ngpus>
 DINLINE opus::vector_t<T, pack_size>
 multiGPUPackReduce(const opus::vector_t<T, pack_size>* ptrs[ngpus], int index)
@@ -1940,6 +1960,102 @@ __device__ __forceinline__ void ar_fusion_epilogue_per_group(
     }
 }
 
+// Per-group INT8 quantization epilogue — the activation format consumed by
+// vLLM's W8A8 path on gfx908 (_quantize_activation_per_block): q [M,K] int8
+// plus scales [M, K/group_size] fp16, per-row per-group absmax/127. Mirrors
+// ar_fusion_epilogue_per_group above with three differences:
+//   (a) quant bound is 127 (not FP8 max) and the payload write goes through
+//       packQuantInt8, which references no fp8 conversion builtins — the fp8
+//       variants are compile-only stubs on gfx908 and must not be instantiated
+//       by this path;
+//   (b) the normed value is rounded to T first, because the reference
+//       quantizes the fp16/bf16 normed tensor, and the quotient/scale are
+//       likewise rounded to T before use (see packQuantInt8);
+//   (c) the scale is stored as fp16 — the dtype the vLLM consumer expects
+//       (fp32 would also be lossless for the values in play, but fp16 avoids
+//       a conversion kernel on the consumer side).
+template <typename P,
+          typename A,
+          typename T,
+          int PACK_SIZE,
+          bool TRANSPOSE_SCALE = false>
+__device__ __forceinline__ void ar_fusion_epilogue_per_group_int8(
+    A& in,
+    P& weight,
+    int hidden_dim,
+    float eps,
+    int idx,
+    int tidx,
+    int block_size,
+    int group_size,
+    opus::i8_t* __restrict__ output,
+    opus::fp16_t* __restrict__ scale_out,
+    bool active            = true,
+    T* __restrict__ bf16_output = nullptr,
+    int m                  = 0)
+{
+    A out;
+
+    // Phase 1: RMSNorm (full block reduction, same as per-token)
+    ar_fusion_epilogue_rms_norm<P, A, A, float, PACK_SIZE, 32>(
+        out, in, weight, eps, hidden_dim, block_size);
+
+    // Optional pre-quantization bf16/fp16 mirror of the normed output.
+    if(bf16_output != nullptr && active)
+    {
+        P bf16_pack;
+#pragma unroll
+        for(int i = 0; i < PACK_SIZE; ++i)
+            bf16_pack[i] = downcast_s<T>(out[i]);
+        *reinterpret_cast<P*>(bf16_output + idx) = bf16_pack;
+    }
+
+    // Phase 2: round the normed values to T (the reference quantizes the
+    // fp16/bf16 normed tensor), then per-group abs-max and int8 quantization.
+    P out_t;
+#pragma unroll
+    for(int i = 0; i < PACK_SIZE; ++i)
+        out_t[i] = downcast_s<T>(out[i]);
+
+    int threads_per_group = group_size / PACK_SIZE;
+    int group_id          = threadIdx.x / threads_per_group;
+    int lane_in_group     = threadIdx.x % threads_per_group;
+    int num_groups        = hidden_dim / group_size;
+
+    auto fn       = [](float a, float b) { return a > b ? a : b; };
+    float local_max = -1.f;
+#pragma unroll
+    for(int i = 0; i < PACK_SIZE; ++i)
+    {
+        float v   = upcast_s(out_t[i]);
+        local_max = fn(local_max, std::abs(v));
+    }
+
+    for(int stride = threads_per_group / 2; stride > 0; stride >>= 1)
+    {
+        float other = __shfl_xor(local_max, stride, threads_per_group);
+        local_max   = fn(local_max, other);
+    }
+
+    float scale_f = local_max == 0.f ? 1.f : local_max / 127.0f;
+    T scale_t     = downcast_s<T>(scale_f);
+
+    using OP = opus::vector_t<opus::i8_t, PACK_SIZE>;
+    OP out_quant = packQuantInt8<T, PACK_SIZE>(out_t, scale_t);
+    if(active)
+        *reinterpret_cast<OP*>(output + idx) = out_quant;
+
+    // Per-group fp16 scale, same layout switch as the fp8 variant.
+    if(lane_in_group == 0 && active)
+    {
+        opus::fp16_t scale_h = downcast_s<opus::fp16_t>(upcast_s(scale_t));
+        if constexpr(TRANSPOSE_SCALE)
+            scale_out[group_id * m + tidx] = scale_h;
+        else
+            scale_out[tidx * num_groups + group_id] = scale_h;
+    }
+}
+
 template <typename T, typename OutT, int ngpus, bool GEMMA_NORM = false>
 __global__ void __launch_bounds__(1024, 1)
     allreduce_fusion_kernel_1stage(RankData* _dp,
@@ -2061,7 +2177,14 @@ __global__ void __launch_bounds__(1024, 1)
 
 // Per-group quant variant of the 1-stage fused allreduce+rmsnorm kernel.
 // scale_out shape: (m, hidden_dim / group_size) instead of (m, 1).
-template <typename T, typename OutT, int ngpus, bool GEMMA_NORM = false, bool TRANSPOSE_SCALE = false>
+// ST is the scale store dtype: float for the fp8 variants, opus::fp16_t for
+// the int8 variant (vLLM W8A8 consumer format).
+template <typename T,
+          typename OutT,
+          int ngpus,
+          bool GEMMA_NORM = false,
+          bool TRANSPOSE_SCALE = false,
+          typename ST = float>
 __global__ void __launch_bounds__(1024, 1)
     allreduce_fusion_kernel_1stage_per_group(RankData* _dp,
                                              RankSignals sg,
@@ -2071,7 +2194,7 @@ __global__ void __launch_bounds__(1024, 1)
                                              T* __restrict__ residual_out,
                                              OutT* __restrict__ output,
                                              T* __restrict__ weight,
-                                             float* __restrict__ scale_out,
+                                             ST* __restrict__ scale_out,
                                              int size,
                                              int hidden_dim,
                                              int group_size,
@@ -2136,18 +2259,27 @@ __global__ void __launch_bounds__(1024, 1)
         int padded_block_size = (int)blockDim.x;
         // token_num == m == size / hidden_dim; the grid-stride loop reuses it as
         // the row count needed by the TRANSPOSE_SCALE (column-major) scale store.
-        ar_fusion_epilogue_per_group<P, A, T, OutT, pack_size, GEMMA_NORM, TRANSPOSE_SCALE>(
-            acc, weight_p, hidden_dim, eps, idx, tidx, padded_block_size,
-            group_size, output, scale_out, active, bf16_output, token_num);
+        if constexpr(std::is_same_v<OutT, opus::i8_t>)
+        {
+            ar_fusion_epilogue_per_group_int8<P, A, T, pack_size, TRANSPOSE_SCALE>(
+                acc, weight_p, hidden_dim, eps, idx, tidx, padded_block_size,
+                group_size, output, scale_out, active, bf16_output, token_num);
+        }
+        else
+        {
+            ar_fusion_epilogue_per_group<P, A, T, OutT, pack_size, GEMMA_NORM, TRANSPOSE_SCALE>(
+                acc, weight_p, hidden_dim, eps, idx, tidx, padded_block_size,
+                group_size, output, scale_out, active, bf16_output, token_num);
+        }
     }
     end_sync<ngpus, true>(sg, self_sg, rank);
 }
 
-template <typename T, typename OutT, int NGPUS>
+template <typename T, typename OutT, int NGPUS, typename ST = float>
 void allreduce_fusion_kernel_1stage_per_group_launcher(
     RankData* _dp, RankSignals sg, Signal* self_sg, int rank,
     T* residual_inp, T* residual_out, OutT* output, T* weight,
-    float* scale_out, int size, int hidden_dim, int group_size,
+    ST* scale_out, int size, int hidden_dim, int group_size,
     float eps, hipStream_t stream, T* bf16_output = nullptr,
     bool transpose_scale = false)
 {
@@ -2163,7 +2295,7 @@ void allreduce_fusion_kernel_1stage_per_group_launcher(
     // resolved at compile time inside the kernel.
     auto launch = [&](auto ts_tag) {
         constexpr bool TRANSPOSE_SCALE = decltype(ts_tag)::value;
-        allreduce_fusion_kernel_1stage_per_group<T, OutT, NGPUS, /*GEMMA_NORM=*/false, TRANSPOSE_SCALE>
+        allreduce_fusion_kernel_1stage_per_group<T, OutT, NGPUS, /*GEMMA_NORM=*/false, TRANSPOSE_SCALE, ST>
             <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank,
                                          residual_inp, residual_out,
                                          output, weight, scale_out,
@@ -2889,7 +3021,11 @@ void allreduce_fusion_kernel_2stage_launcher(RankData* _dp,
 }
 
 // Per-group quant variant of the 2-stage kernel.
-template <typename T, typename OutT, int ngpus, bool TRANSPOSE_SCALE = false>
+template <typename T,
+          typename OutT,
+          int ngpus,
+          bool TRANSPOSE_SCALE = false,
+          typename ST = float>
 __global__ void __launch_bounds__(1024, 1)
     allreduce_fusion_kernel_2stage_per_group(RankData* _dp,
                                              RankSignals sg,
@@ -2899,7 +3035,7 @@ __global__ void __launch_bounds__(1024, 1)
                                              T* __restrict__ residual_out,
                                              OutT* __restrict__ output,
                                              T* __restrict__ weight,
-                                             float* __restrict__ scale_out,
+                                             ST* __restrict__ scale_out,
                                              int size,
                                              int hidden_dim,
                                              int group_size,
@@ -2971,18 +3107,27 @@ __global__ void __launch_bounds__(1024, 1)
 #pragma unroll
         for(int v = 0; v < pack_size; ++v)
             acc[v] = upcast_s(vec[v]);
-        ar_fusion_epilogue_per_group<P, A, T, OutT, pack_size, /*GEMMA_NORM=*/false, TRANSPOSE_SCALE>(
-            acc, weight_p, hidden_dim, eps, idx, tidx, block_size,
-            group_size, output, scale_out, /*active=*/true, bf16_output,
-            m);
+        if constexpr(std::is_same_v<OutT, opus::i8_t>)
+        {
+            ar_fusion_epilogue_per_group_int8<P, A, T, pack_size, TRANSPOSE_SCALE>(
+                acc, weight_p, hidden_dim, eps, idx, tidx, block_size,
+                group_size, output, scale_out, /*active=*/true, bf16_output, m);
+        }
+        else
+        {
+            ar_fusion_epilogue_per_group<P, A, T, OutT, pack_size, /*GEMMA_NORM=*/false, TRANSPOSE_SCALE>(
+                acc, weight_p, hidden_dim, eps, idx, tidx, block_size,
+                group_size, output, scale_out, /*active=*/true, bf16_output,
+                m);
+        }
     }
 }
 
-template <typename T, typename OutT, int NGPUS>
+template <typename T, typename OutT, int NGPUS, typename ST = float>
 void allreduce_fusion_kernel_2stage_per_group_launcher(
     RankData* _dp, RankSignals sg, Signal* self_sg, int rank,
     T* residual_inp, T* residual_out, OutT* output, T* weight,
-    float* scale_out, int size, int hidden_dim, int group_size,
+    ST* scale_out, int size, int hidden_dim, int group_size,
     float eps, hipStream_t stream, T* bf16_output = nullptr,
     bool transpose_scale = false)
 {
@@ -2995,7 +3140,7 @@ void allreduce_fusion_kernel_2stage_per_group_launcher(
     size_t smem_size = BLOCK_SIZE * sizeof(typename opus::vector_t<T, PACK_SIZE>);
     auto launch = [&](auto ts_tag) {
         constexpr bool TRANSPOSE_SCALE = decltype(ts_tag)::value;
-        allreduce_fusion_kernel_2stage_per_group<T, OutT, NGPUS, TRANSPOSE_SCALE>
+        allreduce_fusion_kernel_2stage_per_group<T, OutT, NGPUS, TRANSPOSE_SCALE, ST>
             <<<numBlocks, threadsPerBlock, smem_size, stream>>>(
                 _dp, sg, self_sg, rank,
                 residual_inp, residual_out, output, weight, scale_out,
@@ -3052,7 +3197,7 @@ __global__ void __launch_bounds__(1024, 1)
 }
 
 // Per-group quant variant of the naive local device load kernel.
-template <typename T, typename OutT, bool TRANSPOSE_SCALE = false>
+template <typename T, typename OutT, bool TRANSPOSE_SCALE = false, typename ST = float>
 __global__ void __launch_bounds__(1024, 1)
     local_device_load_rmsnorm_quant_per_group_naive(RankSignals sg,
                                                     int rank,
@@ -3060,7 +3205,7 @@ __global__ void __launch_bounds__(1024, 1)
                                                     T* __restrict__ residual_out,
                                                     OutT* __restrict__ output,
                                                     T* __restrict__ weight,
-                                                    float* __restrict__ scale_out,
+                                                    ST* __restrict__ scale_out,
                                                     int size,
                                                     int hidden_dim,
                                                     int group_size,
@@ -3088,14 +3233,23 @@ __global__ void __launch_bounds__(1024, 1)
 #pragma unroll
         for(int v = 0; v < pack_size; ++v)
             acc[v] = upcast_s(vec[v]);
-        ar_fusion_epilogue_per_group<P, A, T, OutT, pack_size, /*GEMMA_NORM=*/false, TRANSPOSE_SCALE>(
-            acc, weight_p, hidden_dim, eps, idx, tidx, block_size,
-            group_size, output, scale_out, /*active=*/true, bf16_output,
-            m);
+        if constexpr(std::is_same_v<OutT, opus::i8_t>)
+        {
+            ar_fusion_epilogue_per_group_int8<P, A, T, pack_size, TRANSPOSE_SCALE>(
+                acc, weight_p, hidden_dim, eps, idx, tidx, block_size,
+                group_size, output, scale_out, /*active=*/true, bf16_output, m);
+        }
+        else
+        {
+            ar_fusion_epilogue_per_group<P, A, T, OutT, pack_size, /*GEMMA_NORM=*/false, TRANSPOSE_SCALE>(
+                acc, weight_p, hidden_dim, eps, idx, tidx, block_size,
+                group_size, output, scale_out, /*active=*/true, bf16_output,
+                m);
+        }
     }
 }
 
-template <typename T, typename OutT, int NGPUS>
+template <typename T, typename OutT, int NGPUS, typename ST = float>
 void allreduce_fusion_kernel_split_per_group_launcher(RankData* _dp,
                                                       RankSignals sg,
                                                       Signal* self_sg,
@@ -3104,7 +3258,7 @@ void allreduce_fusion_kernel_split_per_group_launcher(RankData* _dp,
                                                       T* residual_out,
                                                       OutT* output,
                                                       T* weight,
-                                                      float* scale_out,
+                                                      ST* scale_out,
                                                       int size,
                                                       int hidden_dim,
                                                       int group_size,
@@ -3143,7 +3297,7 @@ void allreduce_fusion_kernel_split_per_group_launcher(RankData* _dp,
     dim3 numBlocks(nblocks);
     auto launch = [&](auto ts_tag) {
         constexpr bool TRANSPOSE_SCALE = decltype(ts_tag)::value;
-        local_device_load_rmsnorm_quant_per_group_naive<T, OutT, TRANSPOSE_SCALE>
+        local_device_load_rmsnorm_quant_per_group_naive<T, OutT, TRANSPOSE_SCALE, ST>
             <<<numBlocks, threadsPerBlock, 0, stream>>>(
                 sg, rank, residual_inp, residual_out, output, weight, scale_out,
                 size, hidden_dim, group_size, eps, bf16_output);
@@ -4507,13 +4661,16 @@ void dispatchFusedAllReduceRMSNormQuant(hipStream_t stream,
 #undef DISPATCH_AR_FUSION_KERNEL
 }
 
-template <typename T, typename QT>
+// T: input/residual dtype (fp16/bf16). QT: quant output dtype (fp8_type, or
+// opus::i8_t for the vLLM W8A8 activation format). ST: scale store dtype —
+// float for fp8 variants, opus::fp16_t for int8.
+template <typename T, typename QT, typename ST = float>
 void dispatchFusedAllReduceRMSNormQuantPerGroup(hipStream_t stream,
                                                 T* input,
                                                 T* residual_inp,
                                                 T* residual_out,
                                                 QT* output,
-                                                float* scale_out,
+                                                ST* scale_out,
                                                 T* weight,
                                                 float eps,
                                                 int m,
@@ -4595,7 +4752,7 @@ void dispatchFusedAllReduceRMSNormQuantPerGroup(hipStream_t stream,
 #define DISPATCH_AR_FUSION_PG_KERNEL(NGPUS)                                               \
     if(use_1stage)                                                                         \
     {                                                                                      \
-        allreduce_fusion_kernel_1stage_per_group_launcher<T, QT, NGPUS>(                   \
+        allreduce_fusion_kernel_1stage_per_group_launcher<T, QT, NGPUS, ST>(                \
             ptrs, sg_, self_sg_, rank_,                                                     \
             residual_inp, residual_out, output, weight, scale_out,                          \
             size, n, group_size, eps, stream, bf16_output, transpose_scale);               \
@@ -4603,7 +4760,7 @@ void dispatchFusedAllReduceRMSNormQuantPerGroup(hipStream_t stream,
     }                                                                                      \
     else if(n_constrain && (size * sizeof(T) <= 512 * 1024))                               \
     {                                                                                      \
-        allreduce_fusion_kernel_2stage_per_group_launcher<T, QT, NGPUS>(                   \
+        allreduce_fusion_kernel_2stage_per_group_launcher<T, QT, NGPUS, ST>(                \
             ptrs, sg_, self_sg_, rank_,                                                     \
             residual_inp, residual_out, output, weight, scale_out,                          \
             size, n, group_size, eps, stream, bf16_output, transpose_scale);               \
@@ -4611,7 +4768,7 @@ void dispatchFusedAllReduceRMSNormQuantPerGroup(hipStream_t stream,
     }                                                                                      \
     else if(n_constrain)                                                                   \
     {                                                                                      \
-        allreduce_fusion_kernel_split_per_group_launcher<T, QT, NGPUS>(                    \
+        allreduce_fusion_kernel_split_per_group_launcher<T, QT, NGPUS, ST>(                 \
             ptrs, sg_, self_sg_, rank_,                                                     \
             residual_inp, residual_out, output, weight, scale_out,                          \
             size, n, group_size, eps, stream, bf16_output, transpose_scale);               \

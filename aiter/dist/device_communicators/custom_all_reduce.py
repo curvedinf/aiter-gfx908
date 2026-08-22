@@ -1764,6 +1764,62 @@ class CustomAllreduce:
             return out, res_out, scale_out, bf16_out
         return out, res_out, scale_out
 
+    def fused_ar_rms_int8_per_group_quant(
+        self,
+        inp: torch.Tensor,
+        res_inp: torch.Tensor,
+        *,
+        w: torch.Tensor,
+        eps: float,
+        group_size: int = 128,
+        registered: bool = False,
+        use_1stage: bool = False,
+        emit_bf16: bool = False,
+    ):
+        """Fused AR + residual + RMSNorm + per-group int8 quant.
+
+        Produces the activation format vLLM's W8A8 path consumes on gfx908:
+        out int8 [M, K], scale_out fp16 [M, K // group_size] (row-major,
+        per-row per-group absmax / 127 — same numerics as
+        ``_quantize_activation_per_block`` in vllm's triton_w8a16 module).
+        """
+        K = inp.shape[-1]
+        _validate_per_group_size(group_size, inp.element_size(), K)
+        res_out = torch.empty_like(inp)
+        num_groups = K // group_size
+        out = torch.empty(inp.shape, dtype=torch.int8, device=inp.device)
+        # fp16 scales: the dtype the vLLM consumer expects (fp32 would also be
+        # lossless here but would need a conversion on the consumer side).
+        scale_out = torch.empty(
+            inp.shape[:-1] + (num_groups,), dtype=torch.float16, device=inp.device
+        )
+        bf16_out = None
+        bf16_ptr = 0
+        if emit_bf16:
+            bf16_out = torch.empty_like(inp)
+            bf16_ptr = int(bf16_out.data_ptr())
+        reg = 0 if registered else self._pool["input"].data_ptr
+        reg_bytes = 0 if registered else self._pool["input"].max_size
+        ops.fused_allreduce_rmsnorm_quant_int8_per_group(
+            self._ptr,
+            inp,
+            res_inp,
+            res_out,
+            out,
+            scale_out,
+            w,
+            eps,
+            group_size,
+            reg,
+            reg_bytes,
+            use_1stage,
+            False,
+            bf16_ptr,
+        )
+        if emit_bf16:
+            return out, res_out, scale_out, bf16_out
+        return out, res_out, scale_out
+
     def fused_qknorm_ar(
         self,
         qkv_in: torch.Tensor,

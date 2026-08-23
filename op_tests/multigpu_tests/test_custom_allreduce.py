@@ -168,7 +168,7 @@ if __name__ == "__main__":
     for dtype in l_dtype:
         for shape in l_shape:
             ret = test_allreduce_custom(
-                8,
+                int(os.environ.get("CAR_TP", "8")),
                 1,
                 shape,
                 dtype,

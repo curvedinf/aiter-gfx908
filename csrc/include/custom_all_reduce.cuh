@@ -4024,7 +4024,7 @@ class CustomAllreduce
     case ngpus: {                                            \
         if(world_size_ == 2)                                 \
         {                                                    \
-            KL(ngpus, cross_device_reduce_1stage);           \
+            KL(ngpus, cross_device_reduce_1stage_naive);     \
         }                                                    \
         else if(full_nvlink_)                                \
         {                                                    \

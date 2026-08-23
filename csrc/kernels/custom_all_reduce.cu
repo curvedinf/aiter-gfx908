@@ -77,6 +77,20 @@ static void _all_reduce(fptr_t _fa, void* inp, void* out,
 {
     hipStream_t stream = aiter::getCurrentHIPStream();
     auto fa = reinterpret_cast<aiter::CustomAllreduce*>(_fa);
+    // gfx908 graph-capture fix: the smem double-buffered "new" kernels
+    // (cross_device_reduce_1stage/2stage and write_mode) silently corrupt
+    // peer reads when launched inside a captured graph — verified with
+    // op_tests/multigpu_tests/test_car_graph_repro.py (capture alone breaks
+    // even subsequent eager calls; naive kernels replay bit-exact 24/24 at
+    // ws=2/4). The naive kernels (structural twins of vLLM's proven CAR)
+    // are graph-safe. Force the naive path whenever the launch stream is
+    // capturing.
+    hipStreamCaptureStatus cap_status;
+    if(hipStreamIsCapturing(stream, &cap_status) == hipSuccess
+       && cap_status == hipStreamCaptureStatusActive)
+    {
+        use_new = false;
+    }
     switch(dtype)
     {
     case AITER_DTYPE_fp32: {

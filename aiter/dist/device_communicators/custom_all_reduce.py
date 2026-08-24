@@ -1225,11 +1225,26 @@ class CustomAllreduce:
             return None
         if self._IS_CAPTURING:
             if torch.cuda.is_current_stream_capturing():
+                # gfx908 graph-coherence fix (port of vLLM's own CAR
+                # workaround): captured ARs must route through the
+                # pre-registered pool with the copy captured INSIDE the
+                # graph. Binding the input tensor directly
+                # (registered_input=True) bakes a cached-memory IPC view
+                # into the graph; replays then read incoherent peer state
+                # (first decode token correct, every replayed token after
+                # corrupts). The pool path replays coherently.
+                from vllm.platforms.rocm import on_gfx908 as _on_gfx908
+
+                try:
+                    _gfx908 = _on_gfx908()
+                except Exception:
+                    _gfx908 = False
+                reg = self.enable_register_for_capturing and not _gfx908
                 return self.all_reduce(
                     input,
                     use_new=use_new,
                     open_fp8_quant=open_fp8_quant,
-                    registered_input=self.enable_register_for_capturing,
+                    registered_input=reg,
                 )
             else:
                 # if warm up, mimic the allocation pattern

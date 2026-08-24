@@ -163,23 +163,38 @@ DINLINE void start_sync(const RankSignals& sg,
                         volatile
 #endif
                         Signal* self_sg,
-                        int rank)
+                        int rank,
+                        uint32_t seq = 0)
 {
 #ifdef USE_ROCM
-    uint32_t flag = self_sg->_flag[blockIdx.x] + 1;
+    // Mixed-size race fix (gfx908): per-LAUNCH sequence cookie. Grid extents
+    // differ across launch sizes; blocks skipped by an intervening smaller
+    // launch would leave stale counters that satisfy a later wait (the
+    // serving race). seq=0 preserves the legacy counter path.
+    uint32_t flag = seq ? seq : (uint32_t)(self_sg->_flag[blockIdx.x] + 1);
     if(threadIdx.x < ngpus)
     {
         // simultaneously write to the corresponding flag of all ranks.
         // Latency = 1 p2p write
+        // Release/acquire pair: the start flag PUBLISHES this rank's
+        // pool-copy writes. A relaxed store let peers pass the wait and
+        // read the pool before the copy (own-A + peers'-B composition in
+        // mixed-size eager sequences — the gfx908 serving race).
         __scoped_atomic_store_n(&sg.signals[threadIdx.x]->start[blockIdx.x][rank],
                                 flag,
-                                __ATOMIC_RELAXED,
+                                __ATOMIC_RELEASE,
                                 __MEMORY_SCOPE_SYSTEM);
         // wait until we got true from all ranks
-        while(__scoped_atomic_load_n(&self_sg->start[blockIdx.x][threadIdx.x],
-                                     __ATOMIC_RELAXED,
-                                     __MEMORY_SCOPE_DEVICE) < flag)
-            ;
+        if(seq)
+            while(__scoped_atomic_load_n(&self_sg->start[blockIdx.x][threadIdx.x],
+                                         __ATOMIC_ACQUIRE,
+                                         __MEMORY_SCOPE_DEVICE) != flag)
+                ;
+        else
+            while(__scoped_atomic_load_n(&self_sg->start[blockIdx.x][threadIdx.x],
+                                         __ATOMIC_ACQUIRE,
+                                         __MEMORY_SCOPE_DEVICE) < flag)
+                ;
     }
     __syncthreads();
     // use one thread to update flag
@@ -210,7 +225,8 @@ DINLINE void end_sync(const RankSignals& sg,
                       volatile
 #endif
                       Signal* self_sg,
-                      int rank)
+                      int rank,
+                      uint32_t seq = 0)
 {
 #ifdef USE_ROCM
     __syncthreads();
@@ -218,7 +234,7 @@ DINLINE void end_sync(const RankSignals& sg,
     // visible. Note that I did not managed to make this happen through a lot of
     // testing. Might be the case that hardware provides stronger guarantee than
     // the memory model.
-    uint32_t flag = self_sg->_flag[blockIdx.x] + 1;
+    uint32_t flag = seq ? seq : (uint32_t)(self_sg->_flag[blockIdx.x] + 1);
     if(threadIdx.x < ngpus)
     {
         // simultaneously write to the corresponding flag of all ranks.
@@ -228,10 +244,16 @@ DINLINE void end_sync(const RankSignals& sg,
                                 final_sync ? __ATOMIC_RELAXED : __ATOMIC_RELEASE,
                                 __MEMORY_SCOPE_SYSTEM);
         // wait until we got true from all ranks
-        while(__scoped_atomic_load_n(&self_sg->end[blockIdx.x][threadIdx.x],
-                                     final_sync ? __ATOMIC_RELAXED : __ATOMIC_ACQUIRE,
-                                     __MEMORY_SCOPE_DEVICE) < flag)
-            ;
+        if(seq)
+            while(__scoped_atomic_load_n(&self_sg->end[blockIdx.x][threadIdx.x],
+                                         final_sync ? __ATOMIC_RELAXED : __ATOMIC_ACQUIRE,
+                                         __MEMORY_SCOPE_DEVICE) != flag)
+                ;
+        else
+            while(__scoped_atomic_load_n(&self_sg->end[blockIdx.x][threadIdx.x],
+                                         final_sync ? __ATOMIC_RELAXED : __ATOMIC_ACQUIRE,
+                                         __MEMORY_SCOPE_DEVICE) < flag)
+                ;
     }
     __syncthreads();
     // use one thread to update flag
@@ -284,7 +306,7 @@ __global__ void __launch_bounds__(512, 1) cross_device_reduce_1stage_naive(RankD
                                                                            Signal* self_sg,
                                                                            T* __restrict__ result,
                                                                            int rank,
-                                                                           int size)
+                                                                           int size, uint32_t seq)
 {
     constexpr int pack_size = 16 / sizeof(T);
     using P                 = typename opus::vector_t<T, pack_size>;
@@ -292,13 +314,13 @@ __global__ void __launch_bounds__(512, 1) cross_device_reduce_1stage_naive(RankD
     // note: we don't reorder the address so the accumulation order is the same
     // for all ranks, ensuring bitwise identical results
     auto dp = *_input_dp;
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
     // do the actual reduction
     for(int idx = blockIdx.x * blockDim.x + threadIdx.x; idx < size; idx += gridDim.x * blockDim.x)
     {
         ((P*)result)[idx] = packed_reduce<P, ngpus, A>((const P**)&dp.ptrs[0], idx);
     }
-    end_sync<ngpus, true>(sg, self_sg, rank);
+    end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 template <typename P>
@@ -322,7 +344,7 @@ __global__ void __launch_bounds__(512, 1) cross_device_reduce_2stage_naive(RankD
                                                                            Signal* self_sg,
                                                                            T* __restrict__ result,
                                                                            int rank,
-                                                                           int size)
+                                                                           int size, uint32_t seq)
 {
     constexpr int pack_size = 16 / sizeof(T);
     int tid                 = blockIdx.x * blockDim.x + threadIdx.x;
@@ -343,13 +365,13 @@ __global__ void __launch_bounds__(512, 1) cross_device_reduce_2stage_naive(RankD
         tmps[i]    = get_tmp_buf<P>(sg.signals[target]);
     }
     auto tmp_out = tmps[0];
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
     // stage 1: reduce scatter
     for(int idx = start + tid; idx < end; idx += stride)
     {
         tmp_out[idx - start] = packed_reduce<P, ngpus, A>(ptrs, idx);
     }
-    end_sync<ngpus>(sg, self_sg, rank);
+    end_sync<ngpus>(sg, self_sg, rank, seq);
 
     // stage 2: allgather. Note: it's important to match the tid between
     // the two stages, because visibility across devices is only guaranteed
@@ -383,7 +405,7 @@ __global__ void __launch_bounds__(512, 1) cross_device_reduce_1stage(RankData* _
                                                                      Signal* self_sg,
                                                                      T* __restrict__ result,
                                                                      int rank,
-                                                                     int size)
+                                                                     int size, uint32_t seq)
 {
     constexpr int pack_size = 16 / sizeof(T);
     using P                 = typename opus::vector_t<T, pack_size>;
@@ -402,7 +424,7 @@ __global__ void __launch_bounds__(512, 1) cross_device_reduce_1stage(RankData* _
     const int step  = gridDim.x * tnum_gpu;
     const int start = blockIdx.x * tnum_gpu + lane_id;
 
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
 
     // --- compute uniform iteration count (to keep barriers well-formed) ---
     const int first = blockIdx.x * tnum_gpu;
@@ -477,7 +499,7 @@ __global__ void __launch_bounds__(512, 1) cross_device_reduce_1stage(RankData* _
 
         buf = next_buf;
     }
-    end_sync<ngpus, true>(sg, self_sg, rank);
+    end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 template <typename T, int ngpus, bool is_broadcast_reg_outptr = false>
@@ -490,7 +512,7 @@ __global__ void __launch_bounds__(512, 1) cross_device_reduce_2stage(RankData* _
                                                                      Signal* self_sg,
                                                                      T* __restrict__ result,
                                                                      int rank,
-                                                                     int size)
+                                                                     int size, uint32_t seq)
 {
     constexpr int pack_size = 16 / sizeof(T);
     constexpr int tnum_gpu  = THREAD_NUM / ngpus;
@@ -515,7 +537,7 @@ __global__ void __launch_bounds__(512, 1) cross_device_reduce_2stage(RankData* _
         tmps[i]    = get_tmp_buf<P>(sg.signals[target]);
     }
     auto tmp_out = tmps[0];
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
     // stage 1: reduce scatter
     for(int idx = start + tid; idx < end; idx += stride)
     {
@@ -551,7 +573,7 @@ __global__ void __launch_bounds__(512, 1) cross_device_reduce_2stage(RankData* _
         }
         __syncthreads();
     }
-    end_sync<ngpus>(sg, self_sg, rank);
+    end_sync<ngpus>(sg, self_sg, rank, seq);
 
     // stage 2: allgather. Note: it's important to match the tid between
     // the two stages, because visibility across devices is only guaranteed
@@ -576,7 +598,7 @@ __global__ void __launch_bounds__(512, 1)
                                           Signal* self_sg,
                                           T* __restrict__ result,
                                           int rank,
-                                          int size)
+                                          int size, uint32_t seq)
 {
     constexpr int pack_size = 16 / sizeof(T);
     constexpr int tnum_gpu  = THREAD_NUM / ngpus;
@@ -615,7 +637,7 @@ __global__ void __launch_bounds__(512, 1)
     {
         tmps[warp_id][rank * part + idx - start] = input_ptr[idx];
     }
-    end_sync<ngpus>(sg, self_sg, rank);
+    end_sync<ngpus>(sg, self_sg, rank, seq);
 
     // stage 2: reduce scatter & write result to remote rank
     end = rank != ngpus - 1 ? part : size - part * (ngpus - 1);
@@ -669,7 +691,7 @@ __global__ void __launch_bounds__(512, 1)
                 *(reinterpret_cast<P*>(&res_smem[0]) + lane_id);
         }
     }
-    end_sync<ngpus>(sg, self_sg, rank);
+    end_sync<ngpus>(sg, self_sg, rank, seq);
 
     if(!is_broadcast_reg_outptr)
     {
@@ -688,7 +710,7 @@ __global__ void __launch_bounds__(512, 1)
  * */
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(512, 1) allgather_naive(
-    RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int size)
+    RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int size, uint32_t seq)
 {
     constexpr int tnum_gpu = THREAD_NUM / ngpus;
     int warp_id            = threadIdx.x / tnum_gpu;
@@ -702,19 +724,19 @@ __global__ void __launch_bounds__(512, 1) allgather_naive(
     {
         ptrs[i] = (const T*)_dp->ptrs[i];
     }
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
 
     for(int idx = tid; idx < size; idx += stride)
     {
         int write_idx     = warp_id * size + idx;
         result[write_idx] = ptrs[warp_id][idx];
     }
-    end_sync<ngpus, true>(sg, self_sg, rank);
+    end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(512, 1) allgather_vec(
-    RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int size)
+    RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int size, uint32_t seq)
 {
     constexpr int tnum_gpu  = THREAD_NUM / ngpus;
     constexpr int pack_size = 16 / sizeof(T);
@@ -730,14 +752,14 @@ __global__ void __launch_bounds__(512, 1) allgather_vec(
     {
         ptrs[i] = (const P*)_dp->ptrs[i];
     }
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
 
     for(int idx = tid; idx < size; idx += stride)
     {
         int write_idx                                   = warp_id * size + idx;
         *(reinterpret_cast<P*>(&result[0]) + write_idx) = ptrs[warp_id][idx];
     }
-    end_sync<ngpus, true>(sg, self_sg, rank);
+    end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 template <typename T, int ngpus>
@@ -747,7 +769,7 @@ __global__ void __launch_bounds__(512, 1) allgather_lastdim(RankData* _dp,
                                                             T* __restrict__ result,
                                                             int rank,
                                                             int size,
-                                                            int last_dim_size)
+                                                            int last_dim_size, uint32_t seq)
 {
     constexpr int tnum_gpu  = THREAD_NUM / ngpus;
     constexpr int pack_size = 16 / sizeof(T);
@@ -765,7 +787,7 @@ __global__ void __launch_bounds__(512, 1) allgather_lastdim(RankData* _dp,
     {
         ptrs[i] = (const P*)_dp->ptrs[i];
     }
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
 
     for(int idx = tid; idx < size; idx += stride)
     {
@@ -774,7 +796,7 @@ __global__ void __launch_bounds__(512, 1) allgather_lastdim(RankData* _dp,
         int write_idx                                   = (ngpus * y + warp_id) * last_dim_size + x;
         *(reinterpret_cast<P*>(&result[0]) + write_idx) = ptrs[warp_id][idx];
     }
-    end_sync<ngpus, true>(sg, self_sg, rank);
+    end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 // ========== reduce_scatter kernel start ==========
@@ -793,7 +815,7 @@ __global__ void __launch_bounds__(512, 1) allgather_lastdim(RankData* _dp,
 // cond: total_elems % (ngpus * pack_size) == 0
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(512, 1) reduce_scatter_split_first_dim(
-    RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int range)
+    RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int range, uint32_t seq)
 {
     int tid                 = blockIdx.x * blockDim.x + threadIdx.x;
     int stride              = blockDim.x * gridDim.x;
@@ -807,7 +829,7 @@ __global__ void __launch_bounds__(512, 1) reduce_scatter_split_first_dim(
         int target = (rank + i) % ngpus;
         ptrs[i]    = (const P*)_dp->ptrs[target];
     }
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
 
     for(int idx = tid; idx < range; idx += stride)
     {
@@ -816,7 +838,7 @@ __global__ void __launch_bounds__(512, 1) reduce_scatter_split_first_dim(
         *(reinterpret_cast<P*>(result) + store_index) =
             packed_reduce<P, ngpus, A>(ptrs, load_index);
     }
-    end_sync<ngpus, true>(sg, self_sg, rank);
+    end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 // reduce_scatter, scatter on last dim — naive (non-vectorized) fallback.
@@ -828,7 +850,7 @@ __global__ void __launch_bounds__(512, 1) reduce_scatter_split_first_dim(
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(256, 1) reduce_scatter_split_lastdim_naive(
     RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int m, int n
-)
+, uint32_t seq)
 {
   int size = m * n / ngpus;
   int splited_n = n / ngpus;
@@ -840,7 +862,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_lastdim_naive(
     int target = (rank + i) % ngpus;
     ptrs[i] = (const T*)_dp->ptrs[target];
   }
-  start_sync<ngpus>(sg, self_sg, rank);
+  start_sync<ngpus>(sg, self_sg, rank, seq);
   for (int i = index; i < size; i += blockDim.x * gridDim.x)
   {
     int index_x = i % splited_n;
@@ -854,7 +876,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_lastdim_naive(
     }
     result[i] = downcast_s<T>(rslt_reg);
   }
-  end_sync<ngpus, true>(sg, self_sg, rank);
+  end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 // reduce_scatter, scatter on last dim — vectorized (16B / thread).
@@ -864,7 +886,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_lastdim_naive(
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(256, 1) reduce_scatter_split_lastdim(
     RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int m, int n
-)
+, uint32_t seq)
 {
   constexpr int pack_size = 16 / sizeof(T);
   using P = typename opus::vector_t<T, pack_size>;
@@ -880,7 +902,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_lastdim(
     int target = (rank + i) % ngpus;
     ptrs[i] = (const P*)_dp->ptrs[target];
   }
-  start_sync<ngpus>(sg, self_sg, rank);
+  start_sync<ngpus>(sg, self_sg, rank, seq);
   for (int i = index; i < size; i += blockDim.x * gridDim.x)
   {
     int index_x = i % splited_n;
@@ -888,7 +910,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_lastdim(
     int load_index = index_y * packed_dim_n + rank * splited_n + index_x;
     *(reinterpret_cast<P*>(result) + i) = packed_reduce<P, ngpus, A>(ptrs, load_index);
   }
-  end_sync<ngpus, true>(sg, self_sg, rank);
+  end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 // reduce_scatter, scatter on middle dim — naive (non-vectorized) fallback.
@@ -899,7 +921,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_lastdim(
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(256, 1) reduce_scatter_split_middim_naive(
     RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int m, int n, int k
-)
+, uint32_t seq)
 {
   int size = m * n * k / ngpus;
   int splited_n = n / ngpus;
@@ -911,7 +933,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_middim_naive(
     int target = (rank + i) % ngpus;
     ptrs[i] = (const T*)_dp->ptrs[target];
   }
-  start_sync<ngpus>(sg, self_sg, rank);
+  start_sync<ngpus>(sg, self_sg, rank, seq);
   for (int i = index; i < size; i += blockDim.x * gridDim.x)
   {
     int index_m = i / (splited_n * k);
@@ -926,7 +948,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_middim_naive(
     }
     result[i] = downcast_s<T>(rslt_reg);
   }
-  end_sync<ngpus, true>(sg, self_sg, rank);
+  end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 // reduce_scatter, scatter on middle dim — vectorized (16B / thread along k).
@@ -936,7 +958,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_middim_naive(
 template <typename T, int ngpus>
 __global__ void __launch_bounds__(256, 1) reduce_scatter_split_middim(
     RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int m, int n, int k
-)
+, uint32_t seq)
 {
   constexpr int pack_size = 16 / sizeof(T);
   using P = typename opus::vector_t<T, pack_size>;
@@ -952,7 +974,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_middim(
     int target = (rank + i) % ngpus;
     ptrs[i] = (const P*)_dp->ptrs[target];
   }
-  start_sync<ngpus>(sg, self_sg, rank);
+  start_sync<ngpus>(sg, self_sg, rank, seq);
   for (int i = index; i < size; i += blockDim.x * gridDim.x)
   {
     int index_m = i / (splited_n * packed_dim_k);
@@ -961,7 +983,7 @@ __global__ void __launch_bounds__(256, 1) reduce_scatter_split_middim(
     int load_index = index_m * (n * packed_dim_k) + (rank * splited_n + index_n) * packed_dim_k + index_k;
     *(reinterpret_cast<P*>(result) + i) = packed_reduce<P, ngpus, A>(ptrs, load_index);
   }
-  end_sync<ngpus, true>(sg, self_sg, rank);
+  end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 // ========== reduce_scatter kernel end ==========
 
@@ -1204,7 +1226,7 @@ multiGPUPackReduce(const opus::vector_t<T, pack_size>* ptrs[ngpus], int index)
 // fp16
 template <typename T, int quant_scale, int pack_size, int ngpus, FP16_FILTER>
 __global__ __forceinline__ void __launch_bounds__(512, 1) allReduceQuantFp8(
-    RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int size)
+    RankData* _dp, RankSignals sg, Signal* self_sg, T* __restrict__ result, int rank, int size, uint32_t seq)
 {
     float FP8_UPBOUND = opus::cast<opus::fp32_t>(opus::numeric_limits<opus::fp8_t>::max());
     int tid           = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1225,7 +1247,7 @@ __global__ __forceinline__ void __launch_bounds__(512, 1) allReduceQuantFp8(
         tmps[i]    = get_tmp_buf<fp8_pack>(sg.signals[target]);
     }
     auto tmp_out = tmps[0];
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
     // stage 1: reduce scatter
     for(int idx = start + tid; idx < end; idx += stride)
     {
@@ -1244,7 +1266,7 @@ __global__ __forceinline__ void __launch_bounds__(512, 1) allReduceQuantFp8(
                 scale_factor;
         }
     }
-    end_sync<ngpus>(sg, self_sg, rank);
+    end_sync<ngpus>(sg, self_sg, rank, seq);
 
     // stage 2: all-gather
     for(int idx = tid; idx < largest_part; idx += stride)
@@ -1282,7 +1304,7 @@ __global__ void __launch_bounds__(512, 1) reduce_scatter_cross_device_store(
     int rank,
     int m,
     int hidden_dim,
-    int input_hidden_dim)
+    int input_hidden_dim, uint32_t seq)
 {
     constexpr int pack_size = 16 / sizeof(T);
     constexpr int tnum_gpu  = THREAD_NUM / ngpus;
@@ -1302,7 +1324,7 @@ __global__ void __launch_bounds__(512, 1) reduce_scatter_cross_device_store(
         ptrs[i] = (const P*)_dp->ptrs[i];
         tmps[i] = get_tmp_buf<P>(sg.signals[i]);
     }
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
 
     int part = m * valid_pack_count / ngpus;
     for(int idx = tid; idx < part; idx += gridDim.x * tnum_gpu)
@@ -1356,7 +1378,7 @@ __global__ void __launch_bounds__(512, 1) reduce_scatter_cross_device_store(
     // peers' end flags, and the kernel produces progressively corrupted
     // output at per-rank volumes above ~1.2 MB (verified via
     // sglang/benchmark/kernels/all_reduce/repro_ar_rmsnorm_corruption.py).
-    end_sync<ngpus, false>(sg, self_sg, rank);
+    end_sync<ngpus, false>(sg, self_sg, rank, seq);
 }
 
 template <int reduce_range>
@@ -2072,7 +2094,7 @@ __global__ void __launch_bounds__(1024, 1)
                                    int hidden_dim,
                                    int out_hidden_dim,
                                    float eps,
-                                   T* __restrict__ bf16_output = nullptr)
+                                   T* __restrict__ bf16_output = nullptr, uint32_t seq = 0)
 {
     constexpr int pack_size = 16 / sizeof(T);
     int block_size          = hidden_dim / pack_size;
@@ -2092,7 +2114,7 @@ __global__ void __launch_bounds__(1024, 1)
         ptrs[i] = (const P*)_dp->ptrs[i];
         tmps[i] = get_tmp_buf<P>(sg.signals[i]);
     }
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
     for(int tidx = blockIdx.x; tidx < token_num; tidx += gridDim.x)
     {
         int input_idx    = tidx * input_hidden_dim + access_id_in_token;
@@ -2172,7 +2194,7 @@ __global__ void __launch_bounds__(1024, 1)
     // registered input buffer or this block's signal slot for the next fused
     // collective. Without it, a faster rank may advance while a peer is still
     // reading the previous invocation, causing silent cross-request corruption.
-    end_sync<ngpus, true>(sg, self_sg, rank);
+    end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 // Per-group quant variant of the 1-stage fused allreduce+rmsnorm kernel.
@@ -2199,7 +2221,7 @@ __global__ void __launch_bounds__(1024, 1)
                                              int hidden_dim,
                                              int group_size,
                                              float eps,
-                                             T* __restrict__ bf16_output)
+                                             T* __restrict__ bf16_output, uint32_t seq)
 {
     constexpr int pack_size = 16 / sizeof(T);
     int block_size          = hidden_dim / pack_size;
@@ -2216,7 +2238,7 @@ __global__ void __launch_bounds__(1024, 1)
         ptrs[i] = (const P*)_dp->ptrs[i];
         tmps[i] = get_tmp_buf<P>(sg.signals[i]);
     }
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
     for(int tidx = blockIdx.x; tidx < token_num; tidx += gridDim.x)
     {
         int idx = tidx * hidden_dim + access_id_in_token;
@@ -2272,7 +2294,7 @@ __global__ void __launch_bounds__(1024, 1)
                 group_size, output, scale_out, active, bf16_output, token_num);
         }
     }
-    end_sync<ngpus, true>(sg, self_sg, rank);
+    end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 template <typename T, typename OutT, int NGPUS, typename ST = float>
@@ -2300,7 +2322,7 @@ void allreduce_fusion_kernel_1stage_per_group_launcher(
                                          residual_inp, residual_out,
                                          output, weight, scale_out,
                                          size, hidden_dim, group_size, eps,
-                                         bf16_output);
+                                         bf16_output, 0u);
     };
     if(transpose_scale)
         launch(std::true_type{});
@@ -2322,7 +2344,7 @@ __global__ void __launch_bounds__(1024, 1)
                                          int size,
                                          int hidden_dim,
                                          float eps,
-                                         T* __restrict__ bf16_output)
+                                         T* __restrict__ bf16_output, uint32_t seq)
 {
     constexpr int pack_size = 16 / sizeof(T);
     int block_size          = hidden_dim / pack_size;
@@ -2339,7 +2361,7 @@ __global__ void __launch_bounds__(1024, 1)
         ptrs[i] = (const P*)_dp->ptrs[i];
         tmps[i] = get_tmp_buf<P>(sg.signals[i]);
     }
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
     for(int tidx = blockIdx.x; tidx < token_num; tidx += gridDim.x)
     {
         int idx = tidx * hidden_dim + access_id_in_token;
@@ -2382,7 +2404,7 @@ __global__ void __launch_bounds__(1024, 1)
             acc, weight_p, hidden_dim, eps, idx, tidx, padded_block_size,
             output, scale_out, active, bf16_output);
     }
-    end_sync<ngpus, true>(sg, self_sg, rank);
+    end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 template <typename T, int NGPUS>
@@ -2403,7 +2425,7 @@ void allreduce_fusion_kernel_1stage_mxfp4_launcher(
                                      residual_inp, residual_out,
                                      output, weight, scale_out,
                                      size, hidden_dim, eps,
-                                     bf16_output);
+                                     bf16_output, 0u);
 }
 
 // 2-stage variant of the MXFP4 fused AR+RMSNorm+quant kernel.
@@ -2431,7 +2453,7 @@ __global__ void __launch_bounds__(1024, 1)
                                          int size,
                                          int hidden_dim,
                                          float eps,
-                                         T* __restrict__ bf16_output = nullptr)
+                                         T* __restrict__ bf16_output = nullptr, uint32_t seq = 0)
 {
     constexpr int pack_size = 16 / sizeof(T);
     int block_size          = hidden_dim / pack_size;
@@ -2453,7 +2475,7 @@ __global__ void __launch_bounds__(1024, 1)
         tmps[i] = get_tmp_buf<P>(sg.signals[i]);
     }
     A acc;
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
 
     int size_pack = size / pack_size;
     for(int idx_pack = (blockIdx.x * ngpus + rank) * tnum_gpu + lane_id;
@@ -2496,7 +2518,7 @@ __global__ void __launch_bounds__(1024, 1)
     P weight_p{};
     if(active)
         weight_p = *reinterpret_cast<P*>(weight + access_id_in_token);
-    end_sync<ngpus>(sg, self_sg, rank);
+    end_sync<ngpus>(sg, self_sg, rank, seq);
     int token_num = size / hidden_dim;
     for(int tidx = blockIdx.x; tidx < token_num; tidx += gridDim.x)
     {
@@ -2666,7 +2688,7 @@ __global__ void __launch_bounds__(1024, 1)
                                           const T* __restrict__ cos_sin_cache,
                                           const int64_t* __restrict__ position_ids,
                                           int head_dim,
-                                          int rotary_dim)
+                                          int rotary_dim, uint32_t seq)
 {
     constexpr int pack_size = 16 / sizeof(T);
     int hidden_dim_qk       = hidden_dim_q + hidden_dim_k;
@@ -2688,7 +2710,7 @@ __global__ void __launch_bounds__(1024, 1)
         ptrs[i] = (const P*)_dp->ptrs[i];
         tmps[i] = get_tmp_buf<P>(sg.signals[i]);
     }
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
 
     __shared__ float smem[32];
 
@@ -2736,7 +2758,7 @@ __global__ void __launch_bounds__(1024, 1)
         __syncthreads();
     }
 
-    end_sync<ngpus>(sg, self_sg, rank);
+    end_sync<ngpus>(sg, self_sg, rank, seq);
 
     for(int tidx = blockIdx.x; tidx < token_num; tidx += gridDim.x)
     {
@@ -2881,7 +2903,7 @@ void qknorm_allreduce_fusion_kernel_2stage_launcher(RankData* _dp,
                                                     cos_sin_cache,
                                                     position_ids,
                                                     head_dim,
-                                                    rotary_dim);
+                                                    rotary_dim, 0u);
 }
 
 template <typename T, typename OutT, int ngpus, bool GEMMA_NORM = false>
@@ -2898,7 +2920,7 @@ __global__ void __launch_bounds__(1024, 1)
                                    int size,
                                    int hidden_dim,
                                    float eps,
-                                   T* __restrict__ bf16_output = nullptr)
+                                   T* __restrict__ bf16_output = nullptr, uint32_t seq = 0)
 {
     constexpr int pack_size = 16 / sizeof(T);
     int block_size          = hidden_dim / pack_size;
@@ -2919,7 +2941,7 @@ __global__ void __launch_bounds__(1024, 1)
         tmps[i] = get_tmp_buf<P>(sg.signals[i]);
     }
     A acc;
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
 
     for(int idx = ((blockIdx.x * ngpus + rank) * tnum_gpu + lane_id) * pack_size; idx < size;
         idx += gridDim.x * ngpus * tnum_gpu * pack_size)
@@ -2958,7 +2980,7 @@ __global__ void __launch_bounds__(1024, 1)
 
     int access_id_in_token = threadIdx.x * pack_size;
     P weight_p             = *reinterpret_cast<P*>(weight + access_id_in_token);
-    end_sync<ngpus>(sg, self_sg, rank);
+    end_sync<ngpus>(sg, self_sg, rank, seq);
     for(int idx = blockIdx.x * hidden_dim + access_id_in_token, tidx = blockIdx.x; idx < size;
         idx += gridDim.x * hidden_dim, tidx += gridDim.x)
     {
@@ -3040,7 +3062,7 @@ __global__ void __launch_bounds__(1024, 1)
                                              int hidden_dim,
                                              int group_size,
                                              float eps,
-                                             T* __restrict__ bf16_output = nullptr)
+                                             T* __restrict__ bf16_output = nullptr, uint32_t seq = 0)
 {
     constexpr int pack_size = 16 / sizeof(T);
     int block_size          = hidden_dim / pack_size;
@@ -3061,7 +3083,7 @@ __global__ void __launch_bounds__(1024, 1)
         tmps[i] = get_tmp_buf<P>(sg.signals[i]);
     }
     A acc;
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
 
     for(int idx = ((blockIdx.x * ngpus + rank) * tnum_gpu + lane_id) * pack_size; idx < size;
         idx += gridDim.x * ngpus * tnum_gpu * pack_size)
@@ -3094,7 +3116,7 @@ __global__ void __launch_bounds__(1024, 1)
 
     int access_id_in_token = threadIdx.x * pack_size;
     P weight_p             = *reinterpret_cast<P*>(weight + access_id_in_token);
-    end_sync<ngpus>(sg, self_sg, rank);
+    end_sync<ngpus>(sg, self_sg, rank, seq);
     for(int idx = blockIdx.x * hidden_dim + access_id_in_token, tidx = blockIdx.x; idx < size;
         idx += gridDim.x * hidden_dim, tidx += gridDim.x)
     {
@@ -3276,15 +3298,15 @@ void allreduce_fusion_kernel_split_per_group_launcher(RankData* _dp,
     {
     case 8:
         reduce_scatter_cross_device_store<T, 8>
-            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim);
+            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim, 0u);
         break;
     case 4:
         reduce_scatter_cross_device_store<T, 4>
-            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim);
+            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim, 0u);
         break;
     case 2:
         reduce_scatter_cross_device_store<T, 2>
-            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim);
+            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim, 0u);
         break;
     default:
         throw std::runtime_error("unsupported NGPUS=" + std::to_string(NGPUS));
@@ -3333,15 +3355,15 @@ void allreduce_fusion_kernel_split_launcher(RankData* _dp,
     {
     case 8:
         reduce_scatter_cross_device_store<T, 8>
-            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim);
+            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim, 0u);
         break;
     case 4:
         reduce_scatter_cross_device_store<T, 4>
-            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim);
+            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim, 0u);
         break;
     case 2:
         reduce_scatter_cross_device_store<T, 2>
-            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim);
+            <<<grid, block, 0, stream>>>(_dp, sg, self_sg, rank, m, hidden_dim, hidden_dim, 0u);
         break;
     default: throw std::runtime_error("fused allreduce rmsnorm: unsupported NGPUS=" + std::to_string(NGPUS));
     }
@@ -3383,15 +3405,15 @@ void allreduce_mhc_post_split_launcher(RankData* _dp,
     {
     case 8:
         reduce_scatter_cross_device_store<T, 8><<<grid, block, 0, stream>>>(
-            _dp, sg, self_sg, rank, m, hidden_size, input_hidden_dim);
+            _dp, sg, self_sg, rank, m, hidden_size, input_hidden_dim, 0u);
         break;
     case 4:
         reduce_scatter_cross_device_store<T, 4><<<grid, block, 0, stream>>>(
-            _dp, sg, self_sg, rank, m, hidden_size, input_hidden_dim);
+            _dp, sg, self_sg, rank, m, hidden_size, input_hidden_dim, 0u);
         break;
     case 2:
         reduce_scatter_cross_device_store<T, 2><<<grid, block, 0, stream>>>(
-            _dp, sg, self_sg, rank, m, hidden_size, input_hidden_dim);
+            _dp, sg, self_sg, rank, m, hidden_size, input_hidden_dim, 0u);
         break;
     default:
         throw std::runtime_error("AR+MHC post split epilogue: unsupported NGPUS=" +
@@ -3418,7 +3440,7 @@ __global__ void __launch_bounds__(1024, 1) allreduce_mhc_post_large_m_kernel(
     int m,
     int input_hidden_dim,
     int hidden_size,
-    int residual_stride)
+    int residual_stride, uint32_t seq)
 {
     constexpr int pack_size = 16 / sizeof(T);
     using P                 = typename opus::vector_t<T, pack_size>;
@@ -3436,7 +3458,7 @@ __global__ void __launch_bounds__(1024, 1) allreduce_mhc_post_large_m_kernel(
         ptrs[r] = reinterpret_cast<const P*>(_dp->ptrs[r]);
     }
 
-    start_sync<ngpus>(sg, self_sg, rank);
+    start_sync<ngpus>(sg, self_sg, rank, seq);
     for(int row = blockIdx.x; row < m; row += gridDim.x)
     {
         P reduced_pack;
@@ -3494,7 +3516,7 @@ __global__ void __launch_bounds__(1024, 1) allreduce_mhc_post_large_m_kernel(
         if constexpr(two_way)
             __syncthreads();
     }
-    end_sync<ngpus, true>(sg, self_sg, rank);
+    end_sync<ngpus, true>(sg, self_sg, rank, seq);
 }
 
 class CustomAllreduce
@@ -3509,6 +3531,9 @@ class CustomAllreduce
     std::unordered_map<void*, RankData*> input_buffer;
     std::unordered_map<void*, RankData*> output_buffers_;
     Signal* self_sg_;
+
+    // per-launch sequence cookie (host-bumped; device reads via _flag[last])
+    uint32_t launch_cookie_ = 0xFFFFFFFFu; // first next_launch_cookie() -> 1
 
     // stores the registered device pointers from all ranks
     RankData *d_rank_data_base_, *d_rank_data_end_;
@@ -3806,6 +3831,26 @@ class CustomAllreduce
         graph_unreg_output_buffers_.clear();
     }
 
+    // Mixed-size race fix (gfx908): bump a per-launch cookie stored in the
+    // last _flag slot (block_limit <= 80 < kMaxBlocks guarantees kernels
+    // never use it as a counter). Kernels pass it to start/end_sync so
+    // waits match exactly this launch; stale counters from skipped blocks
+    // in differently-sized launches can no longer satisfy a wait.
+    uint32_t next_launch_cookie()
+    {
+        // Odd, monotonically increasing; never 0 (0 = legacy counter path).
+        launch_cookie_ += 2;
+        uint32_t v = launch_cookie_ | 1u;
+        // Write into EVERY rank's meta cookie cell via the IPC mappings.
+        for(int i = 0; i < world_size_; i++)
+        {
+            Signal* sig = sg_.signals[i];
+            if(sig != nullptr)
+                sig->_flag[kMaxBlocks - 1] = v;
+        }
+        return v;
+    }
+
     /*
      * call all reduce fp8 kernel
      * case size in single gpu: (128, 8192)
@@ -3817,13 +3862,14 @@ class CustomAllreduce
     void runFp8QuantKernel(hipStream_t stream, T* input, T* output, int size)
     {
         RankData* ptrs = get_buffer_RD(stream, input);
+        uint32_t seq_v = next_launch_cookie();
         // 32 block 512 thread or 64 block 256 thread
 #define DISPATHC_UNIT(pack_size, quant_scale, ngpus)                                \
     do                                                                              \
     {                                                                               \
     case ngpus: {                                                                   \
         allReduceQuantFp8<T, quant_scale, pack_size, ngpus>                         \
-            <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size); \
+            <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size, seq_v); \
         return;                                                                     \
     }                                                                               \
     } while(0)
@@ -3901,6 +3947,9 @@ class CustomAllreduce
         throw std::runtime_error("max supported block limit is " + std::to_string(kMaxBlocks) +
                                  ". Got " + std::to_string(block_limit));
 
+    // Per-launch cookie for exact-match signal waits (mixed-size race fix).
+    uint32_t seq_v = next_launch_cookie();
+
     RankData* input_ptrs  = get_buffer_RD(stream, input);
     RankData* output_ptrs = nullptr;
     if(is_broadcast_reg_outptr)
@@ -3941,6 +3990,7 @@ class CustomAllreduce
         }
         if(call_1stage)
         {
+        uint32_t seq_v = next_launch_cookie();
             blocks = std::min(kMaxBlocks,
                               (size + (threads / world_size_) - 1) / (threads / world_size_));
         }
@@ -3962,12 +4012,12 @@ class CustomAllreduce
         if(is_broadcast_reg_outptr)                                           \
         {                                                                     \
             name<T, ngpus, true><<<blocks, threads, 0, stream>>>(             \
-                input_ptrs, output_ptrs, sg_, self_sg_, output, rank_, size); \
+                input_ptrs, output_ptrs, sg_, self_sg_, output, rank_, size, seq_v); \
         }                                                                     \
         else                                                                  \
         {                                                                     \
             name<T, ngpus, false><<<blocks, threads, 0, stream>>>(            \
-                input_ptrs, output_ptrs, sg_, self_sg_, output, rank_, size); \
+                input_ptrs, output_ptrs, sg_, self_sg_, output, rank_, size, seq_v); \
         }                                                                     \
     } while(0)
 
@@ -4082,19 +4132,20 @@ void dispatchReduceScatter(hipStream_t stream, T* input, T* output,
         int range = k / (world_size_ * pack_size);
         dim3 block(512);
         dim3 grid(std::min(kGridCap, (range + 511) / 512));
+        uint32_t seq_v = next_launch_cookie();
         switch(world_size_)
         {
         case 8:
             reduce_scatter_split_first_dim<T, 8>
-                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, range);
+                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, range, seq_v);
             break;
         case 4:
             reduce_scatter_split_first_dim<T, 4>
-                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, range);
+                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, range, seq_v);
             break;
         case 2:
             reduce_scatter_split_first_dim<T, 2>
-                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, range);
+                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, range, seq_v);
             break;
         default: printf("reduce_scatter world_size error!\n");
         }
@@ -4112,10 +4163,10 @@ void dispatchReduceScatter(hipStream_t stream, T* input, T* output,
     do {                                                                                      \
         if(vec)                                                                               \
             reduce_scatter_split_lastdim<T, NG>                                               \
-                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, n, k);       \
+                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, n, k, 0u);       \
         else                                                                                  \
             reduce_scatter_split_lastdim_naive<T, NG>                                         \
-                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, n, k);       \
+                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, n, k, 0u);       \
     } while(0)
         switch(world_size_)
         {
@@ -4138,10 +4189,10 @@ void dispatchReduceScatter(hipStream_t stream, T* input, T* output,
     do {                                                                                      \
         if(vec)                                                                               \
             reduce_scatter_split_middim<T, NG>                                                \
-                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, m, n, k);    \
+                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, m, n, k, 0u);    \
         else                                                                                  \
             reduce_scatter_split_middim_naive<T, NG>                                          \
-                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, m, n, k);    \
+                <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, m, n, k, 0u);    \
     } while(0)
         switch(world_size_)
         {
@@ -4165,6 +4216,7 @@ void dispatchAllGather(
     auto d         = 16 / sizeof(T);
     dim3 block(512);
     // only support gather first dim and gather last dim
+    uint32_t seq_v = next_launch_cookie();
     // gather first dim
     if(gather_dim == 0)
     {
@@ -4172,19 +4224,20 @@ void dispatchAllGather(
         {
             int block_num = (size + 512 - 1) / 512;
             dim3 grid(std::min(block_num, 80));
+            uint32_t seq_v = next_launch_cookie();
             switch(world_size_)
             {
             case 8:
                 allgather_naive<T, 8>
-                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size);
+                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size, seq_v);
                 break;
             case 4:
                 allgather_naive<T, 4>
-                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size);
+                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size, seq_v);
                 break;
             case 2:
                 allgather_naive<T, 2>
-                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size);
+                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size, seq_v);
                 break;
             default: printf("allgather world_size error\n");
             }
@@ -4199,15 +4252,15 @@ void dispatchAllGather(
             {
             case 8:
                 allgather_vec<T, 8>
-                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size);
+                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size, seq_v);
                 break;
             case 4:
                 allgather_vec<T, 4>
-                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size);
+                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size, seq_v);
                 break;
             case 2:
                 allgather_vec<T, 2>
-                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size);
+                    <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, output, rank_, size, seq_v);
                 break;
             default: printf("allgather world_size error\n");
             }
@@ -4223,15 +4276,15 @@ void dispatchAllGather(
         {
         case 8:
             allgather_lastdim<T, 8><<<grid, block, 0, stream>>>(
-                ptrs, sg_, self_sg_, output, rank_, size, last_dim_size);
+                ptrs, sg_, self_sg_, output, rank_, size, last_dim_size, 0u);
             break;
         case 4:
             allgather_lastdim<T, 4><<<grid, block, 0, stream>>>(
-                ptrs, sg_, self_sg_, output, rank_, size, last_dim_size);
+                ptrs, sg_, self_sg_, output, rank_, size, last_dim_size, 0u);
             break;
         case 2:
             allgather_lastdim<T, 2><<<grid, block, 0, stream>>>(
-                ptrs, sg_, self_sg_, output, rank_, size, last_dim_size);
+                ptrs, sg_, self_sg_, output, rank_, size, last_dim_size, 0u);
             break;
         default: printf("allgather world_size error\n");
         }
@@ -4333,17 +4386,17 @@ void dispatchFusedAllReduceRMSNorm(hipStream_t stream,
     case 8:
         MAYBE_DISPATCH_1S_KERNEL(8);
         reduce_scatter_cross_device_store<T, 8>
-            <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, rank_, m, n, input_hidden_dim);
+            <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, rank_, m, n, input_hidden_dim, 0u);
         break;
     case 4:
         MAYBE_DISPATCH_1S_KERNEL(4);
         reduce_scatter_cross_device_store<T, 4>
-            <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, rank_, m, n, input_hidden_dim);
+            <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, rank_, m, n, input_hidden_dim, 0u);
         break;
     case 2:
         MAYBE_DISPATCH_1S_KERNEL(2);
         reduce_scatter_cross_device_store<T, 2>
-            <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, rank_, m, n, input_hidden_dim);
+            <<<grid, block, 0, stream>>>(ptrs, sg_, self_sg_, rank_, m, n, input_hidden_dim, 0u);
         break;
     default: throw std::runtime_error("fused allreduce rmsnorm: unsupported world_size=" + std::to_string(world_size_));
     }

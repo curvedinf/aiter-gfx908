@@ -1060,7 +1060,15 @@ class CustomAllreduce:
         # consumers profile against). Gated on the same condition as the
         # capture copy-in path above; _init_ipc only runs for non-VMM.
         raw_cached = _expandable_segments_enabled()
-        self._pool.create("input", max_size, raw_cached=raw_cached)
+        # gfx908: the eager input pool MUST be uncached. Peer GPUs' L2 lines
+        # for the pool addresses go stale between back-to-back AR calls with
+        # different sizes (deterministic own-current + peers-previous reads —
+        # the serving corruption). hipDeviceMallocUncached forces peer reads
+        # to memory. AITER_CAR_UNCACHED_POOL=0 re-enables the cached pool
+        # for A/B benchmarking only.
+        uncached_pool = os.environ.get("AITER_CAR_UNCACHED_POOL", "1") != "0"
+        self._pool.create("input", max_size, raw_cached=raw_cached and not uncached_pool,
+                          uncached=uncached_pool)
 
         handles, offsets = self._pool.get_ipc_meta("meta")
         self._ptr = self._ops_init_custom_ar(

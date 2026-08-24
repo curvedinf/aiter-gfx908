@@ -433,6 +433,30 @@ void get_meta_buffer_ipc_handle(int64_t inp_ptr, int64_t out_handle_ptr)
 
 #endif
 
+// Stream-ordered device-to-device copy for the CAR input pool. A plain
+// elementwise kernel stays on the compute queue, so back-to-back CAR calls
+// serialize correctly (SDMA copies via hipMemcpyAsync do not on gfx908).
+__global__ void car_pool_copy_kernel(unsigned char* __restrict__ dst,
+                                     const unsigned char* __restrict__ src,
+                                     size_t nbytes)
+{
+    size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x;
+    size_t stride = (size_t)gridDim.x * blockDim.x;
+    for(; i < nbytes; i += stride)
+        dst[i] = src[i];
+}
+
+static inline void launch_pool_copy(void* dst, const void* src, size_t nbytes,
+                                    hipStream_t stream)
+{
+    if(nbytes == 0)
+        return;
+    int thread = 256;
+    int block  = (int)std::min<size_t>((nbytes + thread - 1) / thread, 4096);
+    car_pool_copy_kernel<<<block, thread, 0, stream>>>(
+        (unsigned char*)dst, (const unsigned char*)src, nbytes);
+}
+
 // ---- Public collective APIs ----
 
 void all_reduce(fptr_t _fa,
@@ -460,8 +484,12 @@ void all_reduce(fptr_t _fa,
     {
         if(data_bytes > reg_inp_bytes)
             throw std::runtime_error("registered buffer is too small to contain the input");
-        HIP_CALL(hipMemcpyAsync((void*)reg_inp_ptr, actual_inp, data_bytes,
-                                hipMemcpyDeviceToDevice, stream));
+        // gfx908 ordering fix: hipMemcpyAsync D2D on the SDMA copy engine is
+        // not reliably ordered against the reduce kernel of the PREVIOUS
+        // back-to-back custom-AR call reading the same pool region (mixed-
+        // size eager sequences corrupt; single-size sequences are fine).
+        // Route the copy through the compute queue with a kernel instead.
+        launch_pool_copy((void*)reg_inp_ptr, actual_inp, data_bytes, stream);
         actual_inp = (void*)reg_inp_ptr;
     }
 

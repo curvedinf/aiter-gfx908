@@ -1207,6 +1207,26 @@ DINLINE opus::vector_t<opus::i8_t, pack_size> packQuantInt8(opus::vector_t<T, pa
     return ret_val;
 }
 
+// Per-token int8 quant pack matching aiter's pertoken_quant numerics: values,
+// quotient and scale all stay in fp32 (pertoken_quant upcasts to fp32 and
+// stores fp32 scales), and the int8 cast truncates toward zero — torch's
+// `.to(torch.int8)` — NOT the round-to-nearest-even used by the per-group
+// packQuantInt8 above. Uses no fp8 conversion builtins, so it is gfx908-safe.
+template <int pack_size>
+DINLINE opus::vector_t<opus::i8_t, pack_size> packQuantInt8PerToken(
+    opus::vector_t<opus::fp32_t, pack_size> inp_pack, float scale_functor)
+{
+    opus::vector_t<opus::i8_t, pack_size> ret_val;
+#pragma unroll
+    for(int i = 0; i < pack_size; ++i)
+    {
+        float q = upcast_s(inp_pack[i]) / scale_functor;
+        q       = fminf(fmaxf(q, -128.0f), 127.0f);
+        ret_val[i] = static_cast<opus::i8_t>(q);
+    }
+    return ret_val;
+}
+
 template <typename T, int pack_size, int ngpus>
 DINLINE opus::vector_t<T, pack_size>
 multiGPUPackReduce(const opus::vector_t<T, pack_size>* ptrs[ngpus], int index)
@@ -1668,7 +1688,8 @@ template <typename P,
           typename OT,
           int PACK_SIZE,
           int WARP_SIZE = 32,
-          bool GEMMA_NORM = false>
+          bool GEMMA_NORM = false,
+          bool EXACT_RSQRT = false>
 __device__ __forceinline__ void
 ar_fusion_epilogue_rms_norm(O& out, A& in, P& weight, float eps, int hidden_dim, int block_size)
 {
@@ -1683,7 +1704,24 @@ ar_fusion_epilogue_rms_norm(O& out, A& in, P& weight, float eps, int hidden_dim,
     acc = ar_fusion_epilogue_block_reduce<AddFunctor, float, WARP_SIZE>(acc, block_size);
     if(threadIdx.x == 0)
     {
-        s_val = rsqrtf(acc / hidden_dim + eps);
+        // EXACT_RSQRT: the per-token int8 epilogue matches the unfused torch
+        // chain (pertoken_quant after a torch RMSNorm) bitwise, which needs
+        // the correctly-rounded reciprocal sqrt: fp64 sqrt + fp64 divide,
+        // rounded once to fp32. The numerator is derived from a weight load
+        // (w * 0 + 1 == 1.0 exactly for finite w, but NOT constant-foldable
+        // without fast-math): with a literal 1.0 the optimizer combines
+        // 1.0/sqrt(x) into the raw v_rsq_f32 hardware approximation in some
+        // kernel contexts (observed in the 1-stage kernel; this module builds
+        // with -amdgpu-early-inline-all), which is ~1 ULP off on a few
+        // percent of inputs. The default rsqrtf keeps that cheaper form.
+        if constexpr(EXACT_RSQRT)
+        {
+            float one = upcast_s(weight[0]) * 0.0f + 1.0f;
+            s_val = static_cast<float>(static_cast<double>(one) /
+                                       sqrt(static_cast<double>(acc / hidden_dim + eps)));
+        }
+        else
+            s_val = rsqrtf(acc / hidden_dim + eps);
     }
     __syncthreads();
 #pragma unroll
@@ -1886,6 +1924,68 @@ __device__ __forceinline__ void ar_fusion_epilogue(A& in,
         if(threadIdx.x == 0)
             scale_out[tidx] = scale;
     }
+}
+
+// Per-token INT8 quantization epilogue — the activation format produced by
+// aiter's pertoken_quant (consumed by vLLM's CK W8A8 path on gfx908): q [M,K]
+// int8 plus scale [M,1] fp32, per-row absmax/127. Mirrors the fp8 per-token
+// epilogue above (same full-row ar_fusion_epilogue_reduce_abs_max) with two
+// differences:
+//   (a) quant bound is 127 (not FP8 max) and the payload cast truncates toward
+//       zero — torch's `.to(torch.int8)` in pertoken_quant — via
+//       packQuantInt8PerToken, which references no fp8 conversion builtins (the
+//       fp8 casts are compile-only stubs on gfx908 and must not be instantiated
+//       by this path);
+//   (b) the normed values, quotient and scale all stay in fp32: pertoken_quant
+//       upcasts to fp32 and never rounds through the input dtype (unlike the
+//       per-group variant, whose reference quantizes the fp16/bf16 normed
+//       tensor).
+template <typename P, typename A, typename T, int PACK_SIZE>
+__device__ __forceinline__ void ar_fusion_epilogue_per_token_int8(
+    A& in,
+    P& weight,
+    int hidden_dim,
+    float eps,
+    int idx,
+    int tidx,
+    int block_size,
+    opus::i8_t* __restrict__ output,
+    float* __restrict__ scale_out,
+    bool active            = true,
+    T* __restrict__ bf16_output = nullptr)
+{
+    A out;
+    // EXACT_RSQRT: the per-token int8 activation format is defined by aiter's
+    // pertoken_quant on a torch RMSNorm chain, whose rsqrt is correctly
+    // rounded — match it bitwise so the fused epilogue is a drop-in for the
+    // unfused path.
+    ar_fusion_epilogue_rms_norm<P, A, A, float, PACK_SIZE, 32, /*GEMMA_NORM=*/false,
+                                /*EXACT_RSQRT=*/true>(
+        out, in, weight, eps, hidden_dim, block_size);
+
+    // Optional pre-quantization bf16/fp16 mirror of the normed output, same
+    // contract as the fp8 per-token epilogue.
+    if(bf16_output != nullptr && active)
+    {
+        P bf16_pack;
+#pragma unroll
+        for(int i = 0; i < PACK_SIZE; ++i)
+            bf16_pack[i] = downcast_s<T>(out[i]);
+        *reinterpret_cast<P*>(bf16_output + idx) = bf16_pack;
+    }
+
+    float amax = ar_fusion_epilogue_reduce_abs_max<A, PACK_SIZE>(out, block_size);
+    // Scale as a reciprocal MULTIPLY, not a division: pertoken_quant divides
+    // by the python scalar dtypeMax (127), which torch lowers to x * (1/127)
+    // (wrapped-scalar division optimization) — a true IEEE division rounds
+    // differently on ~5% of inputs. Same zero-guard as the reference.
+    float scale = amax == 0.f ? 1.f : amax * (1.0f / 127.0f);
+    using OP    = opus::vector_t<opus::i8_t, PACK_SIZE>;
+    OP out_quant = packQuantInt8PerToken<PACK_SIZE>(out, scale);
+    if(active)
+        *reinterpret_cast<OP*>(output + idx) = out_quant;
+    if(threadIdx.x == 0)
+        scale_out[tidx] = scale;
 }
 
 // Per-group FP8 quantization epilogue.
@@ -2172,18 +2272,37 @@ __global__ void __launch_bounds__(1024, 1)
         }
         // padded threads participate in reduction with zero acc but skip output writes
         int padded_block_size = (int)blockDim.x;
-        ar_fusion_epilogue<P, A, T, OutT, pack_size, GEMMA_NORM>(
-            acc,
-            weight_p,
-            hidden_dim,
-            eps,
-            out_idx,
-            tidx,
-            padded_block_size,
-            output,
-            scale_out,
-            active,
-            bf16_output);
+        if constexpr(std::is_same_v<OutT, opus::i8_t>)
+        {
+            ar_fusion_epilogue_per_token_int8<P, A, T, pack_size>(
+                acc,
+                weight_p,
+                hidden_dim,
+                eps,
+                out_idx,
+                tidx,
+                padded_block_size,
+                output,
+                scale_out,
+                active,
+                bf16_output);
+        }
+        else
+        {
+            static_assert(!std::is_same_v<OutT, opus::i8_t>, "ELSE LIVE FOR I8");
+            ar_fusion_epilogue<P, A, T, OutT, pack_size, GEMMA_NORM>(
+                acc,
+                weight_p,
+                hidden_dim,
+                eps,
+                out_idx,
+                tidx,
+                padded_block_size,
+                output,
+                scale_out,
+                active,
+                bf16_output);
+        }
         if(active_tail)
         {
             OP zero_pack{};
@@ -2997,9 +3116,18 @@ __global__ void __launch_bounds__(1024, 1)
         {
             acc[v] = upcast_s(vec[v]);
         }
-        ar_fusion_epilogue<P, A, T, OutT, pack_size, GEMMA_NORM>(
-            acc, weight_p, hidden_dim, eps, idx, tidx, block_size, output, scale_out,
-            /*active=*/true, bf16_output);
+        if constexpr(std::is_same_v<OutT, opus::i8_t>)
+        {
+            ar_fusion_epilogue_per_token_int8<P, A, T, pack_size>(
+                acc, weight_p, hidden_dim, eps, idx, tidx, block_size, output,
+                scale_out, /*active=*/true, bf16_output);
+        }
+        else
+        {
+            ar_fusion_epilogue<P, A, T, OutT, pack_size, GEMMA_NORM>(
+                acc, weight_p, hidden_dim, eps, idx, tidx, block_size, output, scale_out,
+                /*active=*/true, bf16_output);
+        }
     }
 }
 
@@ -3212,9 +3340,18 @@ __global__ void __launch_bounds__(1024, 1)
         {
             acc[v] = upcast_s(vec[v]);
         }
-        ar_fusion_epilogue<P, A, T, OutT, pack_size, GEMMA_NORM>(
-            acc, weight_p, hidden_dim, eps, idx, tidx, block_size, output, scale_out,
-            /*active=*/true, bf16_output);
+        if constexpr(std::is_same_v<OutT, opus::i8_t>)
+        {
+            ar_fusion_epilogue_per_token_int8<P, A, T, pack_size>(
+                acc, weight_p, hidden_dim, eps, idx, tidx, block_size, output, scale_out,
+                /*active=*/true, bf16_output);
+        }
+        else
+        {
+            ar_fusion_epilogue<P, A, T, OutT, pack_size, GEMMA_NORM>(
+                acc, weight_p, hidden_dim, eps, idx, tidx, block_size, output, scale_out,
+                /*active=*/true, bf16_output);
+        }
     }
 }
 

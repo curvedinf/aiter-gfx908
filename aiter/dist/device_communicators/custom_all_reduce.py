@@ -29,6 +29,7 @@ from torch.distributed import ProcessGroup
 import aiter as ops
 from aiter import logger
 from aiter.dist.parallel_state import in_the_same_node_as
+from aiter.jit.core import get_module
 from aiter.utility.dtypes import fp8
 
 from .rocm_version import get_rocm_version
@@ -1842,6 +1843,69 @@ class CustomAllreduce:
         if emit_bf16:
             return out, res_out, scale_out, bf16_out
         return out, res_out, scale_out
+
+    def fused_ar_rms_int8_per_token_quant(
+        self,
+        inp: torch.Tensor,
+        res_inp: torch.Tensor,
+        *,
+        w: torch.Tensor,
+        eps: float,
+        registered: bool = False,
+        use_1stage: bool = False,
+        emit_bf16: bool = False,
+    ):
+        """Fused AR + residual + RMSNorm + per-token int8 quant.
+
+        Produces the activation format aiter's ``pertoken_quant`` (consumed
+        by vLLM's CK W8A8 path on gfx908) yields: out int8 [M, K], scale_out
+        fp32 [M, 1] (per-row absmax / 127, round-toward-zero payload casts —
+        the normed values, quotient and scale all stay in fp32).
+        """
+        res_out = torch.empty_like(inp)
+        out = torch.empty(inp.shape, dtype=torch.int8, device=inp.device)
+        scale_out = torch.empty(
+            inp.shape[:-1] + (1,), dtype=torch.float32, device=inp.device
+        )
+        bf16_out = None
+        bf16_ptr = 0
+        if emit_bf16:
+            bf16_out = torch.empty_like(inp)
+            bf16_ptr = int(bf16_out.data_ptr())
+        reg = 0 if registered else self._pool["input"].data_ptr
+        reg_bytes = 0 if registered else self._pool["input"].max_size
+        ops.fused_allreduce_rmsnorm_quant_int8_per_token(
+            self._ptr,
+            inp,
+            res_inp,
+            res_out,
+            out,
+            scale_out,
+            w,
+            eps,
+            reg,
+            reg_bytes,
+            use_1stage,
+            False,
+            bf16_ptr,
+        )
+        if emit_bf16:
+            return out, res_out, scale_out, bf16_out
+        return out, res_out, scale_out
+
+    @property
+    def supports_per_token_int8_quant(self) -> bool:
+        """True when the built ``module_custom_all_reduce`` JIT module exposes
+        the per-token int8 fused AR epilogue. Mirrors how vLLM derives
+        ``supports_per_group_quant`` from the aiter build, but checks the
+        compiled module itself; False before the module has been (re)built
+        with the op — invoking any fused op triggers the build, after which
+        the flag flips True. Never triggers a build by itself."""
+        try:
+            module = get_module("module_custom_all_reduce")
+        except ModuleNotFoundError:
+            return False
+        return hasattr(module, "fused_allreduce_rmsnorm_quant_int8_per_token")
 
     def fused_qknorm_ar(
         self,

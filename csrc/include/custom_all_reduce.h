@@ -129,6 +129,21 @@ void fused_allreduce_rmsnorm_quant_int8_per_group(fptr_t _fa,
                                                   bool use_1stage,
                                                   bool gemma_norm      = false,
                                                   int64_t bf16_out_ptr = 0);
+// INT8 per-token variant (aiter pertoken_quant activation format): out int8
+// [M,K], scale_out float32 [M,1].
+void fused_allreduce_rmsnorm_quant_int8_per_token(fptr_t _fa,
+                                                  const aiter_tensor_t& inp,
+                                                  const aiter_tensor_t& res_inp,
+                                                  const aiter_tensor_t& res_out,
+                                                  const aiter_tensor_t& out,
+                                                  const aiter_tensor_t& scale_out,
+                                                  const aiter_tensor_t& w,
+                                                  double eps,
+                                                  int64_t reg_ptr,
+                                                  int64_t reg_bytes,
+                                                  bool use_1stage,
+                                                  bool gemma_norm      = false,
+                                                  int64_t bf16_out_ptr = 0);
 void fused_allreduce_rmsnorm_mxfp4_quant(fptr_t _fa,
                                          const aiter_tensor_t& inp,
                                          const aiter_tensor_t& res_inp,

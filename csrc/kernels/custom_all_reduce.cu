@@ -852,6 +852,87 @@ void fused_allreduce_rmsnorm_quant_int8_per_group(fptr_t _fa,
     }
 }
 
+// Fused AR + residual + RMSNorm + per-token INT8 quantization producing the
+// activation format aiter's pertoken_quant yields (consumed by vLLM's CK W8A8
+// path on gfx908): out int8 [M,K] and scale_out float32 [M,1] (per-row
+// absmax/127, round-toward-zero payload casts). Like the per-group int8 entry
+// this path uses no fp8 conversion builtins, so it is safe on gfx908 where
+// those are compile-only stubs.
+void fused_allreduce_rmsnorm_quant_int8_per_token(fptr_t _fa,
+                                                  const aiter_tensor_t& inp,
+                                                  const aiter_tensor_t& res_inp,
+                                                  const aiter_tensor_t& res_out,
+                                                  const aiter_tensor_t& out,
+                                                  const aiter_tensor_t& scale_out,
+                                                  const aiter_tensor_t& w,
+                                                  double eps,
+                                                  int64_t reg_ptr, int64_t reg_bytes,
+                                                  bool use_1stage,
+                                                  bool gemma_norm,
+                                                  int64_t bf16_out_ptr)
+{
+    if(gemma_norm)
+    {
+        throw std::runtime_error(
+            "fused_allreduce_rmsnorm_quant_int8_per_token does not support gemma_norm");
+    }
+    HipDeviceGuard device_guard(inp.device_id);
+    hipStream_t stream = aiter::getCurrentHIPStream();
+    auto dtype     = inp.dtype();
+    int64_t numel  = inp.numel();
+    int64_t data_bytes = numel * inp.element_size();
+    int n = (int)w.numel();
+    int m = (int)(numel / w.numel());
+
+    auto fa = reinterpret_cast<aiter::CustomAllreduce*>(_fa);
+
+    void* inp_ptr = inp.data_ptr();
+    if(reg_ptr != 0)
+    {
+        _copy_input_to_registered_buffer(inp, m, n, stream, reg_ptr, reg_bytes);
+        inp_ptr = (void*)reg_ptr;
+    }
+
+    // Optional pre-quantization bf16/fp16 mirror of the normed output, same
+    // contract as the fp8 per-token entry.
+    void* bf16_out = reinterpret_cast<void*>(bf16_out_ptr);
+
+    switch(dtype)
+    {
+#if(__CUDA_ARCH__ >= 800 || !defined(__CUDA_ARCH__))
+    case AITER_DTYPE_bf16: {
+        fa->dispatchFusedAllReduceRMSNormQuant<opus::bf16_t, opus::i8_t>(
+            stream,
+            reinterpret_cast<opus::bf16_t*>(inp_ptr),
+            reinterpret_cast<opus::bf16_t*>(res_inp.data_ptr()),
+            reinterpret_cast<opus::bf16_t*>(res_out.data_ptr()),
+            reinterpret_cast<opus::i8_t*>(out.data_ptr()),
+            reinterpret_cast<float*>(scale_out.data_ptr()),
+            reinterpret_cast<opus::bf16_t*>(w.data_ptr()),
+            (float)eps, m, n, use_1stage, /*gemma_norm=*/false,
+            reinterpret_cast<opus::bf16_t*>(bf16_out));
+        break;
+    }
+#endif
+    case AITER_DTYPE_fp16: {
+        fa->dispatchFusedAllReduceRMSNormQuant<opus::fp16_t, opus::i8_t>(
+            stream,
+            reinterpret_cast<opus::fp16_t*>(inp_ptr),
+            reinterpret_cast<opus::fp16_t*>(res_inp.data_ptr()),
+            reinterpret_cast<opus::fp16_t*>(res_out.data_ptr()),
+            reinterpret_cast<opus::i8_t*>(out.data_ptr()),
+            reinterpret_cast<float*>(scale_out.data_ptr()),
+            reinterpret_cast<opus::fp16_t*>(w.data_ptr()),
+            (float)eps, m, n, use_1stage, /*gemma_norm=*/false,
+            reinterpret_cast<opus::fp16_t*>(bf16_out));
+        break;
+    }
+    default:
+        throw std::runtime_error(
+            "fused_allreduce_rmsnorm_quant_int8_per_token only supports float16 and bfloat16");
+    }
+}
+
 void fused_allreduce_rmsnorm_mxfp4_quant(fptr_t _fa,
                                          const aiter_tensor_t& inp,
                                          const aiter_tensor_t& res_inp,

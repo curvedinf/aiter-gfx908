@@ -484,12 +484,8 @@ void all_reduce(fptr_t _fa,
     {
         if(data_bytes > reg_inp_bytes)
             throw std::runtime_error("registered buffer is too small to contain the input");
-        // gfx908 ordering fix: hipMemcpyAsync D2D on the SDMA copy engine is
-        // not reliably ordered against the reduce kernel of the PREVIOUS
-        // back-to-back custom-AR call reading the same pool region (mixed-
-        // size eager sequences corrupt; single-size sequences are fine).
-        // Route the copy through the compute queue with a kernel instead.
-        launch_pool_copy((void*)reg_inp_ptr, actual_inp, data_bytes, stream);
+        HIP_CALL(hipMemcpyAsync((void*)reg_inp_ptr, actual_inp, data_bytes,
+                                hipMemcpyDeviceToDevice, stream));
         actual_inp = (void*)reg_inp_ptr;
     }
 

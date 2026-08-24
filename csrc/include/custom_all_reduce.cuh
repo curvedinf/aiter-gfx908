@@ -3839,16 +3839,11 @@ class CustomAllreduce
     uint32_t next_launch_cookie()
     {
         // Odd, monotonically increasing; never 0 (0 = legacy counter path).
+        // The cookie travels ONLY as a kernel argument — never write device
+        // meta from the host (sg_.signals[i] are device pointers; a host
+        // store segfaults the first serving allreduce call).
         launch_cookie_ += 2;
-        uint32_t v = launch_cookie_ | 1u;
-        // Write into EVERY rank's meta cookie cell via the IPC mappings.
-        for(int i = 0; i < world_size_; i++)
-        {
-            Signal* sig = sg_.signals[i];
-            if(sig != nullptr)
-                sig->_flag[kMaxBlocks - 1] = v;
-        }
-        return v;
+        return launch_cookie_ | 1u;
     }
 
     /*
@@ -3862,7 +3857,7 @@ class CustomAllreduce
     void runFp8QuantKernel(hipStream_t stream, T* input, T* output, int size)
     {
         RankData* ptrs = get_buffer_RD(stream, input);
-        uint32_t seq_v = next_launch_cookie();
+        uint32_t seq_v = 0;
         // 32 block 512 thread or 64 block 256 thread
 #define DISPATHC_UNIT(pack_size, quant_scale, ngpus)                                \
     do                                                                              \
@@ -3947,8 +3942,12 @@ class CustomAllreduce
         throw std::runtime_error("max supported block limit is " + std::to_string(kMaxBlocks) +
                                  ". Got " + std::to_string(block_limit));
 
-    // Per-launch cookie for exact-match signal waits (mixed-size race fix).
-    uint32_t seq_v = next_launch_cookie();
+    // Cookie path disabled for serving isolation (was: next_launch_cookie()).
+    // Graph-captured kernels bake the cookie at capture time; replays then
+    // carry a stale cookie vs advancing eager launches — mismatched
+    // exact-waits. Legacy counters retained until a graph-safe cookie
+    // delivery exists.
+    uint32_t seq_v = 0;
 
     RankData* input_ptrs  = get_buffer_RD(stream, input);
     RankData* output_ptrs = nullptr;
@@ -3959,6 +3958,12 @@ class CustomAllreduce
 
     auto bytes = size * sizeof(T);
     size /= d;
+
+    // gfx908: the smem double-buffered "new" kernels corrupt peer reads
+    // when captured into CUDA graphs and in eager launches after capture.
+    // Force the naive (vLLM-proven) kernels unconditionally so captures
+    // record the naive kernels, which replay bit-exact.
+    use_new = false;
 
     // use new version of allreduce kernel
     if(use_new)
@@ -3990,7 +3995,7 @@ class CustomAllreduce
         }
         if(call_1stage)
         {
-        uint32_t seq_v = next_launch_cookie();
+        uint32_t seq_v = 0;
             blocks = std::min(kMaxBlocks,
                               (size + (threads / world_size_) - 1) / (threads / world_size_));
         }
@@ -4132,7 +4137,7 @@ void dispatchReduceScatter(hipStream_t stream, T* input, T* output,
         int range = k / (world_size_ * pack_size);
         dim3 block(512);
         dim3 grid(std::min(kGridCap, (range + 511) / 512));
-        uint32_t seq_v = next_launch_cookie();
+        uint32_t seq_v = 0;
         switch(world_size_)
         {
         case 8:
@@ -4216,7 +4221,7 @@ void dispatchAllGather(
     auto d         = 16 / sizeof(T);
     dim3 block(512);
     // only support gather first dim and gather last dim
-    uint32_t seq_v = next_launch_cookie();
+    uint32_t seq_v = 0;
     // gather first dim
     if(gather_dim == 0)
     {
@@ -4224,7 +4229,7 @@ void dispatchAllGather(
         {
             int block_num = (size + 512 - 1) / 512;
             dim3 grid(std::min(block_num, 80));
-            uint32_t seq_v = next_launch_cookie();
+            uint32_t seq_v = 0;
             switch(world_size_)
             {
             case 8:

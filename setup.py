@@ -264,6 +264,37 @@ def get_exclude_ops():
             # Keep only module_fmha_v3*
             if not module.startswith("module_fmha_v3"):
                 exclude_ops.append(module)
+        elif PREBUILD_KERNELS == 4:
+            # gfx908/MI100 allowlist profile: exclude everything EXCEPT the
+            # modules named in AITER_MI100_MODULES (comma-separated). Tune
+            # modules stay excluded unless explicitly allowlisted. The arch
+            # must be pinned to exactly gfx908 -- this profile exists to cut
+            # cross-arch and unused-module compile time.
+            gpu_archs = [a for a in os.getenv("GPU_ARCHS", "").split(";") if a]
+            if gpu_archs != ["gfx908"]:
+                raise RuntimeError(
+                    f"PREBUILD_KERNELS=4 requires GPU_ARCHS=gfx908 exactly, "
+                    f"got GPU_ARCHS={os.getenv('GPU_ARCHS')!r}"
+                )
+            allowlist = [
+                m.strip()
+                for m in os.getenv("AITER_MI100_MODULES", "").split(",")
+                if m.strip()
+            ]
+            if not allowlist:
+                raise RuntimeError(
+                    "PREBUILD_KERNELS=4 requires AITER_MI100_MODULES to name at "
+                    "least one module (comma-separated, e.g. "
+                    "'module_aiter_core,module_gemm_a8w8,...')"
+                )
+            for module in all_modules:
+                if module not in allowlist:
+                    exclude_ops.append(module)
+            keep = sorted(set(all_modules) - set(exclude_ops))
+            print(
+                f"[aiter] PREBUILD_KERNELS=4 allowlist: keeping {len(keep)}/{len(all_modules)} "
+                f"modules: {', '.join(keep)}"
+            )
         else:
             # Default behavior: exclude tunes
             if "_tune" in module:
@@ -356,7 +387,12 @@ if PREBUILD_KERNELS != 0:
             except Exception:  # noqa: BLE001,S110
                 pass
 
+        module_build_times = []
+
         def build_one_module(one_opt_args):
+            import time as _time
+
+            _t0 = _time.perf_counter()
             flags_cc = list(one_opt_args["flags_extra_cc"]) + [
                 f"-DPREBUILD_KERNELS={PREBUILD_KERNELS}"
             ]
@@ -378,6 +414,9 @@ if PREBUILD_KERNELS != 0:
                 torch_exclude=False,
                 third_party=one_opt_args["third_party"],
             )
+            _dt = _time.perf_counter() - _t0
+            module_build_times.append((one_opt_args["md_name"], _dt))
+            print(f"[aiter] built {one_opt_args['md_name']} in {_dt:.1f}s")
 
         prebuid_thread_num = 5
         max_jobs = os.environ.get("MAX_JOBS")
@@ -404,6 +443,18 @@ if PREBUILD_KERNELS != 0:
         # --- CK kernel builds ---
         with ThreadPoolExecutor(max_workers=prebuid_thread_num) as executor:
             list(executor.map(build_one_module, all_opts_args_build))
+
+        # Per-module compile-time summary (visible regressions in build time)
+        if module_build_times:
+            total = sum(dt for _, dt in module_build_times)
+            print(
+                f"[aiter] prebuild summary: {len(module_build_times)} modules, "
+                f"sum {total:.0f}s, slowest:"
+            )
+            for md_name, dt in sorted(
+                module_build_times, key=lambda x: x[1], reverse=True
+            )[:10]:
+                print(f"[aiter]   {dt:8.1f}s  {md_name}")
 
         # Retune GEMM shapes on the live GPU after the main build phase.
         if PRETUNE_MODULES:

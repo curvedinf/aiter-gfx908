@@ -72,15 +72,24 @@ def get_tuned_gemm_list(tuned_gemm_file):
 
 
 def generate_data(
-    m, n, k, seed, dtype=dtypes.bf16, q_dtype_w=dtypes.fp8, device="cuda"
+    m,
+    n,
+    k,
+    seed,
+    dtype=dtypes.bf16,
+    q_dtype_w=dtypes.fp8,
+    scale_dtype=None,
+    device="cuda",
 ):
     torch.manual_seed(seed)
 
     if q_dtype_w == dtypes.i8:
         x = torch.randint(-20, 20, (m, k), dtype=dtypes.i8, device=device)
         weight = torch.randint(-20, 20, (n, k), dtype=dtypes.i8, device=device)
-        x_scale = torch.rand([m, 1], dtype=dtypes.bf16, device=device)
-        w_scale = torch.rand([1, n], dtype=dtypes.bf16, device=device)
+        if scale_dtype is None:
+            scale_dtype = dtypes.bf16
+        x_scale = torch.rand([m, 1], dtype=scale_dtype, device=device)
+        w_scale = torch.rand([1, n], dtype=scale_dtype, device=device)
     else:
         x_fp = torch.randn((m, k), dtype=dtype, device=device)
         weight_fp = torch.randn((n, k), dtype=dtype, device=device)
@@ -131,7 +140,21 @@ class GemmA8W8Tuner(GemmCommonTuner):
         _op._GEMM_QUANT_TYPE_HAS_GFX.clear()
 
     def _setup_specific_arguments(self):
-        pass
+        self.parser.add_argument(
+            "--out_dtype",
+            type=str,
+            default="bf16",
+            choices=["bf16", "fp16"],
+            help="output dtype for tuning (gfx908 fp16 serve: use fp16)",
+        )
+        self.parser.add_argument(
+            "--scale_dtype",
+            type=str,
+            default=None,
+            choices=[None, "bf16", "fp32", "fp16"],
+            help="scale dtype for the i8 path (default: bf16 upstream; "
+            "gfx908 production uses fp32)",
+        )
 
     def calculate(self, results, bpes=(1, 1, 2)):
         return super().calculate(results, bpes=(1, 1, 2))
@@ -207,6 +230,14 @@ class GemmA8W8Tuner(GemmCommonTuner):
         errRatio = args.errRatio
         cu_num = self.get_cu_num()
         gfx = self.get_gfx()
+        out_dtype = {"bf16": dtypes.bf16, "fp16": dtypes.fp16}[args.out_dtype]
+        scale_dtype = (
+            None
+            if args.scale_dtype is None
+            else {"bf16": dtypes.bf16, "fp32": dtypes.fp32, "fp16": dtypes.fp16}[
+                args.scale_dtype
+            ]
+        )
 
         task = []
         tasks_data = []
@@ -244,7 +275,7 @@ class GemmA8W8Tuner(GemmCommonTuner):
                         (
                             info,
                             generate_data,
-                            (M, N, K, seed, dtypes.bf16, eval(q_dtype_w)),
+                            (M, N, K, seed, out_dtype, eval(q_dtype_w), scale_dtype),
                             run_gemm_a8w8,
                             (gemm_keys, j, splitK),
                             {
@@ -252,7 +283,7 @@ class GemmA8W8Tuner(GemmCommonTuner):
                                 "num_iters": args.iters,
                             },
                             gemm_a8w8_ref,
-                            (ref_keys, dtypes.bf16, eval(q_dtype_w)),
+                            (ref_keys, out_dtype, eval(q_dtype_w)),
                             {},
                             None,
                             1e-2,

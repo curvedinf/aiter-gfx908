@@ -1,0 +1,22 @@
+# a8w8 CK instance keep-list for gfx908 (one kernels_list id per line).
+# Consumed by csrc/ck_gemm_a8w8/gen_instances.py via AITER_CK_INSTANCE_LIST.
+#
+# Semantics:
+# - tune builds (--tune): only these kernels_list ids are instantiated.
+# - non-tune builds: default_kernels_dict entries are ALWAYS kept (they are
+#   the C++ heuristic fallback); tuned-CSV rows are kept when their kernel
+#   is listed here.
+#
+# Current content: the default/heuristic kernel ids resolvable in
+# kernels_list (2 of the 9 defaults exist only in default_kernels_dict and
+# are kept unconditionally). After the gfx908 tuning sweep, regenerate with:
+#   python3 scripts/gen_a8w8_instance_list.py \
+#     --csv aiter/configs/a8w8_tuned_gemm.csv --gfx gfx908 \
+#     --out csrc/ck_gemm_a8w8/a8w8_instance_keep_list.txt
+13
+39
+43
+44
+60
+76
+78

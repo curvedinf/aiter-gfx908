@@ -2,6 +2,7 @@
 # Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 import functools
+import os
 
 import pandas as pd
 import torch
@@ -664,6 +665,18 @@ def gemm_a8w8_CK(
     ck_config = get_GEMM_config_with_quant_type(
         m, n, k, q_dtype_w, AITER_CONFIGS.AITER_CONFIG_GEMM_A8W8_FILE
     )
+    if (
+        ck_config is None
+        and splitK is None
+        and os.getenv("AITER_CK_STRICT", "0") == "1"
+    ):
+        raise RuntimeError(
+            f"gemm_a8w8_CK: no tuned config for M={m}, N={n}, K={k}, "
+            f"q_dtype_w={q_dtype_w}, {dtype=} in "
+            f"{AITER_CONFIGS.AITER_CONFIG_GEMM_A8W8_FILE} and AITER_CK_STRICT=1 "
+            "forbids the silent splitK=0 default fallback. Tune the shape and "
+            "append a row, or unset AITER_CK_STRICT."
+        )
     if splitK is None:
         if ck_config is not None:
             splitK = ck_config["splitK"]

@@ -17,12 +17,72 @@ AITER_CORE_DIR = (
     else os.path.abspath(f"{this_dir}/../../aiter/jit/utils")
 )
 sys.path.insert(0, AITER_CORE_DIR)
-from chip_info import build_tune_dict, write_lookup_header
-from gemm_a8w8_common import (
+from chip_info import (  # noqa: E402
+    build_tune_dict,
+    get_build_targets,
+    write_lookup_header,
+)
+from gemm_a8w8_common import (  # noqa: E402
     default_kernels_dict,
     kernelInstance,
     kernels_list,
 )
+
+
+def _instance_filters(istune):
+    """Resolve the gfx908 instance-pruning filters.
+
+    Returns (kernels_filter, dtype_filter):
+
+    - kernels_filter: None (build all kernels) or a set of kernelIds to keep.
+      Sourced from the AITER_CK_INSTANCE_LIST file (one kernelId per line,
+      '#'-comments allowed; absent/empty-file = all, preserving upstream
+      behavior). Also accepts comma-separated ids via AITER_CK_INSTANCE_LIST
+      itself for short lists.
+    - dtype_filter: None (emit all 8 dtype combos, upstream behavior) or a
+      set of (ABDtype, DDtype, EDtype) tuples to emit. Activated when every
+      build target is gfx908 (MI100: no fp8 datapath, fp16-serving stack),
+      or overridden via AITER_CK_DTYPES as comma-separated
+      ABxDxD triplets, e.g. "I8xF32xF16,I8xF16xF16".
+    """
+    kernels_filter = None
+    list_env = os.getenv("AITER_CK_INSTANCE_LIST", "")
+    if list_env:
+        if os.path.isfile(list_env):
+            ids = set()
+            with open(list_env) as f:
+                for line in f:
+                    tok = line.split("#", 1)[0].strip()
+                    if tok:
+                        ids.update(int(x) for x in tok.split(",") if x.strip())
+        else:
+            ids = {
+                int(x) for x in list_env.split(",") if x.strip()
+            }
+        unknown = ids - set(kernels_list)
+        if unknown:
+            raise SystemExit(
+                f"AITER_CK_INSTANCE_LIST references unknown kernelIds {sorted(unknown)}; "
+                f"kernels_list has ids 0..{len(kernels_list) - 1}"
+            )
+        if ids:
+            kernels_filter = ids
+
+    dtype_filter = None
+    dtypes_env = os.getenv("AITER_CK_DTYPES", "")
+    if dtypes_env:
+        dtype_filter = set()
+        for tok in dtypes_env.split(","):
+            ab, d, e = (x.strip() for x in tok.split("x"))
+            dtype_filter.add((ab, d, e))
+    elif all(gfx == "gfx908" for gfx, _ in get_build_targets()):
+        # gfx908 default: int8 activations/weights (no fp8 datapath on MI100),
+        # fp16 epilogue (this stack serves --dtype half), keeping both fp32
+        # and fp16 scale/compute variants (fp32 scale math is the accuracy
+        # hedge -- see GFX908_BUILD_PLAN.md Step 5).
+        dtype_filter = {("I8", "F32", "F16"), ("I8", "F16", "F16")}
+
+    return kernels_filter, dtype_filter
 
 
 class gemm_a8w8_fwd_codegen:
@@ -190,15 +250,18 @@ template torch::Tensor
 
 """
         if self.istune:
-            # Generate both I8 and F8 instances for tuning
-            # I8 instances
-            for EDtype in ["B16"]:
+            # Generate tune instances. I8 gets both epilogues: eB16 (upstream
+            # default) and eF16 with dF32/dF16 scale math -- gfx908 production
+            # dispatches <I8, F32, F16> (fp32 scales, fp16 out), so tuning on
+            # eB16-only would measure the wrong template. F8 stays eB16-only.
+            for EDtype, DDtype in [("B16", "B16"), ("F16", "F32"), ("F16", "F16")]:
                 INSTANCE_abI8 = INSTANCE_template.format(
-                    name=k.name, dtypes=f"I8, B16, {EDtype}"
+                    name=k.name, dtypes=f"I8, {DDtype}, {EDtype}"
                 )
                 Path(
                     os.path.join(
-                        self.instances_path, f"{k.name}_abI8_dB16_e{EDtype}.cpp"
+                        self.instances_path,
+                        f"{k.name}_abI8_d{DDtype}_e{EDtype}.cpp",
                     )
                 ).write_text(INSTANCE_abI8)
 
@@ -213,18 +276,26 @@ template torch::Tensor
                     )
                 ).write_text(INSTANCE_abF8)
         else:
-            for EDtype in ["B16", "F16"]:
-                for ABDtype in ["I8", "F8"]:
-                    for DDtype in ["F32", EDtype]:
-                        intsance = INSTANCE_template.format(
-                            name=k.name, dtypes=f"{ABDtype}, {DDtype}, {EDtype}"
-                        )
-                        Path(
-                            os.path.join(
-                                self.instances_path,
-                                f"{k.name}_ab{ABDtype}_d{DDtype}_e{EDtype}.cpp",
-                            )
-                        ).write_text(intsance)
+            # combos as (ABDtype, DDtype, EDtype) to match _instance_filters
+            combos = [
+                (ABDtype, DDtype, EDtype)
+                for EDtype in ["B16", "F16"]
+                for ABDtype in ["I8", "F8"]
+                for DDtype in ["F32", EDtype]
+            ]
+            dtype_filter = getattr(self, "dtype_filter", None)
+            if dtype_filter is not None:
+                combos = [c for c in combos if c in dtype_filter]
+            for ABDtype, DDtype, EDtype in combos:
+                intsance = INSTANCE_template.format(
+                    name=k.name, dtypes=f"{ABDtype}, {DDtype}, {EDtype}"
+                )
+                Path(
+                    os.path.join(
+                        self.instances_path,
+                        f"{k.name}_ab{ABDtype}_d{DDtype}_e{EDtype}.cpp",
+                    )
+                ).write_text(intsance)
 
     def gen_lookup_dict(self, kernels_dict):
         LOOKUP_head = """#pragma once
@@ -297,6 +368,31 @@ torch::Tensor
         if os.path.exists(self.instances_path):
             shutil.rmtree(self.instances_path)
         os.mkdir(self.instances_path)
+
+        kernels_filter, dtype_filter = _instance_filters(self.istune)
+        if kernels_filter is not None:
+            allowed_names = {kernels_list[i].name for i in kernels_filter}
+            if self.istune:
+                kept = {k: v for k, v in kernels_dict.items() if k in kernels_filter}
+            else:
+                # Non-tune dicts mix negative-int keys (default fallback
+                # kernels, always kept -- the C++ heuristic dispatches into
+                # them) and (gfx, cu_num, M, N, K) tuned-row keys (kept only
+                # when their kernel is allowlisted; both the instance and its
+                # lookup entry vanish together, so a dropped row falls back
+                # to the heuristic, never to a missing symbol).
+                kept = {
+                    k: v
+                    for k, v in kernels_dict.items()
+                    if (isinstance(k, int) and k < 0) or v.name in allowed_names
+                }
+            dropped = len(kernels_dict) - len(kept)
+            print(
+                f"[aiter] AITER_CK_INSTANCE_LIST: keeping {len(kept)}/{len(kernels_dict)} "
+                f"dict entries ({dropped} dropped)"
+            )
+            kernels_dict = kept
+        self.dtype_filter = dtype_filter
 
         for k in kernels_dict.values():
             self.gen_instance(k)

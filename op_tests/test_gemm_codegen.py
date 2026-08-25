@@ -918,6 +918,145 @@ def test_build_tune_dict_strict_unknown_kernel():
 
 
 # ---------------------------------------------------------------------------
+# Section 8: gfx908 instance pruning (dtype filter, tile filter, header)
+# Runs gemm_a8w8_fwd_codegen in temp dirs under controlled env; no GPU.
+# ---------------------------------------------------------------------------
+
+
+def _run_codegen(tmp, arch, istune=False, instance_list=None, dtypes=None):
+    """Run gen_instances.py's codegen in tmp under env; returns (files, hdr)."""
+    import importlib
+
+    csrc = os.path.join(_REPO_ROOT, "csrc", "ck_gemm_a8w8")
+    if csrc not in sys.path:
+        sys.path.insert(0, csrc)
+    import gen_instances as gi
+
+    importlib.reload(gi)  # re-read env-dependent module state
+
+    saved = {
+        k: os.environ.get(k)
+        for k in ("GPU_ARCHS", "AITER_CK_INSTANCE_LIST", "AITER_CK_DTYPES")
+    }
+    os.environ["GPU_ARCHS"] = arch
+    for k in ("AITER_CK_INSTANCE_LIST", "AITER_CK_DTYPES"):
+        os.environ.pop(k, None)
+    if instance_list:
+        os.environ["AITER_CK_INSTANCE_LIST"] = instance_list
+    if dtypes:
+        os.environ["AITER_CK_DTYPES"] = dtypes
+    try:
+        os.makedirs(tmp, exist_ok=True)
+        cg = gi.gemm_a8w8_fwd_codegen(tmp, istune=istune)
+        cg.gen_instances(
+            gi.kernels_list if istune else gi.get_tune_dict(
+                os.path.join(_REPO_ROOT, "aiter/configs/a8w8_tuned_gemm.csv")
+            )
+        )
+        files = os.listdir(os.path.join(tmp, "instances"))
+        hdr = open(os.path.join(tmp, "gemm_a8w8_built_combos.h")).read()
+        return files, hdr
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_gfx908_instance_pruning():
+    _section("8. gfx908 instance pruning (dtype/tile filters, combos header)")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        files, hdr = _run_codegen(tmp + "/n908", "gfx908")
+        _check(
+            "gfx908 non-tune: 18 instances (9 default kernels x 2 combos)",
+            len(files) == 18,
+            f"got {len(files)}",
+        )
+        _check(
+            "gfx908 combos are abI8_dF32_eF16 + abI8_dF16_eF16 only",
+            {f.split("_ab")[-1][:-4] for f in files}
+            == {"I8_dF32_eF16", "I8_dF16_eF16"},
+            str(sorted({f.split('_ab')[-1][:-4] for f in files})),
+        )
+        _check(
+            "combos header: PRUNE defined, exactly the 2 gfx908 combos",
+            "AITER_PRUNE_DTYPES 1" in hdr
+            and "AITER_BUILT_I8_F32_F16 1" in hdr
+            and "AITER_BUILT_I8_F16_F16 1" in hdr
+            and hdr.count("#define AITER_BUILT_") == 2,
+            hdr,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        files, hdr = _run_codegen(tmp + "/n942", "gfx942")
+        _check(
+            "gfx942 non-tune: upstream 72 instances",
+            len(files) == 72,
+            f"got {len(files)}",
+        )
+        _check(
+            "combos header: no PRUNE, all 8 combos defined (upstream parity)",
+            "AITER_PRUNE_DTYPES" not in hdr
+            and hdr.count("#define AITER_BUILT_") == 8,
+            hdr,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        files, _ = _run_codegen(tmp + "/t908", "gfx908", istune=True)
+        _check(
+            "gfx908 tune: no F8 instances (no fp8 datapath)",
+            not any("_abF8_" in f for f in files),
+            f"{sum('_abF8_' in f for f in files)} F8 files",
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        files, _ = _run_codegen(tmp + "/t942", "gfx942", istune=True)
+        _check(
+            "gfx942 tune: F8 instances present (upstream parity)",
+            any("_abF8_" in f for f in files),
+        )
+
+    # Tile filter: 7 default-resolvable ids -> 7 impl files in tune mode
+    keep = os.path.join(
+        _REPO_ROOT, "csrc/ck_gemm_a8w8/a8w8_instance_keep_list.txt"
+    )
+    with tempfile.TemporaryDirectory() as tmp:
+        _run_codegen(tmp + "/tl", "gfx908", istune=True, instance_list=keep)
+        impls = os.listdir(os.path.join(tmp + "/tl", "impl"))
+        _check(
+            "tile filter (tune): 7 keep-list kernels instantiated",
+            len(impls) == 7,
+            f"got {len(impls)}",
+        )
+
+    # Unknown kernelId -> loud failure
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            _run_codegen(tmp + "/bad", "gfx908", istune=True, instance_list="999")
+        raised = None
+    except SystemExit as e:
+        raised = e
+    _check(
+        "tile filter: unknown kernelId fails loudly (SystemExit)",
+        raised is not None and "999" in str(raised),
+        f"raised={raised}",
+    )
+
+    # AITER_CK_DTYPES override round-trips through the header
+    with tempfile.TemporaryDirectory() as tmp:
+        _, hdr = _run_codegen(tmp + "/ov", "gfx942", dtypes="I8xF32xF16")
+        _check(
+            "AITER_CK_DTYPES override: header reflects exactly that combo",
+            "AITER_PRUNE_DTYPES 1" in hdr
+            and hdr.count("#define AITER_BUILT_") == 1
+            and "AITER_BUILT_I8_F32_F16 1" in hdr,
+            hdr,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -940,6 +1079,7 @@ if __name__ == "__main__":
     test_runtime_dispatch_key()
     test_blockscale_kernel_name_forwarding()
     test_build_tune_dict_strict_unknown_kernel()
+    test_gfx908_instance_pruning()
 
     print(f"\n{'='*60}")
     print(f"  Results: {_passed} passed, {_failed} failed")

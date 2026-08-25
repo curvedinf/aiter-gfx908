@@ -38,8 +38,8 @@ def bench(M, N, K):
     w_s = torch.rand(1, N, dtype=torch.float32, device=dev) * 0.02
 
     ref = (
-        (xq.double() * x_s.double()) @ (wq.double() * w_s.double()).t()
-    )  # fp64 dequant ref
+        xq.double() @ wq.double().t()
+    ) * x_s.double() * w_s.double()  # fp64 dequant ref; rowwise epilogue order
 
     out_f32 = torch.empty(M, N, dtype=torch.float16, device=dev)
     out_f16 = torch.empty(M, N, dtype=torch.float16, device=dev)

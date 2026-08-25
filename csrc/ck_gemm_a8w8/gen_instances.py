@@ -265,16 +265,19 @@ template torch::Tensor
                     )
                 ).write_text(INSTANCE_abI8)
 
-            # F8 instances
-            for EDtype in ["B16"]:
-                INSTANCE_abF8 = INSTANCE_template.format(
-                    name=k.name, dtypes=f"F8, F32, {EDtype}"
-                )
-                Path(
-                    os.path.join(
-                        self.instances_path, f"{k.name}_abF8_dF32_e{EDtype}.cpp"
+            # F8 instances -- skipped under dtype pruning (gfx908 has no fp8
+            # datapath; an int8-only sweep never calls them)
+            _df = getattr(self, "dtype_filter", None)
+            if _df is None or any(ab == "F8" for ab, _, _ in _df):
+                for EDtype in ["B16"]:
+                    INSTANCE_abF8 = INSTANCE_template.format(
+                        name=k.name, dtypes=f"F8, F32, {EDtype}"
                     )
-                ).write_text(INSTANCE_abF8)
+                    Path(
+                        os.path.join(
+                            self.instances_path, f"{k.name}_abF8_dF32_e{EDtype}.cpp"
+                        )
+                    ).write_text(INSTANCE_abF8)
         else:
             # combos as (ABDtype, DDtype, EDtype) to match _instance_filters
             combos = [

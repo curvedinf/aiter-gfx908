@@ -4,6 +4,7 @@
 #include "gemm_a8w8_common.cuh"
 #include "gemm_a8w8_manifest.h"
 #include "gemm_a8w8_lookup.h"
+#include "gemm_a8w8_built_combos.h"
 #include <string>
 #include "py_itfs_common.h"
 
@@ -114,11 +115,15 @@ torch::Tensor gemm_a8w8_tune(
   }
   else
   {
+#ifdef AITER_BUILT_F8_F32_B16
     TORCH_CHECK(Y.dtype() == at::ScalarType::BFloat16 && x_scale.dtype() == at::ScalarType::Float,
                 "FP8 tune path supports fp32 scales + bf16 out only, got scales: " +
                     std::string(c10::toString(x_scale.dtype())) + ", out: " +
                     std::string(c10::toString(Y.dtype())));
     rowwise_dispatch<F8, F32, B16>(kernelId)(XQ, WQ, x_scale, w_scale, Y, bias, KBatch);
+#else
+    TORCH_CHECK(false, "FP8 tune path is pruned from this gfx908 build (no fp8 datapath; see AITER_CK_DTYPES)");
+#endif
   }
   return Y;
 }

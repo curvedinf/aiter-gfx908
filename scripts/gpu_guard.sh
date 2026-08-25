@@ -5,14 +5,16 @@
 # may compete with it for GPUs.
 set -euo pipefail
 
-if pgrep -f 'vllm' >/dev/null 2>&1; then
-  echo "gpu_guard: vllm process running -- GPUs are in use, aborting." >&2
-  pgrep -af vllm | head -3 >&2
+# Match the actual server process ('vllm serve ...'), not any command line
+# that merely contains the venv path (e.g. our own /vllm-gfx908/.venv/bin/...).
+if pgrep -f 'vllm serve' >/dev/null 2>&1; then
+  echo "gpu_guard: vllm server running -- GPUs are in use, aborting." >&2
+  pgrep -af 'vllm serve' | head -3 >&2
   exit 1
 fi
 
 # Any GPU showing non-trivial use -> busy.
-use=$(rocm-smi --showusegpu --csv 2>/dev/null | awk -F, '
+use=$(rocm-smi -u --csv 2>/dev/null | awk -F, '
   NR>1 && $NF ~ /[0-9]/ { gsub(/[% ]/,"",$NF); if ($NF+0 > 5) { print $0; exit 1 } }') \
   || { echo "gpu_guard: GPU use above 5% -- aborting:" >&2; echo "$use" >&2; exit 1; }
 

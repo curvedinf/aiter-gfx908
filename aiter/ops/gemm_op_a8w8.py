@@ -686,6 +686,19 @@ def gemm_a8w8_CK(
     try:
         return gemm_a8w8_ck(XQ, WQ, x_scale, w_scale, Y, bias, splitK)
     except RuntimeError as e:
+        if "not supported" in str(e) and splitK not in (None, 0):
+            # The tuned (kernelId, splitK) pair was tuned on the fp16
+            # template; some epilogues (e.g. <I8,F32,B16> at small M) reject
+            # splitK>0 via IsSupportedArgument. Retry once with the legal
+            # default (splitK=0, C++ heuristic tile) instead of failing.
+            Y = torch.empty(m, n, dtype=dtype, device=XQ.device)
+            try:
+                return gemm_a8w8_ck(XQ, WQ, x_scale, w_scale, Y, bias, 0)
+            except RuntimeError as e2:
+                raise RuntimeError(
+                    f"gemm_a8w8_CK failed for shape M={m}, N={n}, K={k}, "
+                    f"{dtype=}, splitK=0 fallback, config={ck_config}: {e2}"
+                ) from e2
         raise RuntimeError(
             f"gemm_a8w8_CK failed for shape M={m}, N={n}, K={k}, "
             f"{dtype=}, {splitK=}, config={ck_config}: {e}"

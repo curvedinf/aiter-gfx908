@@ -1,147 +1,140 @@
-<div align="center">
-<img src="docs/assets/aiter_logo.png" alt="AITER" width="400">
-<br><br>
+# aiter-gfx908
 
-[![CI](https://github.com/ROCm/aiter/actions/workflows/aiter-test.yaml/badge.svg)](https://github.com/ROCm/aiter/actions/workflows/aiter-test.yaml)
-[![Release](https://img.shields.io/github/v/release/ROCm/aiter)](https://github.com/ROCm/aiter/releases)
-[![Docs](https://img.shields.io/badge/Docs-rocm.github.io%2Faiter-blue)](https://rocm.github.io/aiter)
-[![Last Commit](https://img.shields.io/github/last-commit/ROCm/aiter)](https://github.com/ROCm/aiter/commits)
+A downstream fork of [ROCm/aiter](https://github.com/ROCm/aiter) (AI Tensor
+Engine for ROCm) with one purpose: making aiter's INT8 W8A8 inference path
+work — correctly and fast — on **AMD Instinct MI100 (gfx908, CDNA1)**.
 
-</div>
+Upstream aiter targets CDNA3/CDNA4 and RDNA (gfx942, gfx950, gfx1250, …);
+gfx908 receives no upstream support. This fork carries the gfx908-specific
+kernel, communication, and build changes needed to serve a production vLLM
+stack on a 4×MI100 node.
 
---------------------------------------------------------------------------------
+## Serving stack this fork targets
 
-**AITER** (AI Tensor Engine for ROCm) is AMD's high-performance AI operator library, providing optimized GPU kernels for inference and training workloads on ROCm. It serves as a unified collection of production-ready operators that framework developers can integrate directly into their stacks.
+The consumer is the companion vLLM fork (`vllm-gfx908`), running:
 
-### Key Features
+- **Qwen3.8-27B-class** model, **W8A8 INT8** (GPTQ weights, per-token
+  activation quant)
+- **TP4** across 4×MI100
+- fp16 activations, **DFlash2** speculative decoding
+- aiter CK GEMMs + aiter custom all-reduce inside vLLM's CUDA-graph-captured
+  decode path
 
-- **C++ and Python APIs** — use operators from either level
-- **Multiple kernel backends** — Triton, Composable Kernel (CK), and hand-tuned ASM
-- **Inference and training** — not just serving kernels, but also training and GEMM+communication fused kernels
-- **Framework-agnostic** — integrate into vLLM, SGLang, or any custom framework
+## Enhancements over upstream
 
-## News
+All fork changes sit on top of regular `upstream/main` merges and are kept
+small and rebaseable. The fork-specific commits touch ~16 files.
 
-- **[2026/07]** [Kimi-K3 support](https://github.com/ROCm/aiter/pull/4397) — FlyDSL SiTUv2 fused-MoE kernels, strided grouped-topk router, and tuned GEMM/fused-MoE configs (BF16, A8W4, FP4) for Kimi-K3
-- **[2026/04]** [AITER v0.1.12.post1 Released](https://github.com/ROCm/aiter/releases/tag/v0.1.12.post1) — patch on v0.1.12 with GEMM and scale masking accuracy fixes; v0.1.12 highlights include blockwise sparse Sage Attention, fused gated RMSNorm+group quantization, etc., plus MI355X tuned configs for Kimi-K2.5 and DeepSeek-V3
-- **[2026/02]** [JAX-AITER: Bringing AMD's Optimized AI Kernels to JAX on ROCm](https://rocm.blogs.amd.com/software-tools-optimization/jax-aiter/README.html)
-- **[2026/02]** [Beyond Porting: How vLLM Orchestrates High-Performance Inference on AMD ROCm](https://blog.vllm.ai/2026/02/27/rocm-attention-backend.html)
-- **[2026/01]** [Character.ai: 2x Production Inference Performance on AMD Instinct GPUs](https://blog.character.ai/technical-deep-dive-how-digitalocean-and-amd-delivered-a-2x-production-inference-performance-increase-for-character-ai/)
-- **[2026/01]** [ROCm Becomes a First-Class Platform in the vLLM Ecosystem](https://rocm.blogs.amd.com/software-tools-optimization/vllm-omni/README.html)
-- **[2025]** [Accelerated LLM Inference with vLLM 0.9.x and ROCm](https://rocm.blogs.amd.com/software-tools-optimization/vllm-0.9.x-rocm/README.html)
-- **[2025]** [Accelerate DeepSeek-R1 Inference: Integrate AITER into SGLang](https://rocm.blogs.amd.com/artificial-intelligence/aiter-intergration-s/README.html)
-- **[2025/08]** [AITER-Enabled MLA Layer Inference on AMD Instinct MI300X](https://rocm.blogs.amd.com/software-tools-optimization/aiter-mla/README.html)
-- **[2025/08]** [Tutorial: MLA Decoding Kernel of the AITER Library to Accelerate LLM Inference](https://rocm.docs.amd.com/projects/ai-developer-hub/en/latest/notebooks/gpu_dev_optimize/aiter_mla_decode_kernel.html)
-- **[2025/03]** [Accelerating DeepSeek Inference with AMD MI300 — Microsoft](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/accelerating-deepseek-inference-with-amd-mi300-a-collaborative-breakthrough/4407673)
-- **[2025/03]** [AITER: AI Tensor Engine For ROCm — Launch Announcement](https://rocm.blogs.amd.com/software-tools-optimization/aiter-ai-tensor-engine/README.html)
+### 1. CK INT8 W8A8 GEMM on gfx908
 
-## Ecosystem
+- `module_gemm_a8w8` (Composable Kernel `a8w8_rowwise` instances) builds and
+  runs correctly on gfx908.
+- The historical "garbled outputs on gfx908" report is resolved: it was a
+  scale-contract issue, not a kernel bug. On gfx908 the CK A8W8 module accepts
+  **per-token scales only** (`x_scale [M,1] fp32`, `w_scale [N,1] fp32`);
+  per-128-block scale layouts are not supported by these instances.
+- Verified by `op_tests/test_gemm_a8w8_int8_gfx908.py` — meanrel ~1.8e-4 vs
+  dequantized reference across M ∈ {1, 8, 64, 512, 4096}.
+- Benchmarks **1.8× (M=64) to 6.8× (M=8)** faster than vLLM's Triton W8A8
+  path (packed-GPTQ baseline).
 
-AITER is the **default kernel backend for LLM inference on AMD GPUs**, integrated into the major serving frameworks and powering production workloads at scale.
+### 2. Custom all-reduce (CAR) on MI100
 
-### Framework Integration
+`module_custom_all_reduce` is enabled for gfx908 and hardened for serving:
 
-| Framework | Integration | Status | Operators Used |
-|---|---|---|---|
-| [**vLLM**](https://github.com/vllm-project/vllm) | Default attention backend on ROCm | Production | MHA, MLA, Paged Attention, Fused MoE, GEMM, RMSNorm, RoPE+KVCache |
-| [**SGLang**](https://github.com/sgl-project/sglang) | Default on ROCm Docker | Production | Attention, Fused MoE, Block-scale GEMM, All-reduce, RMSNorm |
-| [**ATOM**](https://github.com/ROCm/ATOM) | Built natively on AITER | Active development | All AITER operators (attention, MoE, sampling, communication) |
-| [**JAX**](https://github.com/ROCm/jax-aiter) | XLA FFI bridge, no PyTorch dependency | Experimental | MHA/FMHA, RMSNorm, BF16 GEMM |
-| Various customer proprietary inference engines | Kernel-level integration | Production | Attention, MoE, GEMM, quantization |
+- **CUDA graph capture fixes** — captured all-reduces previously corrupted
+  output. Fixes include an uncached eager input pool, signal hardening, and a
+  port of vLLM's graph-pool workaround: graph-captured ARs are routed through
+  the pre-registered pool.
+- **Fused AR + RMSNorm + INT8 quant** kernels, eliminating separate
+  norm/quant passes in the TP4 hot path:
+  - `fused_allreduce_rmsnorm_quant_int8_per_group` — per-group scales,
+    vLLM W8A8 activation format (int8 `[M,K]`, fp16 scales `[M, K/group_size]`)
+  - `fused_allreduce_rmsnorm_quant_int8_per_token` — per-token scales,
+    aiter `pertoken_quant` format (int8 `[M,K]`, fp32 scales `[M,1]`)
+- gfx908 CU count (120) registered in the JIT build/tuning tables
+  (`aiter/jit/utils/build_targets.py`).
+- Multigpu test coverage under `op_tests/multigpu_tests/`:
+  `test_car_graph_repro.py`, `test_car_stress_mixed.py`,
+  `test_ipc_graph_poison.py`, `test_fused_ar_rms_int8_quant.py`.
 
-### Performance Highlights
+### 3. Triton tuning config for gfx908
 
-| Operator | Speedup |
-|---|---|
-| MLA decode kernel | up to **17x** |
-| MHA prefill kernel | up to **14x** |
-| Block-scaled Fused MoE | up to **3x** |
-| Block-scaled GEMM | up to **2x** |
-| DeepSeek-R1 e2e (SGLang) | 6,484 → **13,704** tok/s (2.1x) |
-| JAX-AITER attention (MI350) | **4.39x** median |
+`aiter/ops/triton/configs/gemm/gfx908-GEMM-A8W8_BLOCKSCALE.json` provides a
+tuned A8W8 blockscale GEMM config — the no-CK-change fallback for blockwise
+scales.
 
-> For detailed benchmarks, see the [ATOM Benchmark Dashboard](https://rocm.github.io/ATOM/benchmark-dashboard/).
+### 4. gfx908-only build plan (in progress)
 
-### Supported Hardware
+Full upstream builds take ~6 hours on this box because they compile 124
+modules and 72 CK `a8w8_rowwise` template instances — almost none of which
+this stack calls. [`GFX908_BUILD_PLAN.md`](GFX908_BUILD_PLAN.md) lays out the
+remediation (status: **PLAN**, not yet implemented):
 
-| GPU | Architecture | Status |
-|---|---|---|
-| AMD Instinct MI300X | gfx942 (CDNA3) | Fully supported |
-| AMD Instinct MI325X | gfx942 (CDNA3) | Fully supported |
-| AMD Instinct MI350 | gfx950 (CDNA4) | Supported |
-| AMD Instinct MI355X | gfx950 (CDNA4) | Supported |
-| AMD Pro W7900 | gfx1100 (RDNA3) | Experimental<sup>1</sup> |
-| AMD AI Max and Max Pro 400/300 Series | gfx1151 (RDNA3.5) | Experimental<sup>1</sup> |
-| AMD Radeon AI PRO R9700 | gfx1201 (RDNA4) | Experimental<sup>1</sup> |
+- `PREBUILD_KERNELS=4` allowlist build profile (`AITER_MI100_MODULES`),
+  pinning `GPU_ARCHS=gfx908` — target: full rebuild < 1 h
+- CK instance pruning in `csrc/ck_gemm_a8w8/gen_instances.py` (drop fp8 and
+  bf16-epilogue instances that can never run here; 72 → ~8–15 files)
+- Fail-fast guard (`AITER_CK_STRICT=1`) so a missing tuned config is a loud
+  error instead of a silent default-config fallback
+- Tuning sweep to fill `aiter/configs/a8w8_tuned_gemm.csv` with gfx908 rows
+  (currently zero — every production GEMM runs default config)
+- W8A8 accuracy kernel variants (blockwise GS128 scale layouts) attacking the
+  measured act-quant and requant error legs
 
-<sup>1</sup> On RDNA, Triton and most FlyDSL kernels run, as do most HIP kernels (norm, RoPE, quant, activation, plus some GEMM/attention). Most CK and ASM kernels are CDNA-only.
+Design rules: prune by exclusion (never delete sources, so upstream merges
+stay clean); the Python package stays fully importable; only the compiled
+module and CK instance sets shrink.
 
-## Operators
-
-AITER provides optimized kernels for attention, MoE, GEMM, normalization, quantization, communication, and more. Each operator has unit tests under [`op_tests/`](op_tests/) that you can run directly:
-
-```bash
-# Example: run a single operator test
-python3 op_tests/test_mha.py
-python3 op_tests/test_mla.py
-python3 op_tests/test_moe.py
-python3 op_tests/test_gemm_a8w8.py
-python3 op_tests/test_rmsnorm2d.py
-
-# See all available operator tests
-ls op_tests/test_*.py
-```
-
-## Installation
+## Build
 
 ```bash
-git clone --recursive https://github.com/ROCm/aiter.git
+git clone --recursive <this repo>
 cd aiter
-python3 setup.py develop
+GPU_ARCHS=gfx908 python3 setup.py develop
 ```
 
-If you happen to forget the `--recursive` during `clone`, you can use the following command after `cd aiter`
+If you cloned without `--recursive`:
+
 ```bash
 git submodule sync && git submodule update --init --recursive
 ```
 
-### FlyDSL
+Triton and other dependencies are installed by `setup.py develop`; see the
+upstream docs for details.
 
-AITER uses [FlyDSL](https://github.com/ROCm/FlyDSL)-based kernels across a range of operators (e.g., GEMM and MoE). FlyDSL is a required dependency and is installed automatically when you run `python3 setup.py develop`.
-
-To install it manually:
-
-```bash
-pip install -r requirements.txt
-```
-
-### Triton
-
-AITER includes Triton-based operators that require triton from AMD PyPI, with the correct version selected based on your ROCm installation.
-
-If you install with `python3 setup.py develop`, triton is installed automatically. To skip this and keep your existing triton, set:
+## Verify
 
 ```bash
-AITER_USE_SYSTEM_TRITON=1 python3 setup.py develop
+# INT8 W8A8 CK GEMM contract + correctness (single GPU)
+python3 op_tests/test_gemm_a8w8_int8_gfx908.py
+
+# Custom all-reduce (multi-GPU, run on the 4×MI100 node)
+python3 op_tests/multigpu_tests/test_custom_allreduce.py
+python3 op_tests/multigpu_tests/test_fused_ar_rms_int8_quant.py
 ```
 
-If you use `pip install -e .`, run the install script manually:
+End-to-end validation happens in the vLLM fork: KLD gate boot check plus the
+iso-bench protocol (see `GFX908_BUILD_PLAN.md` for the verification order).
 
-```bash
-./.github/scripts/install_triton.sh
-```
+## Scope and known limitations
 
-### Opus — Lightweight C++ Template for Kernel Development
+- **Not a general MI100 port.** Only the ops this serving stack calls are
+  brought up and verified. Everything else from upstream is present but
+  untested on gfx908 and may not compile or run.
+- **No fp8.** gfx908 has no fp8 hardware; all fp8 kernels/instances are dead
+  code here.
+- **CK A8W8 is per-token-scale only** on gfx908 (see above). Blockwise GS128
+  requires the new epilogue variants described in the build plan.
+- **bf16 serving is out of scope**; the stack serves fp16. The planned CK
+  instance filter drops bf16 epilogues accordingly.
 
-[Opus](csrc/include/opus/) is a single-header C++ template library (`opus.hpp`) for writing HIP kernels on AMD GPUs — vectorized load/store, layout abstractions, and MFMA wrappers with a strong focus on **build time optimization** (up to 61x faster than standard torch extension builds). See the [Opus README](csrc/include/opus/README.md) and [`op_tests/opus/`](op_tests/opus/) for details.
+## Relationship to upstream
 
-### Triton-based Communication (Iris)
-
-AITER supports GPU-initiated communication using the [Iris library](https://github.com/ROCm/iris). This enables high-performance Triton-based communication primitives like reduce-scatter and all-gather.
-
-```bash
-pip install -e .
-pip install -r requirements-triton-comms.txt
-```
-
-For more details, see [docs/triton_comms.md](docs/triton_comms.md).
+This fork tracks [ROCm/aiter](https://github.com/ROCm/aiter) via merge
+commits and intends to stay mergeable: fork changes avoid modifying shared
+upstream code paths where possible and gate gfx908 behavior behind arch
+checks and env flags. For general aiter documentation — operator catalog,
+ecosystem, other architectures — see the
+[upstream repository](https://github.com/ROCm/aiter) and
+[rocm.github.io/aiter](https://rocm.github.io/aiter).

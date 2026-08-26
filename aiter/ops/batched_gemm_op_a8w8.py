@@ -2,6 +2,7 @@
 # Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 
 import functools
+import os
 
 import pandas as pd
 import torch
@@ -140,6 +141,18 @@ def batched_gemm_a8w8_CK(
     n = WQ.shape[1]
     k = XQ.shape[2]
     ck_config = get_CKBatchedGEMM_config(b, m, n, k)
+    if (
+        ck_config is None
+        and splitK is None
+        and os.getenv("AITER_CK_STRICT", "0") == "1"
+    ):
+        raise RuntimeError(
+            f"batched_gemm_a8w8_CK: no tuned config for B={b}, M={m}, N={n}, "
+            f"K={k}, {dtype=} in "
+            f"{AITER_CONFIGS.AITER_CONFIG_A8W8_BATCHED_GEMM_FILE} and "
+            "AITER_CK_STRICT=1 forbids the silent splitK=0 default fallback. "
+            "Tune the shape and append a row, or unset AITER_CK_STRICT."
+        )
     if splitK is None:
         if ck_config is not None:
             splitK = ck_config["splitK"]

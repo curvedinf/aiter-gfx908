@@ -4,6 +4,7 @@
 #include "gemm_a8w8_common.cuh"
 #include "gemm_a8w8_manifest.h"
 #include "gemm_a8w8_lookup.h"
+#include "gemm_a8w8_built_combos.h"
 #include <string>
 #include "py_itfs_common.h"
 
@@ -80,22 +81,49 @@ torch::Tensor gemm_a8w8_tune(
   TORCH_CHECK(is_i8 || is_fp8, 
               "XQ dtype must be int8 or fp8, got: " + std::string(c10::toString(XQ.dtype())));
 
-  if (Y.dtype() == at::ScalarType::BFloat16)
+  if (is_i8)
   {
-    if (is_i8)
+    if (Y.dtype() == at::ScalarType::BFloat16)
     {
-      // INT8 path
+      TORCH_CHECK(x_scale.dtype() == at::ScalarType::BFloat16,
+                  "I8 bf16-out tune path supports bf16 scales only, got: " +
+                      std::string(c10::toString(x_scale.dtype())));
+      // INT8 path, bf16 scales + bf16 out (upstream default)
       rowwise_dispatch<I8, B16, B16>(kernelId)(XQ, WQ, x_scale, w_scale, Y, bias, KBatch);
+    }
+    else if (Y.dtype() == at::ScalarType::Half)
+    {
+      if (x_scale.dtype() == at::ScalarType::Float)
+      {
+        // INT8 path, fp32 scales + fp16 out -- gfx908 production template
+        rowwise_dispatch<I8, F32, F16>(kernelId)(XQ, WQ, x_scale, w_scale, Y, bias, KBatch);
+      }
+      else if (x_scale.dtype() == at::ScalarType::Half)
+      {
+        // INT8 path, fp16 scales + fp16 out
+        rowwise_dispatch<I8, F16, F16>(kernelId)(XQ, WQ, x_scale, w_scale, Y, bias, KBatch);
+      }
+      else
+      {
+        TORCH_CHECK(false, "Unsupported scale dtype: " + std::string(c10::toString(x_scale.dtype())));
+      }
     }
     else
     {
-      // FP8 path
-      rowwise_dispatch<F8, F32, B16>(kernelId)(XQ, WQ, x_scale, w_scale, Y, bias, KBatch);
+      TORCH_CHECK(false, "Unsupported output dtype: " + std::string(c10::toString(Y.dtype())));
     }
   }
   else
   {
-    TORCH_CHECK(false, "Unsupported output dtype: " + std::string(c10::toString(Y.dtype())));
+#ifdef AITER_BUILT_F8_F32_B16
+    TORCH_CHECK(Y.dtype() == at::ScalarType::BFloat16 && x_scale.dtype() == at::ScalarType::Float,
+                "FP8 tune path supports fp32 scales + bf16 out only, got scales: " +
+                    std::string(c10::toString(x_scale.dtype())) + ", out: " +
+                    std::string(c10::toString(Y.dtype())));
+    rowwise_dispatch<F8, F32, B16>(kernelId)(XQ, WQ, x_scale, w_scale, Y, bias, KBatch);
+#else
+    TORCH_CHECK(false, "FP8 tune path is pruned from this gfx908 build (no fp8 datapath; see AITER_CK_DTYPES)");
+#endif
   }
   return Y;
 }

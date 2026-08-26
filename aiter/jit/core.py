@@ -1153,6 +1153,23 @@ def _get_ck_exclude_modules():
 def get_args_of_build(ops_name: str, exclude=None):
     if exclude is None:
         exclude = []
+    # Lazy-JIT allowlist guard: when AITER_JIT_ALLOWLIST (comma-separated
+    # module names) is set, a single-op build request for a module outside
+    # the list raises instead of compiling on demand. This keeps pruned
+    # deployments (PREBUILD_KERNELS=4) from silently rebuilding excluded
+    # modules at runtime via the lazy-JIT path. The "all" path is exempt --
+    # it is driven by setup.py's exclude list (PREBUILD_KERNELS profiles).
+    # Default (env unset) preserves upstream behavior.
+    if ops_name != "all":
+        _allowlist_env = os.getenv("AITER_JIT_ALLOWLIST")
+        if _allowlist_env:
+            _allowed = {m.strip() for m in _allowlist_env.split(",") if m.strip()}
+            if ops_name not in _allowed:
+                raise RuntimeError(
+                    f"module '{ops_name}' is not in AITER_JIT_ALLOWLIST "
+                    f"({len(_allowed)} entries) -- refusing on-demand JIT build. "
+                    "Add it to the allowlist or unset the env to allow all."
+                )
     d_opt_build_args = {
         "srcs": [],
         "md_name": "",

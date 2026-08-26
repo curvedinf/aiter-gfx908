@@ -969,23 +969,26 @@ def test_gfx908_instance_pruning():
 
     with tempfile.TemporaryDirectory() as tmp:
         files, hdr = _run_codegen(tmp + "/n908", "gfx908")
+        # Post-tuning: 45 keep-list kernels (7 defaults + 42 tuned winners)
+        # x 4 int8 dtype combos; 3 kernels_list names are duplicated, hence
+        # 188 files < 45*4.
         _check(
-            "gfx908 non-tune: 18 instances (9 default kernels x 2 combos)",
-            len(files) == 18,
+            "gfx908 non-tune: tuned keep-list x 4 int8 combos (188 files)",
+            len(files) == 188,
             f"got {len(files)}",
         )
         _check(
-            "gfx908 combos are abI8_dF32_eF16 + abI8_dF16_eF16 only",
+            "gfx908 combos are the 4 int8 variants (F16+B16 epilogues)",
             {f.split("_ab")[-1][:-4] for f in files}
-            == {"I8_dF32_eF16", "I8_dF16_eF16"},
+            == {"I8_dF32_eF16", "I8_dF16_eF16", "I8_dF32_eB16", "I8_dB16_eB16"},
             str(sorted({f.split('_ab')[-1][:-4] for f in files})),
         )
         _check(
-            "combos header: PRUNE defined, exactly the 2 gfx908 combos",
+            "combos header: PRUNE defined, exactly the 4 gfx908 int8 combos",
             "AITER_PRUNE_DTYPES 1" in hdr
             and "AITER_BUILT_I8_F32_F16 1" in hdr
             and "AITER_BUILT_I8_F16_F16 1" in hdr
-            and hdr.count("#define AITER_BUILT_") == 2,
+            and hdr.count("#define AITER_BUILT_") == 4,
             hdr,
         )
 
@@ -1026,8 +1029,8 @@ def test_gfx908_instance_pruning():
         _run_codegen(tmp + "/tl", "gfx908", istune=True, instance_list=keep)
         impls = os.listdir(os.path.join(tmp + "/tl", "impl"))
         _check(
-            "tile filter (tune): 7 keep-list kernels instantiated",
-            len(impls) == 7,
+            "tile filter (tune): 45 keep-list kernels instantiated",
+            len(impls) == 45,
             f"got {len(impls)}",
         )
 

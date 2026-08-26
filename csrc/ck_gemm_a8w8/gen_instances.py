@@ -76,11 +76,17 @@ def _instance_filters(istune):
             ab, d, e = (x.strip() for x in tok.split("x"))
             dtype_filter.add((ab, d, e))
     elif all(gfx == "gfx908" for gfx, _ in get_build_targets()):
-        # gfx908 default: int8 activations/weights (no fp8 datapath on MI100),
-        # fp16 epilogue (this stack serves --dtype half), keeping both fp32
-        # and fp16 scale/compute variants (fp32 scale math is the accuracy
-        # hedge -- see GFX908_BUILD_PLAN.md Step 5).
-        dtype_filter = {("I8", "F32", "F16"), ("I8", "F16", "F16")}
+        # gfx908 default: int8 activations/weights (no fp8 datapath on MI100).
+        # Both epilogues are kept: the target model serves fp16 (--dtype half)
+        # but the DFlash2 draft resolves bf16 from its checkpoint and runs
+        # <I8, F32, B16> GEMMs. Both compute variants (fp32/fp16 scale math)
+        # stay -- fp32 is the accuracy hedge (see GFX908_BUILD_PLAN.md Step 5).
+        dtype_filter = {
+            ("I8", "F32", "F16"),
+            ("I8", "F16", "F16"),
+            ("I8", "F32", "B16"),
+            ("I8", "B16", "B16"),
+        }
 
     return kernels_filter, dtype_filter
 

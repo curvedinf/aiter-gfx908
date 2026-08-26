@@ -1,4 +1,4 @@
-# aiter-gfx908
+# int8-aiter
 
 A downstream fork of [ROCm/aiter](https://github.com/ROCm/aiter) (AI Tensor
 Engine for ROCm) with one purpose: making aiter's INT8 W8A8 inference path
@@ -11,7 +11,8 @@ stack on a 4×MI100 node.
 
 ## Serving stack this fork targets
 
-The consumer is the companion vLLM fork (`vllm-gfx908`), running:
+The consumer is the companion vLLM fork,
+[curvedinf/int8-vllm](https://github.com/curvedinf/int8-vllm), running:
 
 - **Qwen3.8-27B-class** model, **W8A8 INT8** (GPTQ weights, per-token
   activation quant)
@@ -114,7 +115,8 @@ python3 op_tests/multigpu_tests/test_custom_allreduce.py
 python3 op_tests/multigpu_tests/test_fused_ar_rms_int8_quant.py
 ```
 
-End-to-end validation happens in the vLLM fork: KLD gate boot check plus the
+End-to-end validation happens in the vLLM fork
+([int8-vllm](https://github.com/curvedinf/int8-vllm)): KLD gate boot check plus the
 iso-bench protocol (see `GFX908_BUILD_PLAN.md` for the verification order).
 
 ## Scope and known limitations

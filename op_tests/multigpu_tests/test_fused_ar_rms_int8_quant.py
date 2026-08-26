@@ -46,7 +46,7 @@ logger = logging.getLogger("aiter")
 
 set_start_method("spawn", force=True)
 
-VLLM_TREE = "~/vllm-gfx908"
+VLLM_TREE = os.path.expanduser("~/vllm-gfx908")
 HIDDEN = 5120
 GROUP_SIZE = 128
 EPS = 1e-5

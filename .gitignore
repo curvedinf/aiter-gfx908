@@ -92,3 +92,9 @@ aiter/ops/opus/configs/
 # vim swaps
 *.swo
 *.swp
+
+# local-only (internal docs/scripts; never publish)
+GFX908_BUILD_PLAN.md
+GFX908_WORKTREE.md
+.verify-logs/
+scripts/serve_direwolf_qwen38_worktree.sh

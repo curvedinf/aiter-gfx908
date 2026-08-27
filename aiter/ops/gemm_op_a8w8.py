@@ -451,16 +451,7 @@ def get_CKGEMM_config(M: int, N: int, K: int, tuned_file=None):
     if tuned_file is None:
         tuned_file = AITER_CONFIGS.AITER_CONFIG_GEMM_A8W8_FILE
     if tuned_file not in _CKGEMM_CONFIG_CACHE:
-        ckgemm_df = pd.read_csv(f"{tuned_file}")
-        # Dedup on the lookup key, not the full row: re-tuned shapes append
-        # rows with new us/splitK and a full-row dedup would keep both,
-        # breaking the to_dict("index") below.
-        key_cols = (
-            ["gfx", "cu_num", "M", "N", "K"]
-            if "gfx" in ckgemm_df.columns
-            else ["cu_num", "M", "N", "K"]
-        )
-        ckgemm_dict = ckgemm_df.drop_duplicates(subset=key_cols, keep="last")
+        ckgemm_dict = pd.read_csv(f"{tuned_file}").drop_duplicates()
         # Use (gfx, cu_num, M, N, K) key when the CSV has a gfx column (new schema).
         # Fall back to (cu_num, M, N, K) for old CSVs that pre-date the gfx column.
         if "gfx" in ckgemm_dict.columns:
@@ -502,7 +493,6 @@ def get_CKGEMM_config(M: int, N: int, K: int, tuned_file=None):
 
 _GEMM_QUANT_TYPE_CACHE: dict = {}
 _GEMM_QUANT_TYPE_HAS_GFX: dict = {}
-_MISS_LOGGED: set = set()
 
 
 @functools.lru_cache(maxsize=1024)
@@ -517,18 +507,7 @@ def get_GEMM_config_with_quant_type(
         tuned_file = AITER_CONFIGS.AITER_CONFIG_GEMM_A8W8_BPRESHUFFLE_FILE
     # Load file if not cached
     if tuned_file not in _GEMM_QUANT_TYPE_CACHE:
-        asmGemmDictDf = pd.read_csv(tuned_file)
-        # Dedup on the lookup key, not the full row: re-tuned shapes append
-        # rows with new us/splitK and a full-row dedup would keep both,
-        # breaking the to_dict("index") below.
-        _qt_key_cols = (
-            ["gfx", "cu_num", "M", "N", "K", "q_dtype_w"]
-            if "gfx" in asmGemmDictDf.columns
-            else ["cu_num", "M", "N", "K", "q_dtype_w"]
-        )
-        asmGemmDictDf = asmGemmDictDf.drop_duplicates(
-            subset=_qt_key_cols, keep="last"
-        )
+        asmGemmDictDf = pd.read_csv(tuned_file).drop_duplicates()
         # Use (gfx, cu_num, M, N, K, q_dtype_w) key when the CSV has a gfx column (new schema).
         # Fall back to (cu_num, M, N, K, q_dtype_w) for old CSVs that pre-date the gfx column.
         if "gfx" in asmGemmDictDf.columns:
@@ -569,19 +548,9 @@ def get_GEMM_config_with_quant_type(
                 logger.info(msg)
             break
     if config is None:
-        # Once per (shape, dtype, file): eager prefill sweeps dozens of
-        # distinct Ms per request and this fires per lru-cached lookup —
-        # a per-miss info line floods serving logs at hundreds of lines.
-        miss_key = (M, N, K, str(q_dtype_w), tuned_file)
-        if miss_key not in _MISS_LOGGED:
-            _MISS_LOGGED.add(miss_key)
-            logger.info(
-                f"shape is M:{M}, N:{N}, K:{K}, q_dtype_w:{q_dtype_w}, not found tuned config in {tuned_file}, will use default config!"
-            )
-        else:
-            logger.debug(
-                f"shape is M:{M}, N:{N}, K:{K}, q_dtype_w:{q_dtype_w}, not found tuned config in {tuned_file}, will use default config!"
-            )
+        logger.info(
+            f"shape is M:{M}, N:{N}, K:{K}, q_dtype_w:{q_dtype_w}, not found tuned config in {tuned_file}, will use default config!"
+        )
     return config
 
 
